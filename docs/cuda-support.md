@@ -1570,6 +1570,18 @@ on Flower. These are new observations of unchanged production, not a speedup.
 The report and accompanying counter CSV give priorities, ceilings, provenance
 and limits; no driver or system setting is changed.
 
+[S106](cuda-representation-fusion-scheduling-s106.md) explores the requested
+compact-consumption, composition/reduction and tile-scheduling directions.
+Typed int8/int16/int32 inputs preserve tested token templates, direct tokens,
+contexts and populations, but compact frame ownership is not integrated yet.
+Fusing composition with the first maximum pass passes all four CUDA sanitizers
+and reduces the isolated 4K stage by about 29%; it is not a measured encoder
+gain. Bounded CPU tile scheduling cuts roughly 4.6–6.5 ms from 4K merging,
+but complete-call comparisons remain mixed there; only static 1080p passes
+both repetitions. All 1,406 encoder calls match frozen bytes/fresh summaries
+as applicable. Keep production unchanged and qualify actual compact ownership,
+integrated fusion and concurrent scheduling before promotion.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
