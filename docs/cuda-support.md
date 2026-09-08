@@ -1832,6 +1832,17 @@ Actual resident inputs/alignment and whole-encode qualification are next.
 No production code, allocation policy or public API changes; runtime remains
 S127.
 
+[S129](cuda-gaborish-epf-integration-s129.md) qualifies that candidate inside
+the resident owner without changing allocations. Actual aligned captures,
+2,086 frozen-oracle encodes, 384 AQ profile pairs and six CUDA memcheck jobs
+pass. However, the two 4K in-encoder stage changes are only +0.36% and −1.44%,
+with larger duplicate-control variation: the synthetic win does not justify
+promotion. Captured-data counters still show roughly 48% less DRAM traffic
+but about half the achieved occupancy. Short timeline traces show kernel
+execution, not large launch gaps, dominating the interval. Keep runtime at
+S127; next test shared-storage reuse to reduce the fused tile's resource
+cost, then requalify it in the actual encoder context.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
