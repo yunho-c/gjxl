@@ -92,7 +92,7 @@ struct Fixture {
     e->setBuffer(b[buffer].object.get(), kGuard, index);
   }
   void run(MTL::CommandQueue *queue, const Kernel &first, const Kernel *inverse,
-           const Kernel *finalizer) {
+           const Kernel *finalizer, unsigned inverse_workers = 0) {
     auto command = NS::RetainPtr(queue->commandBuffer());
     auto e = NS::RetainPtr(command->computeCommandEncoder());
     const unsigned workers = p.transform_height / 8 * 32;
@@ -117,8 +117,9 @@ struct Fixture {
       bind(e.get(), 6, 8);
       for (unsigned i = 0; i < 3; ++i)
         e->setThreadgroupMemoryLength(p.count * 4, i);
-      e->dispatchThreadgroups(MTL::Size(p.candidates * 3, 1, 1),
-                              MTL::Size(workers, 1, 1));
+      e->dispatchThreadgroups(
+          MTL::Size(p.candidates * 3, 1, 1),
+          MTL::Size(inverse_workers ? inverse_workers : workers, 1, 1));
     } else {
       e->setComputePipelineState(first.pipeline.get());
       for (unsigned i = 0; i < 10; ++i)
@@ -133,11 +134,12 @@ struct Fixture {
     Check(command->status() == MTL::CommandBufferStatusCompleted,
           "AC candidate dispatch failed");
   }
-  void compare(const Fixture &other, bool baseline_is_fused) const {
+  void compare(const Fixture &other, bool baseline_is_fused,
+               bool candidate_is_fused = true) const {
     for (size_t i = 0; i < b.size(); ++i) {
       b[i].guards();
       other.b[i].guards();
-      if (i == 10) {
+      if (i == 10 && candidate_is_fused) {
         for (size_t j = 0; j < other.b[i].size; ++j)
           Check(other.b[i].as<unsigned char>()[j] == 0xa5 &&
                     (!baseline_is_fused || b[i].as<unsigned char>()[j] == 0xa5),
@@ -149,18 +151,78 @@ struct Fixture {
     }
   }
 };
+
+// These paths retain separate forward and residual/inverse/loss dispatches.
+// Tuned DCT32 and 16x32 use wider inverse launches than their forward DCTs.
+int RunStagedReductions(MTL::Device *device, MTL::CommandQueue *queue,
+                        const char *baseline, const char *candidate) {
+  unsigned cases = 0;
+  for (const auto shape : std::array<std::array<unsigned, 3>, 4>{
+           {{8, 8, 32}, {32, 32, 512}, {32, 16, 128}, {16, 32, 256}}}) {
+    const unsigned rows = shape[0], cols = shape[1], workers = shape[2];
+    const std::string prefix = "gjxl_ac_strategy_dct" + std::to_string(rows) +
+                              (rows == cols ? "" : "x" + std::to_string(cols));
+    const std::string inverse_name = prefix +
+        (workers > rows / 8 * 32 ? "_residual_inverse_tuned_loss"
+                                : "_residual_inverse_compact_loss");
+    Kernel forward_base(device, baseline, (prefix + "_forward_fused").c_str());
+    Kernel forward_new(device, candidate, (prefix + "_forward_fused").c_str());
+    Kernel inverse_base(device, baseline, inverse_name.c_str());
+    Kernel inverse_new(device, candidate, inverse_name.c_str());
+    Kernel finish_base(device, baseline, "gjxl_ac_strategy_cost_from_loss");
+    Kernel finish_new(device, candidate, "gjxl_ac_strategy_cost_from_loss");
+    const unsigned dynamic_bytes = 3 * rows * cols * sizeof(float);
+    for (const Kernel *kernel : {&inverse_base, &inverse_new}) {
+      Check(kernel->pipeline->threadExecutionWidth() == 32,
+            "Staged reductions require 32-lane SIMD groups");
+      Check(kernel->pipeline->maxTotalThreadsPerThreadgroup() >= workers,
+            "Staged reduction launch exceeds pipeline limit");
+      Check(kernel->pipeline->staticThreadgroupMemoryLength() + dynamic_bytes <=
+                device->maxThreadgroupMemoryLength(),
+            "Staged reduction exceeds threadgroup storage limit");
+    }
+    std::cout << "{\"rows\":" << rows << ",\"columns\":" << cols
+              << ",\"forward_threads\":" << rows / 8 * 32
+              << ",\"inverse_threads\":" << workers
+              << ",\"dynamic_threadgroup_bytes\":" << dynamic_bytes
+              << ",\"baseline_threadgroup_bytes\":"
+              << inverse_base.pipeline->staticThreadgroupMemoryLength()
+              << ",\"static_threadgroup_bytes\":"
+              << inverse_new.pipeline->staticThreadgroupMemoryLength() << "}\n";
+    for (unsigned count : {1, 2, 7, 33, 257})
+      for (unsigned pattern = 0; pattern < 10; ++pattern)
+        for (unsigned source : {0, 1, 2})
+          for (unsigned padding : {0, 19}) {
+            Fixture a(device, rows, cols, count, pattern, source, padding);
+            Fixture b(device, rows, cols, count, pattern, source, padding);
+            a.run(queue, forward_base, &inverse_base, nullptr, workers);
+            b.run(queue, forward_new, &inverse_new, nullptr, workers);
+            a.compare(b, false, false);
+            a.run(queue, forward_base, nullptr, &finish_base);
+            b.run(queue, forward_new, nullptr, &finish_new);
+            a.compare(b, false, false);
+            ++cases;
+          }
+  }
+  std::cout << "{\"cases\":" << cases << ",\"bitwise\":true,\"guards\":true}\n";
+  return 0;
+}
 } // namespace
 
 int main(int argc, char **argv) try {
   Check(argc == 3 ||
-            (argc == 4 && std::string_view(argv[3]) == "--fused-baseline"),
+            (argc == 4 && (std::string_view(argv[3]) == "--fused-baseline" ||
+                           std::string_view(argv[3]) == "--staged-reductions")),
         "usage: gjxl_metal_ac_candidate_probe BASELINE.metallib "
-        "CANDIDATE.metallib [--fused-baseline]");
-  const bool fused_baseline = argc == 4;
+        "CANDIDATE.metallib [--fused-baseline|--staged-reductions]");
+  const bool fused_baseline = argc == 4 &&
+                              std::string_view(argv[3]) == "--fused-baseline";
   auto pool = NS::TransferPtr(NS::AutoreleasePool::alloc()->init());
   auto device = NS::TransferPtr(MTL::CreateSystemDefaultDevice());
   Check(bool(device), "Metal device unavailable");
   auto queue = NS::TransferPtr(device->newCommandQueue());
+  if (argc == 4 && std::string_view(argv[3]) == "--staged-reductions")
+    return RunStagedReductions(device.get(), queue.get(), argv[1], argv[2]);
   unsigned cases = 0;
   for (const auto shape :
        std::array<std::array<unsigned, 2>, 3>{{{16, 16}, {16, 8}, {8, 16}}}) {

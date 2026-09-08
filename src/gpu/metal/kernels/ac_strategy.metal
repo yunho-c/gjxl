@@ -1328,8 +1328,8 @@ inline void AcStrategyReduceInverseLoss(
     loss_sums[transform_index] = pixels[0];
   }
 }
-#define GJXL_AC_SQUARE_LOSS_KERNEL(                    \
-  name, size, basis, scale, worker_count)                                  \
+#define GJXL_AC_SQUARE_LOSS_KERNEL(                                          \
+  name, size, basis, scale, worker_count, magnitude_tail, loss_tail)         \
 kernel void name(                                                           \
   device const float* coefficients [[buffer(0)]],                           \
   device const float* matrices [[buffer(1)]],                               \
@@ -1346,7 +1346,8 @@ kernel void name(                                                           \
   uint tid [[thread_index_in_threadgroup]],                                  \
   uint simdgroup_index [[simdgroup_index_in_threadgroup]],                   \
   uint3 group_position [[threadgroup_position_in_grid]]) {                   \
-  ComputeAcStrategyResidualCompact<size * size, worker_count>(              \
+  ComputeAcStrategyResidualCompact<                                          \
+    size * size, worker_count, false, magnitude_tail>(                       \
     coefficients, matrices, candidates, quant_field,                       \
     precomputed_quant_norm, residual_coefficients, channel_rates, params,   \
     magnitude_reduction, nonzero_reduction, 0, tid, group_position);        \
@@ -1354,14 +1355,14 @@ kernel void name(                                                           \
   AcStrategyInverseSquareDct<size, worker_count>(                           \
     residual_coefficients, magnitude_reduction, basis, scale, shared_basis, tid,         \
     simdgroup_index, uint3(0));                                             \
-  AcStrategyReduceInverseLoss<size * size, worker_count>(                 \
+  AcStrategyReduceInverseLoss<size * size, worker_count, loss_tail>(         \
     magnitude_reduction, pixel_mask, candidates, pixels, params, tid,      \
     group_position.x);                                                     \
 }
 
 #define GJXL_AC_RECTANGULAR_LOSS_KERNEL(                \
   name, rows, columns, vertical_basis, horizontal_basis, scale,             \
-  worker_count)                                                             \
+  worker_count, magnitude_tail, loss_tail)                                   \
 kernel void name(                                                           \
   device const float* coefficients [[buffer(0)]],                           \
   device const float* matrices [[buffer(1)]],                               \
@@ -1378,7 +1379,8 @@ kernel void name(                                                           \
   uint tid [[thread_index_in_threadgroup]],                                  \
   uint simdgroup_index [[simdgroup_index_in_threadgroup]],                   \
   uint3 group_position [[threadgroup_position_in_grid]]) {                   \
-  ComputeAcStrategyResidualCompact<rows * columns, worker_count>(           \
+  ComputeAcStrategyResidualCompact<                                          \
+    rows * columns, worker_count, false, magnitude_tail>(                    \
     coefficients, matrices, candidates, quant_field,                       \
     precomputed_quant_norm, residual_coefficients, channel_rates, params,   \
     magnitude_reduction, nonzero_reduction, 0, tid, group_position);        \
@@ -1388,25 +1390,29 @@ kernel void name(                                                           \
     residual_coefficients, magnitude_reduction, vertical_basis, horizontal_basis, scale, \
     shared_vertical_basis, shared_horizontal_basis, tid, simdgroup_index,   \
     uint3(0));                                                              \
-  AcStrategyReduceInverseLoss<rows * columns, worker_count>(               \
+  AcStrategyReduceInverseLoss<rows * columns, worker_count, loss_tail>(      \
     magnitude_reduction, pixel_mask, candidates, pixels, params, tid,      \
     group_position.x);                                                     \
 }
 
 GJXL_AC_SQUARE_LOSS_KERNEL(gjxl_ac_strategy_dct8_residual_inverse_compact_loss,
-  8, kOrthonormalDct8, kInverseDct8Scale, 32)
+  8, kOrthonormalDct8, kInverseDct8Scale, 32, true, true)
 GJXL_AC_SQUARE_LOSS_KERNEL(gjxl_ac_strategy_dct16_residual_inverse_compact_loss,
-  16, kOrthonormalDct16, kInverseDct16Scale, 64)
+  16, kOrthonormalDct16, kInverseDct16Scale, 64, false, false)
 GJXL_AC_SQUARE_LOSS_KERNEL(gjxl_ac_strategy_dct32_residual_inverse_tuned_loss,
-  32, kOrthonormalDct32, kInverseDct32Scale, 512)
+  32, kOrthonormalDct32, kInverseDct32Scale, 512, true, true)
 GJXL_AC_RECTANGULAR_LOSS_KERNEL(gjxl_ac_strategy_dct16x8_residual_inverse_compact_loss,
-  16, 8, kOrthonormalDct16, kOrthonormalDct8, kInverseDct16x8Scale, 64)
+  16, 8, kOrthonormalDct16, kOrthonormalDct8, kInverseDct16x8Scale, 64,
+  false, false)
 GJXL_AC_RECTANGULAR_LOSS_KERNEL(gjxl_ac_strategy_dct8x16_residual_inverse_compact_loss,
-  8, 16, kOrthonormalDct8, kOrthonormalDct16, kInverseDct16x8Scale, 32)
+  8, 16, kOrthonormalDct8, kOrthonormalDct16, kInverseDct16x8Scale, 32,
+  false, false)
 GJXL_AC_RECTANGULAR_LOSS_KERNEL(gjxl_ac_strategy_dct32x16_residual_inverse_compact_loss,
-  32, 16, kOrthonormalDct32, kOrthonormalDct16, kInverseDct32x16Scale, 128)
+  32, 16, kOrthonormalDct32, kOrthonormalDct16, kInverseDct32x16Scale, 128,
+  true, true)
 GJXL_AC_RECTANGULAR_LOSS_KERNEL(gjxl_ac_strategy_dct16x32_residual_inverse_tuned_loss,
-  16, 32, kOrthonormalDct16, kOrthonormalDct32, kInverseDct32x16Scale, 256)
+  16, 32, kOrthonormalDct16, kOrthonormalDct32, kInverseDct32x16Scale, 256,
+  true, true)
 
 #undef GJXL_AC_SQUARE_LOSS_KERNEL
 #undef GJXL_AC_RECTANGULAR_LOSS_KERNEL
