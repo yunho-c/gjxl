@@ -1769,6 +1769,20 @@ All 1,488 encoded outputs, 14,976 fixtures, four CUDA sanitizers and retained
 runtime identities pass. The candidate proceeds to production-build and other
 tile-size qualification; no stable speedup or production change is claimed yet.
 
+[S124](cuda-malta-unsigned-production-s124.md) promotes the exact unsigned
+coordinate widening to the existing 8/24/64-row paired Malta loaders after a
+clean production build. All twelve changed native bodies match their qualified
+prototypes; the other 66 Butteraugli bodies and 133 linked GPU dependencies
+are unchanged. Two static instructions are removed per changed specialization
+with no resource increase, new dispatch policy or compatibility layer. All
+2,070 exact encodes, 25,088 prototype fixtures, eight CUDA sanitizer jobs and
+78 CTest tests pass, including tall-grid boundaries. Uninstrumented 4K encode
+medians improve by 5.36/6.84 ms, but HD medians regress by 0.81/1.49 ms and
+event-instrumented results are mixed. Retention is for verified address-work
+reduction, not a demonstrated universal elapsed-time improvement. All 1,680
+observed power-limit endpoints are 40 W; clocks within an encode remain an
+uncontrolled source of variation.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

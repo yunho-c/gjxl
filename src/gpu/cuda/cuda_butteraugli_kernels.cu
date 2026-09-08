@@ -1813,9 +1813,13 @@ __global__ void PairedMaltaScaleResponseKernel(
     float value = 0.0f;
     if (x >= 0 && y >= 0 && x < static_cast<int>(params.width) &&
         y < static_cast<int>(params.height)) {
+      // The bounds check makes unsigned widening exact and avoids signed
+      // high-word corrections in the input address calculation.
+      const uint32_t ux = static_cast<uint32_t>(x);
+      const uint32_t uy = static_cast<uint32_t>(y);
       value = MaltaScaleValue(
-          reference[static_cast<size_t>(y) * params.reference_stride + x],
-          distorted[static_cast<size_t>(y) * params.distorted_stride + x],
+          reference[static_cast<size_t>(uy) * params.reference_stride + ux],
+          distorted[static_cast<size_t>(uy) * params.distorted_stride + ux],
           scale);
     }
     tile[index] = value;
