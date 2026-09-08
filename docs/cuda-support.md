@@ -1925,6 +1925,17 @@ variation in other GPU work remains unattributed. Next investigate active
 residual-transform/perceptual-analysis work with whole-call controls, rather
 than inferring throughput gains from removed host intervals alone.
 
+[S137](cuda-fused-ac-evaluation-s137.md) qualifies a shared-memory AC-evaluation
+prototype that schedules complete three-channel candidates together and fuses
+forward transforms with residual/inverse/rate/loss work. Traces verify seven
+fewer launches, and all 214 original kernel bodies remain unchanged. Exact
+grid/exhaustive/contract tests, four CUDA sanitizers and 1,436 frozen-oracle
+encodes pass. Scalarized reductions eliminate the initial prototype's local
+arrays. Whole-call primary comparisons favor it in 15/16 runs, with 16–25 ms
+lower 4K times, but the short compact-4K GPU trace is unfavorable. Production
+remains unchanged: next integrate the fused path and remove the still-allocated
+304,496,640-byte 4K forward scratch, then qualify the new layout and timings.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
