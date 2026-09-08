@@ -1688,6 +1688,16 @@ as universal replacements. Production remains unchanged. Release and host-ASAN
 each pass 10,752 fixtures; all four CUDA sanitizers are clean. The next scaling
 experiment should preserve contiguous lane accesses while reducing loop work.
 
+[S116](cuda-malta-batching-s116.md) tests that lane-contiguous layout with two-
+and four-iteration scaling loops. The memory-transaction increase disappears,
+but two iterations execute 1.4–3% more warp instructions and four reduce LF
+occupancy. Neither is retained: two iterations show no useful replicated gain,
+and four regress all tested LF stages. Native auditing catches and removes an
+extra first-item guard before timing. Both builds pass release/host-ASAN
+fixtures and all four CUDA sanitizers; production and its S114 qualification
+remain unchanged. Separate full batches from tail handling before further
+scaling-loop/preload experiments.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
