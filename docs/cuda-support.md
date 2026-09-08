@@ -1819,6 +1819,19 @@ roughly 1.61 ms / 29% 4K stage saving remains the performance evidence;
 whole-encode timing is still mixed, and no new timing campaign or universal
 throughput improvement is claimed. The retained runtime is now S127.
 
+[S128](cuda-gaborish-epf-fusion-s128.md) investigates the opposite filter
+boundary: Gaborish plus first EPF. An isolated raw-shared pass-1 candidate
+saves about 14.5–15.3% for XYB and 17.9–18.7% for RGB in short 4K synthetic
+bursts, while pass 0 regresses. Counters show roughly 48% less DRAM traffic
+for pass 1, at the cost of higher shared-memory use and lower occupancy.
+The candidate passes 145,152 guarded pipeline executions and four CUDA
+sanitizers. A late power-limit transition is retained and explicitly excluded
+from initial-regime timing qualification; nine user-requested repeats have
+all 3,888 limit endpoints at 40 W and reproduce the large pass-1 result.
+Actual resident inputs/alignment and whole-encode qualification are next.
+No production code, allocation policy or public API changes; runtime remains
+S127.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
