@@ -1751,6 +1751,15 @@ so opposite-order runs cannot be pooled as one fixed operating state. With
 Production is unchanged. Candidate screening now needs sustained workload and
 operating-state controls before final resident-encoder qualification.
 
+[S122](cuda-malta-loader-recurrence-s122.md) tests coordinate and input-offset
+recurrences in the paired Malta tile loader. Both preserve exact output and
+native resource use, but execute 2.86%/3.27% more warp instructions. Short
+replay is slower, and sustained replay provides no repeatable win; all 448
+unprofiled power-limit endpoints report 40 W. The 14,976 differential fixtures,
+four CUDA sanitizers, 224 unprofiled replay bursts and retained-runtime hashes
+pass. Neither candidate is promoted. The disassembly instead motivates a
+narrower test of unsigned widening for already validated input coordinates.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
