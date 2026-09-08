@@ -1843,6 +1843,19 @@ execution, not large launch gaps, dominating the interval. Keep runtime at
 S127; next test shared-storage reuse to reduce the fused tile's resource
 cost, then requalify it in the actual encoder context.
 
+[S130](cuda-gaborish-epf-reuse-s130.md) tests two shared-storage reuse
+schedules. Both raise achieved pass-1 occupancy from about 49% to 82%,
+but channel-wise reuse adds 71% warp instructions versus old fusion and
+regresses the encoder stage. All-channel reuse keeps work nearly unchanged
+and improves the actual two-boundary stage by 10.6–18.7%, with all 24
+individual label-pair medians favorable. The 181,440 guarded executions,
+1,080 captured replays, 2,424 frozen-oracle encodes and 768 AQ profile pairs
+pass; all 4,848 measured power-limit endpoints are 40 W. Whole-encode changes
+still reverse sign between repeats. Select all-channel pass-1-to-XYB reuse
+for production integration and qualification, without claiming a dependable
+end-to-end speedup or enabling unmeasured fusion routes. Runtime remains
+S127 in this isolated study.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
