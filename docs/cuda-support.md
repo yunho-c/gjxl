@@ -1678,6 +1678,16 @@ checks, 14 expected rejections, all scoped CUDA sanitizers and 78/78 CTest
 tests; the expanded 880-case frequency test retains independent horizontal
 references. Failed setup attempts and all slower observations are preserved.
 
+[S115](cuda-malta-layout-s115.md) explains Malta layout tradeoffs with exact
+replay tests and replicated counters. Wider row tiles reduce 4K L2 traffic
+about 5% without comparable DRAM savings. Column pairing increases full-response
+shared-load work and register pressure; adjacent-input scaling nearly doubles
+shared-store work and raises global-load sector requests by 68–93%. Both new
+variants have response/size-dependent gains and regressions and are not retained
+as universal replacements. Production remains unchanged. Release and host-ASAN
+each pass 10,752 fixtures; all four CUDA sanitizers are clean. The next scaling
+experiment should preserve contiguous lane accesses while reducing loop work.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
