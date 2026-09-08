@@ -198,6 +198,21 @@ bool PurePlans() {
       }
     }
     CoefficientOrderStoragePlan large;
+    // Equal group geometry and eligible families isolate the counter-width
+    // boundary without constructing impractically large coefficient planes.
+    CoefficientOrderStoragePlan narrow, wide;
+    if (!FixtureOk(ComputeCoefficientOrderStoragePlan(
+          {65535, 65537}, kFull, 8, &narrow)) ||
+        !FixtureOk(ComputeCoefficientOrderStoragePlan(
+          {65536, 65537}, kFull, 8, &wide)) ||
+        !FixtureCheck(narrow.ac_group_count == wide.ac_group_count &&
+          narrow.maximum_order_elements == wide.maximum_order_elements &&
+          wide.working.peak_bytes - narrow.working.peak_bytes ==
+            4 * narrow.maximum_order_elements * 9 &&
+          wide.working.retained_bytes - narrow.working.retained_bytes ==
+            4 * narrow.maximum_order_elements * 9,
+          "Coefficient counter-width boundary changed its storage bound"))
+      return false;
     BlockContextMapStoragePlan map;
     if (!FixtureOk(ComputeCoefficientOrderStoragePlan({1ul << 24, 1}, kFull, 8,
                                                       &large)) ||

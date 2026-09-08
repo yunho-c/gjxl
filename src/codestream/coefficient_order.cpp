@@ -39,8 +39,9 @@ constexpr uint16_t kSupportedOrderMask =
 constexpr size_t kMaximumCoefficientOrderWorkers = 8;
 constexpr size_t kMinimumParallelCoefficientCount = 256 * 256;
 
+template <typename Count>
 using ZeroCounts = std::array<
-  std::array<Storage<uint64_t>, 3>,
+  std::array<Storage<Count>, 3>,
   codestream_internal::kSimpleCoefficientOrderCount>;
 
 Status AllocationFailure() {
@@ -199,10 +200,30 @@ Status ValidateOrder(
   return Status::Ok();
 }
 
+// Isolate the contiguous update so both counter widths can vectorize.
+template <typename Count>
+void CountCoefficientZeros(
+  const int32_t* coefficients, Count* counts, size_t size) {
+  for (size_t coefficient = 0; coefficient < size; ++coefficient) {
+    counts[coefficient] += coefficients[coefficient] == 0;
+  }
+}
+
+constexpr bool Use32BitZeroCounts(Extent2D blocks) noexcept {
+  size_t area = 0;
+  return blocks.try_area(&area) &&
+    area <= std::numeric_limits<uint32_t>::max();
+}
+
+static_assert(Use32BitZeroCounts({65535, 65537}));
+static_assert(!Use32BitZeroCounts({65536, 65536}));
+static_assert(!Use32BitZeroCounts({std::numeric_limits<size_t>::max(), 2}));
+
+template <typename Count>
 Status CountGroupZeros(
   const VarDctAcGroupView& group,
   const AcStrategyGrid& strategies,
-  ZeroCounts* zero_counts,
+  ZeroCounts<Count>* zero_counts,
   bool sample_dct8,
   std::span<const uint8_t> sample_decisions,
   uint16_t* present_mask) {
@@ -241,7 +262,7 @@ Status CountGroupZeros(
         }
         *present_mask |= family_bit;
         for (size_t channel = 0; channel < 3; ++channel) {
-          Storage<uint64_t>& counts = (*zero_counts)[family][channel];
+          Storage<Count>& counts = (*zero_counts)[family][channel];
           if (counts.empty()) {
             counts.assign(info->coefficient_count(), 0);
           } else if (counts.size() != info->coefficient_count()) {
@@ -257,21 +278,18 @@ Status CountGroupZeros(
           !sample_dct8 || sample_decisions[sample_index++] != 0;
         if (selected) {
           for (size_t channel = 0; channel < 3; ++channel) {
-            Storage<uint64_t>& counts = (*zero_counts)[family][channel];
+            Storage<Count>& counts = (*zero_counts)[family][channel];
             const std::span<const int32_t> coefficients =
               group.coefficients[channel].subspan(
                 source_offset, info->coefficient_count());
-            for (size_t coefficient = 0; coefficient < coefficients.size();
-                 ++coefficient) {
-              if (coefficients[coefficient] == 0) {
-                if (counts[coefficient] ==
-                    std::numeric_limits<uint64_t>::max()) {
-                  return Status::InvalidArgument(
-                    "Coefficient zero count overflow");
-                }
-                ++counts[coefficient];
-              }
-            }
+            // Validated anchors partition the frame's representable block
+            // area. Every counter, including the sum across workers, receives
+            // at most one increment per anchor. The caller uses uint32_t only
+            // when that area fits, and uint64_t otherwise.
+            static_assert(std::numeric_limits<size_t>::digits <=
+                          std::numeric_limits<uint64_t>::digits);
+            CountCoefficientZeros(
+              coefficients.data(), counts.data(), coefficients.size());
           }
         }
       }
@@ -465,9 +483,13 @@ Status codestream_internal::ComputeCoefficientOrderStoragePlan(
       !plan.working.AddVector<VarDctAcGroupView>(plan.ac_group_count,
                                                kFreshExact) ||
       // Global reduction plus worker arrays overlap until reduction finishes.
-      !plan.working.AddVector<uint64_t>(
-        plan.maximum_order_elements, kFreshExact,
-        plan.maximum_participants == 1 ? 1 : 1 + plan.maximum_participants) ||
+      !(Use32BitZeroCounts(blocks)
+        ? plan.working.AddVector<uint32_t>(
+            plan.maximum_order_elements, kFreshExact,
+            plan.maximum_participants == 1 ? 1 : 1 + plan.maximum_participants)
+        : plan.working.AddVector<uint64_t>(
+            plan.maximum_order_elements, kFreshExact,
+            plan.maximum_participants == 1 ? 1 : 1 + plan.maximum_participants)) ||
       // Tokenization: natural, inverse, permutation, Lehmer, Fenwick n+1.
       // This also covers selection's natural/rank and validation's natural.
       !plan.working.AddVector<uint32_t>(5 * maximum_order_size + 1,
@@ -509,7 +531,10 @@ Status ComputeSimpleCoefficientOrders(
     VarDctCoefficientOrderBehavior::kFull, orders);
 }
 
-Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+namespace {
+
+template <typename Count>
+Status ComputeCoefficientOrdersWithCounts(
   const VarDctFrameView& frame,
   VarDctCoefficientOrderBehavior behavior,
   SimpleCoefficientOrders* orders) {
@@ -584,7 +609,7 @@ Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
       }
     }
 
-    ZeroCounts zero_counts;
+    ZeroCounts<Count> zero_counts;
     const size_t participant_count =
       CoefficientOrderParticipantCount(groups.size(), coefficient_count);
     if (participant_count == 1) {
@@ -599,7 +624,7 @@ Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
         if (!status.ok()) return status;
       }
     } else {
-      std::array<ZeroCounts, kMaximumCoefficientOrderWorkers> worker_counts;
+      std::array<ZeroCounts<Count>, kMaximumCoefficientOrderWorkers> worker_counts;
       std::array<uint16_t, kMaximumCoefficientOrderWorkers> worker_masks{};
       status = RunParallelCoefficientGroups(
         groups.size(), coefficient_count,
@@ -620,12 +645,12 @@ Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
         present_mask |= worker_masks[worker];
         for (size_t family = 0; family < zero_counts.size(); ++family) {
           for (size_t channel = 0; channel < 3; ++channel) {
-            const Storage<uint64_t>& source =
+            const Storage<Count>& source =
               worker_counts[worker][family][channel];
             if (source.empty()) {
               continue;
             }
-            Storage<uint64_t>& destination =
+            Storage<Count>& destination =
               zero_counts[family][channel];
             if (destination.empty()) {
               destination.assign(source.size(), 0);
@@ -636,7 +661,7 @@ Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
             for (size_t coefficient = 0; coefficient < source.size();
                  ++coefficient) {
               if (source[coefficient] >
-                  std::numeric_limits<uint64_t>::max() -
+                  std::numeric_limits<Count>::max() -
                     destination[coefficient]) {
                 return Status::InvalidArgument(
                   "Coefficient zero count overflow");
@@ -678,7 +703,7 @@ Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
       }
       bool nondefault = false;
       for (size_t channel = 0; channel < 3; ++channel) {
-        const Storage<uint64_t>& counts = zero_counts[family][channel];
+        const Storage<Count>& counts = zero_counts[family][channel];
         if (counts.size() != natural.size()) {
           return Status::Internal(
             "Coefficient-order zero counts are incomplete");
@@ -719,6 +744,17 @@ Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
     return AllocationFailure();
   }
   return Status::Ok();
+}
+
+}  // namespace
+
+Status codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+  const VarDctFrameView& frame,
+  VarDctCoefficientOrderBehavior behavior,
+  SimpleCoefficientOrders* orders) {
+  return Use32BitZeroCounts(frame.geometry().block_grid().blocks)
+    ? ComputeCoefficientOrdersWithCounts<uint32_t>(frame, behavior, orders)
+    : ComputeCoefficientOrdersWithCounts<uint64_t>(frame, behavior, orders);
 }
 
 Status ValidateSimpleCoefficientOrders(const SimpleCoefficientOrders& orders) {

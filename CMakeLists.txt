@@ -1307,6 +1307,14 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_ac_group_test
   )
 
+  add_executable(gjxl_coefficient_order_test tests/coefficient_order_test.cpp)
+  target_link_libraries(gjxl_coefficient_order_test PRIVATE gjxl_codestream)
+  add_test(NAME coefficient_order COMMAND gjxl_coefficient_order_test)
+
+  add_executable(gjxl_ac_direct_tokenization_test tests/ac_direct_tokenization_test.cpp)
+  target_link_libraries(gjxl_ac_direct_tokenization_test PRIVATE gjxl_codestream)
+  add_test(NAME ac_direct_tokenization COMMAND gjxl_ac_direct_tokenization_test)
+
   add_executable(gjxl_token_storage_plan_test tests/token_storage_plan_test.cpp)
   target_link_libraries(gjxl_token_storage_plan_test PRIVATE gjxl_codestream)
   add_test(NAME token_storage_plan COMMAND gjxl_token_storage_plan_test)

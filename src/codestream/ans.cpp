@@ -157,7 +157,7 @@ Status AllocationFailure() {
   return Status::OutOfMemory("ANS entropy allocation failed");
 }
 
-double ExactCountLog2(uint64_t value) {
+const std::array<double, kExactLog2TableSize + 1>& ExactCountLog2Table() {
   static const std::array<double, kExactLog2TableSize + 1> table = [] {
     std::array<double, kExactLog2TableSize + 1> values{};
     for (size_t index = 1; index < values.size(); ++index) {
@@ -165,9 +165,20 @@ double ExactCountLog2(uint64_t value) {
     }
     return values;
   }();
+  return table;
+}
+
+double ExactCountLog2(
+  uint64_t value,
+  const std::array<double, kExactLog2TableSize + 1>& table) {
+
   return value <= kExactLog2TableSize
     ? table[static_cast<size_t>(value)]
     : std::log2(static_cast<double>(value));
+}
+
+double ExactCountLog2(uint64_t value) {
+  return ExactCountLog2(value, ExactCountLog2Table());
 }
 
 class BitCountWriter {
@@ -1012,7 +1023,8 @@ struct DirectAnsHistogram {
     return true;
   }
 
-  bool AddHistogram(const DirectAnsHistogram& other) {
+  template <typename Histogram>
+  bool AddHistogram(const Histogram& other) {
     if (total_count >
           std::numeric_limits<uint64_t>::max() - other.total_count ||
         extra_bits >
@@ -1036,26 +1048,51 @@ struct DirectAnsHistogram {
   }
 };
 
-double DirectHistogramShannonBits(const DirectAnsHistogram& histogram) {
+// Counts stay in the caller's validated population array for this synchronous
+// partition build. Only small metadata and the mutable Shannon cache are local;
+// selected seeds and merged clusters still own their counts.
+struct DirectAnsHistogramView {
+  const std::array<uint64_t, kMaximumAnsAlphabetSize>& counts;
+  uint64_t total_count;
+  uint64_t extra_bits;
+  uint32_t maximum_symbol;
+  double shannon_bits = 0.0;
+
+  operator DirectAnsHistogram() const {
+    return {
+      .counts = counts,
+      .total_count = total_count,
+      .extra_bits = extra_bits,
+      .maximum_symbol = maximum_symbol,
+      .shannon_bits = shannon_bits,
+    };
+  }
+};
+
+template <typename Histogram>
+double DirectHistogramShannonBits(const Histogram& histogram) {
   if (histogram.total_count == 0) {
     return 0.0;
   }
+  const auto& log2_table = ExactCountLog2Table();
   const double total = static_cast<double>(histogram.total_count);
-  double bits = total * ExactCountLog2(histogram.total_count);
+  double bits = total * ExactCountLog2(histogram.total_count, log2_table);
   const size_t alphabet_size = histogram.maximum_symbol + 1;
   for (uint64_t count :
        std::span(histogram.counts).first(alphabet_size)) {
     if (count != 0) {
       bits -= static_cast<double>(count) *
-        ExactCountLog2(count);
+        ExactCountLog2(count, log2_table);
     }
   }
   return bits;
 }
 
+template <typename Histogram>
 Status DirectHistogramDistance(
-  const DirectAnsHistogram& left,
+  const Histogram& left,
   const DirectAnsHistogram& right,
+  const std::array<double, kExactLog2TableSize + 1>& log2_table,
   double* distance) {
 
   if (distance == nullptr) {
@@ -1071,7 +1108,7 @@ Status DirectHistogramDistance(
     return Status::Ok();
   }
   double combined_bits = static_cast<double>(total_count) *
-    ExactCountLog2(total_count);
+    ExactCountLog2(total_count, log2_table);
   const size_t alphabet_size = std::max(
     left.total_count == 0 ? 0 : left.maximum_symbol + 1,
     right.total_count == 0 ? 0 : right.maximum_symbol + 1);
@@ -1082,15 +1119,17 @@ Status DirectHistogramDistance(
     }
     const uint64_t count = left.counts[symbol] + right.counts[symbol];
     if (count != 0) {
-      combined_bits -= static_cast<double>(count) * ExactCountLog2(count);
+      combined_bits -= static_cast<double>(count) *
+        ExactCountLog2(count, log2_table);
     }
   }
   *distance = combined_bits - left.shannon_bits - right.shannon_bits;
   return Status::Ok();
 }
 
+template <typename Histogram>
 Status CanonicalizeDirectClusters(
-  const Storage<DirectAnsHistogram>& input,
+  const Storage<Histogram>& input,
   Storage<DirectAnsHistogram>* clustered,
   Storage<uint32_t>* symbols) {
 
@@ -1139,20 +1178,26 @@ Status CanonicalizeDirectClusters(
   return Status::Ok();
 }
 
+template <typename Histogram>
 Status FastClusterDirectAnsHistograms(
-  const Storage<DirectAnsHistogram>& input,
+  Storage<Histogram>& source,
   Storage<DirectAnsHistogram>* clustered,
   Storage<uint32_t>* symbols) {
 
-  if (input.empty() || clustered == nullptr || symbols == nullptr) {
+  if (source.empty() || clustered == nullptr || symbols == nullptr) {
     return Status::InvalidArgument("Direct ANS clustering input is invalid");
   }
   constexpr size_t kMaximumClusters = kMaximumPrefixClusters;
   constexpr double kMinimumDistinctDistance = 48.0;
-  Storage<DirectAnsHistogram> source = input;
-  for (DirectAnsHistogram& histogram : source) {
+  // This is the partition builder's private working set. Cache Shannon costs
+  // in place instead of copying every 256-bin histogram, including empty ones.
+  // Counts and context order remain unchanged for canonicalization/refinement.
+  for (Histogram& histogram : source) {
     histogram.shannon_bits = DirectHistogramShannonBits(histogram);
   }
+  // Resolve the thread-safe lazy table once per clustering pass, not once per
+  // populated symbol in every distance. Keep the ordered double sum unchanged.
+  const auto& log2_table = ExactCountLog2Table();
   clustered->clear();
   clustered->reserve(std::min(kMaximumClusters, source.size()));
   symbols->assign(source.size(), kMaximumClusters);
@@ -1178,7 +1223,7 @@ Status FastClusterDirectAnsHistograms(
       }
       double distance = 0.0;
       if (Status status = DirectHistogramDistance(
-            source[index], clustered->back(), &distance);
+            source[index], clustered->back(), log2_table, &distance);
           !status.ok()) {
         return status;
       }
@@ -1200,7 +1245,7 @@ Status FastClusterDirectAnsHistograms(
     for (size_t cluster = 0; cluster < clustered->size(); ++cluster) {
       double distance = 0.0;
       if (Status status = DirectHistogramDistance(
-            source[index], (*clustered)[cluster], &distance);
+            source[index], (*clustered)[cluster], log2_table, &distance);
           !status.ok()) {
         return status;
       }
@@ -1329,6 +1374,36 @@ Status RefineBestDirectAnsClusters(
   return CanonicalizeDirectClusters(input, clustered, symbols);
 }
 
+// The caller has validated the immutable configuration, context map,
+// and histogram extent before scanning any section.
+Status AddDirectAnsTokenHistograms(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCodeOptions& options,
+  std::span<DirectAnsHistogram> histograms) {
+  for (const EntropyTokenStreamView section : section_tokens) {
+    if (!section.valid()) {
+      return Status::InvalidArgument("ANS token-stream view is invalid");
+    }
+    for (size_t index = 0; index < section.size(); ++index) {
+      const EntropyToken token = section[index];
+      if (token.context >= options.context_count) {
+        return Status::InvalidArgument(
+          "ANS token context is out of range");
+      }
+      const HybridUintToken encoded =
+        codestream_internal::EncodeHybridUintValidated(
+          token.value, options.uint_config);
+      const size_t histogram = options.initial_context_map.empty()
+        ? token.context
+        : options.initial_context_map[token.context];
+      if (!histograms[histogram].Add(encoded)) {
+        return Status::InvalidArgument("ANS histogram count overflow");
+      }
+    }
+  }
+  return Status::Ok();
+}
+
 Status PrepareDirectAnsPartition(
   std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCodeOptions& options,
@@ -1364,7 +1439,15 @@ Status PrepareDirectAnsPartition(
 
   try {
     const ProfileClock::time_point histogram_begin = ProfileBegin(profile);
-    Storage<DirectAnsHistogram> histograms(histogram_count);
+    const bool borrow_populations =
+      !fixed_context_populations.empty() && options.initial_context_map.empty();
+    Storage<DirectAnsHistogram> histograms;
+    Storage<DirectAnsHistogramView> borrowed_histograms;
+    if (borrow_populations) {
+      borrowed_histograms.reserve(histogram_count);
+    } else {
+      histograms.resize(histogram_count);
+    }
     if (!fixed_context_populations.empty()) {
       if (mode != codestream_internal::DirectAnsEntropyMode::kBalanced ||
           fixed_context_populations.size() != options.context_count) {
@@ -1416,14 +1499,14 @@ Status PrepareDirectAnsPartition(
           return Status::InvalidArgument(
             "Prepared direct ANS population count differs");
         }
-        DirectAnsHistogram source{
+        DirectAnsHistogramView source{
           .counts = population.counts,
           .total_count = population.token_count,
           .extra_bits = population.extra_bits,
           .maximum_symbol = population.maximum_symbol,
         };
-        if (options.initial_context_map.empty()) {
-          histograms[context] = std::move(source);
+        if (borrow_populations) {
+          borrowed_histograms.push_back(source);
         } else {
           const size_t histogram = options.initial_context_map[context];
           if (!histograms[histogram].AddHistogram(source)) {
@@ -1432,29 +1515,10 @@ Status PrepareDirectAnsPartition(
         }
       }
     } else {
-      for (const EntropyTokenStreamView section : section_tokens) {
-        if (!section.valid()) {
-          return Status::InvalidArgument("ANS token-stream view is invalid");
-        }
-        for (size_t index = 0; index < section.size(); ++index) {
-          const EntropyToken token = section[index];
-          if (token.context >= options.context_count) {
-            return Status::InvalidArgument(
-              "ANS token context is out of range");
-          }
-          HybridUintToken encoded;
-          if (Status status = EncodeHybridUint(
-                token.value, options.uint_config, &encoded);
-              !status.ok()) {
-            return status;
-          }
-          const size_t histogram = options.initial_context_map.empty()
-            ? token.context
-            : options.initial_context_map[token.context];
-          if (!histograms[histogram].Add(encoded)) {
-            return Status::InvalidArgument("ANS histogram count overflow");
-          }
-        }
+      if (Status status = AddDirectAnsTokenHistograms(
+            section_tokens, options, histograms);
+          !status.ok()) {
+        return status;
       }
     }
     ProfileEnd(
@@ -1464,8 +1528,11 @@ Status PrepareDirectAnsPartition(
     const ProfileClock::time_point clustering_begin = ProfileBegin(profile);
     Storage<DirectAnsHistogram> clustered;
     Storage<uint32_t> histogram_symbols;
-    Status status = FastClusterDirectAnsHistograms(
-      histograms, &clustered, &histogram_symbols);
+    Status status = borrow_populations
+      ? FastClusterDirectAnsHistograms(
+          borrowed_histograms, &clustered, &histogram_symbols)
+      : FastClusterDirectAnsHistograms(
+          histograms, &clustered, &histogram_symbols);
     if (status.ok() &&
         mode == codestream_internal::DirectAnsEntropyMode::kHighDensity) {
       status = RefineBestDirectAnsClusters(
@@ -1547,8 +1614,10 @@ Status PrepareDirectAnsPartition(
   return Status::Ok();
 }
 
+// nullptr denotes success; failures return a static message. Materialize a
+// public Status only on failure, not once per token in the ANS recurrence.
 template <typename EmitChunk>
-Status AdvanceAnsState(
+const char* AdvanceAnsState(
   const HybridUintToken& encoded,
   const AnsHistogram& histogram,
   EmitChunk&& emit_chunk,
@@ -1558,7 +1627,7 @@ Status AdvanceAnsState(
       encoded.symbol >= histogram.reciprocal_frequencies.size() ||
       histogram.frequencies[encoded.symbol] == 0 ||
       histogram.reciprocal_frequencies[encoded.symbol] == 0) {
-    return Status::InvalidArgument("ANS token symbol is absent");
+    return "ANS token symbol is absent";
   }
   if (encoded.extra_bit_count != 0) {
     emit_chunk(encoded.extra_bits, encoded.extra_bit_count);
@@ -1578,10 +1647,10 @@ Status AdvanceAnsState(
   const Storage<uint16_t>& reverse =
     histogram.reverse_maps[encoded.symbol];
   if (remainder >= reverse.size() || reverse[remainder] >= kAnsTableSize) {
-    return Status::InvalidArgument("ANS reverse-map entry is invalid");
+    return "ANS reverse-map entry is invalid";
   }
   *state = (quotient << kAnsLogTableSize) + reverse[remainder];
-  return Status::Ok();
+  return nullptr;
 }
 
 template <typename EmitChunk>
@@ -1591,6 +1660,14 @@ Status ProcessAnsTokenStream(
   EmitChunk&& emit_chunk,
   uint32_t* final_state) {
 
+  // Configurations are immutable for the entire stream. Validate each once
+  // so the per-token conversion can inline without constructing a Status or
+  // repeating the same checks for every coefficient value.
+  for (const HybridUintConfig config : code.uint_configs) {
+    if (!config.valid()) {
+      return Status::InvalidArgument("Invalid HybridUint configuration");
+    }
+  }
   uint32_t state = kAnsSignature << 16;
   for (size_t index = tokens.size(); index != 0; --index) {
     const EntropyToken token = tokens[index - 1];
@@ -1598,16 +1675,13 @@ Status ProcessAnsTokenStream(
       return Status::InvalidArgument("ANS token context is out of range");
     }
     const size_t cluster = code.context_map[token.context];
-    HybridUintToken encoded;
-    if (Status status = EncodeHybridUint(
-          token.value, code.uint_configs[cluster], &encoded);
-        !status.ok()) {
-      return status;
-    }
-    if (Status status = AdvanceAnsState(
+    const HybridUintToken encoded =
+      codestream_internal::EncodeHybridUintValidated(
+        token.value, code.uint_configs[cluster]);
+    if (const char* error = AdvanceAnsState(
           encoded, code.ans_histograms[cluster], emit_chunk, &state);
-        !status.ok()) {
-      return status;
+        error != nullptr) {
+      return Status::InvalidArgument(error);
     }
   }
   *final_state = state;
@@ -1779,11 +1853,11 @@ Status MeasureAnsCodes(
                                    uint32_t, uint8_t chunk_bits) {
           section_bits[candidate] += chunk_bits;
         };
-        if (Status status = AdvanceAnsState(
+        if (const char* error = AdvanceAnsState(
               encoded, codes[candidate]->ans_histograms[cluster],
               count_chunk, &states[candidate]);
-            !status.ok()) {
-          return status;
+            error != nullptr) {
+          return Status::InvalidArgument(error);
         }
       }
     }
@@ -2704,11 +2778,11 @@ Status codestream_internal::MeasurePreparedAnsEntropyCodeSection(
                                    uint32_t, uint8_t chunk_bits) {
           group.bits[lane] += chunk_bits;
         };
-        if (Status status = AdvanceAnsState(
+        if (const char* error = AdvanceAnsState(
               encoded, candidate.ans_histograms[cluster], count_chunk,
               &group.states[lane]);
-            !status.ok()) {
-          return status;
+            error != nullptr) {
+          return Status::InvalidArgument(error);
         }
       }
     }
@@ -3068,10 +3142,12 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
   }
 
   if (direct) {
-    // Original histograms + farthest-first mutable copy; clustered + reordered
-    // histograms. Fast clustering/refinement and model search are sequential,
-    // but summing their peaks avoids relying on an optimistic last-use release.
-    if (!work.AddVector<DirectAnsHistogram>(histograms, kFreshExact, 2) ||
+    // One private source array: owning counts for scanned/preclustered input,
+    // or smaller views for borrowed fixed populations. Farthest-first caches
+    // Shannon costs in place. Keep the conservative owning bound for either
+    // input form; selected seeds and canonicalized clusters still own counts.
+    static_assert(sizeof(DirectAnsHistogramView) <= sizeof(DirectAnsHistogram));
+    if (!work.AddVector<DirectAnsHistogram>(histograms, kFreshExact) ||
         !work.AddVector<DirectAnsHistogram>(k, kReusedExact, 2) ||
         !work.AddVector<uint32_t>(histograms, kFreshExact) ||
         !work.AddVector<double>(histograms, kFreshExact) ||

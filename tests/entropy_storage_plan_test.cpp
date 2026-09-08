@@ -338,11 +338,12 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
     population.maximum_symbol =
         std::max(population.maximum_symbol, token.symbol);
   }
-  for (size_t variant = 0; variant < 8; ++variant) {
+  for (size_t variant = 0; variant < 9; ++variant) {
     const std::array policies{kFastPrefix,     kPrefix,
                               kPrefix,         kBalancedAns,
                               kHighDensityAns, kAnsFromPrefix,
-                              kAnsFromPrefix,  kDeferredAnsFromPrefix};
+                              kAnsFromPrefix,  kDeferredAnsFromPrefix,
+                              kBalancedAns};
     EntropyOptimizationStorageOptions o{
         .policy = policies[variant],
         .tokens = n,
@@ -351,10 +352,12 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
         .initial_histograms = initial_map ? 17ul : 0ul,
         .return_cost = pattern != 0 || variant == 2,
         .retain_prepared_clusters = variant == 2,
-        .borrow_prepared_clusters = variant >= 6,
+        .borrow_prepared_clusters = variant == 6 || variant == 7,
     };
     const auto run = [&](Result *out) {
-      if (variant == 3 && initial_map)
+      // Exercise the borrowed, unmapped source as well as the owning merge
+      // fallback under the same reservation and allocation-failure sweep.
+      if ((variant == 3 && initial_map) || variant == 8)
         return OptimizeDirectAnsEntropyCodeWithFixedPopulations(
             views, input, fixed, &out->code,
             o.return_cost ? &out->cost : nullptr);
@@ -365,8 +368,8 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
     if (!Ok(ComputeEntropyOptimizationStoragePlan(o, &plan)) ||
         !Ok(run(&oracle)))
       return false;
-    if (pattern == 3 && (variant == 3 || variant == 4) &&
-        !Check(oracle.code.ans_histograms.size() == (variant == 3 ? 9 : 8),
+    if (pattern == 3 && (variant == 3 || variant == 4 || variant == 8) &&
+        !Check(oracle.code.ans_histograms.size() == (variant == 4 ? 8 : 9),
                "Queue fixture no longer exercises a beneficial merge"))
       return false;
     ResourceBudget budget;

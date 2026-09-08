@@ -595,6 +595,90 @@ bool CheckInitialContextPreclustering() {
   return true;
 }
 
+bool CheckValidatedHybridUintEncoding() {
+  using gjxl::codestream_internal::EncodeHybridUintValidated;
+  static_assert(EncodeHybridUintValidated(0, {4, 2, 0}) ==
+                gjxl::HybridUintToken{0, 0, 0});
+  static_assert(EncodeHybridUintValidated(65535, {4, 2, 0}) ==
+                gjxl::HybridUintToken{63, 13, 8191});
+  static_assert(EncodeHybridUintValidated(0xFFFFFFFFu, {4, 2, 0}) ==
+                gjxl::HybridUintToken{127, 29, 0x1FFFFFFFu});
+  size_t configurations = 0;
+  size_t values_checked = 0;
+  uint32_t random = 0x7f4a7c15u;
+  for (uint8_t split = 0; split <= 16; ++split) {
+    for (uint8_t msb = 0; msb <= 16; ++msb) {
+      for (uint8_t lsb = 0; lsb <= 16; ++lsb) {
+        const gjxl::HybridUintConfig config{split, msb, lsb};
+        if (!config.valid()) {
+          const gjxl::HybridUintToken sentinel{7, 3, 5};
+          gjxl::HybridUintToken output = sentinel;
+          if (gjxl::EncodeHybridUint(0xFFFFFFFFu, config, &output).code() !=
+                gjxl::StatusCode::kInvalidArgument || output != sentinel) {
+            std::cerr << "Invalid HybridUint configuration changed its output\n";
+            return false;
+          }
+          continue;
+        }
+        ++configurations;
+        const auto verify = [&](uint32_t value) {
+          const auto encoded = EncodeHybridUintValidated(value, config);
+          gjxl::HybridUintToken checked;
+          if (!gjxl::EncodeHybridUint(value, config, &checked).ok() ||
+              encoded != checked) return false;
+          const uint32_t split_token = uint32_t{1} << split;
+          if (encoded.symbol < split_token) {
+            if (encoded.symbol != value || encoded.extra_bit_count != 0 ||
+                encoded.extra_bits != 0) return false;
+          } else {
+            // Independently invert the format's exponent, high/low mantissa,
+            // and extra-bit fields instead of repeating the encoder formula.
+            const uint32_t packed = encoded.symbol - split_token;
+            const uint32_t exponent = (packed >> (msb + lsb)) + split;
+            if (exponent > 31 ||
+                encoded.extra_bit_count != exponent - msb - lsb ||
+                encoded.extra_bits >= (uint64_t{1} << encoded.extra_bit_count))
+              return false;
+            const uint64_t low = packed & ((uint64_t{1} << lsb) - 1);
+            const uint64_t high =
+              (packed >> lsb) & ((uint64_t{1} << msb) - 1);
+            const uint64_t reconstructed = (uint64_t{1} << exponent) |
+              (high << (exponent - msb)) |
+              (uint64_t{encoded.extra_bits} << lsb) | low;
+            if (reconstructed != value) return false;
+          }
+          ++values_checked;
+          return true;
+        };
+        for (uint32_t value = 0; value < 256; ++value) {
+          if (!verify(value)) return false;
+        }
+        for (uint32_t exponent = 0; exponent < 32; ++exponent) {
+          for (int32_t delta = -2; delta <= 2; ++delta) {
+            const int64_t value = (int64_t{1} << exponent) + delta;
+            if (value >= 0 && value <= 0xFFFFFFFFll &&
+                !verify(static_cast<uint32_t>(value))) return false;
+          }
+        }
+        for (size_t sample = 0; sample < 128; ++sample) {
+          random ^= random << 13;
+          random ^= random >> 17;
+          random ^= random << 5;
+          if (!verify(random)) return false;
+        }
+        if (!verify(0xFFFFFFFFu)) return false;
+      }
+    }
+  }
+  if (configurations != 816 || values_checked != 443904) {
+    std::cerr << "HybridUint configuration/value coverage is incomplete\n";
+    return false;
+  }
+  std::cout << "Verified " << configurations << " HybridUint configurations and "
+            << values_checked << " value encodings.\n";
+  return true;
+}
+
 bool CheckAnsFrequencyReciprocalDivision() {
   if (gjxl::codestream_internal::AnsFrequencyReciprocal(0) != 0) {
     std::cerr << "Absent ANS symbol has a nonzero reciprocal\n";
@@ -669,6 +753,41 @@ bool CheckAnsFrequencyReciprocalDivision() {
   return true;
 }
 
+bool WriteReferenceAnsTokens(
+  std::span<const gjxl::EntropyToken> tokens,
+  const gjxl::EntropyCode& code,
+  gjxl::BitWriter* writer) {
+  // Independent recurrence: ordinary division/modulo, not the encoder's
+  // reciprocal helper. Retain the format's extra-bit/renormalization order.
+  struct Chunk { uint32_t bits; uint8_t count; };
+  std::vector<Chunk> chunks;
+  uint32_t state = 0x13u << 16;
+  for (size_t index = tokens.size(); index != 0; --index) {
+    const auto token = tokens[index - 1];
+    const size_t cluster = code.context_map[token.context];
+    gjxl::HybridUintToken encoded;
+    if (!gjxl::EncodeHybridUint(
+          token.value, code.uint_configs[cluster], &encoded).ok()) return false;
+    const auto& histogram = code.ans_histograms[cluster];
+    const uint32_t frequency = histogram.frequencies[encoded.symbol];
+    if (frequency == 0) return false;
+    if (encoded.extra_bit_count != 0) {
+      chunks.push_back({encoded.extra_bits, encoded.extra_bit_count});
+    }
+    if (uint64_t{state} >= uint64_t{frequency} * (uint64_t{1} << 20)) {
+      chunks.push_back({state & 65535u, 16});
+      state /= 65536u;
+    }
+    state = (state / frequency) * 4096u +
+      histogram.reverse_maps[encoded.symbol][state % frequency];
+  }
+  if (!writer->WriteBits(32, state).ok()) return false;
+  for (auto it = chunks.rbegin(); it != chunks.rend(); ++it) {
+    if (!writer->WriteBits(it->count, it->bits).ok()) return false;
+  }
+  return true;
+}
+
 bool CheckAnsRoundTripContract() {
   std::array<std::vector<gjxl::EntropyToken>, 4> sections;
   for (uint32_t context = 0; context < 4; ++context) {
@@ -710,8 +829,27 @@ bool CheckAnsRoundTripContract() {
   for (const std::vector<gjxl::EntropyToken>& section : sections) {
     gjxl::BitWriter payload;
     gjxl::BitWriter repeat_payload;
+    gjxl::BitWriter reference;
+    gjxl::BitWriter split_payload;
+    std::vector<uint32_t> values;
+    std::vector<uint16_t> contexts;
+    for (const auto token : section) {
+      values.push_back(token.value);
+      contexts.push_back(static_cast<uint16_t>(token.context));
+    }
+    const auto split = gjxl::EntropyTokenStreamView::Split(values, contexts);
+    uint64_t split_bits = 0;
     if (!gjxl::WriteTokenStream(section, ans, &payload).ok() ||
         !gjxl::WriteTokenStream(section, ans, &repeat_payload).ok() ||
+        !gjxl::WriteTokenStream(split, ans, &split_payload).ok() ||
+        !gjxl::codestream_internal::CountTokenStreamBits(
+          split, ans, &split_bits).ok() ||
+        !WriteReferenceAnsTokens(section, ans, &reference) ||
+        payload.bits_written() != reference.bits_written() ||
+        payload.bits_written() != split_bits ||
+        payload.bits_written() != split_payload.bits_written() ||
+        !std::ranges::equal(payload.padded_bytes(), reference.padded_bytes()) ||
+        !std::ranges::equal(payload.padded_bytes(), split_payload.padded_bytes()) ||
         payload.bits_written() != repeat_payload.bits_written() ||
         !std::ranges::equal(
           payload.padded_bytes(), repeat_payload.padded_bytes()) ||
@@ -783,6 +921,39 @@ bool CheckAnsRoundTripContract() {
   if (!rejects_reciprocals(false) || !rejects_reciprocals(true)) {
     std::cerr << "Malformed ANS reciprocal changed its destination\n";
     return false;
+  }
+  for (size_t fault = 0; fault < 3; ++fault) {
+    auto invalid_tokens = sections[1];
+    auto invalid_code = ans;
+    if (fault == 0) {
+      invalid_tokens.front().context = ans.context_count;
+    } else if (fault == 1) {
+      invalid_tokens.front().value = UINT32_MAX;
+      const size_t cluster = ans.context_map[invalid_tokens.front().context];
+      gjxl::HybridUintToken encoded;
+      if (!gjxl::EncodeHybridUint(
+            UINT32_MAX, ans.uint_configs[cluster], &encoded).ok() ||
+          (encoded.symbol < ans.ans_histograms[cluster].frequencies.size() &&
+           ans.ans_histograms[cluster].frequencies[encoded.symbol] != 0)) {
+        std::cerr << "ANS absent-symbol fixture is not absent\n";
+        return false;
+      }
+    } else {
+      invalid_code.uint_configs.front().split_exponent = 16;
+    }
+    gjxl::BitWriter destination;
+    uint64_t bit_count = 123;
+    if (!destination.WriteBits(3, 5).ok() ||
+        gjxl::WriteTokenStream(invalid_tokens, invalid_code, &destination).code() !=
+          gjxl::StatusCode::kInvalidArgument ||
+        gjxl::codestream_internal::CountTokenStreamBits(
+          invalid_tokens, invalid_code, &bit_count).code() !=
+          gjxl::StatusCode::kInvalidArgument ||
+        destination.bits_written() != 3 || bit_count != 123 ||
+        !HasBytes(destination, std::array<uint8_t, 1>{5})) {
+      std::cerr << "Invalid ANS token/configuration changed its destination\n";
+      return false;
+    }
   }
   return true;
 }
@@ -1087,6 +1258,232 @@ bool CheckDirectAnsOptimization() {
     std::cerr << "Best direct ANS clustering expanded the fast result: "
               << cluster_counts[0] << " vs " << cluster_counts[1] << '\n';
     return false;
+  }
+  return true;
+}
+
+bool CheckSparseDirectAnsPopulations() {
+  using gjxl::codestream_internal::DirectAnsEntropyMode;
+  for (uint32_t contexts : {1u, 33u, 257u, 6930u}) {
+    for (uint32_t pattern = 0; pattern < 3; ++pattern) {
+      std::vector<gjxl::EntropyToken> tokens;
+      std::vector<gjxl::codestream_internal::PreparedFixedAnsCluster>
+        populations(contexts);
+      const auto append = [&](uint32_t context, uint32_t value) {
+        tokens.push_back({context, value});
+        gjxl::HybridUintToken encoded;
+        if (!gjxl::EncodeHybridUint(
+              value, gjxl::kDefaultHybridUintConfig, &encoded).ok()) {
+          return false;
+        }
+        auto& population = populations[context];
+        ++population.counts[encoded.symbol];
+        ++population.token_count;
+        population.extra_bits += encoded.extra_bit_count;
+        population.maximum_symbol = std::max(
+          population.maximum_symbol, encoded.symbol);
+        return true;
+      };
+      if (pattern != 0) {
+        for (uint32_t context = 0; context < contexts; ++context) {
+          if (context != 0 && context != contexts - 1 && context % 97 != 0) {
+            continue;
+          }
+          for (uint32_t index = 0; index < 96; ++index) {
+            const uint32_t value = pattern == 1 ? index % 7 :
+              ((index * 17 + context) % (3 + context % 61));
+            if (!append(context, value)) return false;
+          }
+        }
+        // Exercise both table-backed counts and the >65536 log2 fallback.
+        if (pattern == 2) {
+          for (size_t index = 0; index < 65537; ++index) {
+            if (!append(0, 0)) return false;
+          }
+        }
+      }
+      const auto before = populations;
+      const std::array views = {
+        gjxl::EntropyTokenStreamView::Interleaved(tokens)};
+      gjxl::EntropyCode scanned, prepared;
+      gjxl::EntropyCodeCost scanned_cost, prepared_cost;
+      if (!gjxl::codestream_internal::OptimizeDirectAnsEntropyCode(
+            views, {.context_count = contexts}, DirectAnsEntropyMode::kBalanced,
+            &scanned, &scanned_cost).ok() ||
+          !gjxl::codestream_internal::OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+            views, {.context_count = contexts}, populations, &prepared,
+            &prepared_cost).ok() || scanned != prepared ||
+          scanned_cost != prepared_cost || populations != before) {
+        std::cerr << "Sparse direct ANS populations changed model or input\n";
+        return false;
+      }
+      if (pattern < 2 && (prepared.ans_histograms.size() != 1 ||
+          !std::ranges::all_of(prepared.context_map,
+            [](uint8_t cluster) { return cluster == 0; }))) {
+        std::cerr << "Empty or identical ANS contexts did not canonicalize\n";
+        return false;
+      }
+      // An initial map must merge populations into owned histograms rather
+      // than borrow individual contexts. Compare this fallback as well.
+      const uint32_t mapped_count = std::min(contexts, uint32_t{7});
+      std::vector<uint8_t> initial_map(contexts);
+      for (uint32_t context = 0; context < contexts; ++context) {
+        initial_map[context] = static_cast<uint8_t>(context % mapped_count);
+      }
+      const gjxl::EntropyCodeOptions mapped_options{
+        .context_count = contexts,
+        .initial_context_map = initial_map,
+        .initial_histogram_count = mapped_count,
+      };
+      if (!gjxl::codestream_internal::OptimizeDirectAnsEntropyCode(
+            views, mapped_options, DirectAnsEntropyMode::kBalanced,
+            &scanned, &scanned_cost).ok() ||
+          !gjxl::codestream_internal::OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+            views, mapped_options, populations, &prepared,
+            &prepared_cost).ok() || scanned != prepared ||
+          scanned_cost != prepared_cost || populations != before) {
+        std::cerr << "Mapped direct ANS populations changed model or input\n";
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool CheckScannedDirectAnsLateSectionFailures() {
+  using gjxl::codestream_internal::DirectAnsEntropyMode;
+  using gjxl::codestream_internal::OptimizeDirectAnsEntropyCode;
+  const std::array tokens{gjxl::EntropyToken{0, 1}, gjxl::EntropyToken{1, 2}};
+  const std::array<uint32_t, 4> values{0xDEADBEEFu, 1, 2, 0xDEADBEEFu};
+  const std::array<uint16_t, 4> contexts{0xBEEF, 0, 1, 0xBEEF};
+  const std::array<uint8_t, 2> map{0, 0};
+  size_t cases = 0;
+  for (auto mode : {DirectAnsEntropyMode::kBalanced, DirectAnsEntropyMode::kHighDensity}) {
+    for (bool mapped : {false, true}) {
+      for (bool split : {false, true}) {
+        for (int failure = 0; failure < 5; ++failure) {
+          gjxl::EntropyCodeOptions options{
+            .context_count = 2,
+            .initial_context_map = mapped ? std::span(map) : std::span<const uint8_t>{},
+            .initial_histogram_count = mapped ? 1u : 0u,
+          };
+          std::array<gjxl::EntropyTokenStreamView, 3> views{
+            split ? gjxl::EntropyTokenStreamView::Split(
+              std::span(values).subspan(1, 2), std::span(contexts).subspan(1, 2)) :
+              gjxl::EntropyTokenStreamView::Interleaved(tokens),
+            gjxl::EntropyTokenStreamView::Interleaved({}),
+            gjxl::EntropyTokenStreamView::Interleaved(tokens),
+          };
+          const char* message = "ANS token-stream view is invalid";
+          std::array invalid_tokens = tokens;
+          if (failure == 0) {
+            views[2] = gjxl::EntropyTokenStreamView::Split(
+              std::span(values).subspan(1, 2), std::span(contexts).subspan(1, 1));
+          }
+          if (failure == 1) {
+            views[2] = gjxl::EntropyTokenStreamView::Split(
+              std::span(values).subspan(1, 2), std::span(contexts).subspan(1, 2));
+            views[2].tokens = tokens;
+          }
+          if (failure == 2) views[2].values = std::span(values).subspan(1, 2);
+          if (failure == 3) {
+            invalid_tokens.back().context = options.context_count;
+            views[2] = gjxl::EntropyTokenStreamView::Interleaved(invalid_tokens);
+            message = "ANS token context is out of range";
+          }
+          if (failure == 4) {
+            options.uint_config = {15, 0, 0};
+            invalid_tokens.back().value = 256;
+            views[2] = gjxl::EntropyTokenStreamView::Interleaved(invalid_tokens);
+            message = "ANS histogram count overflow";
+          }
+          gjxl::EntropyCode code;
+          code.context_count = 123;
+          code.context_map = {8, 9};
+          gjxl::EntropyCodeCost cost;
+          cost.token_bits = 456;
+          cost.section_token_bits = {10, 20};
+          const auto code_before = code;
+          const auto cost_before = cost;
+          const auto input_before = invalid_tokens;
+          const auto status = OptimizeDirectAnsEntropyCode(views, options, mode, &code, &cost);
+          if (status.code() != gjxl::StatusCode::kInvalidArgument || status.message() != message ||
+              code != code_before || cost != cost_before || invalid_tokens != input_before ||
+              values.front() != 0xDEADBEEFu || values.back() != 0xDEADBEEFu ||
+              contexts.front() != 0xBEEF || contexts.back() != 0xBEEF) {
+            std::cerr << "Late ANS section failure changed status or output\n";
+            return false;
+          }
+          ++cases;
+        }
+      }
+    }
+  }
+  if (cases != 40) return false;
+  std::cout << "Verified 40 late ANS section failures after populated and empty sections.\n";
+  return true;
+}
+
+bool CheckBorrowedDirectAnsValidation() {
+  using gjxl::codestream_internal::PreparedFixedAnsCluster;
+  using gjxl::codestream_internal::OptimizeDirectAnsEntropyCodeWithFixedPopulations;
+  const std::array tokens{gjxl::EntropyToken{0, 0}};
+  const std::array views{gjxl::EntropyTokenStreamView::Interleaved(tokens)};
+  std::vector<PreparedFixedAnsCluster> valid(2);
+  valid[0].counts[0] = valid[0].token_count = 1;
+  gjxl::EntropyCode code;
+  gjxl::EntropyCodeCost cost;
+  if (!OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+        views, {.context_count = 2}, valid, &code, &cost).ok()) {
+    return false;
+  }
+  const auto code_before = code;
+  const auto cost_before = cost;
+  const auto rejected = [&](const std::vector<PreparedFixedAnsCluster>& input,
+                            const gjxl::EntropyCodeOptions& options) {
+    const auto input_before = input;
+    const auto status = OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+      views, options, input, &code, &cost);
+    return status.code() == gjxl::StatusCode::kInvalidArgument &&
+      input == input_before && code == code_before && cost == cost_before;
+  };
+  // Even an allegedly empty context must have every bin checked, including
+  // bins beyond its declared maximum. Borrowing must not trust the metadata.
+  for (size_t symbol = 0; symbol < gjxl::kMaximumAnsAlphabetSize; ++symbol) {
+    auto input = valid;
+    input[1].counts[symbol] = 1;
+    if (!rejected(input, {.context_count = 2})) {
+      std::cerr << "Borrowed ANS skipped a malformed population bin\n";
+      return false;
+    }
+  }
+  for (size_t pattern = 0; pattern < 6; ++pattern) {
+    auto input = valid;
+    auto& population = input[1];
+    if (pattern == 0) population.maximum_symbol = gjxl::kMaximumAnsAlphabetSize;
+    if (pattern == 1) population.extra_bits = 1;
+    if (pattern == 2) {
+      population.counts[0] = UINT64_MAX;
+      population.counts[1] = 1;
+    }
+    if (pattern == 3) {
+      population.counts[16] = population.token_count = UINT64_MAX;
+      population.maximum_symbol = 16;
+    }
+    if (pattern == 4) {
+      population.counts[0] = population.token_count = 1;
+      population.maximum_symbol = 1;
+    }
+    if (pattern == 5) {
+      population.counts[0] = population.token_count = UINT64_MAX;
+    }
+    const std::array<uint8_t, 2> initial_map{0, 0};
+    if (!rejected(input, {.context_count = 2}) ||
+        !rejected(input, {.context_count = 2,
+          .initial_context_map = initial_map, .initial_histogram_count = 1})) {
+      std::cerr << "Borrowed or mapped ANS validation was not atomic\n";
+      return false;
+    }
   }
   return true;
 }
@@ -1544,6 +1941,7 @@ int main() {
   }
   if (!CheckMutableValueAggregation() ||
       !CheckHybridUintBoundaries() ||
+      !CheckValidatedHybridUintEncoding() ||
       !CheckDeterministicHuffmanScratch() ||
       !CheckUintConfigSerialization() ||
       !CheckDegeneratePrefixPayload() ||
@@ -1559,6 +1957,9 @@ int main() {
       !CheckDirectAnsSourcePolicies() ||
       !CheckOrdinaryCoderSelectionPolicy() ||
       !CheckBestDirectAnsClusteringRefinement() ||
+      !CheckSparseDirectAnsPopulations() ||
+      !CheckBorrowedDirectAnsValidation() ||
+      !CheckScannedDirectAnsLateSectionFailures() ||
       !CheckDirectAnsOptimization() ||
       !CheckSplitTokenStreamParity() ||
       !CheckExactTokenBitCounting()) {

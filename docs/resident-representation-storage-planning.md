@@ -41,8 +41,10 @@ For every eligible family of `N` coefficients and `L` LLF coefficients:
   one token per non-LLF position. The all-family bound is 5874 `EntropyToken`s.
   The output grows by pushes, so its capacity/replacement bounds use the
   [reviewed vector growth contract](resident-token-storage-planning.md).
-- Global `uint64_t` zero counts, plus one set per possible participant when
-  parallel. Worker counts remain allocated while the global reduction is built.
+- Global zero counts use `uint32_t` when the frame's block area fits that type,
+  and `uint64_t` otherwise, plus one set per possible participant when parallel.
+  The planner selects the same width. Worker counts remain allocated while the
+  global reduction is built.
   Within a family, the first assign allocates once; subsequent groups only
   modify counts. A transposed strategy does not require another family array.
 
