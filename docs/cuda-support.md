@@ -1601,8 +1601,19 @@ passes 156 injected allocation failures in both release and ASAN. Two-image
 4K paired median changes are -3.30% with independent backends and -1.99% with
 the public driver; peak working set falls about 153 MiB. Small batches and
 driver 1080p timings remain mixed, so compact CUDA storage remains opt-in.
-Direct narrow group packing is the next unmeasured compact-path candidate;
-composition/reduction and tile scheduling remain separate experiments.
+S108 proposed direct narrow group packing as the next compact-path candidate,
+investigated in S109 below. Composition/reduction and tile scheduling remain
+separate experiments.
+
+[S109](cuda-direct-packing-s109.md) implements and validates direct byte/word
+group packing, reducing logical packing traffic from 15N to 7N bytes and the
+isolated tested 4K stage by roughly 0.5–1.0 ms. The kernel and focused tests
+are retained, but encoder routing stays unchanged: both separate-process and
+duplicate-label within-process comparisons leave incremental complete-call
+gains mixed. There are 2,645 exact encode checks plus 45 under integrated
+memcheck, and all four kernel sanitizers pass. The report preserves the tested
+integration and explains why the scoped saving is not promoted as an encoder
+speedup.
 
 ### Math and kernel strategy
 

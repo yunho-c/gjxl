@@ -582,6 +582,7 @@ if(GJXL_ENABLE_CUDA)
     src/gpu/cuda/cuda_ac_strategy_kernels.cu
     src/gpu/cuda/cuda_ac_group_kernels.cu
     src/gpu/cuda/cuda_compact_ac_kernels.cu
+    src/gpu/cuda/cuda_direct_ac_pack_kernels.cu
     src/gpu/cuda/cuda_coefficient_order_kernels.cu
     src/gpu/cuda/cuda_aq.cpp
     src/gpu/cuda/cuda_aq_kernels.cu
@@ -2423,6 +2424,11 @@ if(GJXL_BUILD_TESTS)
     target_link_libraries(gjxl_cuda_compact_ac_test PRIVATE gjxl_cuda CUDA::cudart)
     add_test(NAME cuda_compact_ac COMMAND gjxl_cuda_compact_ac_test)
     set_tests_properties(cuda_compact_ac PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_direct_ac_pack_test tests/cuda_direct_ac_pack_test.cpp)
+    target_link_libraries(gjxl_cuda_direct_ac_pack_test PRIVATE gjxl_cuda CUDA::cudart)
+    add_test(NAME cuda_direct_ac_pack COMMAND gjxl_cuda_direct_ac_pack_test)
+    set_tests_properties(cuda_direct_ac_pack PROPERTIES SKIP_RETURN_CODE 77)
 
     add_executable(gjxl_cuda_opsin_test tests/cuda_opsin_test.cpp)
     target_link_libraries(gjxl_cuda_opsin_test PRIVATE gjxl_cuda)
