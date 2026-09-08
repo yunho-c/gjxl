@@ -1427,6 +1427,10 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_compact_vardct_frame_test PRIVATE gjxl_codestream)
   add_test(NAME compact_vardct_frame COMMAND gjxl_compact_vardct_frame_test)
 
+  add_executable(gjxl_compact_frame_allocation_test tests/compact_frame_allocation_test.cpp)
+  target_link_libraries(gjxl_compact_frame_allocation_test PRIVATE gjxl_codestream)
+  add_test(NAME compact_frame_allocation COMMAND gjxl_compact_frame_allocation_test)
+
   add_executable(gjxl_ac_direct_tokenization_test tests/ac_direct_tokenization_test.cpp)
   target_link_libraries(gjxl_ac_direct_tokenization_test PRIVATE gjxl_codestream)
   add_test(NAME ac_direct_tokenization COMMAND gjxl_ac_direct_tokenization_test)

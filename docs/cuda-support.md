@@ -1589,9 +1589,20 @@ reconstruction, without a dense compatibility cache. It is available behind
 `GJXL_CUDA_COMPACT_AC=ON` (default OFF). In six paired process repetitions,
 4K/1080p complete-call median changes are -5.70%/-6.87%, with exact frozen
 bytes and summaries; Keong 500 is mixed. The 4K AC owner drops from 101.25 to
-25.31 MiB. Concurrent batch and wider fallback/quality qualification remain
-before default rollout. The report records host/CUDA tests, instrumentation
+25.31 MiB. S108 below extends concurrent batch and fallback/quality qualification.
+The report records host/CUDA tests, instrumentation
 canaries, failed probes, memory definitions and measurement limits.
+
+[S108](cuda-compact-qualification-s108.md) adds 3,120 exact encode checks across
+quality settings, rate control, high-range overflow fixtures and concurrent
+batches, plus 42 checked encodes under five integrated memchecks. Three
+synthetic inputs select the actual int32 fallback. A permanent host test
+passes 156 injected allocation failures in both release and ASAN. Two-image
+4K paired median changes are -3.30% with independent backends and -1.99% with
+the public driver; peak working set falls about 153 MiB. Small batches and
+driver 1080p timings remain mixed, so compact CUDA storage remains opt-in.
+Direct narrow group packing is the next unmeasured compact-path candidate;
+composition/reduction and tile scheduling remain separate experiments.
 
 ### Math and kernel strategy
 
