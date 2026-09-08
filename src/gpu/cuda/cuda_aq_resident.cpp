@@ -2587,7 +2587,25 @@ class CudaPreparedResidentAqEvaluation final
     std::array<DevicePlaneView, 3> current = reconstructed_;
     size_t stage = 0;
     cudaError_t status = cudaSuccess;
-    if (options_.profile.loop_filter.gaborish) {
+    const uint32_t iterations =
+        options_.profile.loop_filter.epf_options.iterations;
+    const uint32_t first_pass = iterations == 3 ? 0 : 1;
+    uint32_t next_pass = first_pass;
+    if (options_.profile.loop_filter.gaborish &&
+        (iterations == 2 ||
+         (iterations == 1 && options_.metric == AqEvaluationMetric::kMaximumError))) {
+      status = LaunchCudaAqGaborishEpf(
+          ConstPointers(current), Pointer<const float>(inverse_sigma_device_),
+          MutablePointers(filter_scratch_[1]),
+          Pointer<unsigned int>(error_device_), gaborish_params_, epf_params_[1],
+          backend.state_->stream);
+      if (status != cudaSuccess) return status;
+      // Retain the same logical stage count and XYB owner as two separate
+      // passes. Maximum-error scoring depends on this final-plane selection.
+      current = filter_scratch_[1];
+      stage = 2;
+      next_pass = 2;
+    } else if (options_.profile.loop_filter.gaborish) {
       status = LaunchCudaAqGaborish(ConstPointers(current),
                                     MutablePointers(filter_scratch_[0]),
                                     Pointer<unsigned int>(error_device_),
@@ -2596,10 +2614,7 @@ class CudaPreparedResidentAqEvaluation final
       current = filter_scratch_[0];
       ++stage;
     }
-    const uint32_t iterations =
-        options_.profile.loop_filter.epf_options.iterations;
-    const uint32_t first_pass = iterations == 3 ? 0 : 1;
-    for (uint32_t pass = first_pass; pass < first_pass + iterations; ++pass) {
+    for (uint32_t pass = next_pass; pass < first_pass + iterations; ++pass) {
       // Perceptual scoring consumes RGB only. Maximum-error scoring also
       // needs the filtered XYB planes, so keep their final materialization.
       if (pass + 1 == first_pass + iterations &&

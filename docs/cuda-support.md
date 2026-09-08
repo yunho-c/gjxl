@@ -1856,6 +1856,19 @@ for production integration and qualification, without claiming a dependable
 end-to-end speedup or enabling unmeasured fusion routes. Runtime remains
 S127 in this isolated study.
 
+[S131](cuda-gaborish-epf-production-s131.md) integrates all-channel reuse
+for first-pass XYB output. The clean production kernel reproduces S130's
+2,744 instructions with only unused-parameter relocations; all 213 previous
+kernel bodies remain unchanged. The measured two-boundary stage improves
+11.0–17.7%, with all 24 individual label-pair medians favorable. Both 4K
+uninstrumented repeats favor fusion, but total-time variation precludes
+attributing their entire 3–4% difference to this kernel. All 80 CTests,
+2,262 frozen-oracle encodes, 256 AQ profile comparisons and thirteen CUDA
+sanitizer jobs pass. Production enables the qualified XYB route while
+preserving maximum-error ownership, other filter routes, allocations and
+compact defaults. Next isolate filter-scratch lifetime planning: the default
+fused perceptual path leaves one allocated scratch image unused.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

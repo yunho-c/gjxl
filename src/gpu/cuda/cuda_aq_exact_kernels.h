@@ -90,6 +90,15 @@ struct CudaLinearRgbToOpsinParams {
     std::array<const float*, 3> input, std::array<float*, 3> output,
     unsigned int* error, CudaAqGaborishParams params, cudaStream_t stream);
 
+// Gaborish followed by EPF pass 1, retaining filtered XYB without a global
+// Gaborish intermediate. Input, sigma and output storage must not alias; the
+// caller validates allocation sizes. Gaborish output_stride and EPF
+// input_stride are unused. Matching empty extents are no-ops for pass 1.
+[[nodiscard]] cudaError_t LaunchCudaAqGaborishEpf(
+    std::array<const float*, 3> input, const float* inverse_sigma,
+    std::array<float*, 3> output, unsigned int* error,
+    CudaAqGaborishParams gaborish, CudaAqEpfParams epf, cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaAqEpf(std::array<const float*, 3> input,
                                           const float* inverse_sigma,
                                           std::array<float*, 3> output,

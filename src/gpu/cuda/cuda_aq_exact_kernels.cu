@@ -185,6 +185,37 @@ __global__ void ScatterReconstructionKernel(
               anchor.x * 8 + x] = inverse[params.coefficient_offset + index];
 }
 
+__device__ __forceinline__ float GaborishValue(
+    const float* input, CudaAqGaborishParams params, uint32_t x, uint32_t y,
+    uint32_t channel, unsigned int* error) {
+  const float axes = Sample(input, params.input_stride, params.width,
+                            params.height, x, y, -1, 0) +
+                     Sample(input, params.input_stride, params.width,
+                            params.height, x, y, 1, 0) +
+                     Sample(input, params.input_stride, params.width,
+                            params.height, x, y, 0, -1) +
+                     Sample(input, params.input_stride, params.width,
+                            params.height, x, y, 0, 1);
+  const float diagonals = Sample(input, params.input_stride, params.width,
+                                 params.height, x, y, -1, -1) +
+                          Sample(input, params.input_stride, params.width,
+                                 params.height, x, y, 1, -1) +
+                          Sample(input, params.input_stride, params.width,
+                                 params.height, x, y, -1, 1) +
+                          Sample(input, params.input_stride, params.width,
+                                 params.height, x, y, 1, 1);
+  float value = params.center_weight[channel] *
+                Sample(input, params.input_stride, params.width,
+                       params.height, x, y, 0, 0);
+  value += params.axis_weight[channel] * axes;
+  value += params.diagonal_weight[channel] * diagonals;
+  if (!isfinite(value)) {
+    atomicOr(error, 1u);
+    value = 0.0f;
+  }
+  return value;
+}
+
 __global__ void GaborishKernel(const float* input_x, const float* input_y,
                                const float* input_b, float* output_x,
                                float* output_y, float* output_b,
@@ -263,11 +294,11 @@ __device__ void StoreLinearRgb(float x, float y, float b, float** outputs,
 }
 
 template <uint32_t Pass, bool ToLinear>
-__global__ void EpfTiledKernel(const float* input_x, const float* input_y,
-  const float* input_b, const float* inverse_sigma,
-  float* output_x, float* output_y, float* output_b,
-  unsigned int* error, CudaAqEpfParams params, uint32_t tiles_per_row,
-  CudaAqColorParams color) {
+__device__ __forceinline__ void EpfFromTile(
+    const float* tile, const float* inverse_sigma,
+    float* output_x, float* output_y, float* output_b, unsigned int* error,
+    CudaAqEpfParams params, CudaAqColorParams color,
+    uint32_t origin_x, uint32_t origin_y) {
   static_assert(Pass <= 2);
   static_assert((kEpfTileWidth * kEpfTileHeight) % kThreads == 0);
   constexpr uint32_t kRadius = Pass == 0 ? 3 : (Pass == 1 ? 2 : 1);
@@ -276,25 +307,6 @@ __global__ void EpfTiledKernel(const float* input_x, const float* input_y,
   constexpr int kPass0Offsets[12][2] = {{0, -2}, {-1, -1}, {0, -1}, {1, -1},
     {-2, 0}, {-1, 0}, {1, 0}, {2, 0}, {-1, 1}, {0, 1}, {1, 1}, {0, 2}};
   constexpr int kCardinalOffsets[4][2] = {{0, -1}, {-1, 0}, {1, 0}, {0, 1}};
-  __shared__ float tile[3][kTileSize];
-  const uint32_t origin_x = (blockIdx.x % tiles_per_row) * kEpfTileWidth;
-  const uint32_t origin_y = (blockIdx.x / tiles_per_row) * kEpfTileHeight;
-  for (uint32_t index = threadIdx.x; index < kTileSize; index += kThreads) {
-    const uint32_t source_x = MirrorOffset(origin_x,
-      static_cast<int>(index % kTileStride) - static_cast<int>(kRadius), params.width);
-    const uint32_t source_y = MirrorOffset(origin_y,
-      static_cast<int>(index / kTileStride) - static_cast<int>(kRadius), params.height);
-    const size_t source_index =
-      static_cast<size_t>(source_y) * params.input_stride + source_x;
-    tile[0][index] = input_x[source_index];
-    tile[1][index] = input_y[source_index];
-    tile[2][index] = input_b[source_index];
-  }
-  // All threads load the mirrored halo before any out-of-image or bypass
-  // branch. Mirror the original patch coordinates, not an already mirrored
-  // candidate center: those operations differ at small image boundaries.
-  __syncthreads();
-
   // Each warp processes one row at a time. Keep consecutive rows in a loop
   // to reuse the tile without keeping several pixels' accumulators live.
 #pragma unroll 1
@@ -317,12 +329,12 @@ __global__ void EpfTiledKernel(const float* input_x, const float* input_y,
       // Bypassed values reach color conversion without EPF sanitization,
       // exactly as when the filtered XYB planes are materialized separately.
       if constexpr (ToLinear) {
-        StoreLinearRgb(tile[0][center], tile[1][center], tile[2][center],
+        StoreLinearRgb(tile[(0) * kTileSize + (center)], tile[(1) * kTileSize + (center)], tile[(2) * kTileSize + (center)],
                        outputs, output_index, error, color.scale);
       } else {
 #pragma unroll
         for (uint32_t channel = 0; channel < 3; ++channel) {
-          outputs[channel][output_index] = tile[channel][center];
+          outputs[channel][output_index] = tile[(channel) * kTileSize + (center)];
         }
       }
       continue;
@@ -330,7 +342,7 @@ __global__ void EpfTiledKernel(const float* input_x, const float* input_y,
     const bool block_border = x % 8 == 0 || x % 8 == 7 || y % 8 == 0 || y % 8 == 7;
     const float scaled_inverse_sigma = block_inverse_sigma * params.sigma_scale *
       (block_border ? params.border_sad_multiplier : 1.0f);
-    float sum[3] = {tile[0][center], tile[1][center], tile[2][center]};
+    float sum[3] = {tile[(0) * kTileSize + (center)], tile[(1) * kTileSize + (center)], tile[(2) * kTileSize + (center)]};
     float weight_sum = 1.0f;
     constexpr uint32_t kCandidateCount = Pass == 0 ? 12 : 4;
 #pragma unroll
@@ -343,7 +355,7 @@ __global__ void EpfTiledKernel(const float* input_x, const float* input_y,
       for (uint32_t channel = 0; channel < 3; ++channel) {
         float channel_sad = 0.0f;
         if constexpr (Pass == 2) {
-          channel_sad = fabsf(tile[channel][center] - tile[channel][candidate]);
+          channel_sad = fabsf(tile[(channel) * kTileSize + (center)] - tile[(channel) * kTileSize + (candidate)]);
         } else {
           constexpr int kPlusOffsets[5][2] = {
             {0, 0}, {0, -1}, {-1, 0}, {0, 1}, {1, 0}};
@@ -351,8 +363,8 @@ __global__ void EpfTiledKernel(const float* input_x, const float* input_y,
           for (uint32_t p = 0; p < 5; ++p) {
             const int offset = kPlusOffsets[p][1] * static_cast<int>(kTileStride) +
               kPlusOffsets[p][0];
-            channel_sad += fabsf(tile[channel][center + offset] -
-              tile[channel][candidate + offset]);
+            channel_sad += fabsf(tile[(channel) * kTileSize + (center + offset)] -
+              tile[(channel) * kTileSize + (candidate + offset)]);
           }
         }
         sad = fmaf(channel_sad, params.channel_scale[channel], sad);
@@ -361,7 +373,7 @@ __global__ void EpfTiledKernel(const float* input_x, const float* input_y,
       weight_sum += weight;
 #pragma unroll
       for (uint32_t channel = 0; channel < 3; ++channel) {
-        sum[channel] = fmaf(weight, tile[channel][candidate], sum[channel]);
+        sum[channel] = fmaf(weight, tile[(channel) * kTileSize + (candidate)], sum[channel]);
       }
     }
     float values[3];
@@ -383,6 +395,110 @@ __global__ void EpfTiledKernel(const float* input_x, const float* input_y,
                      error, color.scale);
     }
   }
+}
+
+template <uint32_t Pass, bool ToLinear>
+__global__ void EpfTiledKernel(const float* input_x, const float* input_y,
+  const float* input_b, const float* inverse_sigma,
+  float* output_x, float* output_y, float* output_b,
+  unsigned int* error, CudaAqEpfParams params, uint32_t tiles_per_row,
+  CudaAqColorParams color) {
+  constexpr uint32_t kRadius = Pass == 0 ? 3 : (Pass == 1 ? 2 : 1);
+  constexpr uint32_t kTileStride = kEpfTileWidth + 2 * kRadius;
+  constexpr uint32_t kTileSize = kTileStride * (kEpfTileHeight + 2 * kRadius);
+  __shared__ float tile[3 * kTileSize];
+  const uint32_t origin_x = (blockIdx.x % tiles_per_row) * kEpfTileWidth;
+  const uint32_t origin_y = (blockIdx.x / tiles_per_row) * kEpfTileHeight;
+  for (uint32_t index = threadIdx.x; index < kTileSize; index += kThreads) {
+    const uint32_t source_x = MirrorOffset(origin_x,
+      static_cast<int>(index % kTileStride) - static_cast<int>(kRadius), params.width);
+    const uint32_t source_y = MirrorOffset(origin_y,
+      static_cast<int>(index / kTileStride) - static_cast<int>(kRadius), params.height);
+    const size_t source_index =
+      static_cast<size_t>(source_y) * params.input_stride + source_x;
+    tile[0 * kTileSize + index] = input_x[source_index];
+    tile[1 * kTileSize + index] = input_y[source_index];
+    tile[2 * kTileSize + index] = input_b[source_index];
+  }
+  // All threads load the mirrored halo before any out-of-image or bypass
+  // branch. Mirror the original patch coordinates, not an already mirrored
+  // candidate center: those operations differ at small image boundaries.
+  __syncthreads();
+
+  EpfFromTile<Pass, ToLinear>(tile, inverse_sigma, output_x, output_y,
+                             output_b, error, params, color, origin_x, origin_y);
+}
+
+// The raw window and filtered EPF halo have disjoint lifetimes. Keep the
+// filtered values in registers until every raw-window reader has finished,
+// then compact all three planes into the same shared allocation.
+__global__ void GaborishEpfKernel(
+    const float* input_x, const float* input_y, const float* input_b,
+    const float* inverse_sigma, float* output_x, float* output_y,
+    float* output_b, unsigned int* error, CudaAqEpfParams params,
+    uint32_t tiles_per_row, CudaAqGaborishParams gaborish) {
+  constexpr uint32_t kRadius = 2;
+  constexpr uint32_t kTileStride = kEpfTileWidth + 2 * kRadius;
+  constexpr uint32_t kTileSize = kTileStride * (kEpfTileHeight + 2 * kRadius);
+  constexpr uint32_t kRawWidth = kTileStride + 2;
+  constexpr uint32_t kRawHeight = kEpfTileHeight + 2 * kRadius + 2;
+  constexpr uint32_t kRawSize = kRawWidth * kRawHeight;
+  constexpr uint32_t kSlots = (kTileSize + kThreads - 1) / kThreads;
+  static_assert(kTileSize <= kRawSize);
+  __shared__ float storage[3 * kRawSize];
+  const uint32_t origin_x = (blockIdx.x % tiles_per_row) * kEpfTileWidth;
+  const uint32_t origin_y = (blockIdx.x / tiles_per_row) * kEpfTileHeight;
+  const uint32_t start_x = min(
+      origin_x > kRadius + 1 ? origin_x - kRadius - 1 : 0,
+      params.width > kRawWidth ? params.width - kRawWidth : 0);
+  const uint32_t start_y = min(
+      origin_y > kRadius + 1 ? origin_y - kRadius - 1 : 0,
+      params.height > kRawHeight ? params.height - kRawHeight : 0);
+  for (uint32_t i = threadIdx.x; i < kRawSize; i += kThreads) {
+    const uint32_t x = min(start_x + i % kRawWidth, params.width - 1);
+    const uint32_t y = min(start_y + i / kRawWidth, params.height - 1);
+    const size_t source = static_cast<size_t>(y) * gaborish.input_stride + x;
+    storage[i] = input_x[source];
+    storage[kRawSize + i] = input_y[source];
+    storage[2 * kRawSize + i] = input_b[source];
+  }
+  __syncthreads();
+  auto local = gaborish;
+  local.width = kRawWidth;
+  local.height = kRawHeight;
+  local.input_stride = kRawWidth;
+  float filtered[3][kSlots];
+#pragma unroll
+  for (uint32_t slot = 0; slot < kSlots; ++slot) {
+    const uint32_t i = threadIdx.x + slot * kThreads;
+    if (i < kTileSize) {
+      // Reflect the EPF center in the original image before reflecting its
+      // Gaborish neighbors. Reflecting an already-offset center is different.
+      const uint32_t x = MirrorOffset(origin_x,
+          static_cast<int>(i % kTileStride) - static_cast<int>(kRadius), params.width);
+      const uint32_t y = MirrorOffset(origin_y,
+          static_cast<int>(i / kTileStride) - static_cast<int>(kRadius), params.height);
+#pragma unroll
+      for (uint32_t channel = 0; channel < 3; ++channel) {
+        filtered[channel][slot] = GaborishValue(storage + channel * kRawSize,
+            local, x - start_x, y - start_y, channel, error);
+      }
+    }
+  }
+  __syncthreads();
+#pragma unroll
+  for (uint32_t slot = 0; slot < kSlots; ++slot) {
+    const uint32_t i = threadIdx.x + slot * kThreads;
+    if (i < kTileSize) {
+#pragma unroll
+      for (uint32_t channel = 0; channel < 3; ++channel) {
+        storage[channel * kTileSize + i] = filtered[channel][slot];
+      }
+    }
+  }
+  __syncthreads();
+  EpfFromTile<1, false>(storage, inverse_sigma, output_x, output_y, output_b,
+                        error, params, {}, origin_x, origin_y);
 }
 
 __global__ void OpsinToLinearKernel(const float* input_x, const float* input_y,
@@ -578,6 +694,30 @@ cudaError_t LaunchCudaAqGaborish(std::array<const float*, 3> input,
   GaborishKernel<<<blocks, kThreads, 0, stream>>>(input[0], input[1], input[2],
                                                   output[0], output[1],
                                                   output[2], error, params);
+  return cudaGetLastError();
+}
+
+cudaError_t LaunchCudaAqGaborishEpf(
+    std::array<const float*, 3> input, const float* inverse_sigma,
+    std::array<float*, 3> output, unsigned int* error,
+    CudaAqGaborishParams gaborish, CudaAqEpfParams epf, cudaStream_t stream) {
+  if (epf.pass != 1 || epf.width != gaborish.width ||
+      epf.height != gaborish.height) return cudaErrorInvalidValue;
+  if (epf.width == 0 || epf.height == 0) return cudaSuccess;
+  if (gaborish.input_stride < epf.width || epf.output_stride < epf.width ||
+      epf.inverse_sigma_stride < (static_cast<uint64_t>(epf.width) + 7) / 8 ||
+      !inverse_sigma || !error) return cudaErrorInvalidValue;
+  for (uint32_t channel = 0; channel < 3; ++channel) {
+    if (!input[channel] || !output[channel]) return cudaErrorInvalidValue;
+  }
+  const uint32_t tiles_per_row = static_cast<uint32_t>(
+      (static_cast<size_t>(epf.width) + kEpfTileWidth - 1) / kEpfTileWidth);
+  const size_t blocks = static_cast<size_t>(tiles_per_row) *
+      ((static_cast<size_t>(epf.height) + kEpfTileHeight - 1) / kEpfTileHeight);
+  if (blocks > 0x7fffffffu) return cudaErrorInvalidValue;
+  GaborishEpfKernel<<<static_cast<unsigned int>(blocks), kThreads, 0, stream>>>(
+      input[0], input[1], input[2], inverse_sigma, output[0], output[1],
+      output[2], error, epf, tiles_per_row, gaborish);
   return cudaGetLastError();
 }
 
