@@ -1913,6 +1913,18 @@ encodes pass, with all 214 S134 GPU bodies unchanged. Next investigate the
 larger regular candidate representation: 522,120 descriptors totaling
 12.53 MB are still constructed and uploaded at 4K.
 
+[S136](cuda-generated-candidates-s136.md) generates those descriptors inside
+the existing quant-norm pass. Traces verify seven fewer H2D copies and
+12,530,880 fewer payload bytes at 4K, with unchanged launch counts. Preparation
+improves by 6.7–7.8 ms, but whole-call primary comparisons favor the candidate
+in only eleven of sixteen runs and three of four 4K runs are unfavorable.
+The candidate is archived and runtime restored; no standalone promotion is
+made. All 82 candidate CTests, 2,712 frozen-oracle encodes and ten CUDA
+sanitizer jobs pass. The added kernel costs only about 0.04 ms in 4K traces;
+variation in other GPU work remains unattributed. Next investigate active
+residual-transform/perceptual-analysis work with whole-call controls, rather
+than inferring throughput gains from removed host intervals alone.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
