@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <iostream>
 #include <limits>
+#include <optional>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -29,7 +31,8 @@ struct Fixture {
   Fixture(MTL::Device *device, unsigned rows, unsigned cols, unsigned count,
           unsigned pattern, unsigned source, unsigned padding)
       : p{72,          56,   72 + padding, 75 + padding, 12,       count,
-          rows * cols, cols, rows,         cols / 8,     rows / 8, 2,
+          rows * cols, cols, rows,         cols / 8,     rows / 8,
+          rows * cols / 64,
           source,      0.9f, 1.2f,         0.7f} {
     for (size_t size : std::array<size_t, 11>{
              p.opsin_stride * p.height * 4, p.opsin_stride * p.height * 4,
@@ -75,6 +78,12 @@ struct Fixture {
           i % ((p.width - cols) / 8 + 1), (i * 3) % ((p.height - rows) / 8 + 1),
           0.5f + (i % 13) / 8.f,          0.75f + (i % 7) / 16.f,
           (int(i % 9) - 4) / 8.f,         (int(i % 11) - 5) / 8.f};
+      if (source == 1)
+        b[7].as<float>()[i] = 0.75f + (i % 17) / 16.f;
+      if (pattern == 8)
+        c.x = p.width / 8;
+      if (pattern == 9)
+        c.quant = -0.5f;
       if (pattern == 7)
         c.cfl_x = std::numeric_limits<float>::quiet_NaN();
     }
@@ -124,13 +133,14 @@ struct Fixture {
     Check(command->status() == MTL::CommandBufferStatusCompleted,
           "AC candidate dispatch failed");
   }
-  void compare(const Fixture &other) const {
+  void compare(const Fixture &other, bool baseline_is_fused) const {
     for (size_t i = 0; i < b.size(); ++i) {
       b[i].guards();
       other.b[i].guards();
       if (i == 10) {
         for (size_t j = 0; j < other.b[i].size; ++j)
-          Check(other.b[i].as<unsigned char>()[j] == 0xa5,
+          Check(other.b[i].as<unsigned char>()[j] == 0xa5 &&
+                    (!baseline_is_fused || b[i].as<unsigned char>()[j] == 0xa5),
                 "Fused candidate wrote coefficient scratch");
         continue;
       }
@@ -142,43 +152,58 @@ struct Fixture {
 } // namespace
 
 int main(int argc, char **argv) try {
-  Check(argc == 3, "usage: gjxl_metal_ac_candidate_probe BASELINE.metallib "
-                   "CANDIDATE.metallib");
+  Check(argc == 3 ||
+            (argc == 4 && std::string_view(argv[3]) == "--fused-baseline"),
+        "usage: gjxl_metal_ac_candidate_probe BASELINE.metallib "
+        "CANDIDATE.metallib [--fused-baseline]");
+  const bool fused_baseline = argc == 4;
   auto pool = NS::TransferPtr(NS::AutoreleasePool::alloc()->init());
   auto device = NS::TransferPtr(MTL::CreateSystemDefaultDevice());
   Check(bool(device), "Metal device unavailable");
   auto queue = NS::TransferPtr(device->newCommandQueue());
   unsigned cases = 0;
-  for (const unsigned rows : {8, 16}) {
-    const unsigned cols = 128 / rows;
+  for (const auto shape :
+       std::array<std::array<unsigned, 2>, 3>{{{16, 16}, {16, 8}, {8, 16}}}) {
+    const unsigned rows = shape[0], cols = shape[1];
     const std::string prefix = "gjxl_ac_strategy_dct" + std::to_string(rows) +
-                               "x" + std::to_string(cols);
+                              (rows == cols ? "" : "x" + std::to_string(cols));
     Kernel forward(device.get(), argv[1], (prefix + "_forward_fused").c_str());
     Kernel inverse(device.get(), argv[1],
                    (prefix + "_residual_inverse_compact_loss").c_str());
+    // Keep the split oracle as the default. The optional mode compares two
+    // fused implementations directly, including their untouched scratch.
+    std::optional<Kernel> previous;
+    if (fused_baseline)
+      previous.emplace(device.get(), argv[1],
+                       (prefix + "_candidate_loss_parallel").c_str());
     Kernel fused(device.get(), argv[2],
                  (prefix + "_candidate_loss_parallel").c_str());
     Kernel finish_base(device.get(), argv[1],
                        "gjxl_ac_strategy_cost_from_loss");
     Kernel finish_new(device.get(), argv[2], "gjxl_ac_strategy_cost_from_loss");
-    std::cout << "{\"rows\":" << rows << ",\"threads\":" << rows / 8 * 96
-              << ",\"static_threadgroup_bytes\":"
+    std::cout << "{\"rows\":" << rows << ",\"columns\":" << cols
+              << ",\"threads\":" << rows / 8 * 96;
+    if (previous)
+      std::cout << ",\"baseline_threadgroup_bytes\":"
+                << previous->pipeline->staticThreadgroupMemoryLength();
+    std::cout << ",\"static_threadgroup_bytes\":"
               << fused.pipeline->staticThreadgroupMemoryLength() << "}\n";
     for (unsigned count : {1, 2, 7, 33, 257})
-      for (unsigned pattern = 0; pattern < 8; ++pattern)
-        for (unsigned source : {0, 2})
+      for (unsigned pattern = 0; pattern < 10; ++pattern)
+        for (unsigned source : {0, 1, 2})
           for (unsigned padding : {0, 19}) {
             Fixture a(device.get(), rows, cols, count, pattern, source,
                       padding);
             Fixture b(device.get(), rows, cols, count, pattern, source,
                       padding);
-            a.run(queue.get(), forward, &inverse, nullptr);
+            a.run(queue.get(), previous ? *previous : forward,
+                  previous ? nullptr : &inverse, nullptr);
             b.run(queue.get(), fused, nullptr, nullptr);
-            a.compare(
-                b); // Also compares quant norm, per-channel rate and loss.
+            // Also compare quant norm, per-channel rate and loss.
+            a.compare(b, fused_baseline);
             a.run(queue.get(), forward, nullptr, &finish_base);
             b.run(queue.get(), fused, nullptr, &finish_new);
-            a.compare(b);
+            a.compare(b, fused_baseline);
             ++cases;
           }
   }
