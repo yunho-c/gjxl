@@ -1652,6 +1652,19 @@ The tested source/build integration is archived, not retained in the runtime.
 The next targets are quantization time outside the merge and serial grid
 export; the cause of the outside-merge slowdown is not yet established.
 
+[S113](cuda-quantization-attribution-s113.md) locates that offset in subsequent
+AQ policy execution. The trace attributes the policy-time variation to GPU
+kernel execution, not launch gaps or host wake-up delays; all 32 captured
+encodes retain the same 229-kernel/two-memset policy signature. Duplicate
+candidate traces still vary substantially, so this does not prove a
+deterministic scheduler penalty. Read-only telemetry reports power/thermal
+clock-limit flags, but SM-clock values change only about every 500 ms and do
+not explain individual policy times. No power settings or runtime routing
+are changed. The study passes 861 encode checks, including 40 scoped ASAN
+checks, and preserves rejected captures and excluded control timings. Malta
+and tiled convolution remain higher-value device-work targets than the
+roughly half-millisecond 4K serial grid export.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
