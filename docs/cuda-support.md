@@ -1760,6 +1760,15 @@ four CUDA sanitizers, 224 unprofiled replay bursts and retained-runtime hashes
 pass. Neither candidate is promoted. The disassembly instead motivates a
 narrower test of unsigned widening for already validated input coordinates.
 
+[S123](cuda-malta-unsigned-address-s123.md) verifies that unsigned widening
+inside the same coordinate bounds check removes 1.01% of executed Malta warp
+instructions without changing numerical work or resources. Four uninstrumented
+4K encoder windows favor the both-coordinate candidate, but duplicate variation
+is large and one instrumented confirmation window reverses the Malta result.
+All 1,488 encoded outputs, 14,976 fixtures, four CUDA sanitizers and retained
+runtime identities pass. The candidate proceeds to production-build and other
+tile-size qualification; no stable speedup or production change is claimed yet.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
