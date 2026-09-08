@@ -1891,6 +1891,18 @@ experiment removes unused host initial-field/mask storage from encoding-only
 resident preparation, preserving real host-output requests and verifying
 whole-call performance; the rejected S112 scheduler remains unpromoted.
 
+[S134](cuda-pipeline-storage-s134.md) removes those unused host arrays and
+materializes them transactionally only when required. Fresh encoding-only
+resident preparation saves 34,214,400 bytes (32.63 MiB) at padded 4K and
+5.9–6.6 ms in controlled input-preparation comparisons. All sixteen whole-call
+paired medians favor the candidate, but duplicate controls leave the exact
+throughput gain uncertain. All 81 CTests, 2,606 frozen-oracle encodes, 108
+lazy/eager host-materialization pairs and six qualified CUDA sanitizer jobs
+pass. No CUDA source changes; 213 historical kernel bodies are bit-identical
+and one source-unchanged code-generation variant has identical resources and
+reproduces in fresh compiles. Next investigate candidate construction and
+cost scattering/representation without restoring the rejected S112 scheduler.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

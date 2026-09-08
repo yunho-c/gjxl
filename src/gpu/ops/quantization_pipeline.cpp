@@ -355,6 +355,17 @@ Status PrepareResidentAcStrategyInputs(
     .butteraugli_target = initial_quant_target,
     .rescale = options.initial_quant_rescale,
   };
+  auto* encoding_initial = encoding_only &&
+      options.adaptive_quantization.control_mode ==
+        AdaptiveQuantizationControlMode::kButteraugli
+    ? dynamic_cast<
+        aq_evaluation_internal::PreparedAqEncodingInitialQuantization*>(
+          state.evaluation.get())
+    : nullptr;
+  if (encoding_initial == nullptr) {
+    status = prepared.PrepareHostInitialStorage();
+    if (!status.ok()) return status;
+  }
   const InitialQuantFieldOutput initial_output{
     .quant_field = {
       prepared.initial_quant.data(), prepared.block_extent,
@@ -369,13 +380,6 @@ Status PrepareResidentAcStrategyInputs(
   const auto initial_begin = profiling_session == nullptr
     ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
     : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
-  auto* encoding_initial = encoding_only &&
-      options.adaptive_quantization.control_mode ==
-        AdaptiveQuantizationControlMode::kButteraugli
-    ? dynamic_cast<
-        aq_evaluation_internal::PreparedAqEncodingInitialQuantization*>(
-          state.evaluation.get())
-    : nullptr;
   if (encoding_initial != nullptr) {
     status = encoding_initial->ComputeInitialQuantizationForEncoding(
       initial_options);

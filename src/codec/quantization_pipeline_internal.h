@@ -75,12 +75,18 @@ struct PreparedQuantizationPipeline {
   bool preprocessing_ready = false;
   bool fast_initial_color_correlation = false;
   std::vector<uint8_t> epf_sharpness;
+  /// Empty for a device-resident frontend until host initial results are
+  /// requested. Encoding-only resident execution uses device fields/masks.
   std::vector<float> initial_quant;
   std::vector<float> strategy_mask;
   std::vector<float> pixel_mask;
   AcStrategyGrid strategies;
   ButteraugliOptions butteraugli_options;
   std::unique_ptr<PreparedButteraugliReference> butteraugli_reference;
+
+  /// Retains correctly sized storage, or commits all three new arrays only
+  /// after every allocation succeeds. Does not compute initial results.
+  [[nodiscard]] Status PrepareHostInitialStorage();
 };
 
 enum class QuantizationPipelineInputProvenance {

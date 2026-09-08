@@ -22,6 +22,7 @@
 #include "codec/epf.h"
 #include "codec/gaborish.h"
 #include "codec/quantization.h"
+#include "codec/quantization_pipeline_internal.h"
 #include "codec/reconstruction.h"
 #include "codec/vardct_frame_internal.h"
 #include "codestream/encoder.h"
@@ -33,6 +34,7 @@
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/aq_evaluation_internal.h"
 #include "gpu/ops/input_preparation.h"
+#include "gpu/ops/quantization_pipeline.h"
 #include "coefficient_order_population_fixture.h"
 
 namespace {
@@ -150,6 +152,104 @@ bool ColorMapsEqual(const gjxl::ColorCorrelationMap& left,
       return false;
     }
   }
+  return true;
+}
+
+bool CheckResidentHostMaterialization(gjxl::GpuBackend& gpu,
+                                     const ImageStorage& source) {
+  namespace pipeline = gjxl::quantization_pipeline_internal;
+  const gjxl::Extent2D blocks{kPaddedExtent.width / 8, kPaddedExtent.height / 8};
+  const size_t block_count = blocks.width * blocks.height;
+  const size_t pixel_count = kPaddedExtent.width * kPaddedExtent.height;
+  auto* capability = gjxl::QueryGpuLinearRgbOpsinPreparation(gpu);
+  std::unique_ptr<gjxl::PreparedGpuLinearRgbOpsin> input;
+  if (capability == nullptr || !Check(capability->PrepareLinearRgbOpsin(
+      source.View(), {.padded_extent = kPaddedExtent}, &input),
+      "Prepare host-materialization source")) return false;
+  size_t pairs = 0;
+  for (bool maximum : {false, true}) {
+    gjxl::CpuQuantizationPipelineOptions options;
+    options.adaptive_quantization.iterations = 1;
+    if (maximum) {
+      options.adaptive_quantization.control_mode =
+        gjxl::AdaptiveQuantizationControlMode::kMaximumError;
+      options.adaptive_quantization.maximum_error = {0.05f, 0.05f, 0.05f};
+    }
+    std::array<pipeline::PreparedQuantizationPipeline, 2> prepared;
+    std::array<gjxl::adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization, 2> aq;
+    for (auto& p : prepared) {
+      if (!Check(pipeline::PrepareResidentQuantizationPipeline(source.View(),
+          kPaddedExtent, input->original_linear_rgb(), input->coding_opsin(),
+          options, &p), "Prepare resident host-materialization pipeline")) return false;
+      if (p.initial_quant.capacity() != 0 || p.strategy_mask.capacity() != 0 ||
+          p.pixel_mask.capacity() != 0) {
+        std::cerr << "Resident preparation allocated host masks\n"; return false;
+      }
+    }
+    // Reproduce the previous eager storage in the reference only.
+    if (!Check(prepared[1].PrepareHostInitialStorage(), "Prepare eager reference")) return false;
+    std::array<const float*, 3> retained{};
+    const size_t rounds = maximum ? 3 : 6;
+    for (size_t round = 0; round < rounds; ++round) {
+      const bool host = maximum ? round == 1 : round == 3 || round == 4;
+      options.butteraugli_target = round == 1 ? 1.2f : 1.0f;
+      std::array<std::vector<uint8_t>, 2> bytes;
+      std::array<std::vector<double>, 2> scores;
+      std::array<gjxl::MaximumErrorResult, 2> errors;
+      std::array<std::array<std::vector<float>, 5>, 2> outputs;
+      std::array<ImageStorage, 2> reconstructed{ImageStorage(kSourceExtent), ImageStorage(kSourceExtent)};
+      for (size_t side = 0; side < 2; ++side) {
+        gjxl::VarDctEncoderFrame frame;
+        gjxl::Status status;
+        if (host) {
+          for (size_t i = 0; i < 5; ++i)
+            outputs[side][i].assign(i == 2 ? pixel_count : block_count, -71.0f);
+          const auto view = [&](size_t index) {
+            const auto extent = index == 2 ? kPaddedExtent : blocks;
+            return gjxl::PlaneF32View{outputs[side][index].data(), extent, extent.width};
+          };
+          status = pipeline::RunPreparedGpuQuantizationPipeline(gpu, source.View(),
+            prepared[side], options, gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+            {.initial_quantization = {view(0), view(1), view(2)},
+             .adaptive_quantization = {.quant_field = view(3), .block_distance_map = view(4),
+               .reconstructed_linear_rgb = reconstructed[side].View(), .frame = &frame,
+               .score_history = &scores[side], .maximum_error_result = &errors[side]}},
+            nullptr, &aq[side]);
+        } else {
+          status = pipeline::RunPreparedGpuQuantizationPipelineForEncoding(gpu,
+            source.View(), prepared[side], options,
+            gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+            {.frame = &frame, .score_history = &scores[side], .maximum_error_result = &errors[side]},
+            nullptr, &aq[side]);
+        }
+        if (!Check(status, "Run host-materialization pipeline") ||
+            !Check(gjxl::EncodeVarDctCodestream(frame, &bytes[side]),
+              "Serialize host-materialization frame")) return false;
+      }
+      if (bytes[0] != bytes[1] || scores[0] != scores[1] || errors[0] != errors[1] ||
+          (host && (outputs[0] != outputs[1] || reconstructed[0].plane != reconstructed[1].plane))) {
+        std::cerr << "Lazy/eager host materialization differs\n"; return false;
+      }
+      const auto& p = prepared[0];
+      const std::array current{p.initial_quant.data(), p.strategy_mask.data(), p.pixel_mask.data()};
+      if (!maximum && round < 3) {
+        if (p.initial_quant.capacity() || p.strategy_mask.capacity() || p.pixel_mask.capacity()) {
+          std::cerr << "Encoding-only resident run allocated host masks\n"; return false;
+        }
+      } else {
+        if (p.initial_quant.size() != block_count || p.strategy_mask.size() != block_count ||
+            p.pixel_mask.size() != pixel_count) {
+          std::cerr << "Host materialization omitted storage\n"; return false;
+        }
+        if (retained[0] == nullptr) retained = current;
+        else if (retained != current) {
+          std::cerr << "Prepared host materialization did not reuse storage\n"; return false;
+        }
+      }
+      ++pairs;
+    }
+  }
+  std::cout << "Resident host materialization: " << pairs << " exact lazy/eager pairs passed.\n";
   return true;
 }
 
@@ -2151,6 +2251,8 @@ int main() {
                noisy_opsin.View()),
         "Prepare noisy CUDA AQ opsin") ||
       !CheckCudaInputPreparation(*gpu, source, opsin) ||
+      !CheckResidentHostMaterialization(*gpu, source) ||
+      !CheckResidentHostMaterialization(*gpu, noisy_source) ||
       !CheckExactWorkflow(*gpu, source, opsin) ||
       !CheckExactMaximumError(*gpu, source, opsin) ||
       !CheckResidentStrategyGridValidation(*gpu, source, opsin) ||

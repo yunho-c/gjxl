@@ -298,6 +298,38 @@ Status quantization_pipeline_internal::PrepareQuantizationPipeline(
   return Status::Ok();
 }
 
+Status quantization_pipeline_internal::PreparedQuantizationPipeline::
+  PrepareHostInitialStorage() {
+  size_t block_count = 0;
+  size_t pixel_count = 0;
+  if (!BlockGrid::IsPaddedPixelExtent(padded_extent) ||
+      block_extent != BlockGrid::FromPaddedPixelExtent(padded_extent).blocks ||
+      !block_extent.try_area(&block_count) ||
+      !padded_extent.try_area(&pixel_count)) {
+    return Status::InvalidArgument(
+      "Host initial-quantization storage geometry is invalid");
+  }
+  if (initial_quant.size() == block_count &&
+      strategy_mask.size() == block_count && pixel_mask.size() == pixel_count) {
+    return Status::Ok();
+  }
+  try {
+    std::vector<float> quant(block_count);
+    std::vector<float> strategy(block_count);
+    std::vector<float> pixel(pixel_count);
+    initial_quant.swap(quant);
+    strategy_mask.swap(strategy);
+    pixel_mask.swap(pixel);
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate host initial-quantization storage");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Host initial-quantization storage is too large");
+  }
+  return Status::Ok();
+}
+
 Status quantization_pipeline_internal::PrepareResidentQuantizationPipeline(
   ConstImage3FView original_linear_rgb,
   Extent2D padded_extent,
@@ -356,9 +388,8 @@ Status quantization_pipeline_internal::PrepareResidentQuantizationPipeline(
       candidate.block_extent,
       candidate.block_extent.width});
     if (!status.ok()) return status;
-    candidate.initial_quant.resize(block_count);
-    candidate.strategy_mask.resize(block_count);
-    candidate.pixel_mask.resize(pixel_count);
+    // The normal resident encoder keeps these fields on the device. Host
+    // storage is prepared only by an operation that requests their readback.
     candidate.butteraugli_options = options.adaptive_quantization.butteraugli;
     *prepared = std::move(candidate);
   } catch (const std::bad_alloc&) {
