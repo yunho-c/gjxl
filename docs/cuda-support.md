@@ -1625,6 +1625,20 @@ repetitions, including duplicate-label controls, so the encoder keeps its
 separate-pass route. The qualified primitive and permanent test are retained
 without a new runtime selector or compatibility adapter.
 
+[S111](cuda-compose-aq-s111.md) eliminates the resident policy's composed
+pixel map by fusing composition, transform L16 reduction and anchor maxima.
+DCT8 uses four warps per CTA, one warp per anchor, with the original rounded
+sum preserved. This route is retained as a validated GPU-stage optimization:
+actual in-encode stage paired medians save 3.43–3.78 ms per odd-4K encode.
+Whole-encode results remain mixed, including slower cohorts, so this is not
+a claim of a general throughput improvement. The study passes 5,521 exact
+encode checks across dense/compact storage, rate/quality settings and batches;
+all kernel sanitizers, eight integrated memchecks and 78/78 CTest tests pass.
+Reconstruction scratch reuse adds no allocation, readback or synchronization. Compact
+storage remains opt-in; CPU tile scheduling is unchanged. The report includes
+the earlier test-upload ordering defect, failed probes, exact math/lifetime
+contracts, duplicate controls and the qualification limits.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

@@ -588,6 +588,7 @@ if(GJXL_ENABLE_CUDA)
     src/gpu/cuda/cuda_aq_kernels.cu
     src/gpu/cuda/cuda_aq_exact.cpp
     src/gpu/cuda/cuda_aq_exact_kernels.cu
+    src/gpu/cuda/cuda_aq_butteraugli_kernels.cu
     src/gpu/cuda/cuda_input_preparation.cpp
     src/gpu/cuda/cuda_aq_resident.cpp
     src/gpu/cuda/cuda_aq_resident_kernels.cu
@@ -2436,6 +2437,13 @@ if(GJXL_BUILD_TESTS)
     target_link_libraries(gjxl_cuda_compose_maximum_test PRIVATE gjxl_cuda CUDA::cudart)
     add_test(NAME cuda_compose_maximum COMMAND gjxl_cuda_compose_maximum_test)
     set_tests_properties(cuda_compose_maximum PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_aq_compose_reduction_test tests/cuda_aq_compose_reduction_test.cu)
+    set_target_properties(gjxl_cuda_aq_compose_reduction_test PROPERTIES
+      CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED YES CUDA_EXTENSIONS NO)
+    target_link_libraries(gjxl_cuda_aq_compose_reduction_test PRIVATE gjxl_cuda CUDA::cudart)
+    add_test(NAME cuda_aq_compose_reduction COMMAND gjxl_cuda_aq_compose_reduction_test)
+    set_tests_properties(cuda_aq_compose_reduction PROPERTIES SKIP_RETURN_CODE 77)
 
     add_executable(gjxl_cuda_opsin_test tests/cuda_opsin_test.cpp)
     target_link_libraries(gjxl_cuda_opsin_test PRIVATE gjxl_cuda)

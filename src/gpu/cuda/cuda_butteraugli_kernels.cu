@@ -3094,10 +3094,12 @@ cudaError_t LaunchCudaButteraugliPrepare(const CudaButteraugliPlan& plan,
                       plan.sub_width, plan.sub_width, plan.sub_height, stream);
 }
 
-cudaError_t LaunchCudaButteraugliCompare(
+namespace {
+cudaError_t LaunchButteraugliCompareImpl(
     const CudaButteraugliPlan& plan, std::array<const float*, 3> distorted,
     std::array<uint32_t, 3> distorted_stride, float* distance_map,
-    uint32_t distance_stride, float* score, cudaStream_t stream) {
+    uint32_t distance_stride, float* score,
+    const CudaAqButteraugliReduction* reduction, cudaStream_t stream) {
   const auto reference_main = ConstPsycho(MainPsycho(plan, 0));
   const auto distorted_main_mutable = MainPsycho(plan, 10);
   const auto distorted_main = ConstPsycho(distorted_main_mutable);
@@ -3158,6 +3160,19 @@ cudaError_t LaunchCudaButteraugliCompare(
           plan.working_width, nullptr, plan.planes[kFinalStaging],
           plan.working_width, plan.sub_width, plan.sub_height, stream);
       if (error != cudaSuccess) return error;
+      if (reduction != nullptr) {
+        for (size_t i = 0; i < reduction->batch_count; ++i) {
+          error = LaunchCudaAqComposeReduction(
+              {distance_map, plan.planes[kFinalStaging], reduction->anchors,
+               reduction->block_distance, reduction->maxima, reduction->error,
+               plan.width, plan.height, distance_stride, plan.working_width,
+               reduction->block_stride, reduction->batches[i]}, stream);
+          if (error != cudaSuccess) return error;
+        }
+        const uint32_t count = reduction->anchor_count;
+        return LaunchMaximumReduction(plan.reduction, reduction->maxima,
+                                      {count, count, count}, score, true, stream);
+      }
       const ComposeParams compose{plan.width, plan.height, distance_stride,
                                   plan.working_width, distance_stride};
       ComposeKernel<<<PlaneBlocks(plan.width, plan.height), kPlaneThreads, 0,
@@ -3167,9 +3182,37 @@ cudaError_t LaunchCudaButteraugliCompare(
       if (error != cudaSuccess) return error;
     }
   }
-  return LaunchMaximumReduction(
+  error = LaunchMaximumReduction(
       plan.reduction, distance_map,
       {plan.width, distance_stride, plan.width * plan.height}, score, true, stream);
+  if (error != cudaSuccess || reduction == nullptr) return error;
+  // Tiny/expanded comparisons have no multiscale composition to eliminate.
+  for (size_t i = 0; i < reduction->batch_count; ++i) {
+    error = LaunchCudaAqReduceButteraugli(
+        distance_map, distance_stride, reduction->anchors,
+        reduction->block_distance, reduction->block_stride, reduction->error,
+        plan.width, plan.height, reduction->batches[i], stream);
+    if (error != cudaSuccess) return error;
+  }
+  return cudaSuccess;
+}
+}  // namespace
+
+cudaError_t LaunchCudaButteraugliCompare(
+    const CudaButteraugliPlan& plan, std::array<const float*, 3> distorted,
+    std::array<uint32_t, 3> distorted_stride, float* distance_map,
+    uint32_t distance_stride, float* score, cudaStream_t stream) {
+  return LaunchButteraugliCompareImpl(plan, distorted, distorted_stride,
+      distance_map, distance_stride, score, nullptr, stream);
+}
+
+cudaError_t LaunchCudaButteraugliCompareAndReduce(
+    const CudaButteraugliPlan& plan, std::array<const float*, 3> distorted,
+    std::array<uint32_t, 3> distorted_stride, float* distance_map,
+    uint32_t distance_stride, float* score,
+    const CudaAqButteraugliReduction& reduction, cudaStream_t stream) {
+  return LaunchButteraugliCompareImpl(plan, distorted, distorted_stride,
+      distance_map, distance_stride, score, &reduction, stream);
 }
 
 }  // namespace gjxl::cuda_internal

@@ -232,7 +232,8 @@ class CudaPreparedDeviceButteraugli final : public PreparedDeviceButteraugli {
 
   [[nodiscard]] cudaError_t EncodeComparisonOnStream(
       const DeviceButteraugliComparisonDescriptor& descriptor,
-      cudaStream_t stream) {
+      cudaStream_t stream,
+      const CudaAqButteraugliReduction* reduction = nullptr) {
     std::array<const float*, 3> distorted{};
     std::array<uint32_t, 3> distorted_stride{};
     for (size_t channel = 0; channel < 3; ++channel) {
@@ -240,6 +241,12 @@ class CudaPreparedDeviceButteraugli final : public PreparedDeviceButteraugli {
           Pointer(descriptor.distorted_linear_rgb.plane[channel]);
       distorted_stride[channel] = static_cast<uint32_t>(
           descriptor.distorted_linear_rgb.plane[channel].row_stride);
+    }
+    if (reduction != nullptr) {
+      return LaunchCudaButteraugliCompareAndReduce(
+          plan_, distorted, distorted_stride, Pointer(descriptor.distance_map),
+          static_cast<uint32_t>(descriptor.distance_map.row_stride),
+          Pointer(descriptor.score), *reduction, stream);
     }
     return LaunchCudaButteraugliCompare(
         plan_, distorted, distorted_stride, Pointer(descriptor.distance_map),
@@ -413,6 +420,16 @@ cudaError_t EncodePreparedCudaButteraugli(
   auto* cuda = dynamic_cast<CudaPreparedDeviceButteraugli*>(&prepared);
   return cuda == nullptr ? cudaErrorInvalidResourceHandle
                          : cuda->EncodeComparisonOnStream(descriptor, stream);
+}
+
+cudaError_t EncodePreparedCudaButteraugliAndReduce(
+    PreparedDeviceButteraugli& prepared,
+    const DeviceButteraugliComparisonDescriptor& descriptor,
+    const CudaAqButteraugliReduction& reduction, cudaStream_t stream) {
+  auto* cuda = dynamic_cast<CudaPreparedDeviceButteraugli*>(&prepared);
+  return cuda == nullptr ? cudaErrorInvalidResourceHandle
+                         : cuda->EncodeComparisonOnStream(descriptor, stream,
+                                                          &reduction);
 }
 
 }  // namespace gjxl::cuda_internal

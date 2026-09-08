@@ -2646,14 +2646,22 @@ class CudaPreparedResidentAqEvaluation final
         if (status != cudaSuccess) return status;
       }
 
-      status = EncodePreparedCudaButteraugli(
+      // Inverse transforms have finished reading reconstruction coefficients.
+      // Reuse that dead buffer for one maximum per anchor. The next evaluation
+      // rewrites coefficients; final AC packing reuses it only after the policy.
+      const CudaAqButteraugliReduction reduction{
+          Pointer<const CudaAqAnchor>(self.anchors_device_), self.batches_.data(),
+          self.batches_.size(), static_cast<uint32_t>(self.anchor_count_),
+          Pointer<float>(self.block_device_),
+          static_cast<uint32_t>(self.block_extent_.width),
+          Pointer<float>(self.reconstruction_coefficients_device_),
+          Pointer<unsigned int>(self.error_device_)};
+      status = EncodePreparedCudaButteraugliAndReduce(
           *self.butteraugli_,
           {.distorted_linear_rgb = ConstImage(self.reconstructed_linear_),
            .distance_map = self.distance_device_,
            .score = self.score_device_},
-          backend.state_->stream);
-      if (status != cudaSuccess) return status;
-      status = EncodeBlockReductionOnStream(backend, self, false);
+          reduction, backend.state_->stream);
       if (status != cudaSuccess) return status;
       status = LaunchCudaAqResidentPolicyUpdate(
           Pointer<float>(self.quant_field_device_),

@@ -9,6 +9,8 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "gpu/cuda/cuda_aq_butteraugli_kernels.h"
+
 namespace gjxl::cuda_internal {
 
 // 20 psycho planes, one cached reference mask, and four reusable work planes.
@@ -232,5 +234,13 @@ struct CudaButteraugliComposePlan {
     const CudaButteraugliPlan& plan, std::array<const float*, 3> distorted,
     std::array<uint32_t, 3> distorted_stride, float* distance_map,
     uint32_t distance_stride, float* score, cudaStream_t stream);
+
+// Resident-policy consumer: distance_map is working storage only, not a
+// composed-map output. Returns the same score and per-transform L16 values.
+[[nodiscard]] cudaError_t LaunchCudaButteraugliCompareAndReduce(
+    const CudaButteraugliPlan& plan, std::array<const float*, 3> distorted,
+    std::array<uint32_t, 3> distorted_stride, float* distance_map,
+    uint32_t distance_stride, float* score,
+    const CudaAqButteraugliReduction& reduction, cudaStream_t stream);
 
 }  // namespace gjxl::cuda_internal
