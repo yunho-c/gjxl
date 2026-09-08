@@ -97,6 +97,15 @@ struct CudaLinearRgbToOpsinParams {
                                           CudaAqEpfParams params,
                                           cudaStream_t stream);
 
+// Final EPF pass (1 or 2) followed by linear RGB conversion, without an XYB
+// intermediate. Input, sigma and RGB storage must not alias. The caller
+// validates allocation sizes. EPF output_stride and color input_stride are
+// unused; matching empty extents are no-ops for supported passes.
+[[nodiscard]] cudaError_t LaunchCudaAqEpfToLinear(
+    std::array<const float*, 3> input, const float* inverse_sigma,
+    std::array<float*, 3> output, unsigned int* error,
+    CudaAqEpfParams epf, CudaAqColorParams color, cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaAqOpsinToLinear(
     std::array<const float*, 3> input, std::array<float*, 3> output,
     unsigned int* error, CudaAqColorParams params, cudaStream_t stream);

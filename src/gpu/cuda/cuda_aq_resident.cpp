@@ -2600,6 +2600,16 @@ class CudaPreparedResidentAqEvaluation final
         options_.profile.loop_filter.epf_options.iterations;
     const uint32_t first_pass = iterations == 3 ? 0 : 1;
     for (uint32_t pass = first_pass; pass < first_pass + iterations; ++pass) {
+      // Perceptual scoring consumes RGB only. Maximum-error scoring also
+      // needs the filtered XYB planes, so keep their final materialization.
+      if (pass + 1 == first_pass + iterations &&
+          options_.metric != AqEvaluationMetric::kMaximumError) {
+        return LaunchCudaAqEpfToLinear(
+            ConstPointers(current), Pointer<const float>(inverse_sigma_device_),
+            MutablePointers(reconstructed_linear_),
+            Pointer<unsigned int>(error_device_), epf_params_[pass],
+            color_params_, backend.state_->stream);
+      }
       std::array<DevicePlaneView, 3>& destination = filter_scratch_[stage % 2];
       status = LaunchCudaAqEpf(
           ConstPointers(current), Pointer<const float>(inverse_sigma_device_),

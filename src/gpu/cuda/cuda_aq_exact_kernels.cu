@@ -234,11 +234,40 @@ __global__ void GaborishKernel(const float* input_x, const float* input_y,
 constexpr uint32_t kEpfTileWidth = 32;
 constexpr uint32_t kEpfTileHeight = 32;
 
-template <uint32_t Pass>
+__device__ void StoreLinearRgb(float x, float y, float b, float** outputs,
+                              size_t output_index, unsigned int* error,
+                              float scale) {
+  constexpr float kOpsinBias = 0.0037930732552754493f;
+  constexpr float kBiasCuberoot = 0.15595419704914093f;
+  constexpr float kInverseOpsinMatrix[9] = {
+      11.031566901960783f,  -9.866943921568629f, -0.16462299647058826f,
+      -3.254147380392157f,  4.418770392156863f,  -0.16462299647058826f,
+      -3.6588512862745097f, 2.7129230470588235f, 1.9459282392156863f};
+  const float gamma[3] = {y + x + kBiasCuberoot, y - x + kBiasCuberoot,
+                         b + kBiasCuberoot};
+  float mixed[3];
+  for (uint32_t channel = 0; channel < 3; ++channel) {
+    mixed[channel] =
+        gamma[channel] * gamma[channel] * gamma[channel] - kOpsinBias;
+  }
+  for (uint32_t row = 0; row < 3; ++row) {
+    float value = scale * kInverseOpsinMatrix[3 * row] * mixed[0];
+    value = fmaf(scale * kInverseOpsinMatrix[3 * row + 1], mixed[1], value);
+    value = fmaf(scale * kInverseOpsinMatrix[3 * row + 2], mixed[2], value);
+    if (!isfinite(value)) {
+      atomicOr(error, 4u);
+      value = 0.0f;
+    }
+    outputs[row][output_index] = value;
+  }
+}
+
+template <uint32_t Pass, bool ToLinear>
 __global__ void EpfTiledKernel(const float* input_x, const float* input_y,
   const float* input_b, const float* inverse_sigma,
   float* output_x, float* output_y, float* output_b,
-  unsigned int* error, CudaAqEpfParams params, uint32_t tiles_per_row) {
+  unsigned int* error, CudaAqEpfParams params, uint32_t tiles_per_row,
+  CudaAqColorParams color) {
   static_assert(Pass <= 2);
   static_assert((kEpfTileWidth * kEpfTileHeight) % kThreads == 0);
   constexpr uint32_t kRadius = Pass == 0 ? 3 : (Pass == 1 ? 2 : 1);
@@ -278,14 +307,23 @@ __global__ void EpfTiledKernel(const float* input_x, const float* input_y,
     // Later iterations keep x fixed and only increase y.
     if (x >= params.width || y >= params.height) return;
     const int center = (local_y + kRadius) * kTileStride + local_x + kRadius;
-    const size_t output_index = static_cast<size_t>(y) * params.output_stride + x;
+    const uint32_t output_stride =
+      ToLinear ? color.output_stride : params.output_stride;
+    const size_t output_index = static_cast<size_t>(y) * output_stride + x;
     float* outputs[3] = {output_x, output_y, output_b};
     const float block_inverse_sigma =
       inverse_sigma[static_cast<size_t>(y / 8) * params.inverse_sigma_stride + x / 8];
     if (block_inverse_sigma < -3.905242919921875f) {
+      // Bypassed values reach color conversion without EPF sanitization,
+      // exactly as when the filtered XYB planes are materialized separately.
+      if constexpr (ToLinear) {
+        StoreLinearRgb(tile[0][center], tile[1][center], tile[2][center],
+                       outputs, output_index, error, color.scale);
+      } else {
 #pragma unroll
-      for (uint32_t channel = 0; channel < 3; ++channel) {
-        outputs[channel][output_index] = tile[channel][center];
+        for (uint32_t channel = 0; channel < 3; ++channel) {
+          outputs[channel][output_index] = tile[channel][center];
+        }
       }
       continue;
     }
@@ -326,6 +364,7 @@ __global__ void EpfTiledKernel(const float* input_x, const float* input_y,
         sum[channel] = fmaf(weight, tile[channel][candidate], sum[channel]);
       }
     }
+    float values[3];
 #pragma unroll
     for (uint32_t channel = 0; channel < 3; ++channel) {
       float value = sum[channel] / weight_sum;
@@ -333,7 +372,15 @@ __global__ void EpfTiledKernel(const float* input_x, const float* input_y,
         atomicOr(error, 2u);
         value = 0.0f;
       }
-      outputs[channel][output_index] = value;
+      if constexpr (ToLinear) {
+        values[channel] = value;
+      } else {
+        outputs[channel][output_index] = value;
+      }
+    }
+    if constexpr (ToLinear) {
+      StoreLinearRgb(values[0], values[1], values[2], outputs, output_index,
+                     error, color.scale);
     }
   }
 }
@@ -343,12 +390,6 @@ __global__ void OpsinToLinearKernel(const float* input_x, const float* input_y,
                                     float* output_g, float* output_b,
                                     unsigned int* error,
                                     CudaAqColorParams params) {
-  constexpr float kOpsinBias = 0.0037930732552754493f;
-  constexpr float kBiasCuberoot = 0.15595419704914093f;
-  constexpr float kInverseOpsinMatrix[9] = {
-      11.031566901960783f,  -9.866943921568629f, -0.16462299647058826f,
-      -3.254147380392157f,  4.418770392156863f,  -0.16462299647058826f,
-      -3.6588512862745097f, 2.7129230470588235f, 1.9459282392156863f};
   const size_t index =
       static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
   const size_t count = static_cast<size_t>(params.width) * params.height;
@@ -358,28 +399,9 @@ __global__ void OpsinToLinearKernel(const float* input_x, const float* input_y,
       static_cast<uint32_t>(index - static_cast<size_t>(y) * params.width);
   const size_t input_index = static_cast<size_t>(y) * params.input_stride + x;
   const size_t output_index = static_cast<size_t>(y) * params.output_stride + x;
-  const float gamma[3] = {
-      input_y[input_index] + input_x[input_index] + kBiasCuberoot,
-      input_y[input_index] - input_x[input_index] + kBiasCuberoot,
-      input_b[input_index] + kBiasCuberoot};
-  float mixed[3];
-  for (uint32_t channel = 0; channel < 3; ++channel) {
-    mixed[channel] =
-        gamma[channel] * gamma[channel] * gamma[channel] - kOpsinBias;
-  }
   float* outputs[3] = {output_r, output_g, output_b};
-  for (uint32_t row = 0; row < 3; ++row) {
-    float value = params.scale * kInverseOpsinMatrix[3 * row] * mixed[0];
-    value =
-        fmaf(params.scale * kInverseOpsinMatrix[3 * row + 1], mixed[1], value);
-    value =
-        fmaf(params.scale * kInverseOpsinMatrix[3 * row + 2], mixed[2], value);
-    if (!isfinite(value)) {
-      atomicOr(error, 4u);
-      value = 0.0f;
-    }
-    outputs[row][output_index] = value;
-  }
+  StoreLinearRgb(input_x[input_index], input_y[input_index], input_b[input_index],
+                 outputs, output_index, error, params.scale);
 }
 
 __global__ void ReduceButteraugliKernel(
@@ -570,22 +592,52 @@ cudaError_t LaunchCudaAqEpf(std::array<const float*, 3> input,
     ((static_cast<size_t>(params.height) + kEpfTileHeight - 1) / kEpfTileHeight));
   switch (params.pass) {
     case 0:
-      EpfTiledKernel<0><<<blocks, kThreads, 0, stream>>>(
+      EpfTiledKernel<0, false><<<blocks, kThreads, 0, stream>>>(
         input[0], input[1], input[2], inverse_sigma, output[0], output[1],
-        output[2], error, params, tiles_per_row);
+        output[2], error, params, tiles_per_row, {});
       break;
     case 1:
-      EpfTiledKernel<1><<<blocks, kThreads, 0, stream>>>(
+      EpfTiledKernel<1, false><<<blocks, kThreads, 0, stream>>>(
         input[0], input[1], input[2], inverse_sigma, output[0], output[1],
-        output[2], error, params, tiles_per_row);
+        output[2], error, params, tiles_per_row, {});
       break;
     case 2:
-      EpfTiledKernel<2><<<blocks, kThreads, 0, stream>>>(
+      EpfTiledKernel<2, false><<<blocks, kThreads, 0, stream>>>(
         input[0], input[1], input[2], inverse_sigma, output[0], output[1],
-        output[2], error, params, tiles_per_row);
+        output[2], error, params, tiles_per_row, {});
       break;
     default:
       return cudaErrorInvalidValue;
+  }
+  return cudaGetLastError();
+}
+
+cudaError_t LaunchCudaAqEpfToLinear(
+    std::array<const float*, 3> input, const float* inverse_sigma,
+    std::array<float*, 3> output, unsigned int* error,
+    CudaAqEpfParams epf, CudaAqColorParams color, cudaStream_t stream) {
+  if ((epf.pass != 1 && epf.pass != 2) || epf.width != color.width ||
+      epf.height != color.height) return cudaErrorInvalidValue;
+  if (epf.width == 0 || epf.height == 0) return cudaSuccess;
+  if (epf.input_stride < epf.width || color.output_stride < epf.width ||
+      epf.inverse_sigma_stride < (static_cast<uint64_t>(epf.width) + 7) / 8 ||
+      !inverse_sigma || !error) return cudaErrorInvalidValue;
+  for (uint32_t channel = 0; channel < 3; ++channel) {
+    if (!input[channel] || !output[channel]) return cudaErrorInvalidValue;
+  }
+  const uint32_t tiles_per_row = static_cast<uint32_t>(
+    (static_cast<size_t>(epf.width) + kEpfTileWidth - 1) / kEpfTileWidth);
+  const size_t blocks = static_cast<size_t>(tiles_per_row) *
+    ((static_cast<size_t>(epf.height) + kEpfTileHeight - 1) / kEpfTileHeight);
+  if (blocks > 0x7fffffffu) return cudaErrorInvalidValue;
+  if (epf.pass == 1) {
+    EpfTiledKernel<1, true><<<static_cast<unsigned int>(blocks), kThreads, 0, stream>>>(
+        input[0], input[1], input[2], inverse_sigma, output[0], output[1],
+        output[2], error, epf, tiles_per_row, color);
+  } else {
+    EpfTiledKernel<2, true><<<static_cast<unsigned int>(blocks), kThreads, 0, stream>>>(
+        input[0], input[1], input[2], inverse_sigma, output[0], output[1],
+        output[2], error, epf, tiles_per_row, color);
   }
   return cudaGetLastError();
 }

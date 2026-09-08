@@ -1806,6 +1806,19 @@ whole-encode timing is mixed, including one slower 4K window; this is a local
 stage improvement, not a general throughput claim. Clean production-build
 qualification and a permanent regression test are next. Runtime stays S124.
 
+[S127](cuda-epf-color-production-s127.md) promotes final-EPF/color fusion to
+the production fully resident perceptual path, sharing one EPF implementation
+and retaining maximum-error evaluation's required XYB output. Both fused GPU
+bodies match the qualified S125/S126 candidates exactly. A fresh Release build
+passes all 79 CTest tests; qualification adds 1,230 frozen-oracle encodes,
+256 bitwise old/new profile-matrix comparisons, 48,384 guarded pipeline
+executions and eight clean CUDA sanitizer jobs. One launch and 24 logical
+bytes per pixel are eliminated at each eligible EPF/color boundary, without
+changing public APIs, compact defaults or allocation policy. The earlier
+roughly 1.61 ms / 29% 4K stage saving remains the performance evidence;
+whole-encode timing is still mixed, and no new timing campaign or universal
+throughput improvement is claimed. The retained runtime is now S127.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
