@@ -1710,6 +1710,16 @@ Production is unchanged; 972 exact encode checks, differential fixtures,
 scoped sanitizers and retained-runtime hashes pass. No compatibility layer
 or new dispatch heuristic is added.
 
+[S118](cuda-malta-allocation-s118.md) tests whether allocation explains the
+Malta execution-context slowdown. Disabling pooling costs 83–97 ms per 4K
+encode and does not remove the early/late kernel-duration difference, so
+production pooling stays unchanged. Twelve counter captures execute identical
+warp-instruction/FFMA counts with nearly unchanged traffic. Their SM cycle
+rates differ, but counter collection itself largely removes the late-call
+slowdown. The next test needs lightweight in-stream cycle-rate observation,
+not a claim that profiling has already proved throttling. All 580 exact encode
+checks pass; GPU bodies and retained runtime hashes are unchanged.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
