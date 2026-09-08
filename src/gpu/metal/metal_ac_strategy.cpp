@@ -302,6 +302,34 @@ Status CreateAcStrategyPipelines(
     }
   }
 
+  // Group only the forward DCT. Keep the existing inverse widths and scratch
+  // handoff; optional kernels preserve fallback with older shader libraries.
+  constexpr struct {
+    AcStrategyType strategy;
+    const char* kernel;
+    NS::UInteger threads;
+  } kGroupedForwardKernels[] = {
+    {AcStrategyType::kDct32x32, "gjxl_ac_strategy_dct32_forward_grouped", 384},
+    {AcStrategyType::kDct32x16, "gjxl_ac_strategy_dct32x16_forward_grouped", 384},
+    {AcStrategyType::kDct16x32, "gjxl_ac_strategy_dct16x32_forward_grouped", 192},
+  };
+  if (device->supportsFamily(MTL::GPUFamilyApple9)) {
+    for (const auto& entry : kGroupedForwardKernels) {
+      auto& fused = pipelines.fused[static_cast<size_t>(entry.strategy)];
+      if (!fused.forward || !fused.reduces_loss || fused.candidate_loss) continue;
+      NS::SharedPtr<MTL::ComputePipelineState> pipeline;
+      status = CreatePipeline(device, library, entry.kernel, &pipeline);
+      if (status.ok() && pipeline->threadExecutionWidth() == 32 &&
+          pipeline->maxTotalThreadsPerThreadgroup() >= entry.threads &&
+          pipeline->staticThreadgroupMemoryLength() <=
+            device->maxThreadgroupMemoryLength()) {
+        fused.forward = std::move(pipeline);
+        fused.forward_threads_per_threadgroup = entry.threads;
+        fused.forward_channels_grouped = true;
+      }
+    }
+  }
+
   constexpr NS::UInteger kPreferredGatherThreads = 256;
   const NS::UInteger execution_width =
     pipelines.gather->threadExecutionWidth();
@@ -789,7 +817,9 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
     DispatchMetalThreadgroups(
       encoder,
       MTL::Size(
-        static_cast<NS::UInteger>(validated.transform_count), 1, 1),
+        fused.forward_channels_grouped
+          ? static_cast<NS::UInteger>(validated.params.candidate_count)
+          : static_cast<NS::UInteger>(validated.transform_count), 1, 1),
       MTL::Size(fused.forward_threads_per_threadgroup, 1, 1));
   } else {
     encoder->setComputePipelineState(ac_strategy_pipelines_.gather.get());

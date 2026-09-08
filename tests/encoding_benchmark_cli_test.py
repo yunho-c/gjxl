@@ -525,14 +525,33 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                 continue
             self.assertEqual(len(stage["dispatches"]), 3)
             self.assertNotIn("gjxl_ac_strategy_gather", kernel_ids)
-            self.assertEqual(
-                sum(
-                    kernel_id.startswith("gjxl_ac_strategy_dct")
-                    and kernel_id.endswith("_forward_fused")
-                    for kernel_id in kernel_ids
-                ),
-                1,
-            )
+            shape = stage["stage_id"].removeprefix("frontend.ac_strategy.")
+            forward, inverse, finalizer = stage["dispatches"]
+            prefix = f"gjxl_ac_strategy_{shape}"
+            allowed_forward = {prefix + "_forward_fused"}
+            if shape in {"dct32", "dct32x16", "dct16x32"}:
+                allowed_forward.add(prefix + "_forward_grouped")
+            self.assertIn(forward["kernel_id"], allowed_forward)
+            grouped = forward["kernel_id"].endswith("_forward_grouped")
+            workers = {
+                "dct8": 32, "dct16": 64, "dct32": 128,
+                "dct16x8": 64, "dct8x16": 32,
+                "dct32x16": 128, "dct16x32": 64,
+            }[shape]
+            candidates = finalizer["grid"][0]
+            self.assertEqual(forward["kind"], "threadgroups")
+            self.assertEqual(forward["grid"],
+                             [candidates * (1 if grouped else 3), 1, 1])
+            self.assertEqual(forward["threads_per_threadgroup"],
+                             [workers * (3 if grouped else 1), 1, 1])
+            self.assertEqual(inverse["kind"], "threadgroups")
+            self.assertEqual(inverse["grid"], [candidates * 3, 1, 1])
+            self.assertEqual(inverse["threads_per_threadgroup"],
+                             [{"dct32": 512, "dct16x32": 256}.get(shape, workers),
+                              1, 1])
+            self.assertEqual(finalizer["kind"], "threads")
+            self.assertEqual(finalizer["kernel_id"],
+                             "gjxl_ac_strategy_cost_from_loss")
             self.assertNotIn("gjxl_ac_strategy_residual", kernel_ids)
             inverse_suffix = (
                 "_residual_inverse_tuned_loss"

@@ -583,6 +583,89 @@ GJXL_AC_RECTANGULAR_FORWARD_KERNEL(
 #undef GJXL_AC_SQUARE_FORWARD_KERNEL
 #undef GJXL_AC_RECTANGULAR_FORWARD_KERNEL
 
+// X/Y/B share one forward launch and one immutable DCT basis. Each basis
+// element has one writer; the helper's existing unconditional barrier publishes
+// both the basis and channel-local pixels. Device coefficient layout and the
+// separate residual/inverse/loss dispatch stay unchanged.
+#define GJXL_AC_GROUPED_SQUARE_FORWARD_KERNEL(name, size, basis, scale)     \
+kernel void name(                                                           \
+  device const float* opsin_x [[buffer(0)]],                                \
+  device const float* opsin_y [[buffer(1)]],                                \
+  device const float* opsin_b [[buffer(2)]],                                \
+  device const AcStrategyCandidate* candidates [[buffer(3)]],               \
+  device float* coefficients [[buffer(4)]],                                 \
+  device const float* quant_field [[buffer(5)]],                            \
+  device float* precomputed_quant_norm [[buffer(6)]],                       \
+  constant AcStrategyBatchParams& params [[buffer(7)]],                     \
+  uint tid [[thread_index_in_threadgroup]],                                 \
+  uint lane [[thread_index_in_simdgroup]],                                  \
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],                  \
+  uint candidate_index [[threadgroup_position_in_grid]]) {                  \
+  constexpr uint Workers = size / 8 * 32;                                   \
+  const uint channel = tid / Workers;                                       \
+  const uint local_simdgroup = simdgroup_index % (Workers / 32);            \
+  threadgroup float pixels[3 * size * size];                                \
+  threadgroup float staged_basis[size * size];                              \
+  for (uint i = tid; i < size * size; i += 3 * Workers) {                   \
+    staged_basis[i] = basis[i];                                             \
+  }                                                                         \
+  AcStrategyForwardSquareDct<size, false, false>(                           \
+    opsin_x, opsin_y, opsin_b, candidates, coefficients, quant_field,       \
+    precomputed_quant_norm, params, basis, scale,                           \
+    pixels + channel * size * size,                                         \
+    staged_basis,                                                           \
+    lane, 32, local_simdgroup, uint3(candidate_index * 3 + channel, 0, 0)); \
+}
+
+#define GJXL_AC_GROUPED_RECTANGULAR_FORWARD_KERNEL(                         \
+  name, rows, columns, vertical_basis, horizontal_basis, scale)             \
+kernel void name(                                                           \
+  device const float* opsin_x [[buffer(0)]],                                \
+  device const float* opsin_y [[buffer(1)]],                                \
+  device const float* opsin_b [[buffer(2)]],                                \
+  device const AcStrategyCandidate* candidates [[buffer(3)]],               \
+  device float* coefficients [[buffer(4)]],                                 \
+  device const float* quant_field [[buffer(5)]],                            \
+  device float* precomputed_quant_norm [[buffer(6)]],                       \
+  constant AcStrategyBatchParams& params [[buffer(7)]],                     \
+  uint tid [[thread_index_in_threadgroup]],                                 \
+  uint lane [[thread_index_in_simdgroup]],                                  \
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],                  \
+  uint candidate_index [[threadgroup_position_in_grid]]) {                  \
+  constexpr uint Workers = rows / 8 * 32;                                   \
+  const uint channel = tid / Workers;                                       \
+  const uint local_simdgroup = simdgroup_index % (Workers / 32);            \
+  threadgroup float pixels[3 * rows * columns];                             \
+  threadgroup float vertical[rows * rows];                                  \
+  threadgroup float horizontal[columns * columns];                          \
+  for (uint i = tid; i < rows * rows; i += 3 * Workers) {                   \
+    vertical[i] = vertical_basis[i];                                        \
+  }                                                                         \
+  for (uint i = tid; i < columns * columns; i += 3 * Workers) {             \
+    horizontal[i] = horizontal_basis[i];                                    \
+  }                                                                         \
+  AcStrategyForwardRectangularDct<rows, columns, false, false>(             \
+    opsin_x, opsin_y, opsin_b, candidates, coefficients, quant_field,       \
+    precomputed_quant_norm, params, vertical_basis, horizontal_basis,       \
+    scale, pixels + channel * rows * columns,                               \
+    vertical,                                                               \
+    horizontal,                                                             \
+    lane, 32, local_simdgroup, uint3(candidate_index * 3 + channel, 0, 0)); \
+}
+
+GJXL_AC_GROUPED_SQUARE_FORWARD_KERNEL(
+  gjxl_ac_strategy_dct32_forward_grouped,
+  32, kOrthonormalDct32, kForwardDct32Scale)
+GJXL_AC_GROUPED_RECTANGULAR_FORWARD_KERNEL(
+  gjxl_ac_strategy_dct32x16_forward_grouped,
+  32, 16, kOrthonormalDct32, kOrthonormalDct16, kForwardDct32x16Scale)
+GJXL_AC_GROUPED_RECTANGULAR_FORWARD_KERNEL(
+  gjxl_ac_strategy_dct16x32_forward_grouped,
+  16, 32, kOrthonormalDct16, kOrthonormalDct32, kForwardDct32x16Scale)
+
+#undef GJXL_AC_GROUPED_SQUARE_FORWARD_KERNEL
+#undef GJXL_AC_GROUPED_RECTANGULAR_FORWARD_KERNEL
+
 template <typename ResidualPointer>
 __attribute__((always_inline)) inline void ComputeAcStrategyResidual(
   device const float* coefficients,
