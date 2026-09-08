@@ -63,7 +63,7 @@ bool Plans() {
                                  .ok() &&
                              p.score_count == iterations + size_t(final) &&
                              p.stage_capacity ==
-                                 p.score_count * (40 + 4 * size_t(sinks) +
+                                 p.score_count * (47 + 11 * size_t(sinks) +
                                                   size_t(gaborish) + epf) +
                                      8 * size_t(!final) + 1 &&
                              p.input.peak_bytes == p.input.retained_bytes &&

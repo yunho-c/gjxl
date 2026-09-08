@@ -443,6 +443,7 @@ private:
     size_t reconstruction_batch_index = 0;
     MetalButteraugliProfileStage butteraugli_stage =
       MetalButteraugliProfileStage::kDistortedPsychoMain;
+    MetalButteraugliPsychoStage psycho_stage = MetalButteraugliPsychoStage::kAll;
   };
 
   struct BlockReductionSubmissionContext {

@@ -1607,7 +1607,7 @@ bool CheckResidentButteraugliPolicy(
     return false;
   }
   for (size_t index = 0; index < actual_scores.size(); ++index) {
-    if (std::abs(profiled_scores[index] - actual_scores[index]) > 2.0e-4) {
+    if (profiled_scores[index] != actual_scores[index]) {
       std::cerr << "Profiled resident scores changed\n";
       return false;
     }
@@ -1615,8 +1615,8 @@ bool CheckResidentButteraugliPolicy(
   for (size_t y = 0; y < blocks.height; ++y) {
     for (size_t x = 0; x < blocks.width; ++x) {
       const size_t index = y * stride + x;
-      if (std::abs(profiled_quant[index] - actual_quant[index]) > 1.0e-5f ||
-          std::abs(profiled_block[index] - actual_block[index]) > 5.0e-4f) {
+      if (profiled_quant[index] != actual_quant[index] ||
+          profiled_block[index] != actual_block[index]) {
         std::cerr << "Profiled resident output changed\n";
         return false;
       }

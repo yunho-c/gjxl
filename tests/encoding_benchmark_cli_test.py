@@ -391,6 +391,18 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         for submission in sample["submissions"]:
             self.assertEqual(submission["invocation"], 0)
             self.assertGreater(submission["command_buffer_gpu_nanoseconds"], 0)
+        psycho_phases = ["opsin", "low_medium", "high_x", "high_y",
+                         "medium_b", "suppress_x", "ultra_x", "ultra_y"]
+        reference = sample["submissions"][0]["stages"]
+        self.assertEqual([stage["stage_id"] for stage in reference], [
+            f"frontend.prepare_aq.reference.{scale}.{phase}"
+            for scale in ("main", "sub") for phase in psycho_phases + ["mask"]
+        ])
+        self.assertEqual([len(stage["dispatches"]) for stage in reference],
+                         [1, 1, 2, 2, 2, 1, 2, 2, 3,
+                          4, 1, 2, 2, 2, 1, 2, 2, 3])
+        self.assertTrue(all(stage["group_id"] == "frontend.prepare_aq.reference"
+                            for stage in reference))
         wall_stages = {
             (stage["stage_id"], stage["kind"]): stage
             for stage in sample["wall_stages"]
@@ -417,6 +429,16 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         )
         self.assertGreater(submission["command_buffer_gpu_nanoseconds"], 0)
         stages = submission["stages"]
+        for iteration in {stage["iteration"] for stage in stages
+                          if stage["group_id"] == "butteraugli.psycho.main"}:
+            for scale in ("main", "sub"):
+                parts = [stage for stage in stages
+                         if stage["group_id"] == f"butteraugli.psycho.{scale}"
+                         and stage["iteration"] == iteration]
+                self.assertEqual([stage["stage_id"] for stage in parts],
+                    [f"butteraugli.psycho.{scale}.{phase}" for phase in psycho_phases])
+                self.assertEqual([len(stage["dispatches"]) for stage in parts],
+                    [4 if scale == "sub" else 1, 1, 2, 2, 2, 1, 2, 2])
         reconstruction_stages = {
             stage["stage_id"]
             for stage in stages

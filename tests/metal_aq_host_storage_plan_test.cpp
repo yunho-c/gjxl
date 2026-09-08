@@ -395,10 +395,14 @@ bool CheckAuxiliaryProfiles(GpuBackend &gpu) {
   };
   const auto graph_ok = [&](const GpuExecutionProfile &p, size_t dispatches,
                            const SubmissionProfileStoragePlan &plan,
-                           const ResourceBudget &budget) {
+                           const ResourceBudget &budget, size_t stages = 1) {
+    size_t actual_dispatches = 0;
+    for (const auto& submission : p.submissions)
+      for (const auto& stage : submission.stages)
+        actual_dispatches += stage.dispatches.size();
     return Check(p.submissions.size() == 1 && p.wall_stages.empty() &&
-                   p.submissions[0].stages.size() == 1 &&
-                   p.submissions[0].stages[0].dispatches.size() <= dispatches &&
+                   p.submissions[0].stages.size() == stages &&
+                   actual_dispatches <= dispatches &&
                    budget.snapshot().classes[static_cast<size_t>(ResourceClass::kDiagnostics)]
                        .live_capacity_bytes <= plan.resolved_output.retained_bytes,
                  "Auxiliary profile exceeded counts or retained storage");
@@ -427,9 +431,14 @@ bool CheckAuxiliaryProfiles(GpuBackend &gpu) {
         GpuExecutionProfile result;
         if (!Ok(preparer->PrepareAqEvaluationProfiled(preparation,
                     GpuProfilingMode::kStage, &prepared, &result)) ||
-            !graph_ok(result, plan.reference_dispatches, plan.reference, budget) ||
-            !Check(result.submissions[0].stages[0].dispatches.size() ==
-                       plan.reference_dispatches,
+            !graph_ok(result, plan.reference_dispatches, plan.reference, budget,
+                      extent.width >= 15 && extent.height >= 15 ? 18 : 9) ||
+            !Check([&] {
+                       size_t dispatches = 0;
+                       for (const auto& stage : result.submissions[0].stages)
+                         dispatches += stage.dispatches.size();
+                       return dispatches == plan.reference_dispatches;
+                     }(),
                    "Reference preparation count is not exact")) return false;
       }
       job.Reset();

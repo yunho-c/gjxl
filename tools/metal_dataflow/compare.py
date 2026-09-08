@@ -17,6 +17,12 @@ import statistics
 import subprocess
 import time
 
+PSYCHO_GROUPS = (
+    "butteraugli.psycho.main",
+    "butteraugli.psycho.sub",
+    "frontend.prepare_aq.reference",
+)
+
 
 def sha(path):
     with Path(path).open("rb") as stream:
@@ -117,6 +123,14 @@ def extract(path, profile, expected_samples):
                 for group, select in groups.items()
             }
             totals.update(grouped)
+            # Fine phases are disjoint. Add compatibility aggregates after the
+            # all-stage sum so their durations are never counted twice.
+            for group in PSYCHO_GROUPS:
+                parts = [v for k, v in totals.items() if k.startswith(group + ".")]
+                if parts:
+                    if group in totals:
+                        raise RuntimeError("Mixed coarse/fine psycho stages")
+                    totals[group] = sum(parts)
             for key, value in totals.items():
                 values[key].append(value / 1e6)
     else:
@@ -294,6 +308,19 @@ def main():
                                 ("aq.epf.", "aq.epf_linear.")
                             ):
                                 del metrics[key]
+                for group in PSYCHO_GROUPS:
+                    fine = [
+                        {key for key in metrics if key.startswith(group + ".")}
+                        for metrics in medians.values()
+                    ]
+                    if fine[0] != fine[1]:
+                        if fine[0] and fine[1]:
+                            raise RuntimeError("Unexpected psycho phase inventory change")
+                        # Compare their common coarse boundary. Raw samples
+                        # retain the new phase attribution for separate analysis.
+                        for metrics in medians.values():
+                            for key in fine[0] | fine[1]:
+                                metrics.pop(key, None)
                 removed = medians["baseline"].keys() - medians["candidate"].keys()
                 if any(
                     not key.startswith("aq.reconstruction.scatter.") for key in removed

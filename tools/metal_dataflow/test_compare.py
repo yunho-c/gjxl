@@ -124,6 +124,23 @@ class ExtractTest(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 quiet()
 
+    def test_fine_psycho_aggregate_does_not_double_count(self):
+        samples = [dict(sample_index=i, capabilities={"stage_boundary": True},
+            submissions=[{"stages": [
+                {"stage_id": "butteraugli.psycho.main.opsin", "gpu_nanoseconds": a},
+                {"stage_id": "butteraugli.psycho.main.low_medium", "gpu_nanoseconds": b},
+                {"stage_id": "frontend.prepare_aq.reference.main.opsin", "gpu_nanoseconds": 25},
+            ]}]) for i, (a, b) in enumerate(((100, 0), (0, 100), (0, 0)))]
+        result = self.extract(samples, True)
+        self.assertEqual(result["butteraugli.psycho.main"], 0.0001)
+        self.assertEqual(result["frontend.prepare_aq.reference"], 0.000025)
+        self.assertEqual(result["group.all_stages"], 0.000125)
+        samples[0]["submissions"][0]["stages"].append(
+            {"stage_id": "butteraugli.psycho.main", "gpu_nanoseconds": 0})
+        with self.assertRaises(RuntimeError):
+            self.extract(samples, True)
+
+
 
 if __name__ == "__main__":
     unittest.main()

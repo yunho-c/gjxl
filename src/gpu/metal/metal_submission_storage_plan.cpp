@@ -87,6 +87,8 @@ Status ComputeResidentAqProfileInputStoragePlan(
   const size_t stages_per_iteration =
       12 + 4 * kSupportedAqStrategies.size() +
       static_cast<size_t>(o.butteraugli_sinks) * 4 +
+      (kMetalButteraugliPsychoProfiles.size() - 1) *
+        (1 + static_cast<size_t>(o.butteraugli_sinks)) +
       static_cast<size_t>(o.gaborish) + o.epf_iterations;
   p.stage_capacity = p.score_count * stages_per_iteration +
                      static_cast<size_t>(!o.evaluate_final_field) *

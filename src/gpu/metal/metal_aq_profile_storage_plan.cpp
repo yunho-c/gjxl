@@ -7,6 +7,8 @@
 #include <limits>
 #include <string_view>
 
+#include "gpu/metal/metal_butteraugli_encoding.h"
+
 namespace gjxl::metal_internal {
 namespace {
 using resource_budget_internal::HostStorageBound;
@@ -65,6 +67,19 @@ constexpr size_t MaximumAqIdLength() {
                               "resident.frame_mapping",
                               "resident.frame_assembly"})
     length = std::max(length, id.size());
+  for (const auto& part : kMetalButteraugliPsychoProfiles) {
+    length = std::max(length, std::string_view(part.main_id).size());
+    length = std::max(length, std::string_view(part.sub_id).size());
+  }
+  return length;
+}
+
+constexpr size_t MaximumReferenceIdLength() {
+  size_t length = sizeof("frontend.prepare_aq.reference.main.mask") - 1;
+  for (const auto& part : kMetalButteraugliPsychoProfiles) {
+    length = std::max(length, std::string_view(part.reference_main_id).size());
+    length = std::max(length, std::string_view(part.reference_sub_id).size());
+  }
   return length;
 }
 
@@ -235,8 +250,13 @@ ComputeAqAuxiliaryProfileStoragePlan(const AqAuxiliaryProfileOptions &o,
     p.initial_dispatches += 5 + p.sort.dispatches;
   }
   p.adjustment_dispatches = 1 + std::min(blocks, kSupportedAqStrategies.size());
-  status = SingleSubmission(p.reference_dispatches,
-                            "frontend.prepare_aq.reference", &p.reference);
+  constexpr size_t reference_id = sizeof("frontend.prepare_aq.reference") - 1;
+  constexpr size_t reference_stage_id = MaximumReferenceIdLength();
+  const size_t reference_stages = (kMetalButteraugliPsychoProfiles.size() + 1) *
+    (butter.multiscale ? 2 : 1);
+  status = gpu_profile_internal::ComputeSubmissionProfileStoragePlan(
+    {reference_stages, p.reference_dispatches, reference_stage_id, reference_id,
+     KernelIdLength(reference_stage_id), reference_id}, &p.reference);
   if (!status.ok())
     return status;
   status = SingleSubmission(p.initial_dispatches,

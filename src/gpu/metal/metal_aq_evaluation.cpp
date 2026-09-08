@@ -2168,20 +2168,33 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
                                   uint32_t epf_pass = 0,
                                   MetalButteraugliProfileStage butter_stage =
                                     MetalButteraugliProfileStage::
-                                      kDistortedPsychoMain) {
+                                      kDistortedPsychoMain,
+                                  MetalButteraugliPsychoStage psycho_stage =
+                                    MetalButteraugliPsychoStage::kAll,
+                                  const char* group_id = nullptr) {
       AppendMetalProfileStage(contexts, stages, ResidentProfileStageContext{
         .self = this,
         .stage = stage,
         .iteration = iteration,
         .epf_pass = epf_pass,
         .butteraugli_stage = butter_stage,
+        .psycho_stage = psycho_stage,
       }, {
         .stage_id = stage_id,
-        .group_id = stage_id,
+        .group_id = group_id == nullptr ? stage_id : group_id,
         .iteration = iteration,
         .invocation = iteration,
         .encode = &MetalPreparedAqEvaluation::EncodeResidentProfileStage,
       });
+    };
+    const auto append_psycho = [&](bool sub, ResidentProfileStage stage,
+                                    uint32_t iteration) {
+      for (const auto& part : kMetalButteraugliPsychoProfiles) {
+        append_stage(sub ? part.sub_id : part.main_id, stage, iteration, 0,
+          sub ? MetalButteraugliProfileStage::kDistortedPsychoSub
+              : MetalButteraugliProfileStage::kDistortedPsychoMain,
+          part.stage, sub ? "butteraugli.psycho.sub" : "butteraugli.psycho.main");
+      }
     };
     const auto append_reconstruction_stage = [&](const char* stage_id,
           ReconstructionProfileStage reconstruction_stage,
@@ -2273,11 +2286,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
             iteration);
         }
         if (butteraugli_multiscale) {
-          append_stage(
-            "butteraugli.psycho.sub",
-            ResidentProfileStage::kButteraugliResident,
-            iteration, 0,
-            MetalButteraugliProfileStage::kDistortedPsychoSub);
+          append_psycho(true, ResidentProfileStage::kButteraugliResident, iteration);
           append_stage(
             "butteraugli.malta.sub",
             ResidentProfileStage::kButteraugliResident, iteration, 0,
@@ -2287,10 +2296,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
             "butteraugli.mask_final.sub",
             ResidentProfileStage::kButteraugliResident, iteration, 0,
             MetalButteraugliProfileStage::kMaskAndFinalSub);
-          append_stage(
-            "butteraugli.psycho.main",
-            ResidentProfileStage::kButteraugliResident, iteration, 0,
-            MetalButteraugliProfileStage::kDistortedPsychoMain);
+          append_psycho(false, ResidentProfileStage::kButteraugliResident, iteration);
           append_stage(
             "butteraugli.malta.main",
             ResidentProfileStage::kButteraugliResident, iteration, 0,
@@ -2305,10 +2311,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
             ResidentProfileStage::kButteraugliResident, iteration, 0,
             MetalButteraugliProfileStage::kResidentReduction);
         } else {
-          append_stage(
-            "butteraugli.psycho.main", ResidentProfileStage::kButteraugli,
-            iteration, 0,
-            MetalButteraugliProfileStage::kDistortedPsychoMain);
+          append_psycho(false, ResidentProfileStage::kButteraugli, iteration);
           append_stage(
             "butteraugli.malta.main", ResidentProfileStage::kButteraugli,
             iteration, 0, MetalButteraugliProfileStage::kMaltaMain);
@@ -4594,7 +4597,7 @@ void MetalPreparedAqEvaluation::EncodeResidentProfileStage(
           .distance_map = self.CompleteDistanceMapScratch(),
           .score = self.score_,
         },
-        stage.butteraugli_stage);
+        stage.butteraugli_stage, stage.psycho_stage);
       break;
     case ResidentProfileStage::kButteraugliResident: {
       const auto batches =
@@ -4614,7 +4617,7 @@ void MetalPreparedAqEvaluation::EncodeResidentProfileStage(
           .error = self.reconstruction_error_,
           .batches = batches,
         },
-        stage.butteraugli_stage);
+        stage.butteraugli_stage, stage.psycho_stage);
       break;
     }
     case ResidentProfileStage::kBlockReduction:

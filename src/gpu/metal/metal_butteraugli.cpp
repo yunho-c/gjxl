@@ -499,15 +499,34 @@ public:
     std::unique_ptr<GpuSubmission> submission;
     Status status;
     if (profiling) {
-      const MetalProfiledComputeStage stage{
-        .stage_id = "frontend.prepare_aq.reference",
-        .encode =
-          &MetalPreparedDeviceButteraugli::EncodePreparationSubmission,
-        .context = &context,
+      constexpr size_t per_scale = kMetalButteraugliPsychoProfiles.size() + 1;
+      std::array<PreparationContext, 2 * per_scale> contexts;
+      std::array<MetalProfiledComputeStage, 2 * per_scale> stages;
+      size_t count = 0;
+      const auto append = [&](const char* id, bool sub,
+                              MetalButteraugliPsychoStage part, bool mask) {
+        contexts[count] = {this, part, sub, mask};
+        stages[count] = {
+          .stage_id = id,
+          .group_id = "frontend.prepare_aq.reference",
+          .encode = &MetalPreparedDeviceButteraugli::EncodePreparationProfileStage,
+          .context = &contexts[count],
+        };
+        ++count;
       };
+      for (size_t scale = 0; scale < (multiscale_ ? 2u : 1u); ++scale) {
+        const bool sub = scale != 0;
+        for (const auto& part : kMetalButteraugliPsychoProfiles) {
+          append(sub ? part.reference_sub_id : part.reference_main_id,
+                 sub, part.stage, false);
+        }
+        append(sub ? "frontend.prepare_aq.reference.sub.mask"
+                   : "frontend.prepare_aq.reference.main.mask",
+               sub, MetalButteraugliPsychoStage::kAll, true);
+      }
       status = metal_.SubmitComputeProfiled(
         "gjxl Butteraugli reference preparation profile",
-        std::span<const MetalProfiledComputeStage>(&stage, 1),
+        std::span<const MetalProfiledComputeStage>(stages.data(), count),
         profiling_mode, &submission);
     } else {
       status = metal_.SubmitCompute(
@@ -733,17 +752,19 @@ public:
   void EncodeValidatedResidentComparisonProfileStage(
     MTL::ComputeCommandEncoder* encoder,
     const MetalButteraugliResidentComparisonDescriptor& descriptor,
-    MetalButteraugliProfileStage stage) {
+    MetalButteraugliProfileStage stage,
+    MetalButteraugliPsychoStage psycho) {
 
-    EncodeResidentComparisonProfileStage(encoder, descriptor, stage);
+    EncodeResidentComparisonProfileStage(encoder, descriptor, stage, psycho);
   }
 
   void EncodeValidatedComparisonProfileStage(
     MTL::ComputeCommandEncoder* encoder,
     const DeviceButteraugliComparisonDescriptor& descriptor,
-    MetalButteraugliProfileStage stage) {
+    MetalButteraugliProfileStage stage,
+    MetalButteraugliPsychoStage psycho) {
 
-    EncodeComparisonProfileStage(encoder, descriptor, stage);
+    EncodeComparisonProfileStage(encoder, descriptor, stage, psycho);
   }
 
 private:
@@ -755,6 +776,9 @@ private:
   };
   struct PreparationContext {
     MetalPreparedDeviceButteraugli* prepared = nullptr;
+    MetalButteraugliPsychoStage stage = MetalButteraugliPsychoStage::kAll;
+    bool sub = false;
+    bool mask_only = false;
   };
 
   struct ComparisonContext {
@@ -859,6 +883,13 @@ private:
 
     const auto& context = *static_cast<const PreparationContext*>(opaque);
     context.prepared->EncodePreparation(encoder);
+  }
+
+  static void EncodePreparationProfileStage(
+    MetalBackend&, MTL::ComputeCommandEncoder* encoder, const void* opaque) {
+    const auto& context = *static_cast<const PreparationContext*>(opaque);
+    context.prepared->EncodePreparationPart(
+      encoder, context.sub, context.stage, context.mask_only);
   }
 
   void EncodeCopy(
@@ -1033,92 +1064,103 @@ private:
     const PsychoPlanes& psycho,
     Extent2D scale_extent,
     bool capture_reference,
-    bool prepare_mask = true) {
+    bool prepare_mask = true,
+    MetalButteraugliPsychoStage stage = MetalButteraugliPsychoStage::kAll) {
 
-    const OpsinParams opsin_params{
-      static_cast<uint32_t>(scale_extent.width),
-      static_cast<uint32_t>(scale_extent.height),
-      static_cast<uint32_t>(input.plane[0].row_stride),
-      static_cast<uint32_t>(input.plane[1].row_stride),
-      static_cast<uint32_t>(input.plane[2].row_stride),
-      static_cast<uint32_t>(working_extent_.width),
-      options().intensity_target,
+    const auto selected = [stage](MetalButteraugliPsychoStage part) {
+      return stage == MetalButteraugliPsychoStage::kAll || stage == part;
     };
-    encoder->setComputePipelineState(
-      metal_.butteraugli_pipelines_.opsin_blur5_tiled.get());
-    for (size_t channel = 0; channel < 3; ++channel) {
-      Bind(encoder, Handle(metal_, input.plane[channel]),
-           input.plane[channel].offset_bytes, channel);
-      DevicePlaneView xyb = Plane(kImage + channel, scale_extent);
-      Bind(encoder, Handle(metal_, xyb), xyb.offset_bytes, 4 + channel);
-    }
-    Bind(encoder, Handle(metal_, kernels_[0]), kernels_[0].offset_bytes, 3);
-    encoder->setBytes(&opsin_params, sizeof(opsin_params), 7);
-    encoder->setThreadgroupMemoryLength(
-      kOpsinBlur5ThreadgroupMemoryBytes, 0);
-    DispatchMetalThreadgroups(
-      encoder,
-      MTL::Size(
-        (scale_extent.width + kOpsinBlur5TileWidth - 1) /
-          kOpsinBlur5TileWidth,
-        (scale_extent.height + kOpsinBlur5TileHeight - 1) /
-          kOpsinBlur5TileHeight,
-        1),
-      MTL::Size(kOpsinBlur5TileWidth, kOpsinBlur5TileHeight, 1));
-    if (capture_reference) {
+
+    if (selected(MetalButteraugliPsychoStage::kOpsin)) {
+      const OpsinParams opsin_params{
+        static_cast<uint32_t>(scale_extent.width),
+        static_cast<uint32_t>(scale_extent.height),
+        static_cast<uint32_t>(input.plane[0].row_stride),
+        static_cast<uint32_t>(input.plane[1].row_stride),
+        static_cast<uint32_t>(input.plane[2].row_stride),
+        static_cast<uint32_t>(working_extent_.width),
+        options().intensity_target,
+      };
+      encoder->setComputePipelineState(
+        metal_.butteraugli_pipelines_.opsin_blur5_tiled.get());
       for (size_t channel = 0; channel < 3; ++channel) {
-        MaybeCapture(
-          encoder,
-          static_cast<MetalButteraugliStage>(
-            static_cast<size_t>(MetalButteraugliStage::kOpsinX) + channel),
-          AsConst(Plane(kImage + channel, scale_extent)),
-          scale_extent);
+        Bind(encoder, Handle(metal_, input.plane[channel]),
+             input.plane[channel].offset_bytes, channel);
+        DevicePlaneView xyb = Plane(kImage + channel, scale_extent);
+        Bind(encoder, Handle(metal_, xyb), xyb.offset_bytes, 4 + channel);
+      }
+      Bind(encoder, Handle(metal_, kernels_[0]), kernels_[0].offset_bytes, 3);
+      encoder->setBytes(&opsin_params, sizeof(opsin_params), 7);
+      encoder->setThreadgroupMemoryLength(
+        kOpsinBlur5ThreadgroupMemoryBytes, 0);
+      DispatchMetalThreadgroups(
+        encoder,
+        MTL::Size(
+          (scale_extent.width + kOpsinBlur5TileWidth - 1) /
+            kOpsinBlur5TileWidth,
+          (scale_extent.height + kOpsinBlur5TileHeight - 1) /
+            kOpsinBlur5TileHeight,
+          1),
+        MTL::Size(kOpsinBlur5TileWidth, kOpsinBlur5TileHeight, 1));
+      if (capture_reference) {
+        for (size_t channel = 0; channel < 3; ++channel) {
+          MaybeCapture(
+            encoder,
+            static_cast<MetalButteraugliStage>(
+              static_cast<size_t>(MetalButteraugliStage::kOpsinX) + channel),
+            AsConst(Plane(kImage + channel, scale_extent)),
+            scale_extent);
+        }
       }
     }
 
-    const FrequencyLowMediumTiledParams frequency_params{
-      static_cast<uint32_t>(scale_extent.width),
-      static_cast<uint32_t>(scale_extent.height),
-      static_cast<uint32_t>(working_extent_.width),
-      static_cast<uint32_t>(psycho[0].row_stride),
-    };
-    encoder->setComputePipelineState(
-      metal_.butteraugli_pipelines_.frequency_low_medium_tiled.get());
-    for (size_t channel = 0; channel < 3; ++channel) {
-      DevicePlaneView xyb = Plane(kImage + channel, scale_extent);
-      DevicePlaneView low = psycho[channel];
-      DevicePlaneView medium = psycho[3 + channel];
-      Bind(encoder, Handle(metal_, xyb), xyb.offset_bytes, channel);
-      Bind(encoder, Handle(metal_, low), low.offset_bytes, 4 + channel);
-      Bind(encoder, Handle(metal_, medium),
-           medium.offset_bytes, 7 + channel);
-    }
-    Bind(encoder, Handle(metal_, kernels_[1]), kernels_[1].offset_bytes, 3);
-    encoder->setBytes(&frequency_params, sizeof(frequency_params), 10);
-    encoder->setThreadgroupMemoryLength(
-      kLowMediumThreadgroupMemoryBytes, 0);
-    DispatchMetalThreadgroups(
-      encoder,
-      MTL::Size(
-        (scale_extent.width + kLowMediumTileWidth - 1) /
-          kLowMediumTileWidth,
-        (scale_extent.height + kLowMediumTileHeight - 1) /
-          kLowMediumTileHeight,
-        1),
-      MTL::Size(kLowMediumTileWidth, kLowMediumTileHeight, 1));
-    if (capture_reference) {
+    if (selected(MetalButteraugliPsychoStage::kLowMedium)) {
+      const FrequencyLowMediumTiledParams frequency_params{
+        static_cast<uint32_t>(scale_extent.width),
+        static_cast<uint32_t>(scale_extent.height),
+        static_cast<uint32_t>(working_extent_.width),
+        static_cast<uint32_t>(psycho[0].row_stride),
+      };
+      encoder->setComputePipelineState(
+        metal_.butteraugli_pipelines_.frequency_low_medium_tiled.get());
       for (size_t channel = 0; channel < 3; ++channel) {
-        MaybeCapture(
-          encoder,
-          static_cast<MetalButteraugliStage>(
-            static_cast<size_t>(MetalButteraugliStage::kLowFrequencyX) +
-            channel),
-          AsConst(psycho[channel]),
-          scale_extent);
+        DevicePlaneView xyb = Plane(kImage + channel, scale_extent);
+        DevicePlaneView low = psycho[channel];
+        DevicePlaneView medium = psycho[3 + channel];
+        Bind(encoder, Handle(metal_, xyb), xyb.offset_bytes, channel);
+        Bind(encoder, Handle(metal_, low), low.offset_bytes, 4 + channel);
+        Bind(encoder, Handle(metal_, medium),
+             medium.offset_bytes, 7 + channel);
+      }
+      Bind(encoder, Handle(metal_, kernels_[1]), kernels_[1].offset_bytes, 3);
+      encoder->setBytes(&frequency_params, sizeof(frequency_params), 10);
+      encoder->setThreadgroupMemoryLength(
+        kLowMediumThreadgroupMemoryBytes, 0);
+      DispatchMetalThreadgroups(
+        encoder,
+        MTL::Size(
+          (scale_extent.width + kLowMediumTileWidth - 1) /
+            kLowMediumTileWidth,
+          (scale_extent.height + kLowMediumTileHeight - 1) /
+            kLowMediumTileHeight,
+          1),
+        MTL::Size(kLowMediumTileWidth, kLowMediumTileHeight, 1));
+      if (capture_reference) {
+        for (size_t channel = 0; channel < 3; ++channel) {
+          MaybeCapture(
+            encoder,
+            static_cast<MetalButteraugliStage>(
+              static_cast<size_t>(MetalButteraugliStage::kLowFrequencyX) +
+              channel),
+            AsConst(psycho[channel]),
+            scale_extent);
+        }
       }
     }
 
     for (size_t channel = 0; channel < 2; ++channel) {
+      if (!selected(channel == 0 ? MetalButteraugliPsychoStage::kHighX
+                                 : MetalButteraugliPsychoStage::kHighY)) continue;
       DevicePlaneView medium = psycho[3 + channel];
       DevicePlaneView high = psycho[6 + channel];
       DevicePlaneView intermediate =
@@ -1161,26 +1203,32 @@ private:
       encoder->setBytes(&channel_params, sizeof(channel_params), 4);
       metal_.DispatchPlane(encoder, scale_extent);
     }
-    DevicePlaneView medium_b = psycho[5];
-    EncodeBlur(
-      encoder, AsConst(medium_b), 2, kPsychoWork, medium_b, scale_extent);
+    if (selected(MetalButteraugliPsychoStage::kMediumB)) {
+      DevicePlaneView medium_b = psycho[5];
+      EncodeBlur(
+        encoder, AsConst(medium_b), 2, kPsychoWork, medium_b, scale_extent);
+    }
 
-    DevicePlaneView high_x = psycho[6];
-    DevicePlaneView high_y = psycho[7];
-    const PlaneParams suppress_params{
-      static_cast<uint32_t>(scale_extent.width),
-      static_cast<uint32_t>(scale_extent.height),
-      static_cast<uint32_t>(high_y.row_stride),
-      static_cast<uint32_t>(high_x.row_stride),
-    };
-    encoder->setComputePipelineState(
-      metal_.butteraugli_pipelines_.frequency_suppress_x.get());
-    Bind(encoder, Handle(metal_, high_x), high_x.offset_bytes, 0);
-    Bind(encoder, Handle(metal_, high_y), high_y.offset_bytes, 1);
-    encoder->setBytes(&suppress_params, sizeof(suppress_params), 2);
-    metal_.DispatchPlane(encoder, scale_extent);
+    if (selected(MetalButteraugliPsychoStage::kSuppressX)) {
+      DevicePlaneView high_x = psycho[6];
+      DevicePlaneView high_y = psycho[7];
+      const PlaneParams suppress_params{
+        static_cast<uint32_t>(scale_extent.width),
+        static_cast<uint32_t>(scale_extent.height),
+        static_cast<uint32_t>(high_y.row_stride),
+        static_cast<uint32_t>(high_x.row_stride),
+      };
+      encoder->setComputePipelineState(
+        metal_.butteraugli_pipelines_.frequency_suppress_x.get());
+      Bind(encoder, Handle(metal_, high_x), high_x.offset_bytes, 0);
+      Bind(encoder, Handle(metal_, high_y), high_y.offset_bytes, 1);
+      encoder->setBytes(&suppress_params, sizeof(suppress_params), 2);
+      metal_.DispatchPlane(encoder, scale_extent);
+    }
 
     for (size_t channel = 0; channel < 2; ++channel) {
+      if (!selected(channel == 0 ? MetalButteraugliPsychoStage::kUltraX
+                                 : MetalButteraugliPsychoStage::kUltraY)) continue;
       DevicePlaneView high = psycho[6 + channel];
       DevicePlaneView ultra = psycho[8 + channel];
       DevicePlaneView intermediate =
@@ -1235,7 +1283,7 @@ private:
       }
       metal_.DispatchPlane(encoder, scale_extent);
     }
-    if (capture_reference) {
+    if (capture_reference && selected(MetalButteraugliPsychoStage::kUltraY)) {
       for (size_t channel = 0; channel < 3; ++channel) {
         MaybeCapture(
           encoder,
@@ -1769,7 +1817,8 @@ private:
   void EncodeResidentComparisonProfileStage(
     MTL::ComputeCommandEncoder* encoder,
     const MetalButteraugliResidentComparisonDescriptor& descriptor,
-    MetalButteraugliProfileStage stage) {
+    MetalButteraugliProfileStage stage,
+    MetalButteraugliPsychoStage psycho) {
 
     const Extent2D requested = extent();
     const PsychoPlanes reference_main =
@@ -1777,16 +1826,19 @@ private:
     const PsychoPlanes distorted =
       PsychoSlots(kPsychoDistorted, working_extent_);
     if (stage == MetalButteraugliProfileStage::kDistortedPsychoSub) {
-      EncodeSubsample(
-        encoder, descriptor.distorted_linear_rgb, requested, sub_extent_);
+      if (psycho == MetalButteraugliPsychoStage::kAll ||
+          psycho == MetalButteraugliPsychoStage::kOpsin) {
+        EncodeSubsample(
+          encoder, descriptor.distorted_linear_rgb, requested, sub_extent_);
+      }
       EncodePsychoImage(
-        encoder, PsychoInputSlots(sub_extent_), distorted, sub_extent_, false);
+        encoder, PsychoInputSlots(sub_extent_), distorted, sub_extent_, false, true, psycho);
       return;
     }
     if (stage == MetalButteraugliProfileStage::kDistortedPsychoMain) {
       EncodePsychoImage(
         encoder, descriptor.distorted_linear_rgb, distorted, requested,
-        false);
+        false, true, psycho);
       return;
     }
     if (stage == MetalButteraugliProfileStage::kResidentReduction) {
@@ -1831,43 +1883,38 @@ private:
              static_cast<size_t>(MetalButteraugliStage::kUltraHighFrequencyY);
   }
 
-  void EncodePreparation(MTL::ComputeCommandEncoder* encoder) {
-    const Extent2D requested = extent();
-    const PsychoPlanes reference_main =
-      PsychoSlots(kPsychoReference, working_extent_);
-    if (expanded_) {
-      EncodeExpand(
-        encoder, reference_linear_rgb(), requested, working_extent_);
-      EncodePsychoImage(
-        encoder, PsychoInputSlots(working_extent_), reference_main,
-        working_extent_, false);
-      EncodeReferenceMask(
-        encoder, Plane(kReferenceMask, working_extent_),
-        working_extent_);
-      EncodeReferenceErosion(
-        encoder, AsConst(Plane(kReferenceMask, working_extent_)),
-        reference_eroded_mask_, working_extent_);
-      return;
+  void EncodePreparationPart(
+    MTL::ComputeCommandEncoder* encoder, bool sub,
+    MetalButteraugliPsychoStage stage = MetalButteraugliPsychoStage::kAll,
+    bool mask_only = false) {
+    const Extent2D scale_extent = sub ? sub_extent_ : working_extent_;
+    const PsychoPlanes psycho = sub ? ReferenceSubSlots()
+      : PsychoSlots(kPsychoReference, working_extent_);
+    if (!mask_only) {
+      if (stage == MetalButteraugliPsychoStage::kAll ||
+          stage == MetalButteraugliPsychoStage::kOpsin) {
+        if (sub) {
+          EncodeSubsample(encoder, reference_linear_rgb(), extent(), sub_extent_);
+        } else if (expanded_) {
+          EncodeExpand(encoder, reference_linear_rgb(), extent(), working_extent_);
+        }
+      }
+      const ConstDeviceImage3View input = sub || expanded_
+        ? PsychoInputSlots(scale_extent) : reference_linear_rgb();
+      EncodePsychoImage(encoder, input, psycho, scale_extent, false, true, stage);
     }
+    if (mask_only || stage == MetalButteraugliPsychoStage::kAll) {
+      const DevicePlaneView mask = sub ? reference_sub_mask_
+        : Plane(kReferenceMask, scale_extent);
+      EncodeReferenceMask(encoder, mask, scale_extent);
+      EncodeReferenceErosion(encoder, AsConst(mask),
+        sub ? reference_sub_eroded_mask_ : reference_eroded_mask_, scale_extent);
+    }
+  }
 
-    EncodePsychoImage(
-      encoder, reference_linear_rgb(), reference_main, requested, false);
-    EncodeReferenceMask(
-      encoder, Plane(kReferenceMask, requested), requested);
-    EncodeReferenceErosion(
-      encoder, AsConst(Plane(kReferenceMask, requested)),
-      reference_eroded_mask_, requested);
-    if (multiscale_) {
-      EncodeSubsample(
-        encoder, reference_linear_rgb(), requested, sub_extent_);
-      EncodePsychoImage(
-        encoder, PsychoInputSlots(sub_extent_), ReferenceSubSlots(),
-        sub_extent_, false);
-      EncodeReferenceMask(encoder, reference_sub_mask_, sub_extent_);
-      EncodeReferenceErosion(
-        encoder, AsConst(reference_sub_mask_), reference_sub_eroded_mask_,
-        sub_extent_);
-    }
+  void EncodePreparation(MTL::ComputeCommandEncoder* encoder) {
+    EncodePreparationPart(encoder, false);
+    if (multiscale_) EncodePreparationPart(encoder, true);
   }
 
   void EncodeComparison(
@@ -1968,7 +2015,8 @@ private:
   void EncodeComparisonProfileStage(
     MTL::ComputeCommandEncoder* encoder,
     const DeviceButteraugliComparisonDescriptor& descriptor,
-    MetalButteraugliProfileStage stage) {
+    MetalButteraugliProfileStage stage,
+    MetalButteraugliPsychoStage psycho) {
 
     const Extent2D requested = extent();
     const PsychoPlanes reference_main =
@@ -1978,27 +2026,32 @@ private:
 
     if (stage == MetalButteraugliProfileStage::kDistortedPsychoMain) {
       if (expanded_) {
-        EncodeExpand(
-          encoder, descriptor.distorted_linear_rgb, requested,
-          working_extent_);
+        if (psycho == MetalButteraugliPsychoStage::kAll ||
+            psycho == MetalButteraugliPsychoStage::kOpsin) {
+          EncodeExpand(encoder, descriptor.distorted_linear_rgb, requested,
+                       working_extent_);
+        }
         EncodePsychoImage(
           encoder, PsychoInputSlots(working_extent_), distorted_main,
-          working_extent_, false);
+          working_extent_, false, true, psycho);
       } else {
         EncodePsychoImage(
           encoder, descriptor.distorted_linear_rgb, distorted_main,
-          requested, false);
+          requested, false, true, psycho);
       }
       return;
     }
 
     if (stage == MetalButteraugliProfileStage::kDistortedPsychoSub) {
       if (multiscale_) {
-        EncodeSubsample(
-          encoder, descriptor.distorted_linear_rgb, requested, sub_extent_);
+        if (psycho == MetalButteraugliPsychoStage::kAll ||
+            psycho == MetalButteraugliPsychoStage::kOpsin) {
+          EncodeSubsample(
+            encoder, descriptor.distorted_linear_rgb, requested, sub_extent_);
+        }
         EncodePsychoImage(
           encoder, PsychoInputSlots(sub_extent_), distorted_main,
-          sub_extent_, false);
+          sub_extent_, false, true, psycho);
       }
       return;
     }
@@ -2165,12 +2218,13 @@ void EncodePreparedMetalButteraugliResidentProfileStage(
   PreparedDeviceButteraugli& prepared,
   MTL::ComputeCommandEncoder* encoder,
   const MetalButteraugliResidentComparisonDescriptor& descriptor,
-  MetalButteraugliProfileStage stage) {
+  MetalButteraugliProfileStage stage,
+  MetalButteraugliPsychoStage psycho) {
 
   auto* metal = dynamic_cast<MetalPreparedDeviceButteraugli*>(&prepared);
   if (metal != nullptr && encoder != nullptr) {
     metal->EncodeValidatedResidentComparisonProfileStage(
-      encoder, descriptor, stage);
+      encoder, descriptor, stage, psycho);
   }
 }
 
@@ -2178,11 +2232,12 @@ void EncodePreparedMetalButteraugliProfileStage(
   PreparedDeviceButteraugli& prepared,
   MTL::ComputeCommandEncoder* encoder,
   const DeviceButteraugliComparisonDescriptor& descriptor,
-  MetalButteraugliProfileStage stage) {
+  MetalButteraugliProfileStage stage,
+  MetalButteraugliPsychoStage psycho) {
 
   auto* metal = dynamic_cast<MetalPreparedDeviceButteraugli*>(&prepared);
   if (metal != nullptr && encoder != nullptr) {
-    metal->EncodeValidatedComparisonProfileStage(encoder, descriptor, stage);
+    metal->EncodeValidatedComparisonProfileStage(encoder, descriptor, stage, psycho);
   }
 }
 
