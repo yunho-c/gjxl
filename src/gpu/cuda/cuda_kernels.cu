@@ -246,6 +246,19 @@ __device__ float DctInputElement(Tile input, size_t base, size_t index) {
   }
 }
 
+// Make every reduction stage a compile-time specialization. Nested dynamic
+// stride loops can materialize these arrays in local memory in the larger
+// fused evaluator, despite ptxas reporting no register spills.
+template <unsigned int Stride, unsigned int Size>
+__device__ __forceinline__ void HalvingSum(float (&values)[Size]) {
+  static_assert(Stride > 0 && 2 * Stride <= Size);
+#pragma unroll
+  for (unsigned int value = 0; value < Stride; ++value) {
+    values[value] += values[value + Stride];
+  }
+  if constexpr (Stride > 1) HalvingSum<Stride / 2>(values);
+}
+
 // Quantize AC residual coefficients directly into the inverse input tile.
 // Channel rates are reduced before the horizontal pass reuses intermediate
 // storage; no global residual-coefficient buffer is materialized.
@@ -260,15 +273,16 @@ struct AcStrategyResidualDctSource {
   CudaAcStrategyBatchParams params;
 
   template <unsigned int Width, unsigned int Height,
-            unsigned int LocalThreads, unsigned int Values>
+            unsigned int LocalThreads, unsigned int Values,
+            bool SharedCoefficients = false>
   __device__ void Load(float* tile, float* reduction, size_t transform_index,
                        unsigned int tid, bool active) const {
     constexpr unsigned int kCount = Width * Height;
     static_assert(LocalThreads * Values == kCount);
     const size_t candidate_index = transform_index / 3;
     const unsigned int channel = static_cast<unsigned int>(transform_index % 3);
-    const size_t base = transform_index * kCount;
-    const size_t y_base = (candidate_index * 3 + 1) * kCount;
+    [[maybe_unused]] const size_t base = transform_index * kCount;
+    [[maybe_unused]] const size_t y_base = (candidate_index * 3 + 1) * kCount;
     const unsigned int matrix_base = channel * kCount;
     const unsigned int inverse_matrix_base = (3 + channel) * kCount;
     bool valid = false;
@@ -294,8 +308,19 @@ struct AcStrategyResidualDctSource {
         float rounded = NAN;
         float residual = NAN;
         if (valid) {
-          const float decorrelated = coefficients[base + index] -
-            coefficients[y_base + index] * factor;
+          float decorrelated;
+          if constexpr (SharedCoefficients) {
+            // The fused caller owns one natural-coordinate tile per channel
+            // and points coefficients at an immutable shared copy of Y.
+            constexpr bool kRowMajor = Height < Width;
+            const unsigned int v = kRowMajor ? index / Width : index % Height;
+            const unsigned int u = kRowMajor ? index % Width : index / Height;
+            decorrelated = tile[v * (Width + 1) + u] -
+              coefficients[index] * factor;
+          } else {
+            decorrelated = coefficients[base + index] -
+              coefficients[y_base + index] * factor;
+          }
           const float scaled = decorrelated *
             matrices[inverse_matrix_base + index] * norm;
           rounded = copysignf(floorf(fabsf(scaled) + 0.5f), scaled);
@@ -316,11 +341,15 @@ struct AcStrategyResidualDctSource {
     }
     // Match the separate residual kernel's halving order, even though the
     // inverse transform uses a different number of lanes per transform.
+    if constexpr (SharedCoefficients) {
+      if constexpr (Values >= 4) HalvingSum<Values / 4>(magnitude);
+    } else {
 #pragma unroll
-    for (unsigned int stride = Values / 4; stride != 0; stride /= 2) {
+      for (unsigned int stride = Values / 4; stride != 0; stride /= 2) {
 #pragma unroll
-      for (unsigned int value = 0; value < stride; ++value) {
-        magnitude[value] += magnitude[value + stride];
+        for (unsigned int value = 0; value < stride; ++value) {
+          magnitude[value] += magnitude[value + stride];
+        }
       }
     }
     if constexpr (LocalThreads > 32) {
@@ -375,7 +404,7 @@ struct AcStrategyDctLossOutput {
   CudaAcStrategyBatchParams params;
 
   template <unsigned int LocalThreads, unsigned int Values,
-            bool OrthonormalPixels = true>
+            bool OrthonormalPixels = true, bool Scalarized = false>
   __device__ void Store(float (&values)[Values], size_t transform_index,
                         unsigned int tid, float* reduction) const {
     const auto candidate = candidates[transform_index / 3];
@@ -402,11 +431,15 @@ struct AcStrategyDctLossOutput {
       values[value] = isfinite(mask) && mask > 0.0f ? weighted : NAN;
     }
     // Match the halving tree of the separate cost kernel.
+    if constexpr (Scalarized) {
+      if constexpr (Values >= 2) HalvingSum<Values / 2>(values);
+    } else {
 #pragma unroll
-    for (unsigned int stride = Values / 2; stride != 0; stride /= 2) {
+      for (unsigned int stride = Values / 2; stride != 0; stride /= 2) {
 #pragma unroll
-      for (unsigned int value = 0; value < stride; ++value) {
-        values[value] += values[value + stride];
+        for (unsigned int value = 0; value < stride; ++value) {
+          values[value] += values[value + stride];
+        }
       }
     }
     if constexpr (LocalThreads > 32) {
@@ -587,6 +620,133 @@ __global__ void InverseDctFactoredKernel(
         pixels[value] = tile[(index / Width) * (Width + 1) + index % Width];
       }
       output.template Store<kLocal, kValues, false>(pixels, transform, tid, tile);
+    }
+  }
+}
+
+// Keep all three channels of a candidate in the same block. Their forward
+// coefficients are consumed in shared memory, including cross-channel CfL,
+// before the same tiles become residual/inverse-transform storage.
+constexpr unsigned int kFusedAcThreads = 3 * kFactoredDctThreads;
+
+template <unsigned int Width, unsigned int Height>
+__global__ void FusedAcStrategyKernel(
+  AcStrategyDctSource<Width, Height> input,
+  AcStrategyResidualDctSource residual,
+  AcStrategyDctLossOutput<Width, Height> output, size_t transform_count) {
+  constexpr unsigned int kLocal = Width > Height ? Width : Height;
+  constexpr unsigned int kCandidates = kFactoredDctThreads / kLocal;
+  constexpr unsigned int kTransforms = 3 * kCandidates;
+  constexpr unsigned int kTileSize = Height * (Width + 1);
+  constexpr unsigned int kCount = Width * Height;
+  constexpr unsigned int kValues = kCount / kLocal;
+  static_assert(kLocal <= 32 && kFactoredDctThreads % kLocal == 0);
+  __shared__ float tiles[kTransforms * kTileSize];
+  __shared__ float y_coefficients[kCandidates * kCount];
+  const unsigned int group = threadIdx.x / kLocal;
+  const unsigned int tid = threadIdx.x % kLocal;
+  const size_t transform = static_cast<size_t>(blockIdx.x) * kTransforms + group;
+  const bool active = transform < transform_count;
+  const size_t base = transform * kCount;
+  float* tile = tiles + group * kTileSize;
+  float* y_tile = y_coefficients + (group / 3) * kCount;
+  float values[kLocal], scratch[2 * kLocal];
+  const auto source = DctInputTile<Width, Height>(input, transform, active);
+
+  // Preserve the original forward transform's pass order and coefficient
+  // normalization. Wide coefficients are row-major; tall/square are column-major.
+  if constexpr (Width > Height) {
+    if (active) {
+#pragma unroll
+      for (unsigned int i = tid; i < kCount; i += kLocal) {
+        tile[(i / Width) * (Width + 1) + i % Width] =
+          DctInputElement(source, base, i);
+      }
+    }
+    __syncthreads();
+    if (active && tid < Height) {
+#pragma unroll
+      for (unsigned int x = 0; x < Width; ++x) values[x] = tile[tid * (Width + 1) + x];
+      FactoredDct1D<Width, true>(values, scratch);
+#pragma unroll
+      for (unsigned int u = 0; u < Width; ++u) tile[tid * (Width + 1) + u] = values[u];
+    }
+    __syncthreads();
+    if (active && tid < Width) {
+#pragma unroll
+      for (unsigned int y = 0; y < Height; ++y) values[y] = tile[y * (Width + 1) + tid];
+      FactoredDct1D<Height, true>(values, scratch);
+#pragma unroll
+      for (unsigned int v = 0; v < Height; ++v) {
+        const float coefficient = values[v] * (1.0f / kCount);
+        tile[v * (Width + 1) + tid] = coefficient;
+        if (group % 3 == 1) y_tile[v * Width + tid] = coefficient;
+      }
+    }
+  } else {
+    if (active && tid < Width) {
+#pragma unroll
+      for (unsigned int y = 0; y < Height; ++y)
+        values[y] = DctInputElement(source, base, y * Width + tid);
+      FactoredDct1D<Height, true>(values, scratch);
+#pragma unroll
+      for (unsigned int v = 0; v < Height; ++v) tile[v * (Width + 1) + tid] = values[v];
+    }
+    __syncthreads();
+    if (active && tid < Height) {
+#pragma unroll
+      for (unsigned int u = 0; u < Width; ++u) values[u] = tile[tid * (Width + 1) + u];
+      FactoredDct1D<Width, true>(values, scratch);
+#pragma unroll
+      for (unsigned int u = 0; u < Width; ++u) {
+        const float coefficient = values[u] * (1.0f / kCount);
+        tile[tid * (Width + 1) + u] = coefficient;
+        if (group % 3 == 1) y_tile[u * Height + tid] = coefficient;
+      }
+    }
+  }
+  // The immutable Y copy lets each lane replace its own coefficients without
+  // racing another channel. Inactive tail candidates still reach all barriers.
+  __syncthreads();
+  residual.coefficients = y_tile;
+  residual.template Load<Width, Height, kLocal, kValues, true>(
+    tile, tile, transform, tid, active);
+  __syncthreads();
+  if (active && tid < Height) {
+#pragma unroll
+    for (unsigned int u = 0; u < Width; ++u) values[u] = tile[tid * (Width + 1) + u];
+    FactoredDct1D<Width, false>(values, scratch);
+#pragma unroll
+    for (unsigned int x = 0; x < Width; ++x) tile[tid * (Width + 1) + x] = values[x];
+  }
+  __syncthreads();
+  if (active && tid < Width) {
+#pragma unroll
+    for (unsigned int v = 0; v < Height; ++v) values[v] = tile[v * (Width + 1) + tid];
+    FactoredDct1D<Height, false>(values, scratch);
+    if constexpr (Width >= Height) {
+      float pixels[kValues];
+#pragma unroll
+      for (unsigned int y = 0; y < Height; ++y) pixels[y] = values[y];
+      output.template Store<kLocal, kValues, false, true>(pixels, transform, tid, tile);
+    }
+  }
+  if constexpr (Height > Width) {
+    // Match the original inverse loss reduction's row-major lane vectors.
+    __syncthreads();
+    if (active && tid < Width) {
+#pragma unroll
+      for (unsigned int y = 0; y < Height; ++y) tile[y * (Width + 1) + tid] = values[y];
+    }
+    __syncthreads();
+    if (active) {
+      float pixels[kValues];
+#pragma unroll
+      for (unsigned int value = 0; value < kValues; ++value) {
+        const unsigned int index = tid + value * kLocal;
+        pixels[value] = tile[(index / Width) * (Width + 1) + index % Width];
+      }
+      output.template Store<kLocal, kValues, false, true>(pixels, transform, tid, tile);
     }
   }
 }
@@ -1510,6 +1670,54 @@ cudaError_t LaunchCudaAcStrategyResidualInverseLoss(
     static_cast<AcStrategyChannelRateDevice*>(channel_rates), params};
   return LaunchAcStrategyInverseLossImpl(
     input, pixel_mask, candidates, losses, params, stream);
+}
+
+cudaError_t LaunchCudaAcStrategyFused(
+  const float* opsin_x, const float* opsin_y, const float* opsin_b,
+  const float* matrices, const float* quant_norms,
+  const signed char* y_to_x, const signed char* y_to_b,
+  const float* pixel_mask, const void* candidates,
+  void* channel_rates, float* losses,
+  CudaAcStrategyBatchParams params, cudaStream_t stream) {
+  const size_t transform_count = static_cast<size_t>(params.candidate_count) * 3;
+  const auto* descriptors = static_cast<const AcStrategyCandidateDevice*>(candidates);
+  const AcStrategyResidualDctSource residual{
+    nullptr, matrices, quant_norms, descriptors, y_to_x, y_to_b,
+    static_cast<AcStrategyChannelRateDevice*>(channel_rates), params};
+  const auto launch = [&](auto width, auto height) {
+    constexpr unsigned int kWidth = decltype(width)::value;
+    constexpr unsigned int kHeight = decltype(height)::value;
+    constexpr unsigned int kLocal = kWidth > kHeight ? kWidth : kHeight;
+    constexpr unsigned int kCandidates = kFactoredDctThreads / kLocal;
+    const unsigned int blocks = (params.candidate_count + kCandidates - 1) / kCandidates;
+    const AcStrategyDctSource<kWidth, kHeight> input{
+      opsin_x, opsin_y, opsin_b, descriptors, params};
+    const AcStrategyDctLossOutput<kWidth, kHeight> output{
+      pixel_mask, descriptors, losses, params};
+    FusedAcStrategyKernel<kWidth, kHeight>
+      <<<blocks, kFusedAcThreads, 0, stream>>>(input, residual, output, transform_count);
+  };
+  using N8 = std::integral_constant<unsigned int, 8>;
+  using N16 = std::integral_constant<unsigned int, 16>;
+  using N32 = std::integral_constant<unsigned int, 32>;
+  if (params.transform_width == 8 && params.transform_height == 8) {
+    launch(N8{}, N8{});
+  } else if (params.transform_width == 16 && params.transform_height == 8) {
+    launch(N16{}, N8{});
+  } else if (params.transform_width == 8 && params.transform_height == 16) {
+    launch(N8{}, N16{});
+  } else if (params.transform_width == 16 && params.transform_height == 16) {
+    launch(N16{}, N16{});
+  } else if (params.transform_width == 32 && params.transform_height == 16) {
+    launch(N32{}, N16{});
+  } else if (params.transform_width == 16 && params.transform_height == 32) {
+    launch(N16{}, N32{});
+  } else if (params.transform_width == 32 && params.transform_height == 32) {
+    launch(N32{}, N32{});
+  } else {
+    return cudaErrorInvalidValue;
+  }
+  return cudaGetLastError();
 }
 
 cudaError_t LaunchCudaPointwiseAffine(

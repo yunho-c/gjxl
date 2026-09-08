@@ -81,10 +81,11 @@ Status CudaBackend::GetAcStrategyScratchRequirements(
     return Status::Unavailable(
       "CUDA candidate evaluation does not support this AC strategy");
   }
-  // Forward coefficients occupy B. The fused residual/inverse evaluator
-  // writes only one loss sum per candidate channel into A.
+  // Forward coefficients and residuals stay in the fused block's shared
+  // memory. Only one loss sum per candidate channel is written into A.
   result.scratch_a_bytes =
     candidate_count * kAcStrategyCandidateChannelCount * sizeof(float);
+  result.scratch_b_bytes = 0;
   *requirements = result;
   return Status::Ok();
 }
@@ -306,11 +307,10 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
   }
   const size_t gather_blocks =
     (packed_element_count + 255) / 256;
-  const std::array<size_t, 6> buffer_offsets = {
+  const std::array<size_t, 5> buffer_offsets = {
     batch.matrices_offset_bytes,
     batch.candidates_offset_bytes,
     batch.scratch_a_offset_bytes,
-    batch.scratch_b_offset_bytes,
     batch.rate_scratch_offset_bytes,
     batch.costs_offset_bytes,
   };
@@ -392,7 +392,6 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
   const CudaBuffer* matrices = nullptr;
   const CudaBuffer* candidates = nullptr;
   CudaBuffer* scratch_a = nullptr;
-  CudaBuffer* scratch_b = nullptr;
   CudaBuffer* rate_scratch = nullptr;
   CudaBuffer* costs = nullptr;
   status = RequireCudaBuffer(
@@ -406,10 +405,6 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
   status = RequireCudaBuffer(
     batch.scratch_a, scratch.scratch_a_bytes, batch.scratch_a_offset_bytes,
     "Scratch A", &scratch_a);
-  if (!status.ok()) return status;
-  status = RequireCudaBuffer(
-    batch.scratch_b, scratch.scratch_b_bytes, batch.scratch_b_offset_bytes,
-    "Scratch B", &scratch_b);
   if (!status.ok()) return status;
   status = RequireCudaBuffer(
     batch.rate_scratch, scratch.rate_scratch_bytes, batch.rate_scratch_offset_bytes,
@@ -431,11 +426,9 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
     BufferRange(batch.candidates, batch.candidates_offset_bytes,
       candidate_bytes),
   };
-  const std::array<DeviceMemoryRange, 4> output_ranges = {
+  const std::array<DeviceMemoryRange, 3> output_ranges = {
     BufferRange(batch.scratch_a, batch.scratch_a_offset_bytes,
       scratch.scratch_a_bytes),
-    BufferRange(batch.scratch_b, batch.scratch_b_offset_bytes,
-      scratch.scratch_b_bytes),
     BufferRange(batch.rate_scratch, batch.rate_scratch_offset_bytes,
       scratch.rate_scratch_bytes),
     BufferRange(batch.costs, batch.costs_offset_bytes, cost_bytes),
@@ -466,8 +459,6 @@ Status CudaBackend::ValidateAcStrategyCandidateBatch(
     candidates->pointer(), batch.candidates_offset_bytes);
   validated.scratch_a = const_cast<float*>(OffsetPointer<float>(
     scratch_a->pointer(), batch.scratch_a_offset_bytes));
-  validated.scratch_b = const_cast<float*>(OffsetPointer<float>(
-    scratch_b->pointer(), batch.scratch_b_offset_bytes));
   validated.rate_scratch = const_cast<std::byte*>(OffsetPointer<std::byte>(
     rate_scratch->pointer(), batch.rate_scratch_offset_bytes));
   validated.costs = const_cast<float*>(OffsetPointer<float>(
@@ -513,7 +504,7 @@ cudaError_t CudaBackend::EncodeAcStrategySubmission(
       batch.opsin[0], batch.opsin[1], batch.opsin[2],
       batch.pixel_mask, batch.quant_field, batch.y_to_x, batch.y_to_b,
       batch.matrices,
-      batch.candidates, batch.scratch_a, batch.scratch_b,
+      batch.candidates, batch.scratch_a,
       batch.rate_scratch, batch.costs, batch.params,
       backend.state_->stream);
     if (error != cudaSuccess) return error;

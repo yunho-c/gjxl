@@ -73,12 +73,23 @@ struct CudaAcStrategyBatchParams {
     const void* candidates, void* channel_rates, float* losses,
     CudaAcStrategyBatchParams params, cudaStream_t stream);
 
+// Evaluate complete three-channel candidates in shared memory. Forward
+// coefficients never leave the block; rates and channel loss sums are the
+// only outputs. Shape, counts and input/output ranges are checked by the batch.
+[[nodiscard]] cudaError_t LaunchCudaAcStrategyFused(
+    const float* opsin_x, const float* opsin_y, const float* opsin_b,
+    const float* matrices, const float* quant_norms,
+    const signed char* y_to_x, const signed char* y_to_b,
+    const float* pixel_mask, const void* candidates,
+    void* channel_rates, float* losses,
+    CudaAcStrategyBatchParams params, cudaStream_t stream);
+
 [[nodiscard]] cudaError_t LaunchCudaAcStrategyBatch(
     const float* opsin_x, const float* opsin_y, const float* opsin_b,
     const float* pixel_mask, const float* quant_field,
     const signed char* y_to_x, const signed char* y_to_b,
     const float* matrices, const void* candidates, float* scratch_a,
-    float* scratch_b, void* rate_scratch, float* costs,
+    void* rate_scratch, float* costs,
     CudaAcStrategyBatchParams params, cudaStream_t stream);
 
 [[nodiscard]] cudaError_t LaunchCudaPointwiseAffine(

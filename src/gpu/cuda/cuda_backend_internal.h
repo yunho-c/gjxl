@@ -225,7 +225,6 @@ class CudaBackend final : public GpuBackend,
     const float* matrices = nullptr;
     const void* candidates = nullptr;
     float* scratch_a = nullptr;
-    float* scratch_b = nullptr;
     void* rate_scratch = nullptr;
     float* costs = nullptr;
     CudaAcStrategyBatchParams params{};

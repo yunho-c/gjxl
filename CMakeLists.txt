@@ -2425,6 +2425,13 @@ if(GJXL_BUILD_TESTS)
     add_test(NAME cuda_ac_strategy_search COMMAND gjxl_ac_strategy_cuda_search_test)
     set_tests_properties(cuda_ac_strategy_search PROPERTIES SKIP_RETURN_CODE 77)
 
+    add_executable(gjxl_cuda_fused_ac_strategy_test
+      tests/cuda_fused_ac_strategy_test.cpp)
+    target_link_libraries(gjxl_cuda_fused_ac_strategy_test PRIVATE gjxl_codec gjxl_cuda)
+    target_include_directories(gjxl_cuda_fused_ac_strategy_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_fused_ac_strategy COMMAND gjxl_cuda_fused_ac_strategy_test)
+    set_tests_properties(cuda_fused_ac_strategy PROPERTIES SKIP_RETURN_CODE 77)
+
     add_executable(gjxl_cuda_memory_pool_test tests/cuda_memory_pool_test.cpp)
     target_link_libraries(gjxl_cuda_memory_pool_test PRIVATE gjxl_cuda)
     target_include_directories(gjxl_cuda_memory_pool_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})

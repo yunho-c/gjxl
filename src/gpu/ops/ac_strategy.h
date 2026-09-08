@@ -64,6 +64,9 @@ struct AcStrategyScratchRequirements {
 /// each of `scratch_a` and `scratch_b`, and `candidate_count * 3 *
 /// kAcStrategyRateScratchBytesPerChannel` bytes in `rate_scratch`. Backends
 /// may require less; allocating these conservative sizes remains valid.
+/// A zero-byte scratch requirement means the corresponding buffer and offset
+/// are unused and ignored. CUDA keeps forward coefficients in shared memory
+/// and requires no `scratch_b` range.
 /// Inputs are expected to remain resident across batches; only candidate
 /// descriptors and scalar costs need to cross the CPU/GPU boundary.
 struct AcStrategyCandidateBatch {

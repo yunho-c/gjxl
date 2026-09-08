@@ -348,6 +348,7 @@ bool CheckPreparedResidentReuse(gjxl::GpuBackend& gpu,
   gjxl::AcStrategyScratchRequirements expected_scratch;
   size_t conservative_packed = 0;
   const auto Append = [&](size_t bytes) {
+    if (bytes == 0) return;
     expected_capacity = (expected_capacity + 255) / 256 * 256 + bytes;
   };
   for (size_t i = 0; i < stats.candidate_counts.size(); ++i) {
@@ -373,6 +374,12 @@ bool CheckPreparedResidentReuse(gjxl::GpuBackend& gpu,
   Append(expected_scratch.scratch_a_bytes);
   Append(expected_scratch.scratch_b_bytes);
   Append(expected_scratch.rate_scratch_bytes);
+#ifdef GJXL_TEST_CUDA
+  if (expected_scratch.scratch_b_bytes != 0) {
+    std::cerr << "CUDA AC search still requires forward coefficient scratch\n";
+    return false;
+  }
+#endif
   if (stats.resource_capacity_bytes != expected_capacity ||
       stats.scratch.scratch_a_bytes != expected_scratch.scratch_a_bytes ||
       stats.scratch.scratch_b_bytes != expected_scratch.scratch_b_bytes ||

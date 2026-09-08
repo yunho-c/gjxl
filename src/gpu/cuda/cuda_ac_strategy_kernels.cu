@@ -165,7 +165,6 @@ cudaError_t LaunchCudaAcStrategyBatch(
   const float* matrices,
   const void* candidates,
   float* scratch_a,
-  float* scratch_b,
   void* rate_scratch,
   float* costs,
   CudaAcStrategyBatchParams params,
@@ -182,14 +181,9 @@ cudaError_t LaunchCudaAcStrategyBatch(
   cudaError_t error = cudaGetLastError();
   if (error != cudaSuccess) return error;
 
-  error = LaunchCudaAcStrategyForward(
-    opsin_x, opsin_y, opsin_b, candidates, scratch_b, params, stream);
-  if (error != cudaSuccess) return error;
-
-  // The inverse consumes forward coefficients in scratch B while writing
-  // compact loss sums to scratch A; those ranges must remain disjoint.
-  error = LaunchCudaAcStrategyResidualInverseLoss(
-    scratch_b, matrices, costs, y_to_x, y_to_b, pixel_mask, candidates,
+  error = LaunchCudaAcStrategyFused(
+    opsin_x, opsin_y, opsin_b, matrices, costs,
+    y_to_x, y_to_b, pixel_mask, candidates,
     rate_scratch, scratch_a, params, stream);
   if (error != cudaSuccess) return error;
 

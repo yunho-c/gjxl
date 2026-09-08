@@ -1936,6 +1936,17 @@ lower 4K times, but the short compact-4K GPU trace is unfavorable. Production
 remains unchanged: next integrate the fused path and remove the still-allocated
 304,496,640-byte 4K forward scratch, then qualify the new layout and timings.
 
+[S138](cuda-fused-ac-integration-s138.md) retains that integration in the normal
+CUDA path. The 4K AC-search arena falls from 323,845,888 to 19,349,248 bytes,
+with exact layout and allocation-free shrink/restore reuse checks. All 82
+CTests, 2,732 frozen-oracle encodes and fourteen qualified CUDA sanitizer jobs
+pass. The seven fused bodies match S137 V2 exactly. Whole-call primary results
+favor the candidate in 14/16 runs, including all four 4K comparisons at about
+16–26 ms lower latency; two small-image results remain unfavorable. Traces
+verify seven fewer launches and unchanged memcpy payloads. Next investigate
+the remaining quant-norm/final-cost boundaries and complete-candidate tile
+packing, without treating noisy whole-call percentages as universal speedups.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive

@@ -477,7 +477,7 @@ static Status FindAcStrategyGridGpuImpl(
     }
 
     status = PlanArenaBytes(maximum_scratch_a_bytes, &resource_capacity);
-    if (status.ok()) {
+    if (status.ok() && maximum_scratch_b_bytes != 0) {
       status = PlanArenaBytes(maximum_scratch_b_bytes, &resource_capacity);
     }
     if (status.ok()) {
@@ -543,7 +543,8 @@ static Status FindAcStrategyGridGpuImpl(
     }
     status = AllocateArenaBytes(
       state.resource_arena, maximum_scratch_a_bytes, &state.scratch_a);
-    if (status.ok()) {
+    state.scratch_b = {};
+    if (status.ok() && maximum_scratch_b_bytes != 0) {
       status = AllocateArenaBytes(
         state.resource_arena, maximum_scratch_b_bytes, &state.scratch_b);
     }
