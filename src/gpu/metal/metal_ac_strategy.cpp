@@ -272,18 +272,33 @@ Status CreateAcStrategyPipelines(
     }
   }
 
-  // DCT16 keeps all three channels local with six SIMD groups. Other shapes
-  // retain their qualified split forward and residual/inverse stages.
-  auto& candidate16 = pipelines.fused[static_cast<size_t>(AcStrategyType::kDct16x16)];
-  if (candidate16.forward && candidate16.reduces_loss &&
-      device->supportsFamily(MTL::GPUFamilyApple9)) {
-    NS::SharedPtr<MTL::ComputePipelineState> pipeline;
-    status = CreatePipeline(device, library,
-      "gjxl_ac_strategy_dct16_candidate_loss_parallel", &pipeline);
-    if (status.ok() && pipeline->threadExecutionWidth() == 32 &&
-        pipeline->maxTotalThreadsPerThreadgroup() >= 192 &&
-        pipeline->staticThreadgroupMemoryLength() <= device->maxThreadgroupMemoryLength()) {
-      candidate16.candidate_loss = std::move(pipeline);
+  // Small candidates keep X/Y/B local. Select each optional pipeline
+  // independently so unsupported shapes retain the split implementation.
+  constexpr struct {
+    AcStrategyType strategy;
+    const char* kernel;
+    NS::UInteger threads;
+  } kCandidateLossKernels[] = {
+    {AcStrategyType::kDct16x16,
+     "gjxl_ac_strategy_dct16_candidate_loss_parallel", 192},
+    {AcStrategyType::kDct16x8,
+     "gjxl_ac_strategy_dct16x8_candidate_loss_parallel", 192},
+    {AcStrategyType::kDct8x16,
+     "gjxl_ac_strategy_dct8x16_candidate_loss_parallel", 96},
+  };
+  if (device->supportsFamily(MTL::GPUFamilyApple9)) {
+    for (const auto& entry : kCandidateLossKernels) {
+      auto& fused = pipelines.fused[static_cast<size_t>(entry.strategy)];
+      if (!fused.forward || !fused.reduces_loss) continue;
+      NS::SharedPtr<MTL::ComputePipelineState> pipeline;
+      status = CreatePipeline(device, library, entry.kernel, &pipeline);
+      if (status.ok() && pipeline->threadExecutionWidth() == 32 &&
+          pipeline->maxTotalThreadsPerThreadgroup() >= entry.threads &&
+          pipeline->staticThreadgroupMemoryLength() <=
+            device->maxThreadgroupMemoryLength()) {
+        fused.candidate_loss = std::move(pipeline);
+        fused.candidate_loss_threads_per_threadgroup = entry.threads;
+      }
     }
   }
 
@@ -757,7 +772,8 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
     encoder->setBuffer(validated.rate_scratch->handle(), 0, 9);
     encoder->setBytes(&validated.params, sizeof(validated.params), 10);
     DispatchMetalThreadgroups(encoder,
-      MTL::Size(validated.params.candidate_count, 1, 1), MTL::Size(192, 1, 1));
+      MTL::Size(validated.params.candidate_count, 1, 1),
+      MTL::Size(fused.candidate_loss_threads_per_threadgroup, 1, 1));
   } else if (fused.forward) {
     encoder->setComputePipelineState(fused.forward.get());
     for (size_t channel = 0; channel < 3; ++channel) {

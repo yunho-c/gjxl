@@ -2851,6 +2851,9 @@ if(GJXL_BUILD_BENCHMARKS)
   add_executable(gjxl_metal_epf_probe benchmarks/metal_epf_probe.cpp)
   target_link_libraries(gjxl_metal_epf_probe PRIVATE gjxl_metal)
   target_include_directories(gjxl_metal_epf_probe PRIVATE third_party/metal-cpp)
+  add_executable(gjxl_metal_ac_candidate_probe benchmarks/metal_ac_candidate_probe.cpp)
+  target_link_libraries(gjxl_metal_ac_candidate_probe PRIVATE gjxl_metal)
+  target_include_directories(gjxl_metal_ac_candidate_probe PRIVATE third_party/metal-cpp)
 
   target_link_libraries(
     gjxl_dct_benchmark

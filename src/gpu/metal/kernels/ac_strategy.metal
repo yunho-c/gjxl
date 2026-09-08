@@ -352,13 +352,14 @@ __attribute__((always_inline)) inline void AcStrategyForwardSquareDct(
   }
 }
 
-template <uint Rows, uint Columns>
+template <uint Rows, uint Columns, bool LocalOutput = false,
+          typename CoefficientPointer>
 __attribute__((always_inline)) inline void AcStrategyForwardRectangularDct(
   device const float* opsin_x,
   device const float* opsin_y,
   device const float* opsin_b,
   device const AcStrategyCandidate* candidates,
-  device float* coefficients,
+  CoefficientPointer coefficients,
   device const float* quant_field,
   device float* precomputed_quant_norm,
   constant AcStrategyBatchParams& params,
@@ -436,7 +437,8 @@ __attribute__((always_inline)) inline void AcStrategyForwardRectangularDct(
   }
 
   const ulong output_base =
-    static_cast<ulong>(group_position.x) * Rows * Columns;
+    static_cast<ulong>(LocalOutput ? group_position.x % 3u : group_position.x) *
+      Rows * Columns;
   for (uint column_tile = 0;
        column_tile < kColumnTiles;
        ++column_tile) {
@@ -1415,6 +1417,70 @@ kernel void gjxl_ac_strategy_dct16_candidate_loss_parallel(
     magnitude + channel * Count, pixel_mask, candidates, loss_sums,
     params, local_tid, transform_index);
 }
+
+// Each channel keeps the split path's worker count and reduction tree. The
+// shared barrier publishes Y before either chroma channel reads its coefficients.
+#define GJXL_AC_RECTANGULAR_CANDIDATE_LOSS_KERNEL(                           \
+  name, rows, columns, vertical_basis, horizontal_basis, workers)           \
+kernel void name(                                                          \
+  device const float* opsin_x [[buffer(0)]],                                \
+  device const float* opsin_y [[buffer(1)]],                                \
+  device const float* opsin_b [[buffer(2)]],                                \
+  device const AcStrategyCandidate* candidates [[buffer(3)]],               \
+  device const float* quant_field [[buffer(4)]],                            \
+  device const float* matrices [[buffer(5)]],                               \
+  device const float* pixel_mask [[buffer(6)]],                             \
+  device float* quant_norm [[buffer(7)]],                                   \
+  device float* loss_sums [[buffer(8)]],                                    \
+  device ChannelRate* channel_rates [[buffer(9)]],                          \
+  constant AcStrategyBatchParams& params [[buffer(10)]],                    \
+  uint tid [[thread_index_in_threadgroup]],                                \
+  uint lane [[thread_index_in_simdgroup]],                                 \
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],                  \
+  uint candidate_index [[threadgroup_position_in_grid]]) {                 \
+  constexpr uint Count = rows * columns;                                  \
+  const uint channel = tid / workers;                                     \
+  const uint local_tid = tid % workers;                                   \
+  const uint local_simdgroup = simdgroup_index % (workers / 32);            \
+  const uint transform_index = candidate_index * 3 + channel;              \
+  threadgroup float coefficients[3 * Count];                              \
+  threadgroup float residual[3 * Count];                                  \
+  threadgroup float magnitude[3 * Count];                                 \
+  threadgroup uint nonzero[3 * Count];                                    \
+  threadgroup float vertical[3 * rows * rows];                            \
+  threadgroup float horizontal[3 * columns * columns];                    \
+  AcStrategyForwardRectangularDct<rows, columns, true>(                    \
+    opsin_x, opsin_y, opsin_b, candidates, coefficients, quant_field,      \
+    quant_norm, params, vertical_basis, horizontal_basis,                  \
+    kForwardDct16x8Scale, residual + channel * Count,                       \
+    vertical + channel * rows * rows,                                     \
+    horizontal + channel * columns * columns, lane, 32, local_simdgroup,   \
+    uint3(transform_index, 0, 0));                                        \
+  threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup); \
+  ComputeAcStrategyResidualCompact<Count, workers, true>(                  \
+    coefficients, matrices, candidates, quant_field, quant_norm,          \
+    residual + channel * Count, channel_rates, params,                    \
+    magnitude + channel * Count, nonzero + channel * Count, 0, local_tid, \
+    uint3(transform_index, 0, 0));                                        \
+  AcStrategyInverseRectangularDct<rows, columns, workers>(                 \
+    residual + channel * Count, magnitude + channel * Count,              \
+    vertical_basis, horizontal_basis, kInverseDct16x8Scale,                \
+    vertical + channel * rows * rows,                                    \
+    horizontal + channel * columns * columns, local_tid, local_simdgroup, \
+    uint3(0));                                                           \
+  AcStrategyReduceInverseLoss<Count, workers>(                             \
+    magnitude + channel * Count, pixel_mask, candidates, loss_sums,        \
+    params, local_tid, transform_index);                                  \
+}
+
+GJXL_AC_RECTANGULAR_CANDIDATE_LOSS_KERNEL(
+  gjxl_ac_strategy_dct16x8_candidate_loss_parallel,
+  16, 8, kOrthonormalDct16, kOrthonormalDct8, 64)
+GJXL_AC_RECTANGULAR_CANDIDATE_LOSS_KERNEL(
+  gjxl_ac_strategy_dct8x16_candidate_loss_parallel,
+  8, 16, kOrthonormalDct8, kOrthonormalDct16, 32)
+
+#undef GJXL_AC_RECTANGULAR_CANDIDATE_LOSS_KERNEL
 
 kernel void gjxl_ac_strategy_cost_from_loss(
   device const float* loss_sums [[buffer(0)]],

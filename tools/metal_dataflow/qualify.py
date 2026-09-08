@@ -30,6 +30,8 @@ def main():
     )
     parser.add_argument("--hardware-aware", action="store_true",
                         help="Qualify the follow-up reduction, filter, Malta and EPF fusion kernels")
+    parser.add_argument("--ac-candidate", action="store_true",
+                        help="Qualify the small rectangular whole-candidate AC kernels")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     out = args.output.resolve()
@@ -165,7 +167,7 @@ def main():
             and "56 forward/inverse image pairs agree bitwise" not in result
         ) or (name == "epf" and json.loads(result)["bitwise_cases"] != count):
             raise RuntimeError("Incomplete guarded probe")
-    if args.hardware_aware:
+    if args.hardware_aware or args.ac_candidate:
         validation = {
             "MTL_DEBUG_LAYER": "1",
             "MTL_DEBUG_LAYER_ERROR_MODE": "assert",
@@ -174,6 +176,23 @@ def main():
             "MTL_SHADER_VALIDATION_REPORT_TO_STDERR": "1",
             "MTL_SHADER_VALIDATION_ABORT_ON_FAULT": "1",
         }
+    if args.ac_candidate:
+        for suffix, environment in [("", None), ("-metal-validation", validation)]:
+            result = run("ac-candidate" + suffix,
+                [candidate / "gjxl_metal_ac_candidate_probe", *libraries],
+                environment=environment)
+            lines = [json.loads(line) for line in result.splitlines() if line.startswith("{")]
+            if (len(lines) != 3 or lines[-1] !=
+                    {"cases": 320, "bitwise": True, "guards": True} or
+                    {line["rows"] for line in lines[:-1]} != {8, 16}):
+                raise RuntimeError("Incomplete AC candidate probe")
+        run("ac-psycho-metal-validation-tests", [
+            "ctest", "--test-dir", candidate, "--output-on-failure", "--no-tests=error",
+            "--parallel", "1", "-R",
+            "^(metal_ac_strategy|metal_ac_strategy_search|metal_butteraugli|metal_aq_evaluation|"
+            "metal_aq_postprocess|metal_quantization_pipeline|metal_completed_frame|encoding_benchmark_cli)$",
+        ], environment=validation)
+    if args.hardware_aware:
         probes = [
             ("reduction", "butteraugli_reduction", [], 990),
             ("filter", "butteraugli_filter", [], 180),
@@ -224,6 +243,8 @@ def main():
             "conformance_per_revision": 22,
             "hardware_aware_cases": 1578 if args.hardware_aware else 0,
             "hardware_aware_validation_cases": 1578 if args.hardware_aware else 0,
+            "ac_candidate_cases": 320 if args.ac_candidate else 0,
+            "ac_candidate_validation_cases": 320 if args.ac_candidate else 0,
         },
     )
 

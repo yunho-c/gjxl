@@ -287,11 +287,24 @@ bool CheckSubmissionStorage(gjxl::GpuBackend& gpu,
           stage.group_id != kAcStrategyProfileGroupId ||
           stage.dispatches.size() < 2 || stage.dispatches.size() > 5)
         return false;
-      if (stage.dispatches.size() == 2 &&
-          (stage.dispatches.front().kernel_id !=
-             "gjxl_ac_strategy_dct16_candidate_loss_parallel" ||
-           stage.dispatches.back().kernel_id !=
-             "gjxl_ac_strategy_cost_from_loss")) return false;
+      if (stage.dispatches.size() == 2) {
+        const char* expected_kernel = nullptr;
+        switch (batch.strategy) {
+          case AcStrategyType::kDct16x16:
+            expected_kernel = "gjxl_ac_strategy_dct16_candidate_loss_parallel";
+            break;
+          case AcStrategyType::kDct16x8:
+            expected_kernel = "gjxl_ac_strategy_dct16x8_candidate_loss_parallel";
+            break;
+          case AcStrategyType::kDct8x16:
+            expected_kernel = "gjxl_ac_strategy_dct8x16_candidate_loss_parallel";
+            break;
+          default: return false;
+        }
+        if (stage.dispatches.front().kernel_id != expected_kernel ||
+            stage.dispatches.back().kernel_id !=
+              "gjxl_ac_strategy_cost_from_loss") return false;
+      }
       dispatches += stage.dispatches.size();
     }
     if (dispatches > plan.maximum_dispatches) return false;

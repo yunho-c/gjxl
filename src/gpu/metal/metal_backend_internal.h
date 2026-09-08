@@ -178,6 +178,7 @@ struct AcStrategyPipelines {
     NS::SharedPtr<MTL::ComputePipelineState> candidate_loss;
     NS::UInteger forward_threads_per_threadgroup = 0;
     NS::UInteger residual_inverse_threads_per_threadgroup = 0;
+    NS::UInteger candidate_loss_threads_per_threadgroup = 0;
     bool reduces_loss = false;
   };
 

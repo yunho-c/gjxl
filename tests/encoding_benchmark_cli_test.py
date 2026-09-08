@@ -488,11 +488,16 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
             kernel_ids = {
                 dispatch["kernel_id"] for dispatch in stage["dispatches"]
             }
-            if "gjxl_ac_strategy_dct16_candidate_loss_parallel" in kernel_ids:
-                self.assertEqual(stage["stage_id"], "frontend.ac_strategy.dct16")
+            candidate_kernel = next((kernel for kernel in kernel_ids
+                                     if kernel.endswith("_candidate_loss_parallel")), None)
+            if candidate_kernel:
+                shape = stage["stage_id"].removeprefix("frontend.ac_strategy.")
+                self.assertIn(shape, ("dct16", "dct16x8", "dct8x16"))
+                self.assertEqual(candidate_kernel,
+                                 f"gjxl_ac_strategy_{shape}_candidate_loss_parallel")
                 self.assertEqual(len(stage["dispatches"]), 2)
                 self.assertEqual(kernel_ids, {
-                    "gjxl_ac_strategy_dct16_candidate_loss_parallel",
+                    candidate_kernel,
                     "gjxl_ac_strategy_cost_from_loss",
                 })
                 continue
@@ -577,12 +582,17 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                         dispatch["kernel_id"]
                         for dispatch in stage["dispatches"]
                     }
-                    if "gjxl_ac_strategy_dct16_candidate_loss_parallel" in kernel_ids:
+                    candidate_kernel = next((kernel for kernel in kernel_ids
+                        if kernel.endswith("_candidate_loss_parallel")), None)
+                    if candidate_kernel:
                         self.assertEqual(mode, "fused-tuned")
-                        self.assertEqual(stage["stage_id"], "frontend.ac_strategy.dct16")
+                        shape = stage["stage_id"].removeprefix("frontend.ac_strategy.")
+                        self.assertIn(shape, ("dct16", "dct16x8", "dct8x16"))
+                        self.assertEqual(candidate_kernel,
+                            f"gjxl_ac_strategy_{shape}_candidate_loss_parallel")
                         self.assertEqual(len(stage["dispatches"]), 2)
                         self.assertEqual(kernel_ids, {
-                            "gjxl_ac_strategy_dct16_candidate_loss_parallel",
+                            candidate_kernel,
                             "gjxl_ac_strategy_cost_from_loss",
                         })
                         continue
