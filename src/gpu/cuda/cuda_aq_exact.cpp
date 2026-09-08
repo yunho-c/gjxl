@@ -955,17 +955,19 @@ class CudaPreparedExactAqEvaluation final : public PreparedAqEvaluation {
       const size_t group_y = anchor.block_y / kVarDctAcGroupBlockDimension;
       const size_t group_index =
           group_y * frame.ac_group_extent().width + group_x;
-      VarDctAcGroupView group;
-      Status status = frame.GetAcGroup(group_index, &group);
+      VarDctNativeAcGroupView native;
+      Status status = frame.GetNativeAcGroup(group_index, &native);
       if (!status.ok()) return status;
+      const size_t used = std::visit(
+          [](const auto &group) { return group.used_coefficient_count; },
+          native);
       const CudaAqExactBatch& batch = batches_[anchor.batch_index];
       const size_t source_offset = group_offsets_[group_index];
       const size_t channel_stride =
           static_cast<size_t>(batch.anchor_count) * batch.coefficient_count;
       if (batch.coefficient_count != info->coefficient_count() ||
-          source_offset > group.used_coefficient_count ||
-          batch.coefficient_count >
-              group.used_coefficient_count - source_offset) {
+          source_offset > used ||
+          batch.coefficient_count > used - source_offset) {
         return Status::InvalidArgument(
             "CUDA exact AQ coefficient group layout is inconsistent");
       }
@@ -981,16 +983,20 @@ class CudaPreparedExactAqEvaluation final : public PreparedAqEvaluation {
                 : (channel == 2 ? QuantizationMatrixMultiplier(
                                       options_.profile.b_qm_scale)
                                 : 1.0f);
-        status = DequantizeAcBlock(
-            anchor.strategy, frame.quantizer(),
-            input.raw_quant_field.Row(anchor.block_y)[anchor.block_x],
-            {.channel = kChannels[channel],
-             .matrix_multiplier = matrix_multiplier},
-            std::span<const int32_t>(
-                group.coefficients[channel].data() + source_offset,
-                batch.coefficient_count),
-            std::span<float>(coefficient_staging_.data() + destination_offset,
-                             batch.coefficient_count));
+        status = std::visit(
+            [&](const auto &group) {
+              return DequantizeAcBlock(
+                  anchor.strategy, frame.quantizer(),
+                  input.raw_quant_field.Row(anchor.block_y)[anchor.block_x],
+                  {.channel = kChannels[channel],
+                   .matrix_multiplier = matrix_multiplier},
+                  group.coefficients[channel].subspan(source_offset,
+                                                      batch.coefficient_count),
+                  std::span<float>(coefficient_staging_.data() +
+                                       destination_offset,
+                                   batch.coefficient_count));
+            },
+            native);
         if (!status.ok()) return status;
       }
 
@@ -1041,10 +1047,13 @@ class CudaPreparedExactAqEvaluation final : public PreparedAqEvaluation {
     }
     for (size_t group_index = 0; group_index < group_offsets_.size();
          ++group_index) {
-      VarDctAcGroupView group;
-      Status status = frame.GetAcGroup(group_index, &group);
+      VarDctNativeAcGroupView native;
+      Status status = frame.GetNativeAcGroup(group_index, &native);
       if (!status.ok()) return status;
-      if (group_offsets_[group_index] != group.used_coefficient_count) {
+      if (group_offsets_[group_index] !=
+          std::visit(
+              [](const auto &group) { return group.used_coefficient_count; },
+              native)) {
         return Status::InvalidArgument(
             "CUDA exact AQ coefficient group has unconsumed values");
       }

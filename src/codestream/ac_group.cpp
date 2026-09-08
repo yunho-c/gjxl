@@ -164,9 +164,10 @@ Status FinalAcContextFromBlockValidated(const SimpleBlockContextMap& map,
   return Status::Ok();
 }
 
-Status ValidateAndCollectAnchors(const VarDctAcGroupView& group,
-                                 const AcStrategyGrid& strategies,
-                                 std::vector<StrategyAnchor>* anchors) {
+template <typename Group>
+Status ValidateAndCollectAnchors(const Group &group,
+                                 const AcStrategyGrid &strategies,
+                                 std::vector<StrategyAnchor> *anchors) {
   size_t block_count = 0;
   if (!strategies.valid()
       || !IsValidGroupExtent(group.block_extent, &block_count)
@@ -177,7 +178,7 @@ Status ValidateAndCollectAnchors(const VarDctAcGroupView& group,
       || group.used_coefficient_count == 0) {
     return Status::InvalidArgument("AC-group view is invalid");
   }
-  for (std::span<const int32_t> coefficients : group.coefficients) {
+  for (const auto coefficients : group.coefficients) {
     if (coefficients.size() < group.used_coefficient_count) {
       return Status::InvalidArgument("AC-group coefficient span is too short");
     }
@@ -247,14 +248,15 @@ Status ValidateAndCollectAnchors(const VarDctAcGroupView& group,
   return Status::Ok();
 }
 
-int32_t CountNonzerosExceptLlf(std::span<const int32_t> coefficients,
-                               const AcStrategyInfo& info) {
+template <typename T>
+int32_t CountNonzerosExceptLlf(std::span<const T> coefficients,
+                               const AcStrategyInfo &info) {
   const Extent2D coefficient_extent = info.coefficient_extent();
   const Extent2D llf_extent = info.low_frequency_extent();
   // Validated production transforms have at most 1024 coefficients. Count
   // the contiguous plane first so the reduction can vectorize, then remove
   // the small LLF rectangle (at most 16 entries). All sums fit int32_t.
-  const int32_t* const data = coefficients.data();
+  const T *const data = coefficients.data();
   const size_t count = info.coefficient_count();
   int32_t nonzeros = 0;
   for (size_t index = 0; index < count; ++index) {
@@ -379,12 +381,12 @@ Status ComputeSimpleNaturalCoefficientOrder(AcStrategyType strategy,
 
 namespace {
 
+template <typename Group>
 Status BuildSimpleAcGroupTokenTemplateValidated(
-  const VarDctAcGroupView& group,
-  const AcStrategyGrid& strategies,
-  const SimpleCoefficientOrders& coefficient_orders,
-  ConstPlaneI32View raw_quant_field,
-  SimpleAcGroupTokenTemplate* token_template) {
+    const Group &group, const AcStrategyGrid &strategies,
+    const SimpleCoefficientOrders &coefficient_orders,
+    ConstPlaneI32View raw_quant_field,
+    SimpleAcGroupTokenTemplate *token_template) {
   if (token_template == nullptr) {
     return Status::InvalidArgument("AC-group token-template output is null");
   }
@@ -461,9 +463,8 @@ Status BuildSimpleAcGroupTokenTemplateValidated(
           return Status::InvalidArgument(
             "Coefficient order does not match its AC strategy");
         }
-        const std::span<const int32_t> coefficients =
-          group.coefficients[channel].subspan(source_offset,
-                                              anchor.coefficient_count);
+        const auto coefficients = group.coefficients[channel].subspan(
+            source_offset, anchor.coefficient_count);
         int32_t nonzeros = CountNonzerosExceptLlf(coefficients, *info);
         const uint8_t scaled_nonzeros = static_cast<uint8_t>(
           (nonzeros + static_cast<int32_t>(covered_blocks) - 1)
@@ -630,16 +631,15 @@ AcTokenError AppendDirectAcToken(
   return AcTokenError::kNone;
 }
 
+template <typename Group>
 Status TokenizeSimpleAcGroupDirectValidated(
-  const VarDctAcGroupView& group,
-  const AcStrategyGrid& strategies,
-  const SimpleCoefficientOrders& coefficient_orders,
-  const codestream_internal::SimpleAcNaturalOrders& natural_orders,
-  const SimpleBlockContextMap& block_context_map,
-  ConstPlaneI32View raw_quant_field,
-  bool collect_fixed_populations,
-  codestream_internal::SimpleAcTokenizationScratch* scratch,
-  codestream_internal::SimpleAcGroupTokenData* output) {
+    const Group &group, const AcStrategyGrid &strategies,
+    const SimpleCoefficientOrders &coefficient_orders,
+    const codestream_internal::SimpleAcNaturalOrders &natural_orders,
+    const SimpleBlockContextMap &block_context_map,
+    ConstPlaneI32View raw_quant_field, bool collect_fixed_populations,
+    codestream_internal::SimpleAcTokenizationScratch *scratch,
+    codestream_internal::SimpleAcGroupTokenData *output) {
 
   if (scratch == nullptr || output == nullptr) {
     return Status::InvalidArgument("AC direct-token output is null");
@@ -719,8 +719,7 @@ Status TokenizeSimpleAcGroupDirectValidated(
           return Status::InvalidArgument(
             "Coefficient order does not match its AC strategy");
         }
-        const std::span<const int32_t> coefficients =
-          group.coefficients[channel].subspan(
+        const auto coefficients = group.coefficients[channel].subspan(
             source_offset, anchor.coefficient_count);
         int32_t nonzeros = CountNonzerosExceptLlf(coefficients, *info);
         const uint8_t scaled_nonzeros = static_cast<uint8_t>(
@@ -980,15 +979,19 @@ Status BuildSimpleAcGroupTokenTemplates(
     candidate.reserve(frame.ac_group_count());
     for (size_t group_index = 0; group_index < frame.ac_group_count();
          ++group_index) {
-      VarDctAcGroupView group;
-      status = frame.GetAcGroup(group_index, &group);
+      VarDctNativeAcGroupView native;
+      status = frame.GetNativeAcGroup(group_index, &native);
       if (!status.ok()) {
         return status;
       }
       SimpleAcGroupTokenTemplate token_template;
-      status = BuildSimpleAcGroupTokenTemplateValidated(
-        group, frame.strategies(), orders, frame.raw_quant_field(),
-        &token_template);
+      status = std::visit(
+          [&](const auto &group) {
+            return BuildSimpleAcGroupTokenTemplateValidated(
+                group, frame.strategies(), orders, frame.raw_quant_field(),
+                &token_template);
+          },
+          native);
       if (!status.ok()) {
         return status;
       }
@@ -1124,15 +1127,19 @@ Status codestream_internal::TokenizeSimpleAcGroupForEncoder(
   if (scratch == nullptr || group == nullptr) {
     return Status::InvalidArgument("AC direct-token output is null");
   }
-  VarDctAcGroupView group_view;
-  if (Status status = frame.GetAcGroup(group_index, &group_view);
+  VarDctNativeAcGroupView native;
+  if (Status status = frame.GetNativeAcGroup(group_index, &native);
       !status.ok()) {
     return status;
   }
-  return TokenizeSimpleAcGroupDirectValidated(
-    group_view, frame.strategies(), orders, natural_orders,
-    block_context_map, frame.raw_quant_field(), collect_fixed_populations,
-    scratch, group);
+  return std::visit(
+      [&](const auto &group_view) {
+        return TokenizeSimpleAcGroupDirectValidated(
+            group_view, frame.strategies(), orders, natural_orders,
+            block_context_map, frame.raw_quant_field(),
+            collect_fixed_populations, scratch, group);
+      },
+      native);
 }
 
 Status codestream_internal::BuildSimpleAcGroupTokenTemplateForEncoder(
@@ -1144,13 +1151,18 @@ Status codestream_internal::BuildSimpleAcGroupTokenTemplateForEncoder(
   if (group == nullptr) {
     return Status::InvalidArgument("AC-group token-template output is null");
   }
-  VarDctAcGroupView group_view;
-  if (Status status = frame.GetAcGroup(group_index, &group_view);
+  VarDctNativeAcGroupView native;
+  if (Status status = frame.GetNativeAcGroup(group_index, &native);
       !status.ok()) {
     return status;
   }
-  return BuildSimpleAcGroupTokenTemplateValidated(
-    group_view, frame.strategies(), orders, frame.raw_quant_field(), group);
+  return std::visit(
+      [&](const auto &group_view) {
+        return BuildSimpleAcGroupTokenTemplateValidated(
+            group_view, frame.strategies(), orders, frame.raw_quant_field(),
+            group);
+      },
+      native);
 }
 
 Status codestream_internal::MaterializeSimpleAcGroupContextsForEncoder(

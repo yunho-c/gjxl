@@ -24,7 +24,7 @@ struct QuantizedAcTransformLayout {
 inline constexpr int32_t kUnwrittenQuantizedCoefficient =
   static_cast<int32_t>(0x81234567u);
 
-struct QuantizedFrameAssemblyInput {
+template <typename T> struct QuantizedFrameAssemblyInputT {
   FrameGeometry geometry;
   const AcStrategyGrid* strategies = nullptr;
   ConstPlaneI32View raw_quant_field;
@@ -34,13 +34,13 @@ struct QuantizedFrameAssemblyInput {
   ConstPlaneU8View epf_sharpness;
   SimpleVarDctCodestreamProfile profile;
   ConstImage3I32View quantized_dc;
-  std::span<const int32_t> quantized_ac;
+  std::span<const T> quantized_ac;
   std::span<const QuantizedAcTransformLayout> transforms;
   bool reject_unwritten_coefficients = false;
   /// Optional final-layout storage matching quantized_ac exactly. Transforms
   /// must name their final group/channel offsets and unused tails must be zero.
   /// Consumed only on success; both this storage and out are unchanged on failure.
-  OverwriteArray<int32_t>* ac_group_storage = nullptr;
+  OverwriteArray<T> *ac_group_storage = nullptr;
   /// Optional exact population result from the internal coefficient producer.
   /// Copied, never borrowed. Shape/bounds are checked; equality to quantized_ac
   /// is a producer invariant, just like the supplied quantized DC/AC decisions.
@@ -50,5 +50,11 @@ struct QuantizedFrameAssemblyInput {
 [[nodiscard]] Status AssembleVarDctEncoderFrame(
   QuantizedFrameAssemblyInput input,
   VarDctEncoderFrame* out);
+[[nodiscard]] Status
+AssembleVarDctEncoderFrame(QuantizedFrameAssemblyInputT<int8_t> input,
+                           VarDctEncoderFrame *out);
+[[nodiscard]] Status
+AssembleVarDctEncoderFrame(QuantizedFrameAssemblyInputT<int16_t> input,
+                           VarDctEncoderFrame *out);
 
 }  // namespace gjxl::vardct_frame_internal

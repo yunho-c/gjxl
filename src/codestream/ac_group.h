@@ -21,7 +21,8 @@ namespace gjxl {
 class VarDctEncoderFrame;
 struct SimpleBlockContextMap;
 struct SimpleCoefficientOrders;
-struct VarDctAcGroupView;
+template <typename T> struct VarDctAcGroupViewT;
+using VarDctAcGroupView = VarDctAcGroupViewT<int32_t>;
 
 inline constexpr size_t kSimpleAcContextCount = 1980;
 

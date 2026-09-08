@@ -19,8 +19,8 @@
 #include <utility>
 #include <vector>
 
-#include "codec/chroma_from_luma_internal.h"
 #include "codec/adaptive_quantization_internal.h"
+#include "codec/chroma_from_luma_internal.h"
 #include "codec/codestream.h"
 #include "codec/gaborish_internal.h"
 #include "codec/quantization_tables_generated.h"
@@ -28,12 +28,13 @@
 #include "core/ac_strategy.h"
 #include "core/frame_geometry.h"
 #include "core/quantizer.h"
-#include "gpu/cuda/cuda_aq_exact_kernels.h"
 #include "gpu/cuda/cuda_ac_group_kernels.h"
-#include "gpu/cuda/cuda_coefficient_order_kernels.h"
+#include "gpu/cuda/cuda_aq_exact_kernels.h"
 #include "gpu/cuda/cuda_aq_resident_kernels.h"
 #include "gpu/cuda/cuda_backend_internal.h"
 #include "gpu/cuda/cuda_butteraugli_internal.h"
+#include "gpu/cuda/cuda_coefficient_order_kernels.h"
+#include "gpu/cuda/cuda_compact_ac_kernels.h"
 #include "gpu/cuda/cuda_kernels.h"
 #include "gpu/ops/aq_evaluation_internal.h"
 #include "gpu/scratch.h"
@@ -411,7 +412,9 @@ class CudaPreparedResidentAqEvaluation final
       raw_readback_.resize(block_count_);
       // Readback fills active coefficients; only unused tails are cleared.
       // Successful frame assembly takes ownership without copying the array.
+#if !defined(GJXL_CUDA_COMPACT_AC)
       quantized_readback_.ResetForOverwrite(ac_storage_count_);
+#endif
       quantized_dc_readback_.resize(3 * block_count_);
       y_to_x_readback_.resize(tile_count_);
       y_to_b_readback_.resize(tile_count_);
@@ -754,6 +757,7 @@ class CudaPreparedResidentAqEvaluation final
     status = UploadPlane(*backend_, input.quant_field, quant_field_device_);
     if (!status.ok()) return Invalidate(status);
 
+    compact_active_ = false;
     EvaluationContext context{this, input.quant_dc,
                               !forward_coefficients_ready_,
                               color_correlation_pending_, true,
@@ -994,6 +998,16 @@ class CudaPreparedResidentAqEvaluation final
       if (!status.ok()) return Invalidate(status);
     }
 
+    compact_active_ = false;
+#if defined(GJXL_CUDA_COMPACT_AC)
+    compact_active_ =
+        output.frame != nullptr && coefficient_count_ >= 8 &&
+        coefficient_count_ % 8 == 0 &&
+        coefficient_count_ <= std::numeric_limits<uint32_t>::max() &&
+        (coefficient_count_ / 4 + 255) / 256 <=
+            backend_->state_->maximum_grid_x;
+#endif
+    compact_flags_ = 3;
     PolicyContext context{this, input, score_count,
                           !forward_coefficients_ready_,
                           color_correlation_pending_, output.frame != nullptr};
@@ -1013,7 +1027,7 @@ class CudaPreparedResidentAqEvaluation final
     status = ReadAndCheckDeviceError();
     if (!status.ok()) return Invalidate(status);
 
-    std::array<CudaDeviceToHostCopy, 3> policy_readbacks{{
+    std::array<CudaDeviceToHostCopy, 4> policy_readbacks{{
         {policy_scores_device_.buffer, policy_score_readback_.data(),
          score_count * sizeof(float), policy_scores_device_.offset_bytes},
     }};
@@ -1028,11 +1042,20 @@ class CudaPreparedResidentAqEvaluation final
           block_device_.buffer, block_readback_.data(),
           block_count_ * sizeof(float), block_device_.offset_bytes};
     }
+    if (compact_active_) {
+      policy_readbacks[policy_readback_count++] = {
+          quantized_device_.buffer, &compact_flags_, sizeof(compact_flags_),
+          quantized_device_.offset_bytes + 3 * coefficient_count_};
+    }
     status = backend_->CopyDeviceToHostBatch(
         std::span<const CudaDeviceToHostCopy>(policy_readbacks).first(
           policy_readback_count));
     if (!status.ok()) return Invalidate(status);
 
+    if (compact_flags_ > 3 || compact_flags_ == 2) {
+      return Invalidate(
+          Status::DeviceError("CUDA compact AC width flags are invalid"));
+    }
     for (size_t index = 0; index < score_count; ++index) {
       const float score = policy_score_readback_[index];
       if (!std::isfinite(score) || score < 0.0f) {
@@ -2118,10 +2141,25 @@ class CudaPreparedResidentAqEvaluation final
   }
 
   Status AssembleFrame(const Quantizer& quantizer, VarDctEncoderFrame* frame) {
-    Status status = PrepareCoefficientReadback();
-    if (!status.ok()) return status;
+    if (compact_active_ && (compact_flags_ & 1u) == 0)
+      return AssembleTypedFrame(quantizer, frame, compact_readback_i8_);
+    if (compact_active_ && (compact_flags_ & 2u) == 0)
+      return AssembleTypedFrame(quantizer, frame, compact_readback_i16_);
+    return AssembleTypedFrame(quantizer, frame, quantized_readback_);
+  }
+
+  template <typename T>
+  Status AssembleTypedFrame(const Quantizer &quantizer,
+                            VarDctEncoderFrame *frame,
+                            OverwriteArray<T> &owner) {
+    const DevicePlaneView source = sizeof(T) == 4
+                                       ? reconstruction_coefficients_device_
+                                       : quantized_device_;
+    const size_t payload_offset = sizeof(T) == 2 ? coefficient_count_ : 0;
     std::vector<CudaDeviceToHostCopy> readbacks;
     try {
+      if (owner.size() != ac_storage_count_)
+        owner.ResetForOverwrite(ac_storage_count_);
       readbacks.reserve(5 + ac_readback_runs_.size());
       if (NeedsOrderPopulation()) {
         readbacks.push_back({order_population_device_.buffer,
@@ -2130,18 +2168,19 @@ class CudaPreparedResidentAqEvaluation final
           order_population_device_.offset_bytes});
       }
       for (const AcReadbackRun& run : ac_readback_runs_) {
-        int32_t* destination = quantized_readback_.data() + run.group_offset;
+        T *destination = owner.data() + run.group_offset;
         if (run.row_values != kVarDctAcGroupCoefficientCapacity) {
           for (size_t row = 0; row < run.rows; ++row) {
             std::fill_n(destination + row * kVarDctAcGroupCoefficientCapacity +
                 run.row_values, kVarDctAcGroupCoefficientCapacity - run.row_values, 0);
           }
         }
-        readbacks.push_back({reconstruction_coefficients_device_.buffer, destination,
-            run.row_values * sizeof(int32_t),
-            reconstruction_coefficients_device_.offset_bytes + run.packed_offset * sizeof(int32_t),
-            run.rows, run.row_values * sizeof(int32_t),
-            kVarDctAcGroupCoefficientCapacity * sizeof(int32_t)});
+        readbacks.push_back({source.buffer, destination,
+                             run.row_values * sizeof(T),
+                             source.offset_bytes + payload_offset +
+                                 run.packed_offset * sizeof(T),
+                             run.rows, run.row_values * sizeof(T),
+                             kVarDctAcGroupCoefficientCapacity * sizeof(T)});
       }
       readbacks.insert(readbacks.end(), {
         {raw_quant_device_.buffer, raw_readback_.data(),
@@ -2159,7 +2198,7 @@ class CudaPreparedResidentAqEvaluation final
     } catch (const std::length_error&) {
       return Status::InvalidArgument("CUDA resident AC copy descriptors are too large");
     }
-    status = backend_->CopyDeviceToHostBatch(readbacks);
+    Status status = backend_->CopyDeviceToHostBatch(readbacks);
     if (!status.ok()) return status;
     if (!std::ranges::all_of(raw_readback_, [](int32_t value) {
           return value >= 1 && value <= kMaxRawQuant;
@@ -2178,23 +2217,26 @@ class CudaPreparedResidentAqEvaluation final
     quantized_dc.plane[2] = {quantized_dc_readback_.data() + 2 * block_count_,
                              block_extent_, block_extent_.width};
     return vardct_frame_internal::AssembleVarDctEncoderFrame(
-        {.geometry = geometry,
-         .strategies = &strategies_,
-         .raw_quant_field = {raw_readback_.data(), block_extent_,
-                             block_extent_.width},
-         .quantizer = &quantizer,
-         .y_to_x = {y_to_x_readback_.data(), tile_extent_, tile_extent_.width},
-         .y_to_b = {y_to_b_readback_.data(), tile_extent_, tile_extent_.width},
-         .epf_sharpness = {epf_sharpness_.data(), block_extent_,
-                           block_extent_.width},
-         .profile = options_.profile,
-         .quantized_dc = quantized_dc,
-         .quantized_ac = {quantized_readback_.data(), ac_storage_count_},
-         .transforms = layouts_,
-         .reject_unwritten_coefficients = true,
-         .ac_group_storage = &quantized_readback_,
-         .coefficient_order_population = NeedsOrderPopulation()
-           ? &order_population_readback_ : nullptr},
+        vardct_frame_internal::QuantizedFrameAssemblyInputT<T>{
+            .geometry = geometry,
+            .strategies = &strategies_,
+            .raw_quant_field = {raw_readback_.data(), block_extent_,
+                                block_extent_.width},
+            .quantizer = &quantizer,
+            .y_to_x = {y_to_x_readback_.data(), tile_extent_,
+                       tile_extent_.width},
+            .y_to_b = {y_to_b_readback_.data(), tile_extent_,
+                       tile_extent_.width},
+            .epf_sharpness = {epf_sharpness_.data(), block_extent_,
+                              block_extent_.width},
+            .profile = options_.profile,
+            .quantized_dc = quantized_dc,
+            .quantized_ac = {owner.data(), ac_storage_count_},
+            .transforms = layouts_,
+            .reject_unwritten_coefficients = true,
+            .ac_group_storage = &owner,
+            .coefficient_order_population =
+                NeedsOrderPopulation() ? &order_population_readback_ : nullptr},
         frame);
   }
 
@@ -2520,6 +2562,24 @@ class CudaPreparedResidentAqEvaluation final
           static_cast<uint32_t>(self.block_extent_.height), backend.state_->stream);
       if (status != cudaSuccess) return status;
     }
+    if (self.compact_active_) {
+      // Quantized source batches and population consumers are finished. Reuse
+      // their allocation for byte[N], word[2N], flags[4], keeping packed int32
+      // coefficients intact for overflow fallback. N is 8-aligned and >= 8.
+      auto *scratch = Pointer<uint8_t>(self.quantized_device_);
+      auto *flags =
+          reinterpret_cast<uint32_t *>(scratch + 3 * self.coefficient_count_);
+      cudaError_t status =
+          cudaMemsetAsync(flags, 0, sizeof(uint32_t), backend.state_->stream);
+      if (status != cudaSuccess)
+        return status;
+      return LaunchCudaCompactAc(
+          Pointer<const int32_t>(self.reconstruction_coefficients_device_),
+          static_cast<uint32_t>(self.coefficient_count_),
+          reinterpret_cast<uint32_t *>(scratch),
+          reinterpret_cast<uint32_t *>(scratch + self.coefficient_count_),
+          flags, backend.state_->stream);
+    }
     return cudaSuccess;
   }
 
@@ -2838,6 +2898,10 @@ class CudaPreparedResidentAqEvaluation final
   std::vector<float> maximum_readback_;
   std::vector<int32_t> raw_readback_;
   OverwriteArray<int32_t> quantized_readback_;
+  OverwriteArray<int8_t> compact_readback_i8_;
+  OverwriteArray<int16_t> compact_readback_i16_;
+  bool compact_active_ = false;
+  uint32_t compact_flags_ = 3;
   vardct_frame_internal::CoefficientOrderPopulation order_population_readback_;
   std::vector<int32_t> quantized_dc_readback_;
   std::vector<int8_t> y_to_x_readback_;

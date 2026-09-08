@@ -100,4 +100,17 @@ struct AdjustedAcQuantization {
   std::span<const int32_t> quantized,
   std::span<float> coefficients);
 
+[[nodiscard]] Status DequantizeAcBlock(AcStrategyType strategy,
+                                       const Quantizer &quantizer,
+                                       int32_t raw_quant,
+                                       AcQuantizationOptions options,
+                                       std::span<const int8_t> quantized,
+                                       std::span<float> coefficients);
+[[nodiscard]] Status DequantizeAcBlock(AcStrategyType strategy,
+                                       const Quantizer &quantizer,
+                                       int32_t raw_quant,
+                                       AcQuantizationOptions options,
+                                       std::span<const int16_t> quantized,
+                                       std::span<float> coefficients);
+
 }  // namespace gjxl

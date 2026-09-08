@@ -152,6 +152,10 @@ void AccumulateEncodingProfile(
 
   destination->peak_cpu_participants = std::max(
     destination->peak_cpu_participants, source.peak_cpu_participants);
+  if (source.ac_storage_bytes > destination->ac_storage_bytes) {
+    destination->ac_storage_bytes = source.ac_storage_bytes;
+    destination->ac_coefficient_bytes = source.ac_coefficient_bytes;
+  }
   destination->backend_selection_nanoseconds +=
     source.backend_selection_nanoseconds;
   destination->quantization_pipeline_nanoseconds +=
@@ -891,6 +895,13 @@ struct PreparedWorkflow {
   ProfileEnd(
     profile, pipeline_begin,
     &candidate_profile.quantization_pipeline_nanoseconds);
+
+  if (profile != nullptr) {
+    const auto storage =
+        vardct_frame_internal::GetAcStorageInfo(encoding.frame);
+    candidate_profile.ac_coefficient_bytes = storage.coefficient_bytes;
+    candidate_profile.ac_storage_bytes = storage.native_bytes;
+  }
 
   std::vector<uint8_t> candidate;
   const WorkflowClock::time_point codestream_begin = ProfileBegin(profile);

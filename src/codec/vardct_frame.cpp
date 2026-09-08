@@ -8,6 +8,7 @@
 #include <limits>
 #include <new>
 #include <stdexcept>
+#include <type_traits>
 
 #include "codec/chroma_from_luma_internal.h"
 #include "codec/dct.h"
@@ -96,15 +97,37 @@ Status VarDctEncoderFrame::GetAcGroup(
   if (out == nullptr) {
     return Status::InvalidArgument("VarDCT AC-group output is null");
   }
+  VarDctNativeAcGroupView native;
+  if (Status status = GetNativeAcGroup(group_index, &native); !status.ok()) {
+    return status;
+  }
+  if (const auto *dense = std::get_if<VarDctAcGroupView>(&native)) {
+    *out = *dense;
+    return Status::Ok();
+  }
+  return Status::InvalidArgument("AC group is narrow; use GetNativeAcGroup");
+}
+
+Status
+VarDctEncoderFrame::GetNativeAcGroup(size_t group_index,
+                                     VarDctNativeAcGroupView *out) const {
+
+  if (out == nullptr) {
+    return Status::InvalidArgument("VarDCT AC-group output is null");
+  }
   size_t group_count = 0;
   if (!ac_group_extent_.try_area(&group_count) ||
       group_count != group_used_coefficient_count_.size() ||
       group_index >= group_count ||
       group_count > std::numeric_limits<size_t>::max() / 3 ||
       group_count * 3 > std::numeric_limits<size_t>::max() /
-        kVarDctAcGroupCoefficientCapacity ||
-      ac_coefficients_.size() != group_count * 3 *
-        kVarDctAcGroupCoefficientCapacity) {
+                            kVarDctAcGroupCoefficientCapacity ||
+      (ac_coefficients_.size() != 0) + (ac_coefficients_i8_.size() != 0) +
+              (ac_coefficients_i16_.size() != 0) !=
+          1 ||
+      ac_coefficients_.size() + ac_coefficients_i8_.size() +
+              ac_coefficients_i16_.size() !=
+          group_count * 3 * kVarDctAcGroupCoefficientCapacity) {
     return Status::InvalidArgument("VarDCT AC-group index is invalid");
   }
 
@@ -117,20 +140,28 @@ Status VarDctEncoderFrame::GetAcGroup(
     &block_x,
     &block_y);
 
-  VarDctAcGroupView result{
-    .block_x = block_x,
-    .block_y = block_y,
-    .block_extent = block_extent,
-    .used_coefficient_count =
-      group_used_coefficient_count_[group_index],
-  };
-  for (size_t channel = 0; channel < 3; ++channel) {
-    result.coefficients[channel] = {
-      ac_coefficients_.data() + AcGroupChannelOffset(group_index, channel),
-      kVarDctAcGroupCoefficientCapacity,
+  const auto make_group = [&]<typename T>(const T *data) {
+    VarDctAcGroupViewT<T> result{
+        .block_x = block_x,
+        .block_y = block_y,
+        .block_extent = block_extent,
+        .used_coefficient_count = group_used_coefficient_count_[group_index],
     };
+    for (size_t channel = 0; channel < 3; ++channel) {
+      result.coefficients[channel] = {
+          data + AcGroupChannelOffset(group_index, channel),
+          kVarDctAcGroupCoefficientCapacity,
+      };
+    }
+    *out = result;
+  };
+  if (ac_coefficients_.size() != 0) {
+    make_group(ac_coefficients_.data());
+  } else if (ac_coefficients_i8_.size() != 0) {
+    make_group(ac_coefficients_i8_.data());
+  } else {
+    make_group(ac_coefficients_i16_.data());
   }
-  *out = result;
   return Status::Ok();
 }
 
@@ -195,9 +226,10 @@ bool VarDctEncoderFrame::valid() const {
 
   if (group_count > std::numeric_limits<size_t>::max() / 3 ||
       group_count * 3 > std::numeric_limits<size_t>::max() /
-        kVarDctAcGroupCoefficientCapacity ||
-      ac_coefficients_.size() != group_count * 3 *
-        kVarDctAcGroupCoefficientCapacity) {
+                            kVarDctAcGroupCoefficientCapacity ||
+      ac_coefficients_.size() + ac_coefficients_i8_.size() +
+              ac_coefficients_i16_.size() !=
+          group_count * 3 * kVarDctAcGroupCoefficientCapacity) {
     return false;
   }
 
@@ -219,16 +251,21 @@ bool VarDctEncoderFrame::valid() const {
     if (group_used_coefficient_count_[group_index] != expected) {
       return false;
     }
-    for (size_t channel = 0; channel < 3; ++channel) {
-      const size_t base = AcGroupChannelOffset(group_index, channel);
-      if (!std::ranges::all_of(
-            ac_coefficients_.begin() + base + expected,
-            ac_coefficients_.begin() + base +
-              kVarDctAcGroupCoefficientCapacity,
-            [](int32_t value) { return value == 0; })) {
-        return false;
-      }
-    }
+    VarDctNativeAcGroupView native;
+    if (!GetNativeAcGroup(group_index, &native).ok() ||
+        !std::visit(
+            [&](const auto &group) {
+              for (const auto coefficients : group.coefficients) {
+                if (!std::ranges::all_of(
+                        coefficients.subspan(expected),
+                        [](auto value) { return value == 0; })) {
+                  return false;
+                }
+              }
+              return true;
+            },
+            native))
+      return false;
   }
 
   const Status strategy_status = strategies_.ForEachAnchor(
@@ -254,10 +291,9 @@ bool VarDctEncoderFrame::valid() const {
 namespace vardct_frame_internal {
 namespace {
 
-bool CopyQuantizedCoefficients(
-  std::span<const int32_t> source,
-  bool reject_unwritten,
-  int32_t* destination) {
+template <typename T>
+bool CopyQuantizedCoefficients(std::span<const T> source, bool reject_unwritten,
+                               T *destination) {
 
   if (!reject_unwritten) {
     std::copy(source.begin(), source.end(), destination);
@@ -273,11 +309,10 @@ bool CopyQuantizedCoefficients(
   return found_unwritten == 0;
 }
 
-Status ValidateAssemblyInput(
-  const QuantizedFrameAssemblyInput& input,
-  size_t* block_count,
-  Extent2D* group_extent,
-  size_t* group_count) {
+template <typename T>
+Status ValidateAssemblyInput(const QuantizedFrameAssemblyInputT<T> &input,
+                             size_t *block_count, Extent2D *group_extent,
+                             size_t *group_count) {
 
   if (block_count == nullptr || group_extent == nullptr ||
       group_count == nullptr || input.strategies == nullptr ||
@@ -345,9 +380,9 @@ Status ValidateAssemblyInput(
 
 }  // namespace
 
-Status AssembleVarDctEncoderFrame(
-  QuantizedFrameAssemblyInput input,
-  VarDctEncoderFrame* out) {
+template <typename T>
+Status AssembleVarDctEncoderFrameImpl(QuantizedFrameAssemblyInputT<T> input,
+                                      VarDctEncoderFrame *out) {
 
   if (out == nullptr) {
     return Status::InvalidArgument(
@@ -365,6 +400,15 @@ Status AssembleVarDctEncoderFrame(
 
   try {
     VarDctEncoderFrame result;
+    OverwriteArray<T> *storage = nullptr;
+    if constexpr (std::is_same_v<T, int32_t>) {
+      storage = &result.ac_coefficients_;
+    } else {
+      if constexpr (std::is_same_v<T, int8_t>)
+        storage = &result.ac_coefficients_i8_;
+      else
+        storage = &result.ac_coefficients_i16_;
+    }
     result.geometry_ = input.geometry;
     result.strategies_ = *input.strategies;
     result.quantizer_ = *input.quantizer;
@@ -379,8 +423,7 @@ Status AssembleVarDctEncoderFrame(
     result.epf_sharpness_.resize(block_count);
     result.group_used_coefficient_count_.assign(group_count, 0);
     if (input.ac_group_storage == nullptr) {
-      result.ac_coefficients_.assign(
-        group_count * 3 * kVarDctAcGroupCoefficientCapacity, 0);
+      storage->assign(group_count * 3 * kVarDctAcGroupCoefficientCapacity, 0);
     }
     for (size_t channel = 0; channel < 3; ++channel) {
       result.quantized_dc_[channel].resize(block_count);
@@ -402,10 +445,10 @@ Status AssembleVarDctEncoderFrame(
         result.epf_sharpness_[index] = epf_sharpness;
       }
       for (size_t channel = 0; channel < 3; ++channel) {
-        if (!CopyQuantizedCoefficients(
-              {input.quantized_dc.plane[channel].Row(y), blocks.width},
-              input.reject_unwritten_coefficients,
-              result.quantized_dc_[channel].data() + y * blocks.width)) {
+        if (!CopyQuantizedCoefficients<int32_t>(
+                {input.quantized_dc.plane[channel].Row(y), blocks.width},
+                input.reject_unwritten_coefficients,
+                result.quantized_dc_[channel].data() + y * blocks.width)) {
           return Status::InvalidArgument(
             "Quantized VarDCT DC coefficients contain unwritten values");
         }
@@ -496,12 +539,13 @@ Status AssembleVarDctEncoderFrame(
             continue;
           }
           if (!CopyQuantizedCoefficients(
-                input.quantized_ac.subspan(
-                  transform.coefficient_offsets[channel], coefficient_count),
-                input.reject_unwritten_coefficients,
-                result.ac_coefficients_.data() +
-                  result.AcGroupChannelOffset(group_index, channel) +
-                  group_offset)) {
+                  input.quantized_ac.subspan(
+                      transform.coefficient_offsets[channel],
+                      coefficient_count),
+                  input.reject_unwritten_coefficients,
+                  storage->data() +
+                      result.AcGroupChannelOffset(group_index, channel) +
+                      group_offset)) {
             return Status::InvalidArgument(
               "Quantized VarDCT AC coefficients contain unwritten values");
           }
@@ -569,8 +613,9 @@ Status AssembleVarDctEncoderFrame(
       for (size_t group_index = 0; group_index < group_count; ++group_index) {
         const size_t used = result.group_used_coefficient_count_[group_index];
         for (size_t channel = 0; channel < 3; ++channel) {
-          const int32_t* coefficients = input.ac_group_storage->data() +
-            result.AcGroupChannelOffset(group_index, channel);
+          const T *coefficients =
+              input.ac_group_storage->data() +
+              result.AcGroupChannelOffset(group_index, channel);
           if (input.reject_unwritten_coefficients) {
             for (size_t index = 0; index < used; ++index) {
               invalid |= static_cast<uint32_t>(
@@ -587,7 +632,7 @@ Status AssembleVarDctEncoderFrame(
         return Status::InvalidArgument(
           "Quantized VarDCT owned AC coefficients or tails are invalid");
       }
-      result.ac_coefficients_ = std::move(*input.ac_group_storage);
+      *storage = std::move(*input.ac_group_storage);
     }
     *out = std::move(result);
     return Status::Ok();
@@ -603,6 +648,27 @@ Status AssembleVarDctEncoderFrame(
 const CoefficientOrderPopulation* GetCoefficientOrderPopulation(
   const VarDctEncoderFrame& frame) noexcept {
   return frame.coefficient_order_population_.get();
+}
+
+Status AssembleVarDctEncoderFrame(QuantizedFrameAssemblyInput input,
+                                  VarDctEncoderFrame *out) {
+  return AssembleVarDctEncoderFrameImpl(input, out);
+}
+Status AssembleVarDctEncoderFrame(QuantizedFrameAssemblyInputT<int8_t> input,
+                                  VarDctEncoderFrame *out) {
+  return AssembleVarDctEncoderFrameImpl(input, out);
+}
+Status AssembleVarDctEncoderFrame(QuantizedFrameAssemblyInputT<int16_t> input,
+                                  VarDctEncoderFrame *out) {
+  return AssembleVarDctEncoderFrameImpl(input, out);
+}
+
+AcStorageInfo GetAcStorageInfo(const VarDctEncoderFrame &frame) noexcept {
+  if (frame.ac_coefficients_i8_.size() != 0)
+    return {1, frame.ac_coefficients_i8_.size()};
+  if (frame.ac_coefficients_i16_.size() != 0)
+    return {2, frame.ac_coefficients_i16_.size() * sizeof(int16_t)};
+  return {4, frame.ac_coefficients_.size() * sizeof(int32_t)};
 }
 
 }  // namespace vardct_frame_internal

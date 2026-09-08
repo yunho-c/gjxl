@@ -48,6 +48,9 @@ option(
   OFF
 )
 
+option(GJXL_CUDA_COMPACT_AC
+  "Experimental native narrow AC readback for the resident CUDA policy" OFF)
+
 if(GJXL_ENABLE_METAL)
   if(NOT APPLE)
     message(FATAL_ERROR "GJXL_ENABLE_METAL requires an Apple platform")
@@ -578,6 +581,7 @@ if(GJXL_ENABLE_CUDA)
     src/gpu/cuda/cuda_ac_strategy.cpp
     src/gpu/cuda/cuda_ac_strategy_kernels.cu
     src/gpu/cuda/cuda_ac_group_kernels.cu
+    src/gpu/cuda/cuda_compact_ac_kernels.cu
     src/gpu/cuda/cuda_coefficient_order_kernels.cu
     src/gpu/cuda/cuda_aq.cpp
     src/gpu/cuda/cuda_aq_kernels.cu
@@ -593,6 +597,10 @@ if(GJXL_ENABLE_CUDA)
   )
 
   add_library(gjxl::cuda ALIAS gjxl_cuda)
+
+  if(GJXL_CUDA_COMPACT_AC)
+    target_compile_definitions(gjxl_cuda PRIVATE GJXL_CUDA_COMPACT_AC=1)
+  endif()
 
   set_target_properties(
     gjxl_cuda
@@ -1414,6 +1422,10 @@ if(GJXL_BUILD_TESTS)
   add_executable(gjxl_coefficient_order_test tests/coefficient_order_test.cpp)
   target_link_libraries(gjxl_coefficient_order_test PRIVATE gjxl_codestream)
   add_test(NAME coefficient_order COMMAND gjxl_coefficient_order_test)
+
+  add_executable(gjxl_compact_vardct_frame_test tests/compact_vardct_frame_test.cpp)
+  target_link_libraries(gjxl_compact_vardct_frame_test PRIVATE gjxl_codestream)
+  add_test(NAME compact_vardct_frame COMMAND gjxl_compact_vardct_frame_test)
 
   add_executable(gjxl_ac_direct_tokenization_test tests/ac_direct_tokenization_test.cpp)
   target_link_libraries(gjxl_ac_direct_tokenization_test PRIVATE gjxl_codestream)
@@ -2402,6 +2414,11 @@ if(GJXL_BUILD_TESTS)
     target_include_directories(gjxl_cuda_ac_packing_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
     add_test(NAME cuda_ac_packing COMMAND gjxl_cuda_ac_packing_test)
     set_tests_properties(cuda_ac_packing PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_compact_ac_test tests/cuda_compact_ac_test.cpp)
+    target_link_libraries(gjxl_cuda_compact_ac_test PRIVATE gjxl_cuda CUDA::cudart)
+    add_test(NAME cuda_compact_ac COMMAND gjxl_cuda_compact_ac_test)
+    set_tests_properties(cuda_compact_ac PROPERTIES SKIP_RETURN_CODE 77)
 
     add_executable(gjxl_cuda_opsin_test tests/cuda_opsin_test.cpp)
     target_link_libraries(gjxl_cuda_opsin_test PRIVATE gjxl_cuda)

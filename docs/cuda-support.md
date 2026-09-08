@@ -1572,8 +1572,9 @@ and limits; no driver or system setting is changed.
 
 [S106](cuda-representation-fusion-scheduling-s106.md) explores the requested
 compact-consumption, composition/reduction and tile-scheduling directions.
+
 Typed int8/int16/int32 inputs preserve tested token templates, direct tokens,
-contexts and populations, but compact frame ownership is not integrated yet.
+contexts and populations; frame ownership was not yet integrated in S106.
 Fusing composition with the first maximum pass passes all four CUDA sanitizers
 and reduces the isolated 4K stage by about 29%; it is not a measured encoder
 gain. Bounded CPU tile scheduling cuts roughly 4.6–6.5 ms from 4K merging,
@@ -1581,6 +1582,16 @@ but complete-call comparisons remain mixed there; only static 1080p passes
 both repetitions. All 1,406 encoder calls match frozen bytes/fresh summaries
 as applicable. Keep production unchanged and qualify actual compact ownership,
 integrated fusion and concurrent scheduling before promotion.
+
+[S107](cuda-compact-frame-s107.md) carries signed int8/int16 owners from CUDA
+readback through frame assembly, native coefficient orders/tokenization and
+reconstruction, without a dense compatibility cache. It is available behind
+`GJXL_CUDA_COMPACT_AC=ON` (default OFF). In six paired process repetitions,
+4K/1080p complete-call median changes are -5.70%/-6.87%, with exact frozen
+bytes and summaries; Keong 500 is mixed. The 4K AC owner drops from 101.25 to
+25.31 MiB. Concurrent batch and wider fallback/quality qualification remain
+before default rollout. The report records host/CUDA tests, instrumentation
+canaries, failed probes, memory definitions and measurement limits.
 
 ### Math and kernel strategy
 

@@ -811,13 +811,12 @@ Status QuantizeAdjustedYAcBlock(
     quantized);
 }
 
-Status DequantizeAcBlock(
-  AcStrategyType strategy,
-  const Quantizer& quantizer,
-  int32_t raw_quant,
-  AcQuantizationOptions options,
-  std::span<const int32_t> quantized,
-  std::span<float> coefficients) {
+template <typename T>
+static Status
+DequantizeAcBlockImpl(AcStrategyType strategy, const Quantizer &quantizer,
+                      int32_t raw_quant, AcQuantizationOptions options,
+                      std::span<const T> quantized,
+                      std::span<float> coefficients) {
 
   QuantizationMatrixView matrix;
   Status status = ValidateAcOperation(
@@ -849,6 +848,28 @@ Status DequantizeAcBlock(
   }
 
   return Status::Ok();
+}
+
+Status DequantizeAcBlock(AcStrategyType strategy, const Quantizer &quantizer,
+                         int32_t raw_quant, AcQuantizationOptions options,
+                         std::span<const int32_t> quantized,
+                         std::span<float> coefficients) {
+  return DequantizeAcBlockImpl(strategy, quantizer, raw_quant, options,
+                               quantized, coefficients);
+}
+Status DequantizeAcBlock(AcStrategyType strategy, const Quantizer &quantizer,
+                         int32_t raw_quant, AcQuantizationOptions options,
+                         std::span<const int8_t> quantized,
+                         std::span<float> coefficients) {
+  return DequantizeAcBlockImpl(strategy, quantizer, raw_quant, options,
+                               quantized, coefficients);
+}
+Status DequantizeAcBlock(AcStrategyType strategy, const Quantizer &quantizer,
+                         int32_t raw_quant, AcQuantizationOptions options,
+                         std::span<const int16_t> quantized,
+                         std::span<float> coefficients) {
+  return DequantizeAcBlockImpl(strategy, quantizer, raw_quant, options,
+                               quantized, coefficients);
 }
 
 }  // namespace gjxl

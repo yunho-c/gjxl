@@ -32,8 +32,9 @@ inline gjxl::vardct_frame_internal::CoefficientOrderPopulation ReferencePopulati
     }));
   uint64_t a = 0x94D049BB133111EBull, b = 0xBF58476D1CE4E5B9ull;
   for (size_t group_index = 0; group_index < frame.ac_group_count(); ++group_index) {
-    gjxl::VarDctAcGroupView group;
-    PopulationCheck(frame.GetAcGroup(group_index, &group));
+    gjxl::VarDctNativeAcGroupView native;
+    PopulationCheck(frame.GetNativeAcGroup(group_index, &native));
+    std::visit([&](const auto& group) {
     size_t offset = 0;
     for (size_t y = 0; y < group.block_extent.height; ++y) {
       for (size_t x = 0; x < group.block_extent.width; ++x) {
@@ -61,6 +62,7 @@ inline gjxl::vardct_frame_internal::CoefficientOrderPopulation ReferencePopulati
       }
     }
     if (offset != group.used_coefficient_count) throw std::runtime_error("Population fixture group consumption differs");
+    }, native);
   }
   return result;
 }
@@ -74,11 +76,13 @@ struct PopulationAssembly {
     constexpr size_t capacity = gjxl::kVarDctAcGroupCoefficientCapacity;
     coefficients.ResetForOverwrite(frame.ac_group_count() * 3 * capacity);
     for (size_t group_index = 0; group_index < frame.ac_group_count(); ++group_index) {
-      gjxl::VarDctAcGroupView group;
-      PopulationCheck(frame.GetAcGroup(group_index, &group));
-      for (size_t channel = 0; channel < 3; ++channel)
-        std::copy(group.coefficients[channel].begin(), group.coefficients[channel].end(),
-          coefficients.data() + (group_index * 3 + channel) * capacity);
+      gjxl::VarDctNativeAcGroupView native;
+      PopulationCheck(frame.GetNativeAcGroup(group_index, &native));
+      std::visit([&](const auto& group) {
+        for (size_t channel = 0; channel < 3; ++channel)
+          std::copy(group.coefficients[channel].begin(), group.coefficients[channel].end(),
+            coefficients.data() + (group_index * 3 + channel) * capacity);
+      }, native);
     }
     std::vector<size_t> used(frame.ac_group_count(), 0);
     PopulationCheck(frame.strategies().ForEachAnchor([&](size_t x, size_t y, gjxl::AcStrategyType strategy) {

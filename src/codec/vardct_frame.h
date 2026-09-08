@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <variant>
 #include <vector>
 
 #include "codec/chroma_from_luma.h"
@@ -35,7 +36,18 @@ namespace vardct_frame_internal {
 struct CoefficientOrderPopulation;
 [[nodiscard]] const CoefficientOrderPopulation* GetCoefficientOrderPopulation(
   const VarDctEncoderFrame&) noexcept;
-struct QuantizedFrameAssemblyInput;
+struct AcStorageInfo {
+  size_t coefficient_bytes = 4;
+  size_t native_bytes = 0;
+};
+[[nodiscard]] AcStorageInfo
+GetAcStorageInfo(const VarDctEncoderFrame &) noexcept;
+template <typename T> struct QuantizedFrameAssemblyInputT;
+using QuantizedFrameAssemblyInput = QuantizedFrameAssemblyInputT<int32_t>;
+template <typename T>
+[[nodiscard]] Status
+AssembleVarDctEncoderFrameImpl(QuantizedFrameAssemblyInputT<T>,
+                               VarDctEncoderFrame *);
 [[nodiscard]] Status AssembleVarDctEncoderFrame(
   QuantizedFrameAssemblyInput,
   VarDctEncoderFrame*);
@@ -69,13 +81,17 @@ struct PreparedForwardDctCoefficients;
 }  // namespace prepared_coefficients_internal
 
 /// Read-only view of one fixed-capacity VarDCT AC group.
-struct VarDctAcGroupView {
+template <typename T> struct VarDctAcGroupViewT {
   size_t block_x = 0;
   size_t block_y = 0;
   Extent2D block_extent;
   size_t used_coefficient_count = 0;
-  std::array<std::span<const int32_t>, 3> coefficients;
+  std::array<std::span<const T>, 3> coefficients;
 };
+using VarDctAcGroupView = VarDctAcGroupViewT<int32_t>;
+using VarDctNativeAcGroupView =
+    std::variant<VarDctAcGroupViewT<int8_t>, VarDctAcGroupViewT<int16_t>,
+                 VarDctAcGroupView>;
 
 /// Owns the native GJXL handoff from VarDCT analysis to entropy coding.
 ///
@@ -127,11 +143,21 @@ public:
     return group_used_coefficient_count_.size();
   }
 
+  /// Typed int32 query. Returns InvalidArgument for a narrow group; it never
+  /// expands storage. General consumers must use GetNativeAcGroup.
   [[nodiscard]] Status GetAcGroup(
     size_t group_index,
     VarDctAcGroupView* out) const;
 
+  /// Native signed storage; dispatch once per group, not per coefficient.
+  /// Frame copies deep-copy the authoritative owner. No dense compatibility
+  /// cache is maintained; const access is allocation-free.
+  [[nodiscard]] Status GetNativeAcGroup(size_t group_index,
+                                        VarDctNativeAcGroupView *out) const;
+
 private:
+  friend vardct_frame_internal::AcStorageInfo
+  vardct_frame_internal::GetAcStorageInfo(const VarDctEncoderFrame &) noexcept;
   friend const vardct_frame_internal::CoefficientOrderPopulation*
     vardct_frame_internal::GetCoefficientOrderPopulation(
       const VarDctEncoderFrame&) noexcept;
@@ -158,6 +184,10 @@ private:
   friend Status vardct_frame_internal::AssembleVarDctEncoderFrame(
     vardct_frame_internal::QuantizedFrameAssemblyInput,
     VarDctEncoderFrame*);
+  template <typename T>
+  friend Status vardct_frame_internal::AssembleVarDctEncoderFrameImpl(
+      vardct_frame_internal::QuantizedFrameAssemblyInputT<T>,
+      VarDctEncoderFrame *);
 
   [[nodiscard]] size_t AcGroupChannelOffset(
     size_t group_index,
@@ -175,6 +205,8 @@ private:
   Extent2D ac_group_extent_;
   std::vector<size_t> group_used_coefficient_count_;
   OverwriteArray<int32_t> ac_coefficients_;
+  OverwriteArray<int8_t> ac_coefficients_i8_;
+  OverwriteArray<int16_t> ac_coefficients_i16_;
   // Immutable and frame-owned: copies may share counts, never mutable input.
   std::shared_ptr<const vardct_frame_internal::CoefficientOrderPopulation>
     coefficient_order_population_;

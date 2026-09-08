@@ -112,9 +112,8 @@ Status ValidateOrder(
 
 // Isolating the contiguous update lets the compiler vectorize narrow counts
 // without architecture-specific intrinsics or aliasing assumptions.
-template <typename Count>
-void CountCoefficientZeros(
-  const int32_t* coefficients, Count* counts, size_t size) {
+template <typename Count, typename T>
+void CountCoefficientZeros(const T *coefficients, Count *counts, size_t size) {
   for (size_t coefficient = 0; coefficient < size; ++coefficient) {
     counts[coefficient] += coefficients[coefficient] == 0;
   }
@@ -130,15 +129,13 @@ static_assert(Use32BitZeroCounts({65535, 65537}));
 static_assert(!Use32BitZeroCounts({65536, 65536}));
 static_assert(!Use32BitZeroCounts({std::numeric_limits<size_t>::max(), 2}));
 
-template <typename Count>
+template <typename Count, typename Group>
 Status CountGroupZeros(
-  const VarDctAcGroupView& group,
-  const AcStrategyGrid& strategies,
-  std::array<std::array<std::vector<Count>, 3>,
-             codestream_internal::kSimpleCoefficientOrderCount>* zero_counts,
-  bool sample_dct8,
-  std::array<uint64_t, 2>* random_state,
-  uint16_t* present_mask) {
+    const Group &group, const AcStrategyGrid &strategies,
+    std::array<std::array<std::vector<Count>, 3>,
+               codestream_internal::kSimpleCoefficientOrderCount> *zero_counts,
+    bool sample_dct8, std::array<uint64_t, 2> *random_state,
+    uint16_t *present_mask) {
 
   const auto use_sample = [&]() {
     uint64_t state_1 = (*random_state)[0];
@@ -198,8 +195,7 @@ Status CountGroupZeros(
         if (selected) {
           for (size_t channel = 0; channel < 3; ++channel) {
             Count* const counts = (*zero_counts)[family][channel].data();
-            const std::span<const int32_t> coefficients =
-              group.coefficients[channel].subspan(
+            const auto coefficients = group.coefficients[channel].subspan(
                 source_offset, info->coefficient_count());
             // The validated frame has a size_t-representable block area.
             // Each zero-initialized counter is incremented at most once per
@@ -227,28 +223,39 @@ Status PresentOrderMask(const VarDctEncoderFrame& frame, uint16_t* mask) {
   uint16_t present = 0;
   for (size_t group_index = 0; group_index < frame.ac_group_count();
        ++group_index) {
-    VarDctAcGroupView group;
-    if (Status status = frame.GetAcGroup(group_index, &group); !status.ok()) {
+    VarDctNativeAcGroupView native;
+    if (Status status = frame.GetNativeAcGroup(group_index, &native);
+        !status.ok()) {
       return status;
     }
-    for (size_t y = 0; y < group.block_extent.height; ++y) {
-      for (size_t x = 0; x < group.block_extent.width; ++x) {
-        AcStrategyCell cell;
-        if (Status status = frame.strategies().Get(
-              group.block_x + x, group.block_y + y, &cell); !status.ok()) {
-          return status;
-        }
-        if (!cell.is_anchor) continue;
-        const size_t family = codestream_internal::kSimpleStrategyOrder[
-          static_cast<size_t>(cell.strategy)];
-        if (family >= codestream_internal::kSimpleCoefficientOrderCount ||
-            (kSupportedOrderMask & (uint16_t{1} << family)) == 0) {
-          return Status::InvalidArgument(
-            "Coefficient-order strategy is outside the simple profile");
-        }
-        present |= uint16_t{1} << family;
-      }
-    }
+    const Status group_status = std::visit(
+        [&](const auto &group) {
+          for (size_t y = 0; y < group.block_extent.height; ++y) {
+            for (size_t x = 0; x < group.block_extent.width; ++x) {
+              AcStrategyCell cell;
+              if (Status status = frame.strategies().Get(
+                      group.block_x + x, group.block_y + y, &cell);
+                  !status.ok()) {
+                return status;
+              }
+              if (!cell.is_anchor)
+                continue;
+              const size_t family =
+                  codestream_internal::kSimpleStrategyOrder[static_cast<size_t>(
+                      cell.strategy)];
+              if (family >= codestream_internal::kSimpleCoefficientOrderCount ||
+                  (kSupportedOrderMask & (uint16_t{1} << family)) == 0) {
+                return Status::InvalidArgument(
+                    "Coefficient-order strategy is outside the simple profile");
+              }
+              present |= uint16_t{1} << family;
+            }
+          }
+          return Status::Ok();
+        },
+        native);
+    if (!group_status.ok())
+      return group_status;
   }
   *mask = present;
   return Status::Ok();
@@ -430,14 +437,17 @@ Status ComputeCoefficientOrdersWithCounts(
     } else {
       for (size_t group_index = 0; group_index < frame.ac_group_count();
            ++group_index) {
-        VarDctAcGroupView group;
-        status = frame.GetAcGroup(group_index, &group);
+        VarDctNativeAcGroupView native;
+        status = frame.GetNativeAcGroup(group_index, &native);
         if (!status.ok()) {
           return status;
         }
-        status = CountGroupZeros(
-          group, frame.strategies(), &zero_counts, sample_dct8, &random_state,
-          &present_mask);
+        status = std::visit(
+            [&](const auto &group) {
+              return CountGroupZeros(group, frame.strategies(), &zero_counts,
+                                     sample_dct8, &random_state, &present_mask);
+            },
+            native);
         if (!status.ok()) {
           return status;
         }

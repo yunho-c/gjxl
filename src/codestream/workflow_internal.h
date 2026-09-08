@@ -71,6 +71,10 @@ ResolveCoefficientOrderBehavior(
 struct VarDctEncodingProfile {
   /// Maximum CPU threads simultaneously participating in this encode.
   size_t peak_cpu_participants = 0;
+  /// Largest authoritative AC owner at a serializer handoff across attempts,
+  /// excluding other metadata/device scratch. Width belongs to that owner.
+  size_t ac_coefficient_bytes = 0;
+  size_t ac_storage_bytes = 0;
   uint64_t input_preparation_nanoseconds = 0;
   uint64_t backend_selection_nanoseconds = 0;
   uint64_t quantization_pipeline_nanoseconds = 0;
