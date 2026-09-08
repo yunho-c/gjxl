@@ -1903,6 +1903,16 @@ and one source-unchanged code-generation variant has identical resources and
 reproduces in fresh compiles. Next investigate candidate construction and
 cost scattering/representation without restoring the rejected S112 scheduler.
 
+[S135](cuda-packed-strategy-costs-s135.md) tests direct consumption of packed
+candidate costs, removing seven dense host arrays and their scatter. Search
+time improves in all sixteen primary comparisons, including 1.4–1.5 ms less
+4K scattering, but whole-call medians split evenly between improvement and
+regression. The candidate is archived and S134 runtime restored; no standalone
+speed promotion is made. Differential grid tests and 1,616 frozen-oracle
+encodes pass, with all 214 S134 GPU bodies unchanged. Next investigate the
+larger regular candidate representation: 522,120 descriptors totaling
+12.53 MB are still constructed and uploaded at 4K.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
