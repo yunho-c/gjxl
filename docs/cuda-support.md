@@ -2073,6 +2073,18 @@ boundary is retained. Next test four adjacent outputs per lane and 32-row
 chunks, with warp-local normalization, to reduce shared-load/barrier work
 while keeping the 24 KiB shared-memory budget. S148 remains the runtime.
 
+[S150](cuda-four-output-rows-s150.md) qualifies that four-output-row prototype
+without changing production dispatch. Equal 96-row tiles retain four blocks
+per SM and identical FFMA counts, while executing 5.624% fewer warp
+instructions and about 23.3% fewer shared-load wavefronts. Sustained current
+4K horizontal-plus-vertical replay improves 4.07%/4.61%; tile128 improves
+4.81%/4.79%. Tile64 does better on some smaller large planes, but small-image
+results remain mixed. All 5,520 original guard fixtures, 1,080 added boundary
+fixtures, 48 capture preflights, 24 timing processes, and twelve CUDA
+sanitizer jobs pass. Next compare the new schedules with actual S148
+dispatch in complete encodes, including rolling48 controls and both
+coefficient-storage modes. No whole-encoder gain is claimed yet.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
