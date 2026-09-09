@@ -3,6 +3,7 @@
 
 #include <cuda_runtime_api.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -94,6 +95,8 @@ struct DeviceCase {
   std::array<std::unique_ptr<DeviceArray>, 16> planes;
   gjxl::cuda_internal::CudaButteraugliLowMediumPlan plan;
   explicit DeviceCase(const Case& c) : plan(c.plan) {
+    for (unsigned tap = 0; tap < 33; ++tap)
+      plan.weights.taps[tap] = c.planes[15][Case::Offset(15) + tap];
     for (size_t p = 0; p < planes.size(); ++p)
       planes[p] = std::make_unique<DeviceArray>(c.planes[p]);
     const auto pointer = [&](size_t p) { return planes[p]->data + Case::Offset(p); };
@@ -104,15 +107,18 @@ struct DeviceCase {
       plan.low[p] = pointer(9 + p);
       plan.medium[p] = pointer(12 + p);
     }
-    plan.weights = pointer(15);
+    plan.device_weights = pointer(15);
   }
-  void Launch(bool reference, cudaStream_t stream = nullptr) {
+  void Launch(bool reference, cudaStream_t stream = nullptr, int schedule = -1) {
     using namespace gjxl::cuda_internal;
     CheckCuda(reference ? LaunchCudaButteraugliLowMediumReference(plan, stream)
-                        : LaunchCudaButteraugliLowMedium(plan, stream));
+                        : schedule < 0 ? LaunchCudaButteraugliLowMedium(plan, stream)
+                        : LaunchCudaButteraugliLowMediumForTesting(
+                              plan, static_cast<unsigned>(schedule), stream));
   }
 };
-void Verify(uint32_t width, uint32_t height, bool padded, unsigned pattern) {
+void Verify(uint32_t width, uint32_t height, bool padded, unsigned pattern,
+            int schedule = -1) {
   Case c(width, height, padded, pattern);
   DeviceCase reference(c), sequential(c), candidate(c);
   for (unsigned reuse = 0; reuse < 3; ++reuse) {
@@ -136,7 +142,7 @@ void Verify(uint32_t width, uint32_t height, bool padded, unsigned pattern) {
     reference.Launch(true);
     CheckCuda(gjxl::cuda_internal::LaunchCudaButteraugliLowMediumSequentialReference(
         sequential.plan, nullptr));
-    candidate.Launch(false);
+    candidate.Launch(false, nullptr, schedule);
     CheckCuda(cudaDeviceSynchronize());
     for (size_t p = 0; p < 16; ++p) {
       const auto a = reference.planes[p]->Read();
@@ -162,6 +168,87 @@ void Verify(uint32_t width, uint32_t height, bool padded, unsigned pattern) {
     }
   }
 }
+struct OwnedCase {
+  Case host;
+  DeviceCase device, oracle;
+  cudaStream_t stream{};
+  cudaGraph_t graph{};
+  cudaGraphExec_t executable{};
+  std::array<std::vector<float>,16> expected;
+  OwnedCase(unsigned width,unsigned height,unsigned pattern)
+      :host(width,height,true,pattern),device(host),oracle(host) {
+    CheckCuda(cudaStreamCreateWithFlags(&stream,cudaStreamNonBlocking));
+  }
+  void Prepare() {
+    CheckCuda(cudaDeviceSynchronize());
+    CheckCuda(gjxl::cuda_internal::LaunchCudaButteraugliLowMediumForTesting(device.plan,0,stream));
+    CheckCuda(gjxl::cuda_internal::LaunchCudaButteraugliLowMediumReference(oracle.plan,stream));
+    CheckCuda(cudaStreamSynchronize(stream));
+    for(unsigned p=0;p<16;++p) {
+      expected[p]=device.planes[p]->Read();
+      if(p>=6&&p<9)Equal(expected[p],host.planes[p]);
+      else Equal(expected[p],oracle.planes[p]->Read());
+    }
+  }
+  void Capture(int variant) {
+    // The payload dies on return; both it and the caller-owned copy are
+    // poisoned before either independent graph is launched.
+    auto temporary=device.plan;
+    CheckCuda(cudaStreamBeginCapture(stream,cudaStreamCaptureModeGlobal));
+    for(unsigned i=0;i<4;++i)CheckCuda(gjxl::cuda_internal::LaunchCudaButteraugliLowMediumForTesting(temporary,variant,stream));
+    CheckCuda(cudaStreamEndCapture(stream,&graph));size_t nodes=0;
+    CheckCuda(cudaGraphGetNodes(graph,nullptr,&nodes));
+    if(nodes!=8)throw std::runtime_error("Ownership graph node count mismatch");
+    CheckCuda(cudaGraphInstantiate(&executable,graph,nullptr,nullptr,0));
+    std::fill(std::begin(temporary.weights.taps),std::end(temporary.weights.taps),-9876.0f);
+    std::fill(std::begin(device.plan.weights.taps),std::end(device.plan.weights.taps),-5432.0f);
+  }
+  void Verify() {for(unsigned p=0;p<16;++p)Equal(expected[p],device.planes[p]->Read());}
+  void ReplaceWeights(unsigned salt) {
+    for(unsigned tap=0;tap<33;++tap) {
+      float value=tap==16?1.25f:((tap+salt)%3==0?-0.03125f:0.0625f);
+      host.planes[15][Case::Offset(15)+tap]=value;
+      device.plan.weights.taps[tap]=value;oracle.plan.weights.taps[tap]=value;
+    }
+    device.planes[15]->Write(host.planes[15]);oracle.planes[15]->Write(host.planes[15]);
+  }
+  void CloseGraph() {CheckCuda(cudaGraphExecDestroy(executable));CheckCuda(cudaGraphDestroy(graph));}
+  void CloseStream() {CheckCuda(cudaStreamDestroy(stream));}
+};
+void VerifyWeightOwnership() {
+    unsigned checked=0;
+    for(int variant:{48,96})for(unsigned pattern:{1u,3u,4u}) {
+      OwnedCase a(33,97,pattern),b(65,193,(pattern+1)%5);
+      for(unsigned generation=0;generation<2;++generation) {
+        if(generation){a.ReplaceWeights(0);b.ReplaceWeights(1);}
+        a.Prepare();b.Prepare();a.Capture(variant);b.Capture(variant);
+        for(unsigned repeat=0;repeat<3;++repeat) {
+          CheckCuda(cudaGraphLaunch(b.executable,b.stream));
+          CheckCuda(cudaGraphLaunch(a.executable,a.stream));
+          CheckCuda(cudaStreamSynchronize(a.stream));CheckCuda(cudaStreamSynchronize(b.stream));
+          a.Verify();b.Verify();checked+=2;
+        }
+        a.CloseGraph();b.CloseGraph();
+      }
+      a.CloseStream();b.CloseStream();
+      std::cout<<"Low/medium ownership CASE PASS variant="<<variant<<" pattern="<<pattern<<'\n'<<std::flush;
+    }
+    std::cout<<"Low/medium ownership PASS checked="<<checked<<" arrays=16 exact=1\n"<<std::flush;
+}
+void VerifyPolicy() {
+  using gjxl::cuda_internal::CudaButteraugliLowMediumRollingTileHeight;
+  constexpr uint32_t maximum = std::numeric_limits<uint32_t>::max();
+  constexpr std::array<std::array<uint32_t, 3>, 18> choices{{
+      {0,maximum,0}, {maximum,0,0}, {1,maximum,0}, {31,maximum,0},
+      {maximum,95,0}, {32,62499,0}, {32,62500,48}, {32,124999,48},
+      {32,125000,96}, {20833,96,0}, {20834,96,48}, {41667,96,96},
+      {1919,1079,48}, {1920,1080,48}, {1999,2000,48}, {2000,2000,96},
+      {500,500,0}, {maximum,maximum,96}}};
+  for (const auto& choice : choices)
+    if (CudaButteraugliLowMediumRollingTileHeight(choice[0],choice[1]) != choice[2])
+      throw std::runtime_error("Low/medium geometry policy mismatch");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -171,6 +258,7 @@ int main(int argc, char** argv) {
   try {
     CheckCuda(cudaSetDevice(0));
     using namespace gjxl::cuda_internal;
+    VerifyPolicy();
     for (bool zero_width : {false,true}) {
       CudaButteraugliLowMediumPlan empty;
       empty.width = zero_width ? 0 : 17;
@@ -189,6 +277,30 @@ int main(int argc, char** argv) {
           (invalid != 1 && LaunchCudaButteraugliLowMedium(bad, nullptr) != cudaErrorInvalidValue) ||
           (invalid != 1 && LaunchCudaButteraugliLowMediumSequentialReference(bad, nullptr) != cudaErrorInvalidValue))
         throw std::runtime_error("Invalid low/medium stride not rejected");
+    }
+    CudaButteraugliLowMediumPlan empty;
+    for (unsigned tile : {0u,48u,96u})
+      CheckCuda(LaunchCudaButteraugliLowMediumForTesting(empty,tile,nullptr));
+    for (unsigned tile : {1u,24u,64u,128u})
+      if (LaunchCudaButteraugliLowMediumForTesting(empty,tile,nullptr) != cudaErrorInvalidValue)
+        throw std::runtime_error("Invalid low/medium tile not rejected");
+    if (mode == "--ownership-only") {
+      VerifyWeightOwnership();
+      return 0;
+    }
+    if (mode == "--policy-only") {
+      constexpr std::array<std::array<uint32_t,2>,8> boundaries{{
+          {1562,1280},{1563,1280},{1999,2000},{2000,2000},
+          {31,65536},{32,62500},{42106,95},{41667,96}}};
+      unsigned cases = 0;
+      for (const auto& shape : boundaries) {
+        Verify(shape[0],shape[1],cases % 2 != 0,1);++cases;
+        std::cout << "Verified low/medium policy geometry " << shape[0] << 'x' << shape[1]
+                  << " tile=" << CudaButteraugliLowMediumRollingTileHeight(shape[0],shape[1])
+                  << '\n' << std::flush;
+      }
+      std::cout << "Verified " << cases << " low/medium production-policy cases\n" << std::flush;
+      return 0;
     }
     if (mode == "--tall-only") {
       Verify(1, 4194305, false, 1);
@@ -214,10 +326,11 @@ int main(int argc, char** argv) {
           !(shape[0] == 1 && shape[1] == 5) &&
           !(shape[0] == 257 && shape[1] == 5)) continue;
       for (bool padded : {false,true})
-        for (unsigned pattern = 0; pattern < 5; ++pattern) {
-          Verify(shape[0], shape[1], padded, pattern);
-          ++cases;
-        }
+        for (unsigned pattern = 0; pattern < 5; ++pattern)
+          for (int schedule : {-1, 0, 48, 96}) {
+            Verify(shape[0], shape[1], padded, pattern, schedule);
+            ++cases;
+          }
       std::cout << "Verified low/medium geometry " << shape[0] << 'x' << shape[1]
                 << " (" << cases << " cases)\n" << std::flush;
     }

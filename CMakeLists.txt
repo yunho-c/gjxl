@@ -2480,7 +2480,10 @@ if(GJXL_BUILD_TESTS)
     target_include_directories(gjxl_cuda_low_medium_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
     add_test(NAME cuda_low_medium COMMAND gjxl_cuda_low_medium_test)
     add_test(NAME cuda_low_medium_tall COMMAND gjxl_cuda_low_medium_test --tall-only)
-    set_tests_properties(cuda_low_medium cuda_low_medium_tall PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(NAME cuda_low_medium_policy COMMAND gjxl_cuda_low_medium_test --policy-only)
+    add_test(NAME cuda_low_medium_ownership COMMAND gjxl_cuda_low_medium_test --ownership-only)
+    set_tests_properties(cuda_low_medium cuda_low_medium_tall cuda_low_medium_policy
+                        cuda_low_medium_ownership PROPERTIES SKIP_RETURN_CODE 77)
 
     add_executable(gjxl_cuda_l2_final_test tests/cuda_l2_final_test.cpp)
     target_link_libraries(gjxl_cuda_l2_final_test PRIVATE gjxl_cuda)

@@ -199,6 +199,9 @@ class CudaPreparedDeviceButteraugli final : public PreparedDeviceButteraugli {
         return Status::Internal(
             "Device Butteraugli Gaussian kernel size is inconsistent");
       }
+      if (index == 1) {
+        std::copy(kernel.begin(), kernel.end(), plan_.low_medium_weights.taps);
+      }
       status = backend_.CopyHostToDevice(*kernels_[index].buffer, kernel.data(),
                                          kernel.size() * sizeof(float),
                                          kernels_[index].offset_bytes);

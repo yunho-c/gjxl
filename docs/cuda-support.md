@@ -2049,6 +2049,18 @@ policy is retained. S143 remains the runtime baseline. Next carry the CPU
 weights through the prepared plan, then qualify geometry selection and
 whole-encoder correctness/performance in both coefficient-storage modes.
 
+[S148](cuda-parameter-weights-integration-s148.md) integrates explicit owned
+tap values into the prepared plan and retains the qualified initial policy:
+plain tiles below 2M pixels or for narrow/short planes, rolling 48 below 4M,
+and rolling 96 above. All 84 CTests, 7,552 frozen-oracle encodes, and sixteen
+CUDA sanitizer jobs pass. The 221 prior GPU bodies are unchanged; the two
+new bodies match S147 exactly. In complete-encode event measurements, selected
+full-resolution vertical stages improve 7.37-10.21%, with all large-case
+cross-label comparisons favorable. Ordinary and separate-executable timing
+remain noisy, so no universal whole-encoder gain is claimed. The 2000-square
+case favors rolling 48 over 96; refining the 4M switch is the next scheduling
+experiment. S148 is now the retained runtime baseline.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
