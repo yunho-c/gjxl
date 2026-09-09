@@ -256,7 +256,7 @@ Fresh production-label 4K traces identify substantial remaining GPU work:
 | Work in production-label snapshots | Wide / compact mean kernel duration (ms) |
 | --- | ---: |
 | Paired Malta scale response, 64-thread true/false variants combined | 21.430 / 20.708 |
-| Low/medium horizontal convolution | 10.261 / 9.211 |
+| Low/medium vertical convolution | 10.261 / 9.211 |
 | Erosion/L2 finalization | 9.550 / 8.701 |
 | All seven fused AC evaluators | 17.691 / 25.508 |
 | All kernels | 144.222 / 141.619 |

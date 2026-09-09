@@ -2000,6 +2000,19 @@ encoder-wide gain is claimed. S143 becomes the retained source implementation;
 historical binaries remain untouched. Fresh traces point next to Malta and
 convolution data reuse/scheduling, alongside GPU-active operating-state checks.
 
+[S144](cuda-rolling-low-medium-s144.md) explores rolling shared-row windows
+for low/medium vertical convolution. Warp-distributed weights make a 24 KiB
+ring fit four blocks per SM instead of three. All guarded, replay, host-ASAN,
+and four CUDA sanitizer checks pass. Repeated isolated full-4K comparisons
+favor rolling 48/96 rows by 3.5-5.7% / 6.3-8.0%, but smaller geometries regress;
+each rolling family is favorable in only 17/36 primary comparisons overall.
+Counters show higher observed occupancy despite increased instruction work,
+and lower memory traffic for 96 rows. A bimodal half-resolution baseline is
+preserved; timeline repeats locate the slowdown inside reported kernel
+intervals without establishing its physical cause. S143 remains the retained
+runtime. Next qualify sustained full-pair/current resident use and small-image
+exclusions before selecting a production tile policy.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
