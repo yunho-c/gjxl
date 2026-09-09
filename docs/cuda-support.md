@@ -1976,6 +1976,17 @@ lose resource capacity. Next test those shapes selectively with repeated GPU
 stage timing and clock/throttle telemetry; retain S138 until whole-encode
 benefit is independently qualified.
 
+[S142](cuda-selective-y-reuse-s142.md) tests deferred reuse only for 32×32, then
+for 32×32 plus 16×16, using the exact frozen S141 evaluator bodies. All 4,941
+frozen-oracle encodes and four CUDA sanitizers pass. Repeated GPU-stage timing
+favors 32×32 in 16/16 primary and 64/64 cross-label comparisons for both variants;
+the added 16×16 stage is favorable in 14/16 primary comparisons. Whole-call
+results remain mixed (8/16 and 10/16 favorable), including a compact-4K reversal.
+Read-only telemetry exposes 210–1,537 MHz encode-endpoint clocks despite a
+constant reported 40 W limit; it does not establish clocks during kernels.
+Next integrate the two-shape prototype for fresh production-path qualification,
+retaining the one-shape diagnostic control. S138 remains the retained runtime.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
