@@ -913,9 +913,10 @@ inline float malta_scale_value(float value0, float value1,
                                float norm) {
   const float absolute = 0.5f * (abs(value0) + abs(value1));
   const float difference = value0 - value1;
-  const float scaler = norm2_0_gt_1 / (norm + absolute);
+  const float reciprocal = fast::divide(1.0f, norm + absolute);
+  const float scaler = norm2_0_gt_1 * reciprocal;
   float scaled = scaler * difference;
-  const float scaler2 = norm2_0_lt_1 / (norm + absolute);
+  const float scaler2 = norm2_0_lt_1 * reciprocal;
   const float magnitude = abs(value0);
   const float too_small = 0.55f * magnitude;
   const float too_big = 1.05f * magnitude;

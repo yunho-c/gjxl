@@ -1,0 +1,4227 @@
+{
+  "baseline": {
+    "head": "1576fdedc67158ffc1755f43c1e2f28d734979cb",
+    "protocol": "7670e055058564aad6f7538e5295f126488058976af40530119e8b59be4da91d",
+    "submodules": "-e8ff09762481785938d8e4e01333ed3917571161 third_party/libjxl\n 27c4382b7151d55a51692cdcb27aaa98752240de third_party/metal-cpp (release/metal-cpp_macOS27_iOS27)\n"
+  },
+  "baseline_tests": {
+    "failed": [
+      "quantization_pipeline"
+    ],
+    "total": 124
+  },
+  "confirmations": {
+    "ba_malta_fastdivide": [
+      {
+        "baseline_ms": 10.531042,
+        "candidate_ms": 10.447708,
+        "favorable_pairs": 4,
+        "median_change_percent": -0.03137051895948373,
+        "name": "synthetic_128x96",
+        "paired_changes_percent": [
+          -1.017230773554978,
+          7.283150674529848,
+          -12.600736155261838,
+          -11.525265476507585,
+          2.040598448613151,
+          3.0179328543254558,
+          -0.03137051895948373
+        ]
+      },
+      {
+        "baseline_ms": 63.881875,
+        "candidate_ms": 63.879208,
+        "favorable_pairs": 4,
+        "median_change_percent": -1.2534212560291857,
+        "name": "padded_1080p",
+        "paired_changes_percent": [
+          -7.356101841124774,
+          -1.2534212560291857,
+          -3.0972524590289874,
+          2.9151976167569815,
+          -2.530361203694076,
+          2.037023796974391,
+          0.6439337960154612
+        ]
+      },
+      {
+        "baseline_ms": 211.0355,
+        "candidate_ms": 206.636583,
+        "favorable_pairs": 6,
+        "median_change_percent": -1.6402523818469295,
+        "name": "padded_4k",
+        "paired_changes_percent": [
+          -4.861857064025632,
+          -2.4047684142818437,
+          -2.893332164493656,
+          -1.6402523818469295,
+          -0.13058040970624907,
+          -1.0045532955963332,
+          0.9025990256556149
+        ]
+      },
+      {
+        "baseline_ms": 233.188834,
+        "candidate_ms": 221.035083,
+        "favorable_pairs": 6,
+        "median_change_percent": -2.7372960921955736,
+        "name": "imazen26-1029-planter-4k",
+        "paired_changes_percent": [
+          -2.7372960921955736,
+          -8.533532174119763,
+          -7.238727318581839,
+          -0.027213567181361142,
+          6.960799175870758,
+          -11.78524089569345,
+          -2.264743497301558
+        ]
+      },
+      {
+        "baseline_ms": 201.614042,
+        "candidate_ms": 199.288875,
+        "favorable_pairs": 5,
+        "median_change_percent": -0.7623243857136641,
+        "name": "imazen26-1039-sun-forest-4k",
+        "paired_changes_percent": [
+          -1.9847469606575352,
+          0.11851971574319276,
+          -0.14304515810046325,
+          -2.6591441483029277,
+          -1.135991818300075,
+          -0.7623243857136641,
+          1.5351220008235522
+        ]
+      },
+      {
+        "baseline_ms": 730.292209,
+        "candidate_ms": 719.472041,
+        "favorable_pairs": 5,
+        "median_change_percent": -1.8152380426120551,
+        "name": "doughnuts_4672x5584",
+        "paired_changes_percent": [
+          -0.20451413474646962,
+          3.068600429528545,
+          -7.389900565145135,
+          -3.2418550451286388,
+          -4.1182354205808185,
+          1.9620611710628122,
+          -1.8152380426120551
+        ]
+      }
+    ],
+    "ba_relaxed_precise": [
+      {
+        "baseline_ms": 10.220125,
+        "candidate_ms": 10.455709,
+        "favorable_pairs": 4,
+        "median_change_percent": -0.35387042722080375,
+        "name": "synthetic_128x96",
+        "paired_changes_percent": [
+          7.231503925508931,
+          -0.35387042722080375,
+          -1.676019774856885,
+          3.6471509325331164,
+          3.785893134257168,
+          -12.214657787681915,
+          -6.784074835624487
+        ]
+      },
+      {
+        "baseline_ms": 67.477125,
+        "candidate_ms": 65.350875,
+        "favorable_pairs": 7,
+        "median_change_percent": -3.8805597394771407,
+        "name": "padded_1080p",
+        "paired_changes_percent": [
+          -4.0583513433029905,
+          -4.27345691134996,
+          -4.201300811200836,
+          -2.8652557393148093,
+          -3.8805597394771407,
+          -1.4025895438379954,
+          -2.1192551826655026
+        ]
+      },
+      {
+        "baseline_ms": 222.339167,
+        "candidate_ms": 216.981625,
+        "favorable_pairs": 7,
+        "median_change_percent": -2.773413040588668,
+        "name": "padded_4k",
+        "paired_changes_percent": [
+          -3.2102646560488113,
+          -1.4114323815920482,
+          -2.928737630149403,
+          -2.773413040588668,
+          -1.8625456529322904,
+          -4.192764592528553,
+          -0.748475618307165
+        ]
+      },
+      {
+        "baseline_ms": 224.977166,
+        "candidate_ms": 219.723334,
+        "favorable_pairs": 7,
+        "median_change_percent": -2.744810694105082,
+        "name": "imazen26-1029-planter-4k",
+        "paired_changes_percent": [
+          -2.8468823803036947,
+          -2.9317832727617232,
+          -3.2976671946059244,
+          -2.5134500206239307,
+          -1.879410549234839,
+          -0.593763813346293,
+          -2.744810694105082
+        ]
+      },
+      {
+        "baseline_ms": 230.517375,
+        "candidate_ms": 222.35925,
+        "favorable_pairs": 7,
+        "median_change_percent": -2.8487417742956267,
+        "name": "imazen26-1039-sun-forest-4k",
+        "paired_changes_percent": [
+          -3.114884361855774,
+          -2.8487417742956267,
+          -2.8142945267097486,
+          -3.539049930618021,
+          -1.1673875975252157,
+          -11.234929328813049,
+          -2.052119836809685
+        ]
+      },
+      {
+        "baseline_ms": 839.180666,
+        "candidate_ms": 808.494334,
+        "favorable_pairs": 7,
+        "median_change_percent": -3.5403290821531153,
+        "name": "doughnuts_4672x5584",
+        "paired_changes_percent": [
+          -4.107506280957606,
+          -3.5403290821531153,
+          -3.7061899637740314,
+          -1.5065231669634915,
+          -7.01194848547666,
+          -2.9331520967401326,
+          -3.1555604168733153
+        ]
+      }
+    ]
+  },
+  "decision": {
+    "dispositions": {
+      "ac_half_all": "Rejected: no compelling whole-encode or stage advantage in the screen.",
+      "ac_half_forward": "Rejected: no compelling whole-encode or stage advantage in the screen.",
+      "ac_half_storage": "Rejected: no compelling whole-encode or stage advantage in the screen.",
+      "aq_contract": "Rejected: no compelling whole-encode or stage advantage in the screen.",
+      "ba_contract": "Rejected integration: existing contract tests failed; tighter arithmetic was investigated.",
+      "ba_explicit_fma": "Rejected: no compelling whole-encode or stage advantage in the screen.",
+      "ba_fastfn": "Rejected: no compelling whole-encode or stage advantage in the screen.",
+      "ba_filter_nocontract": "Contract-preserving filter repair; its combination with Malta reassociation had negligible stage savings.",
+      "ba_filter_reassociate": "Rejected integration: existing contract tests failed; tighter arithmetic was investigated.",
+      "ba_half_blur_scratch": "Rejected: decoded-quality budget exceeded.",
+      "ba_half_mask": "Rejected: no compelling whole-encode or stage advantage in the screen.",
+      "ba_malta_fastdivide": "Accepted: bounded explicit FP32 reciprocal, decoded-quality and existing contracts pass, independent whole-encode gate passes.",
+      "ba_malta_reassociate": "Contract and quality screens passed; only 0.30% all-GPU-stage improvement.",
+      "ba_malta_reciprocal": "Useful stage improvement; the faster explicit approximate reciprocal was fully qualified instead.",
+      "ba_reciprocal": "Rejected: decoded-quality budget exceeded.",
+      "ba_relaxed": "Screen passed; refined to retain precise functions, whose integration then exposed contract failures.",
+      "ba_relaxed_nocontract": "Rejected integration: existing contract tests failed; tighter arithmetic was investigated.",
+      "ba_relaxed_precise": "Rejected integration: existing contract tests failed; tighter arithmetic was investigated.",
+      "ba_selective_reassociate": "Contract and quality screens passed; only 0.20% all-GPU-stage improvement.",
+      "control": "Unchanged recompile control: byte exact; retained to expose timing noise.",
+      "dct_half_all": "Rejected: decoded-quality budget exceeded.",
+      "epf_contract": "Rejected: decoded-quality budget exceeded.",
+      "epf_fastfn": "Rejected: no compelling whole-encode or stage advantage in the screen.",
+      "reduce_fastfn": "Rejected: no compelling whole-encode or stage advantage in the screen."
+    },
+    "experimental_variants": 23,
+    "performance_gate": {
+      "minimum_favorable_pairs": 6,
+      "minimum_improvement_percent": 1,
+      "pairs": 7,
+      "passes": true,
+      "qualified_large_workloads": [
+        "padded_4k",
+        "imazen26-1029-planter-4k"
+      ],
+      "repeatable_regressions": []
+    },
+    "precision": "FP32 storage and operands, explicit fast reciprocal in Malta only; compiler policy unchanged.",
+    "production_files": {
+      "src/gpu/metal/kernels/butteraugli.metal": "88da029150cf6f652ded4822a6b6cec07f06528f6568b0086d1b22b5878b9e5a"
+    },
+    "selected_variant": "ba_malta_fastdivide",
+    "status": "complete",
+    "unchanged_controls": 1
+  },
+  "device": [
+    {
+      "spdisplays_vendor": "sppci_vendor_Apple",
+      "sppci_cores": "20",
+      "sppci_model": "Apple M4 Pro"
+    }
+  ],
+  "experiments": {
+    "ac_half_all": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "disposition": "Rejected: no compelling whole-encode or stage advantage in the screen.",
+      "exact": 6,
+      "flags": [],
+      "library_sha256": "d6da47751e41b8cb1d97cb12e4b8fc00ff3371b51eeb6754b37332e240497f0d",
+      "patch_sha256": "4f2d183250e131a816f7db67d7866485858b555a4011b637f4fee619956905b1",
+      "quality_cases": 10,
+      "quality_failures": [],
+      "shader": "ac_strategy",
+      "stage": {
+        "padded_1080p": {
+          "ac": {
+            "baseline_ms": 6.981624,
+            "candidate_ms": 6.929584,
+            "median_change_percent": -1.2329939280602997,
+            "paired_changes": [
+              -1.574817071954604,
+              -1.2329939280602997,
+              -0.6825652897262002
+            ],
+            "wins": 3
+          },
+          "all": {
+            "baseline_ms": 36.284343,
+            "candidate_ms": 36.471925,
+            "median_change_percent": 0.12365664165394641,
+            "paired_changes": [
+              0.12162413324834365,
+              1.0289758080644917,
+              0.12365664165394641
+            ],
+            "wins": 0
+          },
+          "butteraugli": {
+            "baseline_ms": 18.64604,
+            "candidate_ms": 18.630582,
+            "median_change_percent": 0.23799691516268595,
+            "paired_changes": [
+              -0.7744517160823361,
+              1.3331472399549016,
+              0.23799691516268595
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 1.190999,
+            "candidate_ms": 1.186792,
+            "median_change_percent": 0.12267012818651946,
+            "paired_changes": [
+              0.12267012818651946,
+              -0.8907201755719019,
+              0.2713183211756176
+            ],
+            "wins": 1
+          }
+        },
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 31.404582,
+            "candidate_ms": 29.408835,
+            "median_change_percent": -0.11416251993809912,
+            "paired_changes": [
+              2.0695044365096393,
+              -6.354954827929249,
+              -0.11416251993809912
+            ],
+            "wins": 2
+          },
+          "all": {
+            "baseline_ms": 144.160586,
+            "candidate_ms": 136.92467,
+            "median_change_percent": -0.6200286949443967,
+            "paired_changes": [
+              1.1924628688547045,
+              -5.07942453667124,
+              -0.6200286949443967
+            ],
+            "wins": 2
+          },
+          "butteraugli": {
+            "baseline_ms": 83.617833,
+            "candidate_ms": 80.483377,
+            "median_change_percent": -0.7528573093821156,
+            "paired_changes": [
+              1.6264019116601913,
+              -3.7485496664329987,
+              -0.7528573093821156
+            ],
+            "wins": 2
+          },
+          "epf": {
+            "baseline_ms": 5.354832,
+            "candidate_ms": 5.263833,
+            "median_change_percent": 0.7307179351045079,
+            "paired_changes": [
+              0.7307179351045079,
+              -3.2717210020955956,
+              1.3640577332771686
+            ],
+            "wins": 1
+          }
+        },
+        "synthetic_128x96": {
+          "ac": {
+            "baseline_ms": 0.126166,
+            "candidate_ms": 0.174584,
+            "median_change_percent": 30.349698016898373,
+            "paired_changes": [
+              46.416024456021574,
+              30.349698016898373,
+              8.520173797373154
+            ],
+            "wins": 0
+          },
+          "all": {
+            "baseline_ms": 5.707417,
+            "candidate_ms": 8.29541,
+            "median_change_percent": 45.34438258147249,
+            "paired_changes": [
+              53.51077857067901,
+              45.34438258147249,
+              -0.44935284010712007
+            ],
+            "wins": 1
+          },
+          "butteraugli": {
+            "baseline_ms": 0.542463,
+            "candidate_ms": 0.735378,
+            "median_change_percent": 35.56279414448542,
+            "paired_changes": [
+              41.34733235871764,
+              35.56279414448542,
+              -1.6378715500899088
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 0.022124,
+            "candidate_ms": 0.030456,
+            "median_change_percent": 37.660459229795684,
+            "paired_changes": [
+              52.860923526190916,
+              37.660459229795684,
+              -1.906675125114543
+            ],
+            "wins": 1
+          }
+        }
+      },
+      "wall": {
+        "padded_1080p": {
+          "total": {
+            "baseline_ms": 63.80175,
+            "candidate_ms": 64.014333,
+            "median_change_percent": 0.20780480333737472,
+            "paired_changes_percent": [
+              0.05015536407702026,
+              1.6283124292461704,
+              0.20780480333737472
+            ]
+          }
+        },
+        "padded_4k": {
+          "total": {
+            "baseline_ms": 216.187459,
+            "candidate_ms": 218.024,
+            "median_change_percent": -0.7515420651226346,
+            "paired_changes_percent": [
+              -0.7515420651226346,
+              0.8495131995607696,
+              -2.689369692977006
+            ]
+          }
+        },
+        "synthetic_128x96": {
+          "total": {
+            "baseline_ms": 11.105041,
+            "candidate_ms": 11.043209,
+            "median_change_percent": 1.3845063696748205,
+            "paired_changes_percent": [
+              28.300634891977026,
+              -16.194490148346098,
+              1.3845063696748205
+            ]
+          }
+        }
+      }
+    },
+    "ac_half_forward": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "disposition": "Rejected: no compelling whole-encode or stage advantage in the screen.",
+      "exact": 6,
+      "flags": [],
+      "library_sha256": "24822ec29dfa12b8db4832b3094a470e97aeba615989d0d58b5c194a6574b9f6",
+      "patch_sha256": "cdf9ee04f0626d00138a6419dbb9a06879e4883539e0f4c04a993f6d2cc83ace",
+      "quality_cases": 10,
+      "quality_failures": [],
+      "shader": "ac_strategy",
+      "stage": {
+        "padded_1080p": {
+          "ac": {
+            "baseline_ms": 6.875957,
+            "candidate_ms": 6.962459,
+            "median_change_percent": 0.8959610613949787,
+            "paired_changes": [
+              0.15103339885611522,
+              1.2580357905088713,
+              0.8959610613949787
+            ],
+            "wins": 0
+          },
+          "all": {
+            "baseline_ms": 36.349757,
+            "candidate_ms": 36.240823,
+            "median_change_percent": -0.29968288371226004,
+            "paired_changes": [
+              0.3630346916637661,
+              -0.29968288371226004,
+              -0.39831732381463425
+            ],
+            "wins": 2
+          },
+          "butteraugli": {
+            "baseline_ms": 18.788001,
+            "candidate_ms": 18.448338,
+            "median_change_percent": -0.7827904366925154,
+            "paired_changes": [
+              -0.022110923348916955,
+              -1.9123748183747735,
+              -0.7827904366925154
+            ],
+            "wins": 3
+          },
+          "epf": {
+            "baseline_ms": 1.179042,
+            "candidate_ms": 1.176043,
+            "median_change_percent": -0.40895521377702915,
+            "paired_changes": [
+              0.4270555624819705,
+              -0.40895521377702915,
+              -0.4487541580367682
+            ],
+            "wins": 2
+          }
+        },
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 31.205043,
+            "candidate_ms": 32.942251,
+            "median_change_percent": 3.5028806647459554,
+            "paired_changes": [
+              20.789998604214045,
+              3.5028806647459554,
+              0.5271551780909212
+            ],
+            "wins": 0
+          },
+          "all": {
+            "baseline_ms": 142.876588,
+            "candidate_ms": 149.069618,
+            "median_change_percent": 2.8474450975411347,
+            "paired_changes": [
+              13.88225257843514,
+              2.8474450975411347,
+              0.42658703467919334
+            ],
+            "wins": 0
+          },
+          "butteraugli": {
+            "baseline_ms": 83.071162,
+            "candidate_ms": 86.131542,
+            "median_change_percent": 2.3356198928899063,
+            "paired_changes": [
+              11.551840134408952,
+              2.3356198928899063,
+              0.2073619723773623
+            ],
+            "wins": 0
+          },
+          "epf": {
+            "baseline_ms": 5.3165,
+            "candidate_ms": 5.436624,
+            "median_change_percent": 0.3221343796934173,
+            "paired_changes": [
+              15.370686622483888,
+              0.3221343796934173,
+              0.18811248001506797
+            ],
+            "wins": 0
+          }
+        },
+        "synthetic_128x96": {
+          "ac": {
+            "baseline_ms": 0.160416,
+            "candidate_ms": 0.161624,
+            "median_change_percent": -0.20684247247760856,
+            "paired_changes": [
+              42.09176470588234,
+              -9.479104328745258,
+              -0.20684247247760856
+            ],
+            "wins": 2
+          },
+          "all": {
+            "baseline_ms": 7.902663,
+            "candidate_ms": 8.384541,
+            "median_change_percent": -3.1151820754314663,
+            "paired_changes": [
+              51.19493995208222,
+              -8.985882353834407,
+              -3.1151820754314663
+            ],
+            "wins": 2
+          },
+          "butteraugli": {
+            "baseline_ms": 0.692001,
+            "candidate_ms": 0.746795,
+            "median_change_percent": -3.280682168454374,
+            "paired_changes": [
+              48.42627783372906,
+              -7.30302412857784,
+              -3.280682168454374
+            ],
+            "wins": 2
+          },
+          "epf": {
+            "baseline_ms": 0.027958,
+            "candidate_ms": 0.028501,
+            "median_change_percent": -6.255812289863371,
+            "paired_changes": [
+              46.98876708620925,
+              -6.255812289863371,
+              -10.351660795168605
+            ],
+            "wins": 2
+          }
+        }
+      },
+      "wall": {
+        "padded_1080p": {
+          "total": {
+            "baseline_ms": 64.649125,
+            "candidate_ms": 64.340042,
+            "median_change_percent": -0.4780930909737746,
+            "paired_changes_percent": [
+              -0.7631593807064574,
+              -0.4780930909737746,
+              2.0585838219220554
+            ]
+          }
+        },
+        "padded_4k": {
+          "total": {
+            "baseline_ms": 210.090292,
+            "candidate_ms": 210.818208,
+            "median_change_percent": 0.35634994826119204,
+            "paired_changes_percent": [
+              0.35634994826119204,
+              -0.6598553349623559,
+              1.0168427022643645
+            ]
+          }
+        },
+        "synthetic_128x96": {
+          "total": {
+            "baseline_ms": 10.223041,
+            "candidate_ms": 9.76975,
+            "median_change_percent": 2.5566088781588503,
+            "paired_changes_percent": [
+              10.07332564836625,
+              2.5566088781588503,
+              -4.434013323432828
+            ]
+          }
+        }
+      }
+    },
+    "ac_half_storage": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "disposition": "Rejected: no compelling whole-encode or stage advantage in the screen.",
+      "exact": 6,
+      "flags": [],
+      "library_sha256": "0678e3af1e205c2e860ab4285504070ca42d55f3d4af63d43ba8aec74e524a2c",
+      "patch_sha256": "19f764b6efb50088b5d8d319e684c915e418312ccfc40d4ff8218bd40af3123b",
+      "quality_cases": 10,
+      "quality_failures": [],
+      "shader": "ac_strategy",
+      "stage": {
+        "padded_1080p": {
+          "ac": {
+            "baseline_ms": 6.860875,
+            "candidate_ms": 6.846084,
+            "median_change_percent": -0.21558474684351125,
+            "paired_changes": [
+              0.2566051956225168,
+              -1.780109716100331,
+              -0.21558474684351125
+            ],
+            "wins": 2
+          },
+          "all": {
+            "baseline_ms": 36.44816,
+            "candidate_ms": 36.520035,
+            "median_change_percent": 0.4085182084157202,
+            "paired_changes": [
+              -0.35075109290866324,
+              0.4085182084157202,
+              0.47261919394558927
+            ],
+            "wins": 1
+          },
+          "butteraugli": {
+            "baseline_ms": 18.663958,
+            "candidate_ms": 18.67554,
+            "median_change_percent": -0.44649157483102053,
+            "paired_changes": [
+              -0.44649157483102053,
+              1.3855318291509766,
+              -0.748027334398671
+            ],
+            "wins": 2
+          },
+          "epf": {
+            "baseline_ms": 1.185833,
+            "candidate_ms": 1.197583,
+            "median_change_percent": 0.7959593511126073,
+            "paired_changes": [
+              0.042103771029733394,
+              1.4511318204165402,
+              0.7959593511126073
+            ],
+            "wins": 0
+          }
+        },
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 27.757374,
+            "candidate_ms": 27.693335,
+            "median_change_percent": -0.1456108847435189,
+            "paired_changes": [
+              -0.39283615229595004,
+              -0.1456108847435189,
+              -0.026764619252706012
+            ],
+            "wins": 3
+          },
+          "all": {
+            "baseline_ms": 131.487167,
+            "candidate_ms": 131.353,
+            "median_change_percent": -0.24100326313675202,
+            "paired_changes": [
+              -0.2845007680483236,
+              -0.24100326313675202,
+              -0.09298631969176796
+            ],
+            "wins": 3
+          },
+          "butteraugli": {
+            "baseline_ms": 77.436458,
+            "candidate_ms": 77.1695,
+            "median_change_percent": -0.29962630528137524,
+            "paired_changes": [
+              -0.29962630528137524,
+              -0.7548085951761485,
+              -0.2529002553293358
+            ],
+            "wins": 3
+          },
+          "epf": {
+            "baseline_ms": 4.9925,
+            "candidate_ms": 4.996083,
+            "median_change_percent": 0.07176765147720587,
+            "paired_changes": [
+              0.9344765367161889,
+              -1.5431390022763392,
+              0.07176765147720587
+            ],
+            "wins": 1
+          }
+        },
+        "synthetic_128x96": {
+          "ac": {
+            "baseline_ms": 0.158126,
+            "candidate_ms": 0.16304,
+            "median_change_percent": 8.273149260716139,
+            "paired_changes": [
+              0.9023282296295232,
+              9.457943925233625,
+              8.273149260716139
+            ],
+            "wins": 0
+          },
+          "all": {
+            "baseline_ms": 7.84134,
+            "candidate_ms": 8.056916,
+            "median_change_percent": 3.6477056217432136,
+            "paired_changes": [
+              -1.7118804456571657,
+              6.307194055704479,
+              3.6477056217432136
+            ],
+            "wins": 1
+          },
+          "butteraugli": {
+            "baseline_ms": 0.694003,
+            "candidate_ms": 0.711125,
+            "median_change_percent": 3.691482601660212,
+            "paired_changes": [
+              -3.224410033146985,
+              5.724000333024093,
+              3.691482601660212
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 0.02875,
+            "candidate_ms": 0.029416,
+            "median_change_percent": 2.3165217391304394,
+            "paired_changes": [
+              -6.1473486625997165,
+              10.74136788632849,
+              2.3165217391304394
+            ],
+            "wins": 1
+          }
+        }
+      },
+      "wall": {
+        "padded_1080p": {
+          "total": {
+            "baseline_ms": 63.366709,
+            "candidate_ms": 63.092833,
+            "median_change_percent": -0.5715650814208884,
+            "paired_changes_percent": [
+              -0.5715650814208884,
+              -0.3780912781820467,
+              -0.9942234943826178
+            ]
+          }
+        },
+        "padded_4k": {
+          "total": {
+            "baseline_ms": 205.693125,
+            "candidate_ms": 208.605209,
+            "median_change_percent": 1.7420937064186015,
+            "paired_changes_percent": [
+              1.7420937064186015,
+              0.7695198305912365,
+              2.466821873604186
+            ]
+          }
+        },
+        "synthetic_128x96": {
+          "total": {
+            "baseline_ms": 10.173125,
+            "candidate_ms": 10.5775,
+            "median_change_percent": -2.1706704276515665,
+            "paired_changes_percent": [
+              -2.1706704276515665,
+              4.961602260858866,
+              -6.908010857197022
+            ]
+          }
+        }
+      }
+    },
+    "aq_contract": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "disposition": "Rejected: no compelling whole-encode or stage advantage in the screen.",
+      "exact": 9,
+      "flags": [
+        "-fmetal-math-mode=safe",
+        "-ffp-contract=fast"
+      ],
+      "library_sha256": "a200a77ae33d5a3348391c6f4e5af5fb44633fd1ba329453f24d9f0fe3f45683",
+      "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "quality_cases": 10,
+      "quality_failures": [],
+      "shader": "aq_reconstruction",
+      "stage": {
+        "padded_1080p": {
+          "ac": {
+            "baseline_ms": 7.244667,
+            "candidate_ms": 7.017707,
+            "median_change_percent": 0.2302764631546106,
+            "paired_changes": [
+              0.2302764631546106,
+              -7.13684976825022,
+              6.586187708246394
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 36.779835,
+            "candidate_ms": 36.889665,
+            "median_change_percent": 0.29861471646079885,
+            "paired_changes": [
+              0.2895479199333417,
+              0.29861471646079885,
+              0.3689765775507503
+            ],
+            "wins": 0
+          },
+          "butteraugli": {
+            "baseline_ms": 18.64508,
+            "candidate_ms": 19.032546,
+            "median_change_percent": 1.3715196070209101,
+            "paired_changes": [
+              1.3715196070209101,
+              2.0781139045796593,
+              -1.8637814044103695
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 1.180457,
+            "candidate_ms": 1.237833,
+            "median_change_percent": 1.479088183644106,
+            "paired_changes": [
+              1.479088183644106,
+              5.198242153472488,
+              0.39948914431673366
+            ],
+            "wins": 0
+          }
+        },
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 33.827792,
+            "candidate_ms": 34.819415,
+            "median_change_percent": -1.4519459033108029,
+            "paired_changes": [
+              -7.253107056125041,
+              2.931385530572017,
+              -1.4519459033108029
+            ],
+            "wins": 2
+          },
+          "all": {
+            "baseline_ms": 152.114457,
+            "candidate_ms": 155.995245,
+            "median_change_percent": -1.6198370649467386,
+            "paired_changes": [
+              -5.941787840781232,
+              2.551228907848002,
+              -1.6198370649467386
+            ],
+            "wins": 2
+          },
+          "butteraugli": {
+            "baseline_ms": 88.580122,
+            "candidate_ms": 91.015416,
+            "median_change_percent": -0.05441724128288916,
+            "paired_changes": [
+              -4.615231228699801,
+              2.749255639995618,
+              -0.05441724128288916
+            ],
+            "wins": 2
+          },
+          "epf": {
+            "baseline_ms": 5.687916,
+            "candidate_ms": 5.765043,
+            "median_change_percent": -4.446177930600459,
+            "paired_changes": [
+              -7.770254327938764,
+              1.355979940632035,
+              -4.446177930600459
+            ],
+            "wins": 2
+          }
+        },
+        "synthetic_128x96": {
+          "ac": {
+            "baseline_ms": 0.160541,
+            "candidate_ms": 0.159707,
+            "median_change_percent": -1.1108290351143468,
+            "paired_changes": [
+              24.84763966684902,
+              -1.1108290351143468,
+              -8.848829893921174
+            ],
+            "wins": 2
+          },
+          "all": {
+            "baseline_ms": 7.821089,
+            "candidate_ms": 7.862583,
+            "median_change_percent": 2.2444038011700806,
+            "paired_changes": [
+              27.801804534303276,
+              2.2444038011700806,
+              -6.793120497669813
+            ],
+            "wins": 1
+          },
+          "butteraugli": {
+            "baseline_ms": 0.683624,
+            "candidate_ms": 0.690709,
+            "median_change_percent": 1.3182213295300116,
+            "paired_changes": [
+              23.093387224972652,
+              1.3182213295300116,
+              -5.863310825834079
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 0.027916,
+            "candidate_ms": 0.028335,
+            "median_change_percent": 6.002038162842194,
+            "paired_changes": [
+              22.52972972972973,
+              6.002038162842194,
+              -5.21564694082246
+            ],
+            "wins": 1
+          }
+        }
+      },
+      "wall": {
+        "padded_1080p": {
+          "total": {
+            "baseline_ms": 64.092167,
+            "candidate_ms": 63.236375,
+            "median_change_percent": -1.5008461771064185,
+            "paired_changes_percent": [
+              -1.7387725398643528,
+              1.3139076651763393,
+              -1.5008461771064185
+            ]
+          }
+        },
+        "padded_4k": {
+          "total": {
+            "baseline_ms": 211.272333,
+            "candidate_ms": 212.774166,
+            "median_change_percent": 0.7108517138398884,
+            "paired_changes_percent": [
+              0.42066965870670714,
+              0.7108517138398884,
+              1.5921930150638142
+            ]
+          }
+        },
+        "synthetic_128x96": {
+          "total": {
+            "baseline_ms": 10.020166,
+            "candidate_ms": 10.294333,
+            "median_change_percent": 5.994102664215473,
+            "paired_changes_percent": [
+              8.861229956908412,
+              2.7361522753215795,
+              5.994102664215473
+            ]
+          }
+        }
+      }
+    },
+    "ba_contract": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "contracts": {
+        "adaptive_quantization_gpu_policy": true,
+        "butteraugli_device_operation": false,
+        "metal_aq_evaluation": false
+      },
+      "disposition": "Rejected integration: existing contract tests failed; tighter arithmetic was investigated.",
+      "exact": 7,
+      "flags": [
+        "-fmetal-math-mode=safe",
+        "-fmetal-math-fp32-functions=precise",
+        "-ffp-contract=fast"
+      ],
+      "library_sha256": "561a3b90ea5ff28aba583633fc1cf06efa8dc9e934390b9f333a863b70542b06",
+      "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "quality_cases": 10,
+      "quality_failures": [],
+      "shader": "butteraugli",
+      "stage": {
+        "padded_1080p": {
+          "ac": {
+            "baseline_ms": 6.765832,
+            "candidate_ms": 6.914792,
+            "median_change_percent": 1.1754260542679473,
+            "paired_changes": [
+              1.1754260542679473,
+              1.06789527141673,
+              2.699794146030521
+            ],
+            "wins": 0
+          },
+          "all": {
+            "baseline_ms": 36.118084,
+            "candidate_ms": 35.726082,
+            "median_change_percent": -0.963629814829825,
+            "paired_changes": [
+              -2.499746193170471,
+              -0.963629814829825,
+              -0.8368494851498931
+            ],
+            "wins": 3
+          },
+          "butteraugli": {
+            "baseline_ms": 18.596538,
+            "candidate_ms": 18.080542,
+            "median_change_percent": -2.805574337156469,
+            "paired_changes": [
+              -4.5108487474132435,
+              -2.805574337156469,
+              -2.774688493094779
+            ],
+            "wins": 3
+          },
+          "epf": {
+            "baseline_ms": 1.183166,
+            "candidate_ms": 1.188084,
+            "median_change_percent": -0.021358648295388694,
+            "paired_changes": [
+              -1.3184845318524485,
+              -0.021358648295388694,
+              0.7817161750760304
+            ],
+            "wins": 2
+          }
+        },
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 27.516085,
+            "candidate_ms": 27.483791,
+            "median_change_percent": -0.15885617448849754,
+            "paired_changes": [
+              0.7953607375013272,
+              -0.15885617448849754,
+              -0.20470826466999492
+            ],
+            "wins": 2
+          },
+          "all": {
+            "baseline_ms": 129.679912,
+            "candidate_ms": 129.339961,
+            "median_change_percent": -0.404650953186958,
+            "paired_changes": [
+              -0.7471664819150847,
+              -0.21595144701457292,
+              -0.404650953186958
+            ],
+            "wins": 3
+          },
+          "butteraugli": {
+            "baseline_ms": 76.140579,
+            "candidate_ms": 75.782747,
+            "median_change_percent": -0.6247732894177238,
+            "paired_changes": [
+              -1.5323042304693946,
+              -0.419233234602856,
+              -0.6247732894177238
+            ],
+            "wins": 3
+          },
+          "epf": {
+            "baseline_ms": 4.912208,
+            "candidate_ms": 4.953583,
+            "median_change_percent": 0.7414700137722718,
+            "paired_changes": [
+              2.5076717532271253,
+              0.7125309026002169,
+              0.7414700137722718
+            ],
+            "wins": 0
+          }
+        },
+        "synthetic_128x96": {
+          "ac": {
+            "baseline_ms": 0.162293,
+            "candidate_ms": 0.160083,
+            "median_change_percent": -1.208945828859176,
+            "paired_changes": [
+              0.051586594854846624,
+              -1.900882970922968,
+              -1.208945828859176
+            ],
+            "wins": 2
+          },
+          "all": {
+            "baseline_ms": 8.349918,
+            "candidate_ms": 8.007543,
+            "median_change_percent": -2.316547012149184,
+            "paired_changes": [
+              -2.316547012149184,
+              0.4663772865780125,
+              -7.128860427132344
+            ],
+            "wins": 2
+          },
+          "butteraugli": {
+            "baseline_ms": 0.749248,
+            "candidate_ms": 0.743582,
+            "median_change_percent": -1.2726261240866954,
+            "paired_changes": [
+              -1.2726261240866954,
+              11.869467462511118,
+              -9.664890663705473
+            ],
+            "wins": 2
+          },
+          "epf": {
+            "baseline_ms": 0.030542,
+            "candidate_ms": 0.028791,
+            "median_change_percent": -5.733088861240255,
+            "paired_changes": [
+              -6.627674115515436,
+              -4.8203419791277184,
+              -5.733088861240255
+            ],
+            "wins": 3
+          }
+        }
+      },
+      "wall": {
+        "padded_1080p": {
+          "total": {
+            "baseline_ms": 63.707,
+            "candidate_ms": 63.487917,
+            "median_change_percent": -0.37936415854876726,
+            "paired_changes_percent": [
+              -0.37936415854876726,
+              -1.2183386441050437,
+              0.061927267927397445
+            ]
+          }
+        },
+        "padded_4k": {
+          "total": {
+            "baseline_ms": 215.371542,
+            "candidate_ms": 206.960834,
+            "median_change_percent": -1.3097214391801781,
+            "paired_changes_percent": [
+              -4.216182841835248,
+              -1.3097214391801781,
+              0.4144498099440286
+            ]
+          }
+        },
+        "synthetic_128x96": {
+          "total": {
+            "baseline_ms": 9.893792,
+            "candidate_ms": 11.063083,
+            "median_change_percent": 11.818431194025525,
+            "paired_changes_percent": [
+              33.53220476906185,
+              11.818431194025525,
+              -2.97115250407608
+            ]
+          }
+        }
+      }
+    },
+    "ba_explicit_fma": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "disposition": "Rejected: no compelling whole-encode or stage advantage in the screen.",
+      "exact": 7,
+      "flags": [
+        "-fmetal-math-mode=safe",
+        "-fmetal-math-fp32-functions=precise",
+        "-ffp-contract=off"
+      ],
+      "library_sha256": "a2990304ec00bcbda729a56c9cb6337ae0b5429814a11a87778aa0a1346a014b",
+      "patch_sha256": "4d5183a8a76ab50d063ffbd3c1146f98d7c43d92f08ad13fee0c8b21473f7c52",
+      "quality_cases": 10,
+      "quality_failures": [],
+      "shader": "butteraugli",
+      "stage": {
+        "padded_1080p": {
+          "ac": {
+            "baseline_ms": 6.816166,
+            "candidate_ms": 6.83975,
+            "median_change_percent": 0.567002482114165,
+            "paired_changes": [
+              0.567002482114165,
+              0.914027384062388,
+              0.3460009630047223
+            ],
+            "wins": 0
+          },
+          "all": {
+            "baseline_ms": 36.214877,
+            "candidate_ms": 35.992957,
+            "median_change_percent": -0.6127868389557256,
+            "paired_changes": [
+              -0.020802554161947207,
+              -0.683427078297083,
+              -0.6127868389557256
+            ],
+            "wins": 3
+          },
+          "butteraugli": {
+            "baseline_ms": 18.623995,
+            "candidate_ms": 18.446623,
+            "median_change_percent": -0.9903890115949943,
+            "paired_changes": [
+              0.42485038585446944,
+              -0.9903890115949943,
+              -1.1829965048971935
+            ],
+            "wins": 2
+          },
+          "epf": {
+            "baseline_ms": 1.188251,
+            "candidate_ms": 1.190625,
+            "median_change_percent": 0.37172280940644953,
+            "paired_changes": [
+              0.37172280940644953,
+              -2.0245563587337867,
+              0.5170109607336881
+            ],
+            "wins": 1
+          }
+        },
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 27.44575,
+            "candidate_ms": 27.752959,
+            "median_change_percent": 0.8647349771822688,
+            "paired_changes": [
+              0.8647349771822688,
+              -0.17654458618543423,
+              1.429052269118647
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 130.960919,
+            "candidate_ms": 130.814297,
+            "median_change_percent": 0.2230596747721414,
+            "paired_changes": [
+              0.3950004057187817,
+              -0.46775891854062834,
+              0.2230596747721414
+            ],
+            "wins": 1
+          },
+          "butteraugli": {
+            "baseline_ms": 77.118871,
+            "candidate_ms": 77.03796,
+            "median_change_percent": 0.7572716332336027,
+            "paired_changes": [
+              0.7572716332336027,
+              -0.4208308495595059,
+              0.7697300605177038
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 4.952375,
+            "candidate_ms": 4.931875,
+            "median_change_percent": -0.08236634429620304,
+            "paired_changes": [
+              -0.7812367976553936,
+              -0.08236634429620304,
+              -0.007592316817695011
+            ],
+            "wins": 3
+          }
+        },
+        "synthetic_128x96": {
+          "ac": {
+            "baseline_ms": 0.159165,
+            "candidate_ms": 0.161291,
+            "median_change_percent": 0.25811735653080703,
+            "paired_changes": [
+              28.432762135303857,
+              -3.9512455627807586,
+              0.25811735653080703
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 7.982835,
+            "candidate_ms": 7.888251,
+            "median_change_percent": -1.184842227103522,
+            "paired_changes": [
+              42.18880279523201,
+              -2.904209577112027,
+              -1.184842227103522
+            ],
+            "wins": 2
+          },
+          "butteraugli": {
+            "baseline_ms": 0.720504,
+            "candidate_ms": 0.707828,
+            "median_change_percent": -1.7593240287354428,
+            "paired_changes": [
+              33.0827053843636,
+              -5.9179269825172405,
+              -1.7593240287354428
+            ],
+            "wins": 2
+          },
+          "epf": {
+            "baseline_ms": 0.028002,
+            "candidate_ms": 0.028542,
+            "median_change_percent": 1.9284336833083504,
+            "paired_changes": [
+              30.673403606585946,
+              -5.016503919680915,
+              1.9284336833083504
+            ],
+            "wins": 1
+          }
+        }
+      },
+      "wall": {
+        "padded_1080p": {
+          "total": {
+            "baseline_ms": 63.891375,
+            "candidate_ms": 63.418458,
+            "median_change_percent": -0.740189110032452,
+            "paired_changes_percent": [
+              -0.6901547703720312,
+              -1.2336323534560156,
+              -0.740189110032452
+            ]
+          }
+        },
+        "padded_4k": {
+          "total": {
+            "baseline_ms": 211.384167,
+            "candidate_ms": 211.708166,
+            "median_change_percent": 0.5135670087563327,
+            "paired_changes_percent": [
+              0.5135670087563327,
+              -0.858468742363272,
+              1.5410410183486878
+            ]
+          }
+        },
+        "synthetic_128x96": {
+          "total": {
+            "baseline_ms": 10.17575,
+            "candidate_ms": 10.818542,
+            "median_change_percent": 7.737758887551283,
+            "paired_changes_percent": [
+              20.58172809101424,
+              -1.9309438281187918,
+              7.737758887551283
+            ]
+          }
+        }
+      }
+    },
+    "ba_fastfn": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "contracts": {
+        "adaptive_quantization_gpu_policy": true,
+        "butteraugli_device_operation": true,
+        "metal_aq_evaluation": true
+      },
+      "disposition": "Rejected: no compelling whole-encode or stage advantage in the screen.",
+      "exact": 10,
+      "flags": [
+        "-fmetal-math-mode=safe",
+        "-fmetal-math-fp32-functions=fast",
+        "-ffp-contract=off"
+      ],
+      "library_sha256": "93fbe0715793b3bf0477bad28a537d43b33d7b6250c197f9895cc6f7531e9c42",
+      "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "quality_cases": 10,
+      "quality_failures": [],
+      "shader": "butteraugli",
+      "stage": {
+        "padded_1080p": {
+          "ac": {
+            "baseline_ms": 6.912666,
+            "candidate_ms": 6.8305,
+            "median_change_percent": 0.21701337307680202,
+            "paired_changes": [
+              0.21701337307680202,
+              0.4297907637950571,
+              -1.6500224068915381
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 36.104663,
+            "candidate_ms": 36.259541,
+            "median_change_percent": 0.44969120193898426,
+            "paired_changes": [
+              0.44969120193898426,
+              1.1559103916671587,
+              -0.5648744041732323
+            ],
+            "wins": 1
+          },
+          "butteraugli": {
+            "baseline_ms": 18.554545,
+            "candidate_ms": 18.630253,
+            "median_change_percent": 0.40802940735005233,
+            "paired_changes": [
+              0.40802940735005233,
+              1.3533537015478547,
+              0.29906553810437053
+            ],
+            "wins": 0
+          },
+          "epf": {
+            "baseline_ms": 1.1785,
+            "candidate_ms": 1.178667,
+            "median_change_percent": 0.2481702127659524,
+            "paired_changes": [
+              0.2481702127659524,
+              2.483775473432881,
+              0.014170555791248596
+            ],
+            "wins": 0
+          }
+        },
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 27.566459,
+            "candidate_ms": 27.47646,
+            "median_change_percent": -0.13703434225843525,
+            "paired_changes": [
+              -0.13703434225843525,
+              0.18521027618823016,
+              -0.3264800894449249
+            ],
+            "wins": 2
+          },
+          "all": {
+            "baseline_ms": 129.948917,
+            "candidate_ms": 129.924003,
+            "median_change_percent": -0.3097846632709733,
+            "paired_changes": [
+              0.3005341263480954,
+              -0.3097846632709733,
+              -0.5303953398857475
+            ],
+            "wins": 2
+          },
+          "butteraugli": {
+            "baseline_ms": 76.377413,
+            "candidate_ms": 76.154504,
+            "median_change_percent": -0.5062527762535574,
+            "paired_changes": [
+              0.6151002313915521,
+              -0.5062527762535574,
+              -1.0168176290548225
+            ],
+            "wins": 2
+          },
+          "epf": {
+            "baseline_ms": 4.859125,
+            "candidate_ms": 5.028333,
+            "median_change_percent": 1.6551691696070625,
+            "paired_changes": [
+              -0.44761145267923075,
+              1.6551691696070625,
+              3.523967052405852
+            ],
+            "wins": 1
+          }
+        },
+        "synthetic_128x96": {
+          "ac": {
+            "baseline_ms": 0.162375,
+            "candidate_ms": 0.16279,
+            "median_change_percent": 1.9756735950731352,
+            "paired_changes": [
+              8.713320079522857,
+              1.9756735950731352,
+              -2.5203743734992567
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 7.833462,
+            "candidate_ms": 8.418628,
+            "median_change_percent": 8.47904796116965,
+            "paired_changes": [
+              20.08696195449591,
+              8.47904796116965,
+              0.5039266789129471
+            ],
+            "wins": 0
+          },
+          "butteraugli": {
+            "baseline_ms": 0.691373,
+            "candidate_ms": 0.710167,
+            "median_change_percent": 5.460438865850992,
+            "paired_changes": [
+              14.638948652751793,
+              5.460438865850992,
+              -3.0491384323865334
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 0.029334,
+            "candidate_ms": 0.030333,
+            "median_change_percent": 6.607112759143763,
+            "paired_changes": [
+              12.221420193088516,
+              6.607112759143763,
+              3.4056044180813982
+            ],
+            "wins": 0
+          }
+        }
+      },
+      "wall": {
+        "padded_1080p": {
+          "total": {
+            "baseline_ms": 64.042458,
+            "candidate_ms": 62.8075,
+            "median_change_percent": -1.998022936596211,
+            "paired_changes_percent": [
+              -2.6905378762604792,
+              1.7817751136014026,
+              -1.998022936596211
+            ]
+          }
+        },
+        "padded_4k": {
+          "total": {
+            "baseline_ms": 210.165917,
+            "candidate_ms": 209.973708,
+            "median_change_percent": -0.09145583772273147,
+            "paired_changes_percent": [
+              -0.7340221351024634,
+              -0.09145583772273147,
+              4.822978676049794
+            ]
+          }
+        },
+        "synthetic_128x96": {
+          "total": {
+            "baseline_ms": 10.011209,
+            "candidate_ms": 10.30275,
+            "median_change_percent": 2.9121457757999014,
+            "paired_changes_percent": [
+              21.437467578648818,
+              2.9121457757999014,
+              -10.599414723726364
+            ]
+          }
+        }
+      }
+    },
+    "ba_filter_nocontract": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "contracts": {
+        "adaptive_quantization_gpu_policy": true,
+        "butteraugli_device_operation": true,
+        "metal_aq_evaluation": true
+      },
+      "disposition": "Contract-preserving filter repair; its combination with Malta reassociation had negligible stage savings.",
+      "flags": [
+        "-fmetal-math-mode=safe",
+        "-fmetal-math-fp32-functions=precise",
+        "-ffp-contract=off"
+      ],
+      "library_sha256": "e90937ff2ef9762d687311dd9751f452af39863504c22b3effb1b4d695d09f77",
+      "patch_sha256": "7d9d1ec2b52978eda68934b953a4c96f8c19b6a9f16b071a77d9ec33d490706d",
+      "shader": "butteraugli"
+    },
+    "ba_filter_reassociate": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "contracts": {
+        "adaptive_quantization_gpu_policy": true,
+        "butteraugli_device_operation": false,
+        "metal_aq_evaluation": true
+      },
+      "disposition": "Rejected integration: existing contract tests failed; tighter arithmetic was investigated.",
+      "flags": [
+        "-fmetal-math-mode=safe",
+        "-fmetal-math-fp32-functions=precise",
+        "-ffp-contract=off"
+      ],
+      "library_sha256": "52d317591bb0721a1a0a62cb2e0e4cae7108d2b15c55b439bc2e58e2b8765f83",
+      "patch_sha256": "dbd3d630ccb59817eea5ddda0b4e69a01b23a0003f41442d121d129996b5041d",
+      "shader": "butteraugli"
+    },
+    "ba_half_blur_scratch": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "disposition": "Rejected: decoded-quality budget exceeded.",
+      "exact": 0,
+      "flags": [
+        "-fmetal-math-mode=safe",
+        "-fmetal-math-fp32-functions=precise",
+        "-ffp-contract=off"
+      ],
+      "library_sha256": "6b33d33844e4db7e997f08e0ed05284ac78fdccc03c2e3b9b546cd813887779f",
+      "patch_sha256": "2da6cd716571aafafe84dc1d0b4e51fea7779bbb491fde807a8dfdf877b88320",
+      "quality_cases": 10,
+      "quality_failures": [
+        "neutral-d0.1",
+        "flat-d1.2"
+      ],
+      "shader": "butteraugli",
+      "stage": {
+        "padded_1080p": {
+          "ac": {
+            "baseline_ms": 6.830249,
+            "candidate_ms": 6.815332,
+            "median_change_percent": -0.21839613753467102,
+            "paired_changes": [
+              2.575970343726497,
+              -0.21839613753467102,
+              -0.7578386418054417
+            ],
+            "wins": 2
+          },
+          "all": {
+            "baseline_ms": 36.514495,
+            "candidate_ms": 36.418042,
+            "median_change_percent": -0.47393025585751314,
+            "paired_changes": [
+              -1.0010736832044231,
+              0.10924115133084111,
+              -0.47393025585751314
+            ],
+            "wins": 2
+          },
+          "butteraugli": {
+            "baseline_ms": 18.719626,
+            "candidate_ms": 18.840958,
+            "median_change_percent": -0.7548045611699639,
+            "paired_changes": [
+              -1.455391297460551,
+              0.7516603162905033,
+              -0.7548045611699639
+            ],
+            "wins": 2
+          },
+          "epf": {
+            "baseline_ms": 1.188334,
+            "candidate_ms": 1.182959,
+            "median_change_percent": -0.22098164320805136,
+            "paired_changes": [
+              -0.22098164320805136,
+              0.14459247018627774,
+              -0.8615559448200805
+            ],
+            "wins": 2
+          }
+        },
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 32.219749,
+            "candidate_ms": 32.994041,
+            "median_change_percent": 2.4031596273453415,
+            "paired_changes": [
+              8.100197870573655,
+              2.4031596273453415,
+              -2.7134779565035516
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 146.802915,
+            "candidate_ms": 148.398669,
+            "median_change_percent": 1.0870043009704622,
+            "paired_changes": [
+              5.890075036666831,
+              1.0870043009704622,
+              -1.080045366533744
+            ],
+            "wins": 1
+          },
+          "butteraugli": {
+            "baseline_ms": 85.531207,
+            "candidate_ms": 86.470337,
+            "median_change_percent": 1.0979968983718447,
+            "paired_changes": [
+              5.597443498503241,
+              1.0979968983718447,
+              -0.17965553688457092
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 5.412709,
+            "candidate_ms": 5.445041,
+            "median_change_percent": 0.09269051152864805,
+            "paired_changes": [
+              0.09269051152864805,
+              0.5973349019871455,
+              -1.1743795044331873
+            ],
+            "wins": 1
+          }
+        },
+        "synthetic_128x96": {
+          "ac": {
+            "baseline_ms": 0.151043,
+            "candidate_ms": 0.161833,
+            "median_change_percent": 5.296504968783711,
+            "paired_changes": [
+              22.25201669811181,
+              5.296504968783711,
+              -10.672907616645233
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 6.983666,
+            "candidate_ms": 8.359248,
+            "median_change_percent": 11.463134118957008,
+            "paired_changes": [
+              36.38186179946277,
+              11.463134118957008,
+              -10.851077713640134
+            ],
+            "wins": 1
+          },
+          "butteraugli": {
+            "baseline_ms": 0.625167,
+            "candidate_ms": 0.736916,
+            "median_change_percent": 10.457365791860408,
+            "paired_changes": [
+              30.505220803876277,
+              10.457365791860408,
+              -7.297943589631739
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 0.029291,
+            "candidate_ms": 0.029457,
+            "median_change_percent": -5.404390427093652,
+            "paired_changes": [
+              25.578718506202858,
+              -5.404390427093652,
+              -7.529749103942662
+            ],
+            "wins": 2
+          }
+        }
+      },
+      "wall": {
+        "padded_1080p": {
+          "total": {
+            "baseline_ms": 64.257625,
+            "candidate_ms": 63.857708,
+            "median_change_percent": -0.258594991644967,
+            "paired_changes_percent": [
+              -0.258594991644967,
+              -0.22661838749117313,
+              -2.1384452832529766
+            ]
+          }
+        },
+        "padded_4k": {
+          "total": {
+            "baseline_ms": 209.875083,
+            "candidate_ms": 210.813041,
+            "median_change_percent": 0.455125615287999,
+            "paired_changes_percent": [
+              0.455125615287999,
+              0.23178501851979227,
+              0.8103257244098439
+            ]
+          }
+        },
+        "synthetic_128x96": {
+          "total": {
+            "baseline_ms": 10.216084,
+            "candidate_ms": 10.325583,
+            "median_change_percent": -0.05832959086867762,
+            "paired_changes_percent": [
+              17.334583700663032,
+              -6.18969507694056,
+              -0.05832959086867762
+            ]
+          }
+        }
+      }
+    },
+    "ba_half_mask": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "disposition": "Rejected: no compelling whole-encode or stage advantage in the screen.",
+      "exact": 9,
+      "flags": [
+        "-fmetal-math-mode=safe",
+        "-fmetal-math-fp32-functions=precise",
+        "-ffp-contract=off"
+      ],
+      "library_sha256": "5cdcaa7ffedb4852bf93863244f13b53d7c0ffcd20fda53d26fa031616d775a7",
+      "patch_sha256": "10b2fe652b3a31ef79adce6a97756ab00ca0b2c59effb5a22e23beea66940273",
+      "quality_cases": 10,
+      "quality_failures": [],
+      "shader": "butteraugli",
+      "stage": {
+        "padded_1080p": {
+          "ac": {
+            "baseline_ms": 6.875166,
+            "candidate_ms": 6.952543,
+            "median_change_percent": 1.3804423936631283,
+            "paired_changes": [
+              1.3804423936631283,
+              -0.42118255762843004,
+              1.5681588275355596
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 36.613176,
+            "candidate_ms": 35.994877,
+            "median_change_percent": 0.065802629308509,
+            "paired_changes": [
+              0.065802629308509,
+              -1.8946102900223694,
+              2.5951212071189556
+            ],
+            "wins": 1
+          },
+          "butteraugli": {
+            "baseline_ms": 18.958246,
+            "candidate_ms": 18.389126,
+            "median_change_percent": -0.37712308601788314,
+            "paired_changes": [
+              -0.37712308601788314,
+              -3.0019654771860083,
+              1.9114812209596321
+            ],
+            "wins": 2
+          },
+          "epf": {
+            "baseline_ms": 1.183668,
+            "candidate_ms": 1.187917,
+            "median_change_percent": 0.3589689000631946,
+            "paired_changes": [
+              -0.7535664444427548,
+              0.3589689000631946,
+              2.6735561911474415
+            ],
+            "wins": 1
+          }
+        },
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 31.922875,
+            "candidate_ms": 33.311835,
+            "median_change_percent": -2.6701132577974573,
+            "paired_changes": [
+              -6.925243890143973,
+              4.350986557445102,
+              -2.6701132577974573
+            ],
+            "wins": 2
+          },
+          "all": {
+            "baseline_ms": 146.659,
+            "candidate_ms": 150.881964,
+            "median_change_percent": -2.7932257828013007,
+            "paired_changes": [
+              -5.897731566733688,
+              2.8794441527625336,
+              -2.7932257828013007
+            ],
+            "wins": 2
+          },
+          "butteraugli": {
+            "baseline_ms": 85.18675,
+            "candidate_ms": 88.054124,
+            "median_change_percent": -1.8599411429715773,
+            "paired_changes": [
+              -5.805972866337939,
+              3.365985907432778,
+              -1.8599411429715773
+            ],
+            "wins": 2
+          },
+          "epf": {
+            "baseline_ms": 5.38025,
+            "candidate_ms": 5.61175,
+            "median_change_percent": -2.3620463733097896,
+            "paired_changes": [
+              -4.4406709089428675,
+              4.545666247496616,
+              -2.3620463733097896
+            ],
+            "wins": 2
+          }
+        },
+        "synthetic_128x96": {
+          "ac": {
+            "baseline_ms": 0.149917,
+            "candidate_ms": 0.147875,
+            "median_change_percent": 6.392870721799393,
+            "paired_changes": [
+              14.020372408874548,
+              6.392870721799393,
+              -8.104799368618599
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 7.333374,
+            "candidate_ms": 7.275328,
+            "median_change_percent": 4.369339406390571,
+            "paired_changes": [
+              22.188054770888897,
+              4.369339406390571,
+              -8.871974842534113
+            ],
+            "wins": 1
+          },
+          "butteraugli": {
+            "baseline_ms": 0.658876,
+            "candidate_ms": 0.659666,
+            "median_change_percent": 4.066622551132526,
+            "paired_changes": [
+              17.233918054033957,
+              4.066622551132526,
+              -7.533525555395137
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 0.026791,
+            "candidate_ms": 0.027167,
+            "median_change_percent": 4.206636557052734,
+            "paired_changes": [
+              17.03555555555556,
+              4.206636557052734,
+              -3.837032317440081
+            ],
+            "wins": 1
+          }
+        }
+      },
+      "wall": {
+        "padded_1080p": {
+          "total": {
+            "baseline_ms": 64.072792,
+            "candidate_ms": 63.753625,
+            "median_change_percent": 0.6219138153102932,
+            "paired_changes_percent": [
+              0.6219138153102932,
+              -1.1113625831473128,
+              0.9724611345171219
+            ]
+          }
+        },
+        "padded_4k": {
+          "total": {
+            "baseline_ms": 210.746291,
+            "candidate_ms": 210.799292,
+            "median_change_percent": -1.0760222337134362,
+            "paired_changes_percent": [
+              -1.4714753654517132,
+              -1.0760222337134362,
+              0.025149197050389205
+            ]
+          }
+        },
+        "synthetic_128x96": {
+          "total": {
+            "baseline_ms": 10.399584,
+            "candidate_ms": 10.550459,
+            "median_change_percent": 1.450779185013551,
+            "paired_changes_percent": [
+              18.76601745362074,
+              -8.599885513527594,
+              1.450779185013551
+            ]
+          }
+        }
+      }
+    },
+    "ba_malta_fastdivide": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "contracts": {
+        "adaptive_quantization_gpu_policy": true,
+        "butteraugli_device_operation": true,
+        "metal_aq_evaluation": true
+      },
+      "disposition": "Accepted: bounded explicit FP32 reciprocal, decoded-quality and existing contracts pass, independent whole-encode gate passes.",
+      "exact": 10,
+      "flags": [
+        "-fmetal-math-mode=safe",
+        "-fmetal-math-fp32-functions=precise",
+        "-ffp-contract=off"
+      ],
+      "library_sha256": "f485346b1b88275034e8cee78758336434a7515795d9f6500eedcedf2dcfe72f",
+      "patch_sha256": "3a16e3d9f489ce495c9b58af4965ea89794dbf04bed390491b69038be08ef786",
+      "quality_cases": 10,
+      "quality_failures": [],
+      "shader": "butteraugli",
+      "stage": {
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 29.094667,
+            "candidate_ms": 29.198458,
+            "median_change_percent": 0.5545071198099549,
+            "paired_changes": [
+              -1.9811889812667571,
+              0.5545071198099549,
+              0.9961793064641178
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 138.394375,
+            "candidate_ms": 136.854294,
+            "median_change_percent": -1.3457104190035207,
+            "paired_changes": [
+              -1.3457104190035207,
+              -1.4896739842208073,
+              -0.9251080637411535
+            ],
+            "wins": 3
+          },
+          "butteraugli": {
+            "baseline_ms": 81.732746,
+            "candidate_ms": 80.08213,
+            "median_change_percent": -2.2402494139511453,
+            "paired_changes": [
+              -1.9478506225521497,
+              -2.285796197279366,
+              -2.2402494139511453
+            ],
+            "wins": 3
+          },
+          "epf": {
+            "baseline_ms": 5.091416,
+            "candidate_ms": 5.107041,
+            "median_change_percent": 0.3068890854724948,
+            "paired_changes": [
+              -0.98205196032084,
+              0.3068890854724948,
+              3.3912708564841187
+            ],
+            "wins": 1
+          }
+        }
+      },
+      "wall": {
+        "padded_1080p": {
+          "total": {
+            "baseline_ms": 66.959459,
+            "candidate_ms": 66.476667,
+            "median_change_percent": -1.6461943473090712,
+            "paired_changes_percent": [
+              -3.4318661385839278,
+              -1.6461943473090712,
+              -0.33763368720893805
+            ]
+          }
+        },
+        "padded_4k": {
+          "total": {
+            "baseline_ms": 219.023959,
+            "candidate_ms": 217.530875,
+            "median_change_percent": -0.6816989368729209,
+            "paired_changes_percent": [
+              0.05958221236668226,
+              -0.6816989368729209,
+              -2.570484846035581
+            ]
+          }
+        }
+      }
+    },
+    "ba_malta_reassociate": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "contracts": {
+        "adaptive_quantization_gpu_policy": true,
+        "butteraugli_device_operation": true,
+        "metal_aq_evaluation": true
+      },
+      "disposition": "Contract and quality screens passed; only 0.30% all-GPU-stage improvement.",
+      "exact": 10,
+      "flags": [
+        "-fmetal-math-mode=safe",
+        "-fmetal-math-fp32-functions=precise",
+        "-ffp-contract=off"
+      ],
+      "library_sha256": "b54904646d6c3a248100bdd33e90cb715a6bd6dcf39086bccd78f611b19d4dc6",
+      "patch_sha256": "e35d8f6a9fc325921fc1dbbefab36850803f0c1bf29d24893272342c5861670c",
+      "quality_cases": 10,
+      "quality_failures": [],
+      "shader": "butteraugli",
+      "stage": {
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 29.239167,
+            "candidate_ms": 28.957959,
+            "median_change_percent": -0.6059508468633235,
+            "paired_changes": [
+              0.29208318290769864,
+              -0.6059508468633235,
+              -1.048111254332229
+            ],
+            "wins": 2
+          },
+          "all": {
+            "baseline_ms": 139.222582,
+            "candidate_ms": 138.517452,
+            "median_change_percent": -0.2959907454090027,
+            "paired_changes": [
+              -0.2959907454090027,
+              -0.987647521551771,
+              -0.12803382715599332
+            ],
+            "wins": 3
+          },
+          "butteraugli": {
+            "baseline_ms": 82.424621,
+            "candidate_ms": 81.634463,
+            "median_change_percent": -0.5700581937248206,
+            "paired_changes": [
+              -0.5700581937248206,
+              -1.2407809554865978,
+              -0.37958387019527695
+            ],
+            "wins": 3
+          },
+          "epf": {
+            "baseline_ms": 5.099791,
+            "candidate_ms": 5.180458,
+            "median_change_percent": 3.7751795322156223,
+            "paired_changes": [
+              -2.9153513061291436,
+              4.9569090184284015,
+              3.7751795322156223
+            ],
+            "wins": 1
+          }
+        }
+      }
+    },
+    "ba_malta_reciprocal": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "contracts": {
+        "adaptive_quantization_gpu_policy": true,
+        "butteraugli_device_operation": true,
+        "metal_aq_evaluation": true
+      },
+      "disposition": "Useful stage improvement; the faster explicit approximate reciprocal was fully qualified instead.",
+      "exact": 10,
+      "flags": [
+        "-fmetal-math-mode=safe",
+        "-fmetal-math-fp32-functions=precise",
+        "-ffp-contract=off"
+      ],
+      "library_sha256": "331d4801568d8f8572536f480d37674743f7f8a0ad98efef77f5ad4dc87c2a0e",
+      "patch_sha256": "5b9e15518f8d3b097e6332531ad1cc29ce3486136b8771d92036bdc6fe27ca47",
+      "quality_cases": 10,
+      "quality_failures": [],
+      "shader": "butteraugli",
+      "stage": {
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 29.191209,
+            "candidate_ms": 29.252167,
+            "median_change_percent": 0.04724710100221241,
+            "paired_changes": [
+              0.4303183587974768,
+              0.04724710100221241,
+              -0.3266759892653903
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 138.74421,
+            "candidate_ms": 137.259046,
+            "median_change_percent": -1.0603890106780867,
+            "paired_changes": [
+              -1.0603890106780867,
+              -1.4712965402390754,
+              -1.0575828713861424
+            ],
+            "wins": 3
+          },
+          "butteraugli": {
+            "baseline_ms": 82.344041,
+            "candidate_ms": 80.135667,
+            "median_change_percent": -2.092087798016906,
+            "paired_changes": [
+              -2.092087798016906,
+              -1.898776609112507,
+              -2.7624974101040367
+            ],
+            "wins": 3
+          },
+          "epf": {
+            "baseline_ms": 4.985209,
+            "candidate_ms": 5.09,
+            "median_change_percent": 2.10203824954982,
+            "paired_changes": [
+              2.10203824954982,
+              -4.660684690079508,
+              5.26151329282829
+            ],
+            "wins": 1
+          }
+        }
+      }
+    },
+    "ba_reciprocal": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "disposition": "Rejected: decoded-quality budget exceeded.",
+      "exact": 7,
+      "flags": [
+        "-fmetal-math-mode=safe",
+        "-fmetal-math-fp32-functions=precise",
+        "-ffp-contract=off",
+        "-freciprocal-math"
+      ],
+      "library_sha256": "f8ad06bcffd7814e14d1594a5c357f6857dc0dc72a2b45b3ee0121f4283f3ab0",
+      "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "quality_cases": 10,
+      "quality_failures": [
+        "flat-d1.2"
+      ],
+      "shader": "butteraugli",
+      "stage": {
+        "padded_1080p": {
+          "ac": {
+            "baseline_ms": 6.837917,
+            "candidate_ms": 6.832083,
+            "median_change_percent": -0.1760916372632204,
+            "paired_changes": [
+              -0.1760916372632204,
+              -0.35707252997503325,
+              0.018914354135568523
+            ],
+            "wins": 2
+          },
+          "all": {
+            "baseline_ms": 36.249539,
+            "candidate_ms": 35.646544,
+            "median_change_percent": -1.6799573406861668,
+            "paired_changes": [
+              -1.6799573406861668,
+              -3.0797846559757924,
+              -1.6127736134796122
+            ],
+            "wins": 3
+          },
+          "butteraugli": {
+            "baseline_ms": 18.53817,
+            "candidate_ms": 17.676295,
+            "median_change_percent": -4.2670272786758945,
+            "paired_changes": [
+              -4.2670272786758945,
+              -5.022777329153849,
+              -4.244626640783233
+            ],
+            "wins": 3
+          },
+          "epf": {
+            "baseline_ms": 1.179875,
+            "candidate_ms": 1.183542,
+            "median_change_percent": 0.37817524296424043,
+            "paired_changes": [
+              0.6303667121992262,
+              0.37817524296424043,
+              0.31071088038987504
+            ],
+            "wins": 0
+          }
+        },
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 27.553001,
+            "candidate_ms": 27.750248,
+            "median_change_percent": 0.6705222418421863,
+            "paired_changes": [
+              0.9385638382488626,
+              0.6705222418421863,
+              0.22994892508043652
+            ],
+            "wins": 0
+          },
+          "all": {
+            "baseline_ms": 130.263749,
+            "candidate_ms": 128.486664,
+            "median_change_percent": -1.5403461357709425,
+            "paired_changes": [
+              -1.5403461357709425,
+              -1.8577355700088005,
+              -1.2052708590987282
+            ],
+            "wins": 3
+          },
+          "butteraugli": {
+            "baseline_ms": 76.528501,
+            "candidate_ms": 74.239207,
+            "median_change_percent": -3.290225167222338,
+            "paired_changes": [
+              -3.4495792664297587,
+              -3.290225167222338,
+              -2.5397526925059366
+            ],
+            "wins": 3
+          },
+          "epf": {
+            "baseline_ms": 4.908542,
+            "candidate_ms": 4.909167,
+            "median_change_percent": 0.6621246880174958,
+            "paired_changes": [
+              -1.0050438602745904,
+              0.6621246880174958,
+              2.9146418646386785
+            ],
+            "wins": 1
+          }
+        },
+        "synthetic_128x96": {
+          "ac": {
+            "baseline_ms": 0.161501,
+            "candidate_ms": 0.149126,
+            "median_change_percent": 8.641740700270795,
+            "paired_changes": [
+              8.641740700270795,
+              12.085982140648577,
+              -7.66249125392412
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 8.119248,
+            "candidate_ms": 6.976458,
+            "median_change_percent": 7.953753845183686,
+            "paired_changes": [
+              17.546718663144656,
+              7.953753845183686,
+              -14.193109652309344
+            ],
+            "wins": 1
+          },
+          "butteraugli": {
+            "baseline_ms": 0.716372,
+            "candidate_ms": 0.587454,
+            "median_change_percent": 6.164123014159317,
+            "paired_changes": [
+              6.164123014159317,
+              12.908026027368846,
+              -17.995957407603868
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 0.028874,
+            "candidate_ms": 0.027209,
+            "median_change_percent": 4.580000000000006,
+            "paired_changes": [
+              13.939613089857161,
+              4.580000000000006,
+              -5.766433469557386
+            ],
+            "wins": 1
+          }
+        }
+      },
+      "wall": {
+        "padded_1080p": {
+          "total": {
+            "baseline_ms": 63.422625,
+            "candidate_ms": 62.660167,
+            "median_change_percent": -1.1877962981723278,
+            "paired_changes_percent": [
+              -1.1877962981723278,
+              -1.8343863881382982,
+              -0.18279594061431093
+            ]
+          }
+        },
+        "padded_4k": {
+          "total": {
+            "baseline_ms": 220.588125,
+            "candidate_ms": 215.573917,
+            "median_change_percent": -2.628112687811124,
+            "paired_changes_percent": [
+              -2.628112687811124,
+              -2.2731087632210434,
+              -3.724906138800943
+            ]
+          }
+        },
+        "synthetic_128x96": {
+          "total": {
+            "baseline_ms": 10.72475,
+            "candidate_ms": 10.665542,
+            "median_change_percent": -0.5520688127928386,
+            "paired_changes_percent": [
+              6.955043718731879,
+              -0.5520688127928386,
+              -8.299294540431479
+            ]
+          }
+        }
+      }
+    },
+    "ba_relaxed": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "disposition": "Screen passed; refined to retain precise functions, whose integration then exposed contract failures.",
+      "exact": 6,
+      "flags": [
+        "-fmetal-math-mode=relaxed",
+        "-fmetal-math-fp32-functions=fast"
+      ],
+      "library_sha256": "f7efe3733eda68fd61cf77a37278cfe0e3cab181379d2ca4adb6a0be8b85c280",
+      "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "quality_cases": 10,
+      "quality_failures": [],
+      "shader": "butteraugli",
+      "stage": {
+        "padded_1080p": {
+          "ac": {
+            "baseline_ms": 6.815833,
+            "candidate_ms": 6.827709,
+            "median_change_percent": 0.17424135831967114,
+            "paired_changes": [
+              -0.07646752618377661,
+              1.6652698751778772,
+              0.17424135831967114
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 36.170172,
+            "candidate_ms": 35.004503,
+            "median_change_percent": -3.4265498716598786,
+            "paired_changes": [
+              -3.4265498716598786,
+              -3.222735573389035,
+              -3.691537569837966
+            ],
+            "wins": 3
+          },
+          "butteraugli": {
+            "baseline_ms": 18.673831,
+            "candidate_ms": 17.378337,
+            "median_change_percent": -6.937483797513222,
+            "paired_changes": [
+              -6.619124981830515,
+              -6.937483797513222,
+              -7.114914579247156
+            ],
+            "wins": 3
+          },
+          "epf": {
+            "baseline_ms": 1.178833,
+            "candidate_ms": 1.191209,
+            "median_change_percent": 1.0498518450026362,
+            "paired_changes": [
+              0.2561867586311495,
+              1.0498518450026362,
+              2.634771790205348
+            ],
+            "wins": 0
+          }
+        },
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 27.412627,
+            "candidate_ms": 27.559083,
+            "median_change_percent": 0.5553821699650907,
+            "paired_changes": [
+              0.8458620182589582,
+              0.13792677944404197,
+              0.5553821699650907
+            ],
+            "wins": 0
+          },
+          "all": {
+            "baseline_ms": 130.186508,
+            "candidate_ms": 126.985171,
+            "median_change_percent": -2.5786754993331718,
+            "paired_changes": [
+              -2.459038996575602,
+              -2.5786754993331718,
+              -2.710693723688362
+            ],
+            "wins": 3
+          },
+          "butteraugli": {
+            "baseline_ms": 76.44854,
+            "candidate_ms": 73.204543,
+            "median_change_percent": -4.546235143263921,
+            "paired_changes": [
+              -3.966903328956495,
+              -4.900571024639577,
+              -4.546235143263921
+            ],
+            "wins": 3
+          },
+          "epf": {
+            "baseline_ms": 5.021084,
+            "candidate_ms": 4.917292,
+            "median_change_percent": -2.0671233542398526,
+            "paired_changes": [
+              -2.0671233542398526,
+              0.20607716994680558,
+              -2.4545144649590123
+            ],
+            "wins": 2
+          }
+        },
+        "synthetic_128x96": {
+          "ac": {
+            "baseline_ms": 0.160377,
+            "candidate_ms": 0.160334,
+            "median_change_percent": 0.9607546653226162,
+            "paired_changes": [
+              29.955582933471668,
+              0.9607546653226162,
+              -6.755956278019903
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 7.85696,
+            "candidate_ms": 8.51629,
+            "median_change_percent": 8.391668024274024,
+            "paired_changes": [
+              49.40775981380882,
+              8.391668024274024,
+              -7.8917675488302415
+            ],
+            "wins": 1
+          },
+          "butteraugli": {
+            "baseline_ms": 0.701838,
+            "candidate_ms": 0.683289,
+            "median_change_percent": -2.642917596368377,
+            "paired_changes": [
+              31.691361496651904,
+              -2.642917596368377,
+              -13.293269942725615
+            ],
+            "wins": 2
+          },
+          "epf": {
+            "baseline_ms": 0.028875,
+            "candidate_ms": 0.031209,
+            "median_change_percent": 10.217894264304729,
+            "paired_changes": [
+              40.000897182845875,
+              10.217894264304729,
+              -5.34372294372295
+            ],
+            "wins": 1
+          }
+        }
+      },
+      "wall": {
+        "padded_1080p": {
+          "total": {
+            "baseline_ms": 63.5375,
+            "candidate_ms": 62.92625,
+            "median_change_percent": -0.5259476369188998,
+            "paired_changes_percent": [
+              -0.5259476369188998,
+              -2.3951084005508605,
+              0.49333599330432243
+            ]
+          }
+        },
+        "padded_4k": {
+          "total": {
+            "baseline_ms": 212.817416,
+            "candidate_ms": 204.122834,
+            "median_change_percent": -1.9450853578353855,
+            "paired_changes_percent": [
+              -1.915441435298726,
+              -4.085465448936754,
+              -1.9450853578353855
+            ]
+          }
+        },
+        "synthetic_128x96": {
+          "total": {
+            "baseline_ms": 10.584625,
+            "candidate_ms": 10.340375,
+            "median_change_percent": 11.769334220254212,
+            "paired_changes_percent": [
+              11.769334220254212,
+              -5.081925830732514,
+              12.206781062153826
+            ]
+          }
+        }
+      }
+    },
+    "ba_relaxed_nocontract": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "contracts": {
+        "adaptive_quantization_gpu_policy": false,
+        "butteraugli_device_operation": true,
+        "metal_aq_evaluation": true
+      },
+      "disposition": "Rejected integration: existing contract tests failed; tighter arithmetic was investigated.",
+      "flags": [
+        "-fmetal-math-mode=relaxed",
+        "-fmetal-math-fp32-functions=precise",
+        "-ffp-contract=off"
+      ],
+      "library_sha256": "19e3f0e2af6581728b35cf282377e6d61d0439178645b8ec5b1cd8a65645eaf1",
+      "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "shader": "butteraugli"
+    },
+    "ba_relaxed_precise": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "contracts": {
+        "adaptive_quantization_gpu_policy": false,
+        "butteraugli_device_operation": false,
+        "metal_aq_evaluation": false
+      },
+      "disposition": "Rejected integration: existing contract tests failed; tighter arithmetic was investigated.",
+      "exact": 6,
+      "flags": [
+        "-fmetal-math-mode=relaxed",
+        "-fmetal-math-fp32-functions=precise"
+      ],
+      "library_sha256": "8663d0a1fb2000aac588157b5b42467c004b00e525cab7546e1d977ecb70f03d",
+      "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "quality_cases": 10,
+      "quality_failures": [],
+      "shader": "butteraugli",
+      "stage": {
+        "padded_1080p": {
+          "ac": {
+            "baseline_ms": 6.841374,
+            "candidate_ms": 6.874167,
+            "median_change_percent": 0.43590813537390805,
+            "paired_changes": [
+              0.43590813537390805,
+              0.8319235288116067,
+              0.11357967170024796
+            ],
+            "wins": 0
+          },
+          "all": {
+            "baseline_ms": 36.384661,
+            "candidate_ms": 35.423121,
+            "median_change_percent": -2.6427070462467617,
+            "paired_changes": [
+              -2.360414542046796,
+              -4.072223106176775,
+              -2.6427070462467617
+            ],
+            "wins": 3
+          },
+          "butteraugli": {
+            "baseline_ms": 18.787751,
+            "candidate_ms": 17.816752,
+            "median_change_percent": -5.168255636345187,
+            "paired_changes": [
+              -4.319525733011876,
+              -7.637046876383435,
+              -5.168255636345187
+            ],
+            "wins": 3
+          },
+          "epf": {
+            "baseline_ms": 1.19175,
+            "candidate_ms": 1.191376,
+            "median_change_percent": -0.19928676316341987,
+            "paired_changes": [
+              -0.2353872086335418,
+              -0.19928676316341987,
+              0.26653560106006946
+            ],
+            "wins": 2
+          }
+        },
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 27.82329,
+            "candidate_ms": 27.832042,
+            "median_change_percent": 0.0405882985081929,
+            "paired_changes": [
+              0.39407645542786085,
+              0.0405882985081929,
+              -0.3630087670346782
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 131.661331,
+            "candidate_ms": 128.046538,
+            "median_change_percent": -2.7842135540749213,
+            "paired_changes": [
+              -2.7842135540749213,
+              -1.8546288279585932,
+              -3.350068527069261
+            ],
+            "wins": 3
+          },
+          "butteraugli": {
+            "baseline_ms": 77.620083,
+            "candidate_ms": 73.753586,
+            "median_change_percent": -4.668430755671937,
+            "paired_changes": [
+              -4.668430755671937,
+              -3.6634591076126433,
+              -5.424132975231421
+            ],
+            "wins": 3
+          },
+          "epf": {
+            "baseline_ms": 4.968251,
+            "candidate_ms": 4.958417,
+            "median_change_percent": 0.21301258732699946,
+            "paired_changes": [
+              1.5409873262603124,
+              0.21301258732699946,
+              -1.3978149908604132
+            ],
+            "wins": 1
+          }
+        },
+        "synthetic_128x96": {
+          "ac": {
+            "baseline_ms": 0.180544,
+            "candidate_ms": 0.145709,
+            "median_change_percent": -19.29446561503013,
+            "paired_changes": [
+              0.8942469582896351,
+              -19.29446561503013,
+              -21.161785277359414
+            ],
+            "wins": 2
+          },
+          "all": {
+            "baseline_ms": 8.643959,
+            "candidate_ms": 7.07825,
+            "median_change_percent": -18.113332097017132,
+            "paired_changes": [
+              -0.9815498335943529,
+              -18.113332097017132,
+              -27.344256916229703
+            ],
+            "wins": 3
+          },
+          "butteraugli": {
+            "baseline_ms": 0.782415,
+            "candidate_ms": 0.599164,
+            "median_change_percent": -23.421202303125575,
+            "paired_changes": [
+              -7.462451223291755,
+              -23.421202303125575,
+              -28.171183621938912
+            ],
+            "wins": 3
+          },
+          "epf": {
+            "baseline_ms": 0.031709,
+            "candidate_ms": 0.026166,
+            "median_change_percent": -17.48084140149485,
+            "paired_changes": [
+              -1.4681318681318722,
+              -17.48084140149485,
+              -20.969536423841063
+            ],
+            "wins": 3
+          }
+        }
+      },
+      "wall": {
+        "padded_1080p": {
+          "total": {
+            "baseline_ms": 63.083209,
+            "candidate_ms": 62.182125,
+            "median_change_percent": -1.3474887929768031,
+            "paired_changes_percent": [
+              -1.428405457306392,
+              -1.3474887929768031,
+              -1.0711637571205967
+            ]
+          }
+        },
+        "padded_4k": {
+          "total": {
+            "baseline_ms": 208.233042,
+            "candidate_ms": 203.067042,
+            "median_change_percent": -2.687694011596886,
+            "paired_changes_percent": [
+              -2.9059898922560334,
+              -1.4192997394391726,
+              -2.687694011596886
+            ]
+          }
+        },
+        "synthetic_128x96": {
+          "total": {
+            "baseline_ms": 10.543792,
+            "candidate_ms": 9.899125,
+            "median_change_percent": -6.114185484690893,
+            "paired_changes_percent": [
+              -8.15448800123767,
+              -0.8252664547889643,
+              -6.114185484690893
+            ]
+          }
+        }
+      }
+    },
+    "ba_selective_reassociate": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "contracts": {
+        "adaptive_quantization_gpu_policy": true,
+        "butteraugli_device_operation": true,
+        "metal_aq_evaluation": true
+      },
+      "disposition": "Contract and quality screens passed; only 0.20% all-GPU-stage improvement.",
+      "exact": 10,
+      "flags": [
+        "-fmetal-math-mode=safe",
+        "-fmetal-math-fp32-functions=precise",
+        "-ffp-contract=off"
+      ],
+      "library_sha256": "4284b03b4fe2db05ac4fd85917240945fa05a4b54ebdee1f485e6825d16a0630",
+      "patch_sha256": "e7aa41f91a5d15e2f3e995975ae99917bee3fd15f5dbafb5fed8febe5f44c966",
+      "quality_cases": 10,
+      "quality_failures": [],
+      "shader": "butteraugli",
+      "stage": {
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 28.912415,
+            "candidate_ms": 29.187041,
+            "median_change_percent": -0.5638285669256726,
+            "paired_changes": [
+              -0.5638285669256726,
+              -0.6386737281401489,
+              1.0026038987057895
+            ],
+            "wins": 2
+          },
+          "all": {
+            "baseline_ms": 138.352917,
+            "candidate_ms": 138.671666,
+            "median_change_percent": -0.20150532781325614,
+            "paired_changes": [
+              -0.20150532781325614,
+              -0.2710481340989723,
+              0.35863159258566757
+            ],
+            "wins": 2
+          },
+          "butteraugli": {
+            "baseline_ms": 81.844966,
+            "candidate_ms": 81.886248,
+            "median_change_percent": 0.012316160781522534,
+            "paired_changes": [
+              0.012316160781522534,
+              -0.2667213521721057,
+              0.5967808720811041
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 5.268958,
+            "candidate_ms": 5.187083,
+            "median_change_percent": 0.05364682735460313,
+            "paired_changes": [
+              0.05364682735460313,
+              -4.228350273431669,
+              0.9200955991993442
+            ],
+            "wins": 1
+          }
+        }
+      }
+    },
+    "control": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "disposition": "Unchanged recompile control: byte exact; retained to expose timing noise.",
+      "exact": 10,
+      "flags": [
+        "-fmetal-math-mode=safe",
+        "-fmetal-math-fp32-functions=precise",
+        "-ffp-contract=off"
+      ],
+      "library_sha256": "b2f51553b44ec074d2bd3ca3e11122690e0d56c59a67c2931ca3f098d4661d3c",
+      "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "quality_cases": 10,
+      "quality_failures": [],
+      "shader": "butteraugli",
+      "stage": {
+        "padded_1080p": {
+          "ac": {
+            "baseline_ms": 6.870709,
+            "candidate_ms": 6.812833,
+            "median_change_percent": -0.3403590747321217,
+            "paired_changes": [
+              -0.3403590747321217,
+              -0.8423584814900353,
+              -0.2166528146357427
+            ],
+            "wins": 3
+          },
+          "all": {
+            "baseline_ms": 36.288121,
+            "candidate_ms": 36.148791,
+            "median_change_percent": -0.38395484847505434,
+            "paired_changes": [
+              -0.29511363509229227,
+              -0.38395484847505434,
+              -0.5147130371826347
+            ],
+            "wins": 3
+          },
+          "butteraugli": {
+            "baseline_ms": 18.664498,
+            "candidate_ms": 18.554498,
+            "median_change_percent": -1.1143180322053747,
+            "paired_changes": [
+              -1.1143180322053747,
+              -0.4308339822479912,
+              -1.6534525768834185
+            ],
+            "wins": 3
+          },
+          "epf": {
+            "baseline_ms": 1.195333,
+            "candidate_ms": 1.196,
+            "median_change_percent": 0.05580035019530083,
+            "paired_changes": [
+              -1.1785152293369738,
+              1.1170706575859723,
+              0.05580035019530083
+            ],
+            "wins": 1
+          }
+        },
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 27.682583,
+            "candidate_ms": 27.447043,
+            "median_change_percent": -0.55145449419709,
+            "paired_changes": [
+              -0.55145449419709,
+              0.219907224697935,
+              -0.9910975094576391
+            ],
+            "wins": 2
+          },
+          "all": {
+            "baseline_ms": 130.694453,
+            "candidate_ms": 130.79846,
+            "median_change_percent": -0.10061488716026634,
+            "paired_changes": [
+              -0.10061488716026634,
+              0.07958027109229437,
+              -0.2240775678785223
+            ],
+            "wins": 2
+          },
+          "butteraugli": {
+            "baseline_ms": 76.705956,
+            "candidate_ms": 76.764626,
+            "median_change_percent": -0.1331307144784577,
+            "paired_changes": [
+              -0.1331307144784577,
+              0.07648688975339102,
+              -0.6944740024689033
+            ],
+            "wins": 2
+          },
+          "epf": {
+            "baseline_ms": 4.929707,
+            "candidate_ms": 4.946375,
+            "median_change_percent": 0.025257192637750947,
+            "paired_changes": [
+              -0.13524130338778972,
+              0.8448924812643144,
+              0.025257192637750947
+            ],
+            "wins": 1
+          }
+        },
+        "synthetic_128x96": {
+          "ac": {
+            "baseline_ms": 0.15971,
+            "candidate_ms": 0.146584,
+            "median_change_percent": 0.3907081585373673,
+            "paired_changes": [
+              2.4904455593476316,
+              0.3907081585373673,
+              -9.446737008574468
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 7.678626,
+            "candidate_ms": 7.475706,
+            "median_change_percent": 4.2253653192641405,
+            "paired_changes": [
+              11.896861896985467,
+              4.2253653192641405,
+              -8.93474679246088
+            ],
+            "wins": 1
+          },
+          "butteraugli": {
+            "baseline_ms": 0.696169,
+            "candidate_ms": 0.652707,
+            "median_change_percent": 2.3033200271773024,
+            "paired_changes": [
+              7.153014684753045,
+              2.3033200271773024,
+              -9.477633157431232
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 0.027624,
+            "candidate_ms": 0.026833,
+            "median_change_percent": 7.091659426585584,
+            "paired_changes": [
+              8.490309726498824,
+              7.091659426585584,
+              -9.03759449472864
+            ],
+            "wins": 1
+          }
+        }
+      },
+      "wall": {
+        "padded_1080p": {
+          "total": {
+            "baseline_ms": 63.389417,
+            "candidate_ms": 63.288417,
+            "median_change_percent": -0.15933259017036905,
+            "paired_changes_percent": [
+              -0.15933259017036905,
+              -2.274741841571437,
+              0.8137803765865925
+            ]
+          }
+        },
+        "padded_4k": {
+          "total": {
+            "baseline_ms": 232.333167,
+            "candidate_ms": 233.450042,
+            "median_change_percent": -1.1843655891167648,
+            "paired_changes_percent": [
+              12.927637850501572,
+              -1.1843655891167648,
+              -1.2742657616335973
+            ]
+          }
+        },
+        "synthetic_128x96": {
+          "total": {
+            "baseline_ms": 10.665167,
+            "candidate_ms": 10.522334,
+            "median_change_percent": -2.226211185237714,
+            "paired_changes_percent": [
+              -9.3302615068239,
+              6.320022930723912,
+              -2.226211185237714
+            ]
+          }
+        }
+      }
+    },
+    "dct_half_all": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "disposition": "Rejected: decoded-quality budget exceeded.",
+      "exact": 0,
+      "flags": [],
+      "library_sha256": "bc7ebb2d14818e9656fb9a9e3cfe55ce139ae25d503aeb014412dc1d71374840",
+      "patch_sha256": "4ba7a3a496db37417004ea794af4aaf1f69d187b04704cbeb7ba338b732e7996",
+      "quality_cases": 10,
+      "quality_failures": [
+        "neutral-d0.1",
+        "neutral-d1.2",
+        "kodak-kodim17-d0.1"
+      ],
+      "shader": "dct",
+      "stage": {
+        "padded_1080p": {
+          "ac": {
+            "baseline_ms": 6.845874,
+            "candidate_ms": 6.864083,
+            "median_change_percent": 2.114308921802577,
+            "paired_changes": [
+              2.9799116957162752,
+              2.114308921802577,
+              -0.8793381140859036
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 36.083914,
+            "candidate_ms": 36.336953,
+            "median_change_percent": 0.3242687707879943,
+            "paired_changes": [
+              0.3242687707879943,
+              0.904034412674859,
+              0.13110724557807707
+            ],
+            "wins": 0
+          },
+          "butteraugli": {
+            "baseline_ms": 18.60275,
+            "candidate_ms": 18.612079,
+            "median_change_percent": 0.050148499549806935,
+            "paired_changes": [
+              -1.1499659648330995,
+              0.050148499549806935,
+              0.4980970709280941
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 1.182959,
+            "candidate_ms": 1.184375,
+            "median_change_percent": 0.2610703035915707,
+            "paired_changes": [
+              -0.7476887438138236,
+              0.3416855529227769,
+              0.2610703035915707
+            ],
+            "wins": 1
+          }
+        },
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 28.141915,
+            "candidate_ms": 27.797209,
+            "median_change_percent": 0.06108099021555624,
+            "paired_changes": [
+              0.06108099021555624,
+              -1.2248846604788755,
+              4.74311304141497
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 132.902707,
+            "candidate_ms": 131.157833,
+            "median_change_percent": -0.052533633828377724,
+            "paired_changes": [
+              -0.052533633828377724,
+              -1.3128957561413523,
+              3.853861483219023
+            ],
+            "wins": 2
+          },
+          "butteraugli": {
+            "baseline_ms": 78.297837,
+            "candidate_ms": 77.314957,
+            "median_change_percent": -0.267000964874331,
+            "paired_changes": [
+              -0.267000964874331,
+              -1.2553092622469175,
+              4.642613816063035
+            ],
+            "wins": 2
+          },
+          "epf": {
+            "baseline_ms": 4.940916,
+            "candidate_ms": 4.955207,
+            "median_change_percent": 0.2892378660151351,
+            "paired_changes": [
+              -0.15115304393489293,
+              0.2892378660151351,
+              2.6708262924668214
+            ],
+            "wins": 1
+          }
+        },
+        "synthetic_128x96": {
+          "ac": {
+            "baseline_ms": 0.1595,
+            "candidate_ms": 0.160667,
+            "median_change_percent": 0.07899686520376203,
+            "paired_changes": [
+              25.169435009848186,
+              -1.0012816404998293,
+              0.07899686520376203
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 7.857253,
+            "candidate_ms": 7.999336,
+            "median_change_percent": -0.9259342928120029,
+            "paired_changes": [
+              33.302782243328764,
+              -1.7223647577691459,
+              -0.9259342928120029
+            ],
+            "wins": 2
+          },
+          "butteraugli": {
+            "baseline_ms": 0.689258,
+            "candidate_ms": 0.728998,
+            "median_change_percent": 1.7031358359278936,
+            "paired_changes": [
+              40.7610753165963,
+              -1.1749235764201837,
+              1.7031358359278936
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 0.028957,
+            "candidate_ms": 0.029501,
+            "median_change_percent": -0.280557057869113,
+            "paired_changes": [
+              29.222123632061514,
+              -0.280557057869113,
+              -3.453396415374521
+            ],
+            "wins": 2
+          }
+        }
+      },
+      "wall": {
+        "padded_1080p": {
+          "total": {
+            "baseline_ms": 64.021791,
+            "candidate_ms": 64.005291,
+            "median_change_percent": -0.025772474874985463,
+            "paired_changes_percent": [
+              -0.025772474874985463,
+              0.25487676054465336,
+              -3.457689802930264
+            ]
+          }
+        },
+        "padded_4k": {
+          "total": {
+            "baseline_ms": 212.940542,
+            "candidate_ms": 215.908291,
+            "median_change_percent": 1.3936984343732917,
+            "paired_changes_percent": [
+              0.8529180506861245,
+              4.3183753163860805,
+              1.3936984343732917
+            ]
+          }
+        },
+        "synthetic_128x96": {
+          "total": {
+            "baseline_ms": 10.587042,
+            "candidate_ms": 10.837333,
+            "median_change_percent": 2.364125881431267,
+            "paired_changes_percent": [
+              26.665459302288653,
+              2.364125881431267,
+              -12.244593419028572
+            ]
+          }
+        }
+      }
+    },
+    "epf_contract": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "disposition": "Rejected: decoded-quality budget exceeded.",
+      "exact": 9,
+      "flags": [
+        "-fmetal-math-mode=safe",
+        "-fmetal-math-fp32-functions=precise",
+        "-ffp-contract=fast"
+      ],
+      "library_sha256": "b5d0256db328463b2602101a8459655a9fedee0e0904910d57fb76cd99e4d5db",
+      "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "quality_cases": 10,
+      "quality_failures": [
+        "flat-d1.2"
+      ],
+      "shader": "aq_postprocess",
+      "stage": {
+        "padded_1080p": {
+          "ac": {
+            "baseline_ms": 6.835292,
+            "candidate_ms": 6.912126,
+            "median_change_percent": 0.7957039080459749,
+            "paired_changes": [
+              1.124077800919121,
+              0.07694334970145267,
+              0.7957039080459749
+            ],
+            "wins": 0
+          },
+          "all": {
+            "baseline_ms": 36.157831,
+            "candidate_ms": 36.289707,
+            "median_change_percent": 0.3978004100964938,
+            "paired_changes": [
+              0.5725085696561605,
+              0.3978004100964938,
+              -0.43908560579141165
+            ],
+            "wins": 1
+          },
+          "butteraugli": {
+            "baseline_ms": 18.435458,
+            "candidate_ms": 18.644083,
+            "median_change_percent": 0.7368029587331071,
+            "paired_changes": [
+              1.9267982789219706,
+              0.7368029587331071,
+              -0.47331550074768414
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 1.200418,
+            "candidate_ms": 1.189375,
+            "median_change_percent": -1.2185441404233388,
+            "paired_changes": [
+              -0.1433150698272545,
+              -1.5204703694879584,
+              -1.2185441404233388
+            ],
+            "wins": 3
+          }
+        },
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 27.767541,
+            "candidate_ms": 27.869668,
+            "median_change_percent": 0.5561061384585564,
+            "paired_changes": [
+              0.11438234183021034,
+              0.5561061384585564,
+              0.9703558807256041
+            ],
+            "wins": 0
+          },
+          "all": {
+            "baseline_ms": 131.334046,
+            "candidate_ms": 131.878459,
+            "median_change_percent": 0.09538166064353426,
+            "paired_changes": [
+              0.09538166064353426,
+              0.7103834129421394,
+              -0.20225524766059877
+            ],
+            "wins": 1
+          },
+          "butteraugli": {
+            "baseline_ms": 76.583081,
+            "candidate_ms": 77.422461,
+            "median_change_percent": -0.19402196681014283,
+            "paired_changes": [
+              -0.26466647338452276,
+              1.4925099020873356,
+              -0.19402196681014283
+            ],
+            "wins": 2
+          },
+          "epf": {
+            "baseline_ms": 5.080916,
+            "candidate_ms": 5.044124,
+            "median_change_percent": -0.3583408975861846,
+            "paired_changes": [
+              -0.3583408975861846,
+              -1.603660940481233,
+              0.030021008701885954
+            ],
+            "wins": 2
+          }
+        },
+        "synthetic_128x96": {
+          "ac": {
+            "baseline_ms": 0.161208,
+            "candidate_ms": 0.1555,
+            "median_change_percent": -0.49191107141084434,
+            "paired_changes": [
+              17.70180360721443,
+              -0.49191107141084434,
+              -12.945628806879261
+            ],
+            "wins": 2
+          },
+          "all": {
+            "baseline_ms": 7.986712,
+            "candidate_ms": 7.522582,
+            "median_change_percent": -2.6059910511359363,
+            "paired_changes": [
+              27.66188202848834,
+              -2.6059910511359363,
+              -16.618825773097722
+            ],
+            "wins": 2
+          },
+          "butteraugli": {
+            "baseline_ms": 0.697951,
+            "candidate_ms": 0.669288,
+            "median_change_percent": 0.6457473375638179,
+            "paired_changes": [
+              19.872677219545775,
+              0.6457473375638179,
+              -16.05916223209123
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 0.028792,
+            "candidate_ms": 0.028624,
+            "median_change_percent": -0.5834954153931649,
+            "paired_changes": [
+              22.69902737752161,
+              -0.5834954153931649,
+              -10.451828682914744
+            ],
+            "wins": 2
+          }
+        }
+      },
+      "wall": {
+        "padded_1080p": {
+          "total": {
+            "baseline_ms": 64.246458,
+            "candidate_ms": 63.340541,
+            "median_change_percent": -0.870546051826826,
+            "paired_changes_percent": [
+              -0.6566966790444106,
+              -0.870546051826826,
+              -1.5703838490209177
+            ]
+          }
+        },
+        "padded_4k": {
+          "total": {
+            "baseline_ms": 214.517333,
+            "candidate_ms": 213.957125,
+            "median_change_percent": 0.38216980674981027,
+            "paired_changes_percent": [
+              0.38216980674981027,
+              -0.2611481282960071,
+              0.7210148874696065
+            ]
+          }
+        },
+        "synthetic_128x96": {
+          "total": {
+            "baseline_ms": 9.988625,
+            "candidate_ms": 10.363208,
+            "median_change_percent": 4.553930095483616,
+            "paired_changes_percent": [
+              16.946486708959576,
+              -6.430885296120481,
+              4.553930095483616
+            ]
+          }
+        }
+      }
+    },
+    "epf_fastfn": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "disposition": "Rejected: no compelling whole-encode or stage advantage in the screen.",
+      "exact": 10,
+      "flags": [
+        "-fmetal-math-mode=safe",
+        "-fmetal-math-fp32-functions=fast",
+        "-ffp-contract=off"
+      ],
+      "library_sha256": "a94b10404ab9d5e04147c82c77b8e3cfc695cb416d1be6480948c45a050b99e7",
+      "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "quality_cases": 10,
+      "quality_failures": [],
+      "shader": "aq_postprocess",
+      "stage": {
+        "padded_1080p": {
+          "ac": {
+            "baseline_ms": 6.906166,
+            "candidate_ms": 7.045417,
+            "median_change_percent": 1.9044223467727273,
+            "paired_changes": [
+              1.9044223467727273,
+              1.4461859156006396,
+              3.1516161303817958
+            ],
+            "wins": 0
+          },
+          "all": {
+            "baseline_ms": 36.212753,
+            "candidate_ms": 36.213128,
+            "median_change_percent": 0.0071328462655229075,
+            "paired_changes": [
+              0.5658332031589053,
+              0.0071328462655229075,
+              -1.257109988084959
+            ],
+            "wins": 1
+          },
+          "butteraugli": {
+            "baseline_ms": 18.465087,
+            "candidate_ms": 18.554085,
+            "median_change_percent": 0.642661472431727,
+            "paired_changes": [
+              0.642661472431727,
+              1.0851319892061673,
+              -3.4275889873787158
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 1.192375,
+            "candidate_ms": 1.171292,
+            "median_change_percent": -1.768151797882378,
+            "paired_changes": [
+              -1.768151797882378,
+              0.32785720147860964,
+              -2.2310795581282794
+            ],
+            "wins": 2
+          }
+        },
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 28.867874,
+            "candidate_ms": 28.840792,
+            "median_change_percent": -0.2796368179543429,
+            "paired_changes": [
+              -0.2796368179543429,
+              -0.09381362825680029,
+              -1.1455567469820016
+            ],
+            "wins": 3
+          },
+          "all": {
+            "baseline_ms": 137.330951,
+            "candidate_ms": 135.984249,
+            "median_change_percent": -0.886222714188134,
+            "paired_changes": [
+              0.518123494502043,
+              -0.9806252634193102,
+              -0.886222714188134
+            ],
+            "wins": 2
+          },
+          "butteraugli": {
+            "baseline_ms": 80.755539,
+            "candidate_ms": 79.047419,
+            "median_change_percent": 0.0957675086477261,
+            "paired_changes": [
+              1.175538736925108,
+              -2.1151737963138295,
+              0.0957675086477261
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 5.140875,
+            "candidate_ms": 5.074167,
+            "median_change_percent": -0.785654558026605,
+            "paired_changes": [
+              -0.785654558026605,
+              -1.2976001167116502,
+              0.83392668121689
+            ],
+            "wins": 2
+          }
+        },
+        "synthetic_128x96": {
+          "ac": {
+            "baseline_ms": 0.153124,
+            "candidate_ms": 0.160792,
+            "median_change_percent": 5.7156291632924905,
+            "paired_changes": [
+              18.950799192799252,
+              5.7156291632924905,
+              -3.838287183780875
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 7.957664,
+            "candidate_ms": 7.600456,
+            "median_change_percent": 6.63045084587639,
+            "paired_changes": [
+              33.01067346613769,
+              6.63045084587639,
+              -12.582982595044934
+            ],
+            "wins": 1
+          },
+          "butteraugli": {
+            "baseline_ms": 0.666375,
+            "candidate_ms": 0.677212,
+            "median_change_percent": 8.091089851810175,
+            "paired_changes": [
+              24.09764178344136,
+              8.091089851810175,
+              -10.803180909032006
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 0.028624,
+            "candidate_ms": 0.0275,
+            "median_change_percent": 2.9171324762437,
+            "paired_changes": [
+              22.222222222222232,
+              2.9171324762437,
+              -8.690895415227873
+            ],
+            "wins": 1
+          }
+        }
+      },
+      "wall": {
+        "padded_1080p": {
+          "total": {
+            "baseline_ms": 63.587875,
+            "candidate_ms": 64.074208,
+            "median_change_percent": 1.071155467925311,
+            "paired_changes_percent": [
+              1.071155467925311,
+              -0.7635059506516662,
+              1.3235205515736315
+            ]
+          }
+        },
+        "padded_4k": {
+          "total": {
+            "baseline_ms": 212.090334,
+            "candidate_ms": 212.943958,
+            "median_change_percent": 0.6716557163337855,
+            "paired_changes_percent": [
+              0.6716557163337855,
+              -1.1339512530542772,
+              1.422929088099134
+            ]
+          }
+        },
+        "synthetic_128x96": {
+          "total": {
+            "baseline_ms": 10.087792,
+            "candidate_ms": 10.458792,
+            "median_change_percent": 4.7231148302819825,
+            "paired_changes_percent": [
+              13.1556958780928,
+              4.7231148302819825,
+              -6.759456173137468
+            ]
+          }
+        }
+      }
+    },
+    "reduce_fastfn": {
+      "compiler": "Apple metal version 32023.864 (metalfe-32023.864)\nTarget: air64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /private/var/run/com.apple.security.cryptexd/mnt/com.apple.MobileAsset.MetalToolchain-v17.3.7003.10.wsxhhw/Metal.xctoolchain/usr/metal/current/bin",
+      "disposition": "Rejected: no compelling whole-encode or stage advantage in the screen.",
+      "exact": 10,
+      "flags": [
+        "-fmetal-math-mode=safe",
+        "-fmetal-math-fp32-functions=fast",
+        "-ffp-contract=off"
+      ],
+      "library_sha256": "33199777e25ebfd34992796b260c2529c0ee5b9b2f0bd8c6f7b46c7c11b3dcf2",
+      "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "quality_cases": 10,
+      "quality_failures": [],
+      "shader": "aq_reduction",
+      "stage": {
+        "padded_1080p": {
+          "ac": {
+            "baseline_ms": 6.844709,
+            "candidate_ms": 6.746124,
+            "median_change_percent": -1.440309588033617,
+            "paired_changes": [
+              -1.440309588033617,
+              -1.8731556059216836,
+              4.512255487008465
+            ],
+            "wins": 2
+          },
+          "all": {
+            "baseline_ms": 36.113874,
+            "candidate_ms": 36.39279,
+            "median_change_percent": 0.38260088075845466,
+            "paired_changes": [
+              0.38260088075845466,
+              1.4055710515717745,
+              -0.21843058174008112
+            ],
+            "wins": 1
+          },
+          "butteraugli": {
+            "baseline_ms": 18.452498,
+            "candidate_ms": 18.718671,
+            "median_change_percent": 1.442476785527913,
+            "paired_changes": [
+              1.442476785527913,
+              3.4203962898026186,
+              -0.8767540010650166
+            ],
+            "wins": 1
+          },
+          "epf": {
+            "baseline_ms": 1.183084,
+            "candidate_ms": 1.199207,
+            "median_change_percent": 0.8336045028432881,
+            "paired_changes": [
+              0.2781712879220688,
+              1.7963590041552902,
+              0.8336045028432881
+            ],
+            "wins": 0
+          }
+        },
+        "padded_4k": {
+          "ac": {
+            "baseline_ms": 34.640541,
+            "candidate_ms": 36.619749,
+            "median_change_percent": -1.3391025065989992,
+            "paired_changes": [
+              -5.852135380643563,
+              5.713559727603568,
+              -1.3391025065989992
+            ],
+            "wins": 2
+          },
+          "all": {
+            "baseline_ms": 156.162289,
+            "candidate_ms": 161.804703,
+            "median_change_percent": -0.9223975118026639,
+            "paired_changes": [
+              -5.4386414612386025,
+              3.6131732162302033,
+              -0.9223975118026639
+            ],
+            "wins": 2
+          },
+          "butteraugli": {
+            "baseline_ms": 90.908247,
+            "candidate_ms": 93.394207,
+            "median_change_percent": -1.2845315322005835,
+            "paired_changes": [
+              -5.322508904760026,
+              2.734581385118995,
+              -1.2845315322005835
+            ],
+            "wins": 2
+          },
+          "epf": {
+            "baseline_ms": 5.731709,
+            "candidate_ms": 5.982,
+            "median_change_percent": -0.03635913826051107,
+            "paired_changes": [
+              -4.397958903603206,
+              4.613175209230724,
+              -0.03635913826051107
+            ],
+            "wins": 2
+          }
+        },
+        "synthetic_128x96": {
+          "ac": {
+            "baseline_ms": 0.160499,
+            "candidate_ms": 0.160792,
+            "median_change_percent": 0.0785051620259214,
+            "paired_changes": [
+              28.359800995024887,
+              -0.07830074945004428,
+              0.0785051620259214
+            ],
+            "wins": 1
+          },
+          "all": {
+            "baseline_ms": 8.213959,
+            "candidate_ms": 7.954873,
+            "median_change_percent": -3.1542158902911344,
+            "paired_changes": [
+              48.369869795354646,
+              -3.1542158902911344,
+              -4.411839303093556
+            ],
+            "wins": 2
+          },
+          "butteraugli": {
+            "baseline_ms": 0.716416,
+            "candidate_ms": 0.689454,
+            "median_change_percent": -3.7634558692156594,
+            "paired_changes": [
+              47.15662974424304,
+              -3.7634558692156594,
+              -7.8824751764693275
+            ],
+            "wins": 2
+          },
+          "epf": {
+            "baseline_ms": 0.029376,
+            "candidate_ms": 0.028792,
+            "median_change_percent": -1.988017429193889,
+            "paired_changes": [
+              41.71620111731844,
+              -1.988017429193889,
+              -10.644358588173663
+            ],
+            "wins": 2
+          }
+        }
+      },
+      "wall": {
+        "padded_1080p": {
+          "total": {
+            "baseline_ms": 64.025125,
+            "candidate_ms": 63.772125,
+            "median_change_percent": -0.39515736986066585,
+            "paired_changes_percent": [
+              1.2037910499628879,
+              -1.5009848736202258,
+              -0.39515736986066585
+            ]
+          }
+        },
+        "padded_4k": {
+          "total": {
+            "baseline_ms": 209.299167,
+            "candidate_ms": 208.474583,
+            "median_change_percent": -0.5436049118669906,
+            "paired_changes_percent": [
+              -0.5436049118669906,
+              -1.3432483736616652,
+              2.0409182994980624
+            ]
+          }
+        },
+        "synthetic_128x96": {
+          "total": {
+            "baseline_ms": 10.206291,
+            "candidate_ms": 11.045084,
+            "median_change_percent": 9.362284496885298,
+            "paired_changes_percent": [
+              20.417702255540004,
+              -1.2818161505116832,
+              9.362284496885298
+            ]
+          }
+        }
+      }
+    }
+  },
+  "harness_sha256": {
+    "tools/metal_dataflow/precision.py": "cc312f07e7f26831c6d077beaf0e3581e97e7c15527e4d6a18d7c2f1ff28c1e1",
+    "tools/metal_dataflow/precision_candidate.py": "3d4f37a0a8dd19cdf75e58128c44122dfc68104697ac93aba490a8f7afc03431",
+    "tools/metal_dataflow/precision_contracts.py": "16f64850cc6180e3be18bbd83d26cf002c725a69c61226cb3b7ed357313ed203",
+    "tools/metal_dataflow/precision_matched.py": "f937652290768c1af61d6744f9c3a981c42e918b2123a69906426c08eb62b065",
+    "tools/metal_dataflow/precision_metrics.py": "6d0919922fc35de699c8f256ecf1b0d6ee3633f0e2c310abd921b9cd30b93c55",
+    "tools/metal_dataflow/precision_quality.py": "0bce313993c9dd086935fd1bc6eeadafe4fb97bfb2e3a0da0482716e1b656b7d",
+    "tools/metal_dataflow/precision_refine.py": "29052c1bbea051dae1b22ec7d37a18df12ade28229de16aa81e024ed086914a2",
+    "tools/metal_dataflow/precision_report.py": "6907a2f70babdf515577b8a1b24497faffe51d2d0462e9acea54000210781835"
+  },
+  "live_artifacts": {
+    "/Users/yunhocho/GitHub/gjxl-metal-kernel-dataflow/build/precision-study/live-release/gjxl_encode": "4ae1e118c73171d358b8b1a67d573e7cd30d57f2d9ff12d96c8592a7bbc6fcfc",
+    "/Users/yunhocho/GitHub/gjxl-metal-kernel-dataflow/build/precision-study/live-release/gjxl_encoding_benchmark": "b4295f1562427ca4dd7b35d7eca44d2b3e39ac9342b4f1c39cd436c38f063b72",
+    "/Users/yunhocho/GitHub/gjxl-metal-kernel-dataflow/build/precision-study/live-release/metal/gjxl.metallib": "5f525077451703c5d099e0b55d36744fee908b3c066454e1e407c7980d697973"
+  },
+  "live_shader_equivalence": {
+    "ac_strategy.ir": {
+      "equal": true,
+      "live_sha256": "c69cc95467ad7bbabe2a25f1768c449902079a3706510a20d41f03f517e98673",
+      "normalized_sha256": "08222bc74476a686995c64634af9f4027c00c782302d5cdd736dc89ba8bde541",
+      "screened_sha256": "08222bc74476a686995c64634af9f4027c00c782302d5cdd736dc89ba8bde541"
+    },
+    "aq_postprocess.ir": {
+      "equal": true,
+      "live_sha256": "7bd2c1abe0e7914c46ac05708da0cdd56a95b81b20eda057f7f52a3f310d27b3",
+      "normalized_sha256": "4d16e903ff46e3756aafeb1c7800932954afeb1ecc1479c0aa5063a235fd5e32",
+      "screened_sha256": "4d16e903ff46e3756aafeb1c7800932954afeb1ecc1479c0aa5063a235fd5e32"
+    },
+    "aq_reconstruction.ir": {
+      "equal": true,
+      "live_sha256": "19be7f37248b32fccda610fb49f17aa53a388b5fd188ce41475d9cfe72622580",
+      "normalized_sha256": "708c2644e33b895f4b9b977965e933167d97724e525dc30068440bfa46a47dc5",
+      "screened_sha256": "708c2644e33b895f4b9b977965e933167d97724e525dc30068440bfa46a47dc5"
+    },
+    "aq_reduction.ir": {
+      "equal": true,
+      "live_sha256": "17ab42a6aa2b26ca7176f19b6b08a47afbd2e277e2d0922e06ce706d26573119",
+      "normalized_sha256": "4c4e00432dfeee93cbe935778ddfc9b9eeb94f4005adc012f4ab324062f5d55f",
+      "screened_sha256": "4c4e00432dfeee93cbe935778ddfc9b9eeb94f4005adc012f4ab324062f5d55f"
+    },
+    "butteraugli.ir": {
+      "equal": true,
+      "live_sha256": "a101c40e6c8c6547a6257ecca46a5133f02ea88e35c8be34572c9f9787ad8bf6",
+      "normalized_sha256": "a88025ad89b67a133489faa88b1f222fdafeaeab7b3e15283051a9bdcfd008c1",
+      "screened_sha256": "a88025ad89b67a133489faa88b1f222fdafeaeab7b3e15283051a9bdcfd008c1"
+    },
+    "dct.ir": {
+      "equal": true,
+      "live_sha256": "f1fb2091fafe042bcfa748f5d9b138442eefe4119dd4e4296a35e207e9f86112",
+      "normalized_sha256": "3728c9cb207457931624325e7604cec607b1eaa32a97ea4e4907251731d85ba0",
+      "screened_sha256": "3728c9cb207457931624325e7604cec607b1eaa32a97ea4e4907251731d85ba0"
+    },
+    "primitives.ir": {
+      "equal": true,
+      "live_sha256": "3c5580da773e11b1ed546818aede914e17898b5994e2b4eecb24458ca12beba6",
+      "normalized_sha256": "5941f7b1fee2a7f85947b2ca9efe59b2747c9ebfdcfbedb13ced1b051fa89de0",
+      "screened_sha256": "5941f7b1fee2a7f85947b2ca9efe59b2747c9ebfdcfbedb13ced1b051fa89de0"
+    }
+  },
+  "qualification": {
+    "ba_malta_fastdivide": {
+      "candidate-artifacts": {
+        "/Users/yunhocho/GitHub/gjxl-metal-kernel-dataflow/build/precision-study/integrations/ba_malta_fastdivide/candidate-release/gjxl_encode": "4ae1e118c73171d358b8b1a67d573e7cd30d57f2d9ff12d96c8592a7bbc6fcfc",
+        "/Users/yunhocho/GitHub/gjxl-metal-kernel-dataflow/build/precision-study/integrations/ba_malta_fastdivide/candidate-release/gjxl_encoding_benchmark": "e48f59f109d234e326250b74de6687c874330e37bf19fbe971dac8791d7af915",
+        "/Users/yunhocho/GitHub/gjxl-metal-kernel-dataflow/build/precision-study/integrations/ba_malta_fastdivide/candidate-release/gjxl_metal_precision_metric_probe": "f2af2ed0b85d8530c01d74657ffa834d52e2b17848221e3bc170e12d63a78bbe",
+        "/Users/yunhocho/GitHub/gjxl-metal-kernel-dataflow/build/precision-study/integrations/ba_malta_fastdivide/candidate-release/gjxl_metal_precision_probe": "b70aa6bf526150e16145f71b512bbcdc24504ebcf22880f4aac2b4c449a99ff0",
+        "/Users/yunhocho/GitHub/gjxl-metal-kernel-dataflow/build/precision-study/integrations/ba_malta_fastdivide/candidate-release/metal/gjxl.metallib": "5f525077451703c5d099e0b55d36744fee908b3c066454e1e407c7980d697973"
+      },
+      "candidate-shader-equivalence": {
+        "ac_strategy.ir": {
+          "binary_equal": false,
+          "candidate": "ae232758f58015eaa1dd7e28ff25d816e4868624aca5f738753cf5356fbbb45a",
+          "equal": true,
+          "normalized_ir": [
+            "08222bc74476a686995c64634af9f4027c00c782302d5cdd736dc89ba8bde541",
+            "08222bc74476a686995c64634af9f4027c00c782302d5cdd736dc89ba8bde541"
+          ],
+          "screened": "381788a55be8adee528c514a9b57975633946cb97f9962c66d66fb3015547560"
+        },
+        "aq_postprocess.ir": {
+          "binary_equal": false,
+          "candidate": "7fa22298a82405134b6d4eab5e77f82f7919911d892264d62d6392758fe82a4a",
+          "equal": true,
+          "normalized_ir": [
+            "4d16e903ff46e3756aafeb1c7800932954afeb1ecc1479c0aa5063a235fd5e32",
+            "4d16e903ff46e3756aafeb1c7800932954afeb1ecc1479c0aa5063a235fd5e32"
+          ],
+          "screened": "5ae5cff9993811f8213eef9c76e04a26e2d47b0350dc35a82857be083ba5bf3f"
+        },
+        "aq_reconstruction.ir": {
+          "binary_equal": false,
+          "candidate": "caa6457db909b380edff46d11063aacac9ec65a98db006951b1ab7f0b67c8a11",
+          "equal": true,
+          "normalized_ir": [
+            "708c2644e33b895f4b9b977965e933167d97724e525dc30068440bfa46a47dc5",
+            "708c2644e33b895f4b9b977965e933167d97724e525dc30068440bfa46a47dc5"
+          ],
+          "screened": "7cb7c10c13c11c488e0fa78a90c5970e5295abb5fb9bd065ae5cfb64203c5184"
+        },
+        "aq_reduction.ir": {
+          "binary_equal": false,
+          "candidate": "d9b978252273d2af3fe75f1b20a6d7d30a76d7f7372c4b4b77d3a8a81cff62ae",
+          "equal": true,
+          "normalized_ir": [
+            "4c4e00432dfeee93cbe935778ddfc9b9eeb94f4005adc012f4ab324062f5d55f",
+            "4c4e00432dfeee93cbe935778ddfc9b9eeb94f4005adc012f4ab324062f5d55f"
+          ],
+          "screened": "b49db263dad612bbed1bf2a05743dee96fc8a8a255d0f43f79aaddc14dec49cc"
+        },
+        "butteraugli.ir": {
+          "binary_equal": false,
+          "candidate": "98ddfdb0799feb6e65ee6872ea0ede168f3d9def0459788963c8f44827241c1e",
+          "equal": true,
+          "normalized_ir": [
+            "a88025ad89b67a133489faa88b1f222fdafeaeab7b3e15283051a9bdcfd008c1",
+            "a88025ad89b67a133489faa88b1f222fdafeaeab7b3e15283051a9bdcfd008c1"
+          ],
+          "screened": "2047d787848afe1670af76d15dfb9acd6a1606021cf34e7a2976a4f299803965"
+        },
+        "dct.ir": {
+          "binary_equal": false,
+          "candidate": "d2ebe253c49331bcee7a671535b2a9634e5a58562d906ab8ef998c03a8a9dbab",
+          "equal": true,
+          "normalized_ir": [
+            "3728c9cb207457931624325e7604cec607b1eaa32a97ea4e4907251731d85ba0",
+            "3728c9cb207457931624325e7604cec607b1eaa32a97ea4e4907251731d85ba0"
+          ],
+          "screened": "db5f7babc8a950721aec0ef41c2bb5ac029d50de423b65e5bcd6c1885b0585c8"
+        },
+        "primitives.ir": {
+          "binary_equal": false,
+          "candidate": "7182cdbc8ec2ef8bb74d4a1b5cba0cd8d22f4736e89331e9e0e6ed6889e40628",
+          "equal": true,
+          "normalized_ir": [
+            "5941f7b1fee2a7f85947b2ca9efe59b2747c9ebfdcfbedb13ced1b051fa89de0",
+            "5941f7b1fee2a7f85947b2ca9efe59b2747c9ebfdcfbedb13ced1b051fa89de0"
+          ],
+          "screened": "8cc39c355aaa6b532ffa6c157b1d93d5359e0cd435852eed55cbfb424506b9d9"
+        }
+      },
+      "matched_quality": {
+        "cases": 184,
+        "geometric_mean_size_change_percent": -3.090841471653505e-07,
+        "interpretation": "Observed candidate points at matched or better quality; no BD-rate interpolation. Unmatched points require further target sampling.",
+        "passes": true,
+        "unmatched": [],
+        "variant": "ba_malta_fastdivide",
+        "worst_size_change_percent": 0.0
+      },
+      "metric_full-normal": {
+        "cases": 59,
+        "failures": [],
+        "max_map_error": 7.152557373046875e-07,
+        "max_score_error": 4.76837158203125e-07,
+        "max_underestimation": 1.1920928955078125e-07,
+        "mode": "full-normal",
+        "variant": "ba_malta_fastdivide"
+      },
+      "metric_screen-validation": {
+        "cases": 18,
+        "failures": [],
+        "max_map_error": 2.384185791015625e-07,
+        "max_score_error": 0,
+        "max_underestimation": 0,
+        "mode": "screen-validation",
+        "variant": "ba_malta_fastdivide"
+      },
+      "quality": {
+        "cases": 46,
+        "exact": 46,
+        "quality_failures": [],
+        "variant": "ba_malta_fastdivide"
+      },
+      "quality-corpus": {
+        "cases": 152,
+        "exact": 151,
+        "quality_failures": [],
+        "variant": "ba_malta_fastdivide"
+      },
+      "tests-normal": {
+        "failed": [
+          "quantization_pipeline"
+        ],
+        "total": 124
+      },
+      "tests-validation": {
+        "failed": [],
+        "total": 6
+      }
+    },
+    "ba_relaxed_precise": {
+      "candidate-artifacts": {
+        "/Users/yunhocho/GitHub/gjxl-metal-kernel-dataflow/build/precision-study/candidate-release/gjxl_encode": "50d65e798bdde755d85dc09672c0ad9f071bdecd771db7eba59409a8b9cac6c3",
+        "/Users/yunhocho/GitHub/gjxl-metal-kernel-dataflow/build/precision-study/candidate-release/gjxl_encoding_benchmark": "8dc7eb8f75be9e6c9e5f628e428544e670549e48c657a2a9a13c65ba6b0ccd04",
+        "/Users/yunhocho/GitHub/gjxl-metal-kernel-dataflow/build/precision-study/candidate-release/gjxl_metal_precision_metric_probe": "ecfd43ca3aa92ef9591f7cf604fc284491ec7dabab839910ded5efdcf99f4b15",
+        "/Users/yunhocho/GitHub/gjxl-metal-kernel-dataflow/build/precision-study/candidate-release/gjxl_metal_precision_probe": "43301dbab594217302482c306adae535ec39c8d7e9cfc80e231b9e80a840539d",
+        "/Users/yunhocho/GitHub/gjxl-metal-kernel-dataflow/build/precision-study/candidate-release/metal/gjxl.metallib": "4054be77a2d53d4cf0cb995ff29d9234a0208d64900ac613ea2497b10ce02741"
+      },
+      "candidate-shader-equivalence": {
+        "ac_strategy.ir": {
+          "binary_equal": false,
+          "candidate": "33f803e26fb2e360db4786a7aa34ab6b98bb9a3e4081292d3609a88535185dd7",
+          "equal": true,
+          "normalized_ir": [
+            "08222bc74476a686995c64634af9f4027c00c782302d5cdd736dc89ba8bde541",
+            "08222bc74476a686995c64634af9f4027c00c782302d5cdd736dc89ba8bde541"
+          ],
+          "screened": "381788a55be8adee528c514a9b57975633946cb97f9962c66d66fb3015547560"
+        },
+        "aq_postprocess.ir": {
+          "binary_equal": false,
+          "candidate": "8aad71e4af140761cc2d76ef2f7f92eaadcad627a9d90faabe1403793cc53797",
+          "equal": true,
+          "normalized_ir": [
+            "4d16e903ff46e3756aafeb1c7800932954afeb1ecc1479c0aa5063a235fd5e32",
+            "4d16e903ff46e3756aafeb1c7800932954afeb1ecc1479c0aa5063a235fd5e32"
+          ],
+          "screened": "5ae5cff9993811f8213eef9c76e04a26e2d47b0350dc35a82857be083ba5bf3f"
+        },
+        "aq_reconstruction.ir": {
+          "binary_equal": false,
+          "candidate": "b404c37def0dd215dfd31ae746e96cc45e1ad423a81688dbcbf9afe8906c514a",
+          "equal": true,
+          "normalized_ir": [
+            "708c2644e33b895f4b9b977965e933167d97724e525dc30068440bfa46a47dc5",
+            "708c2644e33b895f4b9b977965e933167d97724e525dc30068440bfa46a47dc5"
+          ],
+          "screened": "7cb7c10c13c11c488e0fa78a90c5970e5295abb5fb9bd065ae5cfb64203c5184"
+        },
+        "aq_reduction.ir": {
+          "binary_equal": false,
+          "candidate": "04ecf6a1cc0acbd6faf7f5c24ee390331ef40c3a8e953d72837f58727d8143b0",
+          "equal": true,
+          "normalized_ir": [
+            "4c4e00432dfeee93cbe935778ddfc9b9eeb94f4005adc012f4ab324062f5d55f",
+            "4c4e00432dfeee93cbe935778ddfc9b9eeb94f4005adc012f4ab324062f5d55f"
+          ],
+          "screened": "b49db263dad612bbed1bf2a05743dee96fc8a8a255d0f43f79aaddc14dec49cc"
+        },
+        "butteraugli.ir": {
+          "binary_equal": false,
+          "candidate": "7c80d7f8c503ad72b386b1491bad04967f980b0e11f7f020c4d63bd7ea14e049",
+          "equal": true,
+          "normalized_ir": [
+            "b8fc2efec6367507468bb135cc6a40186ca3ebc2fd3f6a442b28a9ce74f9c6a3",
+            "b8fc2efec6367507468bb135cc6a40186ca3ebc2fd3f6a442b28a9ce74f9c6a3"
+          ],
+          "screened": "943fbafeb44254b3a3784a64114b152a86f54c810673c06212ad2a6afe6fc954"
+        },
+        "dct.ir": {
+          "binary_equal": false,
+          "candidate": "dbb234132dcf4b85a31f1334e41bf6300f035b68343eb80799bf746a88faf828",
+          "equal": true,
+          "normalized_ir": [
+            "3728c9cb207457931624325e7604cec607b1eaa32a97ea4e4907251731d85ba0",
+            "3728c9cb207457931624325e7604cec607b1eaa32a97ea4e4907251731d85ba0"
+          ],
+          "screened": "db5f7babc8a950721aec0ef41c2bb5ac029d50de423b65e5bcd6c1885b0585c8"
+        },
+        "primitives.ir": {
+          "binary_equal": false,
+          "candidate": "1350dd833119fdb412575cf0599acb9f9343d8665e772ecf4de5e99ca3d938d6",
+          "equal": true,
+          "normalized_ir": [
+            "5941f7b1fee2a7f85947b2ca9efe59b2747c9ebfdcfbedb13ced1b051fa89de0",
+            "5941f7b1fee2a7f85947b2ca9efe59b2747c9ebfdcfbedb13ced1b051fa89de0"
+          ],
+          "screened": "8cc39c355aaa6b532ffa6c157b1d93d5359e0cd435852eed55cbfb424506b9d9"
+        }
+      },
+      "candidate-tests": {
+        "failed": [
+          "quantization_pipeline",
+          "metal_butteraugli_operation_contract",
+          "metal_aq_evaluation",
+          "adaptive_quantization_gpu_policy"
+        ],
+        "total": 124
+      },
+      "matched_quality": {
+        "cases": 184,
+        "geometric_mean_size_change_percent": 0.009922518146976422,
+        "interpretation": "Observed candidate points at matched or better quality; no BD-rate interpolation. Unmatched points require further target sampling.",
+        "passes": true,
+        "unmatched": [],
+        "variant": "ba_relaxed_precise",
+        "worst_size_change_percent": 1.8642749650568113
+      },
+      "metric_full-normal": {
+        "cases": 59,
+        "failures": [],
+        "max_map_error": 0.00029659271240234375,
+        "max_score_error": 7.429241668432951e-05,
+        "max_underestimation": 5.34718856215477e-05,
+        "mode": "full-normal",
+        "variant": "ba_relaxed_precise"
+      },
+      "metric_screen-validation": {
+        "cases": 18,
+        "failures": [],
+        "max_map_error": 0.00029900670051574707,
+        "max_score_error": 7.429241668432951e-05,
+        "max_underestimation": 5.34718856215477e-05,
+        "mode": "screen-validation",
+        "variant": "ba_relaxed_precise"
+      },
+      "quality": {
+        "cases": 46,
+        "exact": 32,
+        "quality_failures": [],
+        "variant": "ba_relaxed_precise"
+      },
+      "quality-corpus": {
+        "cases": 152,
+        "exact": 98,
+        "quality_failures": [],
+        "variant": "ba_relaxed_precise"
+      }
+    }
+  },
+  "raw_evidence": "build/precision-study",
+  "schema_version": 1
+}
