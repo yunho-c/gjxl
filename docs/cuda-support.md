@@ -1955,6 +1955,16 @@ three of four 4K comparisons unfavorable. The standalone final-cost work was
 only about 0.16 ms at 4K in prior traces. The prototype is not promoted; S138
 remains the runtime baseline for isolated candidate-packing/scheduling work.
 
+[S140](cuda-ac-scheduling-s140.md) tests channel-major 192-thread scheduling
+and candidate-major 96-thread packing. Both remain unpromoted: all four 4K
+whole-call primary comparisons are unfavorable for each variant. All 2,488
+frozen-oracle encodes and four CUDA sanitizer jobs pass. The 96-thread variant
+lowers summed evaluator time in all eight traces without establishing a
+whole-encode gain. A read-only driver query identifies 1,024 reserved shared
+bytes per block, explaining the retained 32×32 evaluator's two-block-per-SM
+shared-memory capacity bound. Next test removing its duplicate shared Y copy
+while retaining the 192-thread schedule; capacity alone does not prove speedup.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
