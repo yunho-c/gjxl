@@ -209,9 +209,12 @@ int main() {
     std::unique_ptr<gjxl::GpuBackend> gpu;
     const auto status = gjxl::CreateCudaBackend(&gpu);
     if (!status.ok()) { std::cerr << status.message() << '\n'; return 77; }
-    for (gjxl::Extent2D blocks : std::array<gjxl::Extent2D, 15>{{
+    // Include one-candidate and odd-tail square batches: all inactive channel
+    // groups must reach the deferred Y-read barrier before any tile is reused.
+    for (gjxl::Extent2D blocks : std::array<gjxl::Extent2D, 23>{{
       {1,1},{1,9},{9,1},{3,3},{7,7},{8,8},{9,9},{15,17},{17,15},
-      {33,3},{3,33},{33,17},{65,33},{257,1},{1,257}}}) {
+      {33,3},{3,33},{33,17},{65,33},{257,1},{1,257},
+      {2,2},{4,4},{4,5},{5,4},{4,6},{6,4},{4,9},{9,4}}}) {
       for (const auto& stage : gjxl::ac_strategy_internal::kCandidateStages)
         for (const bool device_cfl : {false, true}) Case(*gpu, blocks, stage, device_cfl);
     }

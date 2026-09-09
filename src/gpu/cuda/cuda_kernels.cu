@@ -274,11 +274,12 @@ struct AcStrategyResidualDctSource {
 
   template <unsigned int Width, unsigned int Height,
             unsigned int LocalThreads, unsigned int Values,
-            bool SharedCoefficients = false>
+            bool SharedCoefficients = false, bool DeferredStores = false>
   __device__ void Load(float* tile, float* reduction, size_t transform_index,
                        unsigned int tid, bool active) const {
     constexpr unsigned int kCount = Width * Height;
     static_assert(LocalThreads * Values == kCount);
+    static_assert(!DeferredStores || (SharedCoefficients && LocalThreads <= 32));
     const size_t candidate_index = transform_index / 3;
     const unsigned int channel = static_cast<unsigned int>(transform_index % 3);
     [[maybe_unused]] const size_t base = transform_index * kCount;
@@ -298,6 +299,7 @@ struct AcStrategyResidualDctSource {
     }
     static_assert(Values >= 2);
     float magnitude[Values / 2];
+    [[maybe_unused]] float residual_values[DeferredStores ? Values : 1];
     unsigned int nonzero = 0;
 #pragma unroll
     for (unsigned int pair = 0; pair < Values / 2; ++pair) {
@@ -310,13 +312,13 @@ struct AcStrategyResidualDctSource {
         if (valid) {
           float decorrelated;
           if constexpr (SharedCoefficients) {
-            // The fused caller owns one natural-coordinate tile per channel
-            // and points coefficients at an immutable shared copy of Y.
+            // Deferred stores preserve the original padded Y channel tile.
+            // Other shapes read an immutable packed shared copy of Y.
             constexpr bool kRowMajor = Height < Width;
             const unsigned int v = kRowMajor ? index / Width : index % Height;
             const unsigned int u = kRowMajor ? index % Width : index / Height;
             decorrelated = tile[v * (Width + 1) + u] -
-              coefficients[index] * factor;
+              coefficients[DeferredStores ? v * (Width + 1) + u : index] * factor;
           } else {
             decorrelated = coefficients[base + index] -
               coefficients[y_base + index] * factor;
@@ -326,10 +328,14 @@ struct AcStrategyResidualDctSource {
           rounded = copysignf(floorf(fabsf(scaled) + 0.5f), scaled);
           residual = matrices[matrix_base + index] * (scaled - rounded);
         }
-        constexpr bool kRowMajorCoefficients = Height < Width;
-        const unsigned int v = kRowMajorCoefficients ? index / Width : index % Height;
-        const unsigned int u = kRowMajorCoefficients ? index % Width : index / Height;
-        tile[v * (Width + 1) + u] = active ? residual : 0.0f;
+        if constexpr (DeferredStores) {
+          residual_values[value] = active ? residual : 0.0f;
+        } else {
+          constexpr bool kRowMajorCoefficients = Height < Width;
+          const unsigned int v = kRowMajorCoefficients ? index / Width : index % Height;
+          const unsigned int u = kRowMajorCoefficients ? index % Width : index / Height;
+          tile[v * (Width + 1) + u] = active ? residual : 0.0f;
+        }
         // Compute the first halving step as each pair arrives. Counts are exact
         // integers and can accumulate immediately; magnitudes retain the original
         // FP32 halving tree without keeping every coefficient's rate live.
@@ -386,6 +392,19 @@ struct AcStrategyResidualDctSource {
       }
       if (tid == 0 && active) {
         channel_rates[transform_index] = {total_magnitude, total_nonzero};
+      }
+    }
+    if constexpr (DeferredStores) {
+      // All channels finish reading original Y before any residual stores.
+      // Compile-time indices keep the deferred coefficients in registers.
+      __syncthreads();
+#pragma unroll
+      for (unsigned int value = 0; value < Values; ++value) {
+        const unsigned int index = tid + value * LocalThreads;
+        constexpr bool kRowMajor = Height < Width;
+        const unsigned int v = kRowMajor ? index / Width : index % Height;
+        const unsigned int u = kRowMajor ? index % Width : index / Height;
+        tile[v * (Width + 1) + u] = residual_values[value];
       }
     }
     // The caller's existing input-tile barrier protects these rate reads
@@ -640,16 +659,24 @@ __global__ void FusedAcStrategyKernel(
   constexpr unsigned int kTileSize = Height * (Width + 1);
   constexpr unsigned int kCount = Width * Height;
   constexpr unsigned int kValues = kCount / kLocal;
+  // These squares benefit from lower shared-memory usage. Other shapes retain
+  // their packed Y copy to avoid unfavorable register/synchronization tradeoffs.
+  constexpr bool kReuseYTile = Width == Height && (Width == 16 || Width == 32);
   static_assert(kLocal <= 32 && kFactoredDctThreads % kLocal == 0);
   __shared__ float tiles[kTransforms * kTileSize];
-  __shared__ float y_coefficients[kCandidates * kCount];
   const unsigned int group = threadIdx.x / kLocal;
   const unsigned int tid = threadIdx.x % kLocal;
   const size_t transform = static_cast<size_t>(blockIdx.x) * kTransforms + group;
   const bool active = transform < transform_count;
   const size_t base = transform * kCount;
   float* tile = tiles + group * kTileSize;
-  float* y_tile = y_coefficients + (group / 3) * kCount;
+  float* y_tile;
+  if constexpr (kReuseYTile) {
+    y_tile = tiles + ((group / 3) * 3 + 1) * kTileSize;
+  } else {
+    __shared__ float y_coefficients[kCandidates * kCount];
+    y_tile = y_coefficients + (group / 3) * kCount;
+  }
   float values[kLocal], scratch[2 * kLocal];
   const auto source = DctInputTile<Width, Height>(input, transform, active);
 
@@ -680,7 +707,9 @@ __global__ void FusedAcStrategyKernel(
       for (unsigned int v = 0; v < Height; ++v) {
         const float coefficient = values[v] * (1.0f / kCount);
         tile[v * (Width + 1) + tid] = coefficient;
-        if (group % 3 == 1) y_tile[v * Width + tid] = coefficient;
+        if constexpr (!kReuseYTile) {
+          if (group % 3 == 1) y_tile[v * Width + tid] = coefficient;
+        }
       }
     }
   } else {
@@ -701,15 +730,17 @@ __global__ void FusedAcStrategyKernel(
       for (unsigned int u = 0; u < Width; ++u) {
         const float coefficient = values[u] * (1.0f / kCount);
         tile[tid * (Width + 1) + u] = coefficient;
-        if (group % 3 == 1) y_tile[u * Height + tid] = coefficient;
+        if constexpr (!kReuseYTile) {
+          if (group % 3 == 1) y_tile[u * Height + tid] = coefficient;
+        }
       }
     }
   }
-  // The immutable Y copy lets each lane replace its own coefficients without
-  // racing another channel. Inactive tail candidates still reach all barriers.
+  // Selected squares delay all residual stores until original Y has been read;
+  // other shapes use their immutable Y copy. Inactive tails hit every barrier.
   __syncthreads();
   residual.coefficients = y_tile;
-  residual.template Load<Width, Height, kLocal, kValues, true>(
+  residual.template Load<Width, Height, kLocal, kValues, true, kReuseYTile>(
     tile, tile, transform, tid, active);
   __syncthreads();
   if (active && tid < Height) {

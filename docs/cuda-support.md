@@ -1987,6 +1987,19 @@ constant reported 40 W limit; it does not establish clocks during kernels.
 Next integrate the two-shape prototype for fresh production-path qualification,
 retaining the one-shape diagnostic control. S138 remains the retained runtime.
 
+[S143](cuda-shared-y-integration-s143.md) integrates selective shared-Y reuse
+for 16×16 and 32×32 into normal source, without a runtime selector. Native
+bodies exactly match the qualified deferred prototypes; the other five fused
+shapes remain instruction-identical to S138. Static shared allocation drops by
+4 KiB and 8 KiB per block respectively, with no spills. Fresh qualification
+passes all 82 CTests, 6,230 frozen-oracle encodes, sixteen CUDA sanitizer jobs
+and fourteen matched expected rejections. Repeated 32×32 stage comparisons
+remain favorable in 16/16 primary and 64/64 cross-label pairs; 16×16 in 14/16
+and 52/64. Whole-call results are mixed (9/16 favorable), so no universal
+encoder-wide gain is claimed. S143 becomes the retained source implementation;
+historical binaries remain untouched. Fresh traces point next to Malta and
+convolution data reuse/scheduling, alongside GPU-active operating-state checks.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
