@@ -122,6 +122,9 @@ DirectAnsHistogramPrecisionShifts(DirectAnsEntropyMode mode) noexcept;
   const EntropyCode& code,
   BitWriter* writer);
 
+/// Writes one stream using an already validated ANS model. The caller must
+/// keep the model unchanged throughout this call; token and state checks are
+/// still performed. Public mutable-model callers must use WriteTokenStream.
 [[nodiscard]] Status WriteAnsTokenStream(
   std::span<const EntropyToken> tokens,
   const EntropyCode& code,

@@ -694,8 +694,16 @@ Status WriteAcSections(
           profile == nullptr ? nullptr : &group_profiles[index];
         const ProfileClock::time_point tokens_begin =
           WorkBegin(group_profile != nullptr);
-        Status token_status = WriteTokenStream(
-          ac.streams[index], ac_code, &candidate[1 + index]);
+        // WriteSimpleAcGlobal validated this locally owned model before the
+        // batch started. It stays read-only until all workers join, so ANS
+        // groups can share that validation instead of rescanning every reverse
+        // map per group. The internal writer still checks each token and ANS
+        // state transition. Public/mutable-code callers retain full validation.
+        Status token_status = ac_code.mode == EntropyCodingMode::kAns
+          ? codestream_internal::WriteAnsTokenStream(
+              ac.streams[index], ac_code, &candidate[1 + index])
+          : WriteTokenStream(
+              ac.streams[index], ac_code, &candidate[1 + index]);
         WorkEnd(
           group_profile != nullptr, tokens_begin,
           group_profile == nullptr
