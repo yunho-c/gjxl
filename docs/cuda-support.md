@@ -1965,6 +1965,17 @@ bytes per block, explaining the retained 32×32 evaluator's two-block-per-SM
 shared-memory capacity bound. Next test removing its duplicate shared Y copy
 while retaining the 192-thread schedule; capacity alone does not prove speedup.
 
+[S141](cuda-shared-y-reuse-s141.md) removes that copy in two isolated prototypes:
+phased X/B-then-Y residual work and deferred residual stores. Both pass 2,488
+frozen-oracle encodes and four CUDA sanitizers, but remain unpromoted, with
+three of four 4K whole-call primary comparisons unfavorable for each. Shared
+storage falls from 33,536 to 25,344 bytes for 32×32, raising its modeled ceiling
+from twelve to eighteen warps per SM without local-memory traffic. Deferred
+16×16 and 32×32 kernels are faster in all eight short traces, while other shapes
+lose resource capacity. Next test those shapes selectively with repeated GPU
+stage timing and clock/throttle telemetry; retain S138 until whole-encode
+benefit is independently qualified.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
