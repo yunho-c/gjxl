@@ -1434,6 +1434,10 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_compact_frame_allocation_test PRIVATE gjxl_codestream)
   add_test(NAME compact_frame_allocation COMMAND gjxl_compact_frame_allocation_test)
 
+  add_executable(gjxl_frame_validation_test tests/frame_validation_test.cpp)
+  target_link_libraries(gjxl_frame_validation_test PRIVATE gjxl_codestream)
+  add_test(NAME frame_validation COMMAND gjxl_frame_validation_test)
+
   add_executable(gjxl_sparse_coefficients_test tests/sparse_coefficients_test.cpp)
   target_link_libraries(gjxl_sparse_coefficients_test PRIVATE gjxl_codestream)
   add_test(NAME sparse_coefficients COMMAND gjxl_sparse_coefficients_test)

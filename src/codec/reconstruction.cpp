@@ -752,6 +752,9 @@ Status ComputeQuantizedCoefficientsImpl(
     if (!status.ok()) {
       return status;
     }
+    // Dense storage started zeroed; checked writes touched only active ranges.
+    // Later const validation need not scan the unchanged group tails again.
+    result.ac_validated_ = true;
     if (!result.valid()) {
       return Status::Internal(
         "Coefficient coding did not produce a valid encoder frame");

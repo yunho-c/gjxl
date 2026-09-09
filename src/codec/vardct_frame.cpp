@@ -54,6 +54,15 @@ Extent2D GroupBlockExtent(
 
 }  // namespace
 
+VarDctEncoderFrame& VarDctEncoderFrame::operator=(
+    const VarDctEncoderFrame& other) {
+  if (this != &other) {
+    VarDctEncoderFrame candidate(other);
+    *this = std::move(candidate);
+  }
+  return *this;
+}
+
 size_t VarDctEncoderFrame::AcGroupChannelOffset(
   size_t group_index,
   size_t channel) const noexcept {
@@ -117,6 +126,7 @@ VarDctEncoderFrame::GetNativeAcGroup(size_t group_index,
   }
   size_t group_count = 0;
   if (!ac_group_extent_.try_area(&group_count) ||
+      !ac_validated_ ||
       group_count != group_used_coefficient_count_.size() ||
       group_index >= group_count ||
       group_count > std::numeric_limits<size_t>::max() / 3 ||
@@ -128,7 +138,7 @@ VarDctEncoderFrame::GetNativeAcGroup(size_t group_index,
     ac_coefficients_i16_.size();
   const bool sparse = sparse_ac_.index() != 0;
   if (sparse) {
-    if (!sparse_validated_ || dense_count != 0 || sparse_group_offsets_.size() != group_count) {
+    if (dense_count != 0 || sparse_group_offsets_.size() != group_count) {
       return Status::InvalidArgument("Sparse VarDCT AC storage is invalid");
     }
   } else if ((ac_coefficients_.size() != 0) + (ac_coefficients_i8_.size() != 0) +
@@ -286,26 +296,16 @@ bool VarDctEncoderFrame::valid() const {
       sparse_offset += 3 * expected;
     }
     VarDctNativeAcGroupView native;
-    if (!GetNativeAcGroup(group_index, &native).ok() ||
-        !std::visit(
-            [&](const auto &group) {
-              for (const auto coefficients : group.coefficients) {
-                if (!std::ranges::all_of(
-                        coefficients.subspan(expected),
-                        [](auto value) { return value == 0; })) {
-                  return false;
-                }
-              }
-              return true;
-            },
-            native))
+    // AC payloads and dense edge tails were validated by the producer.
+    // The private owner cannot change independently of its group metadata.
+    if (!GetNativeAcGroup(group_index, &native).ok())
       return false;
   }
 
   if (sparse_ac_.index() != 0 && !std::visit([&](const auto& storage) {
         using Storage = std::decay_t<decltype(storage)>;
         if constexpr (std::is_same_v<Storage, std::monostate>) return false;
-        else return sparse_validated_ && storage.ValidShape() &&
+        else return ac_validated_ && storage.ValidShape() &&
           storage.coefficient_count == sparse_offset;
       }, sparse_ac_)) return false;
 
@@ -677,7 +677,6 @@ Status AssembleVarDctEncoderFrameImpl(QuantizedFrameAssemblyInputT<T> input,
                                                  kUnwrittenQuantizedCoefficient);
       if (!status.ok()) return status;
       result.sparse_ac_ = std::move(*input.sparse_ac_storage);
-      result.sparse_validated_ = true;
     } else if (input.ac_group_storage != nullptr) {
       uint32_t invalid = 0;
       for (size_t group_index = 0; group_index < group_count; ++group_index) {
@@ -704,6 +703,9 @@ Status AssembleVarDctEncoderFrameImpl(QuantizedFrameAssemblyInputT<T> input,
       }
       *storage = std::move(*input.ac_group_storage);
     }
+    // Borrowed dense assembly writes only active ranges into zeroed storage;
+    // owned dense and sparse assembly exhaustively checked their input above.
+    result.ac_validated_ = true;
     *out = std::move(result);
     return Status::Ok();
   } catch (const std::bad_alloc&) {

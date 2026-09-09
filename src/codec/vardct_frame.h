@@ -113,6 +113,11 @@ using VarDctNativeAcGroupView =
 class VarDctEncoderFrame {
 public:
   VarDctEncoderFrame() = default;
+  VarDctEncoderFrame(const VarDctEncoderFrame&) = default;
+  VarDctEncoderFrame(VarDctEncoderFrame&&) noexcept = default;
+  // Publish the complete copy atomically, including its validation provenance.
+  VarDctEncoderFrame& operator=(const VarDctEncoderFrame&);
+  VarDctEncoderFrame& operator=(VarDctEncoderFrame&&) noexcept = default;
 
   [[nodiscard]] bool valid() const;
 
@@ -223,9 +228,9 @@ private:
     vardct_frame_internal::SparseAcStorage<int16_t>,
     vardct_frame_internal::SparseAcStorage<int32_t>> sparse_ac_;
   std::vector<size_t> sparse_group_offsets_;
-  // Set only after exhaustive assembly validation. The published owner is
-  // private and immutable, so const queries need not repeat payload checks.
-  bool sparse_validated_ = false;
+  // Producers establish dense zero tails or exhaustively validate sparse
+  // payloads before publication. Const queries never rescan immutable AC data.
+  bool ac_validated_ = false;
   // Immutable and frame-owned: copies may share counts, never mutable input.
   std::shared_ptr<const vardct_frame_internal::CoefficientOrderPopulation>
     coefficient_order_population_;
