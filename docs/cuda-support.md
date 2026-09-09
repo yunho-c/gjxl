@@ -2061,6 +2061,18 @@ remain noisy, so no universal whole-encoder gain is claimed. The 2000-square
 case favors rolling 48 over 96; refining the 4M switch is the next scheduling
 experiment. S148 is now the retained runtime baseline.
 
+[S149](cuda-rolling-tile-crossover-s149.md) screens twelve cases across five
+areas and multiple photographic contents using the frozen S148 binaries.
+All 24 cross-label comparisons at 4M favor rolling 48, but larger-size
+preferences and unchanged-stage controls disagree. Some large control shifts
+are already present before the current encode's first changed kernel.
+The 3,375 oracle-checked encodes and four device memory/init checks pass;
+a missing study-local temporary directory caused one preserved sanitizer
+launch failure, resolved without admin or firewall changes. No new area
+boundary is retained. Next test four adjacent outputs per lane and 32-row
+chunks, with warp-local normalization, to reduce shared-load/barrier work
+while keeping the 24 KiB shared-memory budget. S148 remains the runtime.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
