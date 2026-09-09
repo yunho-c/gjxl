@@ -1117,7 +1117,7 @@ __global__ void ConvolutionLowMediumRollingRowsKernel(
     const float* horizontal0, const float* horizontal1, const float* horizontal2,
     const CudaButteraugliLowMediumWeights weights, float* low0, float* low1, float* low2,
     float* medium0, float* medium1, float* medium2, LowMediumParams params) {
-  constexpr unsigned Rows = 3;
+  constexpr unsigned Rows = 4;
   constexpr unsigned Threads = 256;
   constexpr unsigned int kWidth = 32;
   constexpr unsigned int kRadius = 16;
@@ -1128,23 +1128,23 @@ __global__ void ConvolutionLowMediumRollingRowsKernel(
   const uint32_t columns = (params.width + kWidth - 1) / kWidth;
   const uint32_t origin_x = (blockIdx.x % columns) * kWidth;
   const uint32_t origin_y = (blockIdx.x / columns) * TileHeight;
-  // Tap values are immutable per-launch kernel parameters. Keep the ordered
-  // normalization on the device, once per CTA, and publish only its scalar.
+  // Keep the exact ordered device sum, once per warp. Every lane reaches
+  // the broadcast before any geometric predicate or chunk barrier.
   float held_normalization = 0.0f;
-  if (threadIdx.x == 0) {
+  if (threadIdx.x % 32 == 0) {
 #pragma unroll
     for (unsigned tap = 0; tap < 33; ++tap) held_normalization += weights.taps[tap];
   }
-  static_assert(TileHeight % 24 == 0);
+  const float normalization = __shfl_sync(0xffffffffu, held_normalization, 0);
+  static_assert(TileHeight % 32 == 0);
   const uint32_t local_x = threadIdx.x % 32;
   const uint32_t x = origin_x + local_x;
-  // A 64-row ring retains the 32-row overlap between 24-output-row chunks.
-  // One slot in the eight unused rows holds the ordered normalization.
-  // It is disjoint from both this chunk's loaders and live pixels.
+  // Each 32-output-row chunk uses all 64 ring rows. Retain the 32-row
+  // overlap and overwrite only retired rows after the read-completion barrier.
 #pragma unroll 1
-  for (unsigned chunk = 0; chunk < TileHeight / 24; ++chunk) {
-    const unsigned first_row = chunk == 0 ? 0 : chunk * 24 + 32;
-    const unsigned loaded_rows = chunk == 0 ? 56 : 24;
+  for (unsigned chunk = 0; chunk < TileHeight / 32; ++chunk) {
+    const unsigned first_row = chunk == 0 ? 0 : chunk * 32 + 32;
+    const unsigned loaded_rows = chunk == 0 ? 64 : 32;
     for (unsigned index = threadIdx.x; index < loaded_rows * kWidth; index += Threads) {
       const unsigned logical_row = first_row + index / kWidth;
       const uint32_t input_x = origin_x + index % kWidth;
@@ -1156,11 +1156,8 @@ __global__ void ConvolutionLowMediumRollingRowsKernel(
       tile1[destination] = valid ? horizontal1[source] : 0.0f;
       tile2[destination] = valid ? horizontal2[source] : 0.0f;
     }
-    const unsigned normalization_slot = ((chunk * 24 + 56) & 63u) * kWidth;
-    if (threadIdx.x == 0) tile0[normalization_slot] = held_normalization;
     __syncthreads();
-    const float normalization = tile0[normalization_slot];
-    const uint32_t local_y = chunk * 24 + (threadIdx.x / 32) * Rows;
+    const uint32_t local_y = chunk * 32 + (threadIdx.x / 32) * Rows;
     const uint32_t y = origin_y + local_y;
     // Keep partial x lanes participating in the cooperative chunk barriers.
     if (y < params.height) {
@@ -1171,8 +1168,8 @@ __global__ void ConvolutionLowMediumRollingRowsKernel(
 #pragma unroll
       for (unsigned row = 0; row < Rows; ++row)
         weight_sum[row] = interior ? normalization : 0.0f;
-      // Keep nine independent FMA chains in the original tap order. A loaded
-      // input row feeds up to three adjacent output rows before it is discarded.
+      // Keep twelve independent FMA chains in the original tap order. A loaded
+      // input row feeds up to four adjacent output rows before it is discarded.
       if (interior) {
 #pragma unroll
         for (unsigned input_row = 0; input_row < 32 + Rows; ++input_row) {
@@ -1229,7 +1226,7 @@ __global__ void ConvolutionLowMediumRollingRowsKernel(
       }
     }
     // All readers finish before the next chunk overwrites retired ring rows.
-    if (chunk + 1 < TileHeight / 24) __syncthreads();
+    if (chunk + 1 < TileHeight / 32) __syncthreads();
   }
 }
 
@@ -2992,7 +2989,7 @@ cudaError_t LaunchLowMediumImpl(const CudaButteraugliLowMediumPlan& plan,
           plan.low[0], plan.low[1], plan.low[2],
           plan.medium[0], plan.medium[1], plan.medium[2], params);
     } else {
-      ConvolutionLowMediumRollingRowsKernel<48><<<blocks, kPlaneThreads, 0, stream>>>(
+      ConvolutionLowMediumRollingRowsKernel<64><<<blocks, kPlaneThreads, 0, stream>>>(
           plan.input[0], plan.input[1], plan.input[2],
           plan.intermediate[0], plan.intermediate[1], plan.intermediate[2], plan.weights,
           plan.low[0], plan.low[1], plan.low[2],
@@ -3089,7 +3086,7 @@ cudaError_t LaunchCudaButteraugliLowMedium(
 cudaError_t LaunchCudaButteraugliLowMediumForTesting(
     const CudaButteraugliLowMediumPlan& plan, unsigned rolling_tile_height,
     cudaStream_t stream) {
-  if (rolling_tile_height != 0 && rolling_tile_height != 48 && rolling_tile_height != 96)
+  if (rolling_tile_height != 0 && rolling_tile_height != 64 && rolling_tile_height != 96)
     return cudaErrorInvalidValue;
   return LaunchLowMediumImpl(plan, false, stream, false, rolling_tile_height);
 }

@@ -167,17 +167,18 @@ struct CudaButteraugliLowMediumPlan {
 
 // Zero selects the plain 48-row tile. Large planes amortize rolling chunks;
 // narrow/short planes keep the plain body even when their area is large.
+// Eligible planes use four outputs per lane in 64- or 96-row rolling tiles.
 [[nodiscard]] constexpr unsigned CudaButteraugliLowMediumRollingTileHeight(
     uint32_t width, uint32_t height) {
   if (width < 32 || height < 96) return 0;
   const uint64_t area = static_cast<uint64_t>(width) * height;
-  return area < 2000000 ? 0 : area < 4000000 ? 48 : 96;
+  return area < 2000000 ? 0 : area < 4000000 ? 64 : 96;
 }
 
 [[nodiscard]] cudaError_t LaunchCudaButteraugliLowMedium(
     const CudaButteraugliLowMediumPlan& plan, cudaStream_t stream);
 
-// Force plain (0), rolling 48, or rolling 96 independently of geometry.
+// Force plain (0), four-row rolling 64, or rolling 96 independently of geometry.
 [[nodiscard]] cudaError_t LaunchCudaButteraugliLowMediumForTesting(
     const CudaButteraugliLowMediumPlan& plan, unsigned rolling_tile_height,
     cudaStream_t stream);

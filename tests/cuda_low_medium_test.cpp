@@ -217,7 +217,7 @@ struct OwnedCase {
 };
 void VerifyWeightOwnership() {
     unsigned checked=0;
-    for(int variant:{48,96})for(unsigned pattern:{1u,3u,4u}) {
+    for(int variant:{64,96})for(unsigned pattern:{1u,3u,4u}) {
       OwnedCase a(33,97,pattern),b(65,193,(pattern+1)%5);
       for(unsigned generation=0;generation<2;++generation) {
         if(generation){a.ReplaceWeights(0);b.ReplaceWeights(1);}
@@ -240,9 +240,9 @@ void VerifyPolicy() {
   constexpr uint32_t maximum = std::numeric_limits<uint32_t>::max();
   constexpr std::array<std::array<uint32_t, 3>, 18> choices{{
       {0,maximum,0}, {maximum,0,0}, {1,maximum,0}, {31,maximum,0},
-      {maximum,95,0}, {32,62499,0}, {32,62500,48}, {32,124999,48},
-      {32,125000,96}, {20833,96,0}, {20834,96,48}, {41667,96,96},
-      {1919,1079,48}, {1920,1080,48}, {1999,2000,48}, {2000,2000,96},
+      {maximum,95,0}, {32,62499,0}, {32,62500,64}, {32,124999,64},
+      {32,125000,96}, {20833,96,0}, {20834,96,64}, {41667,96,96},
+      {1919,1079,64}, {1920,1080,64}, {1999,2000,64}, {2000,2000,96},
       {500,500,0}, {maximum,maximum,96}}};
   for (const auto& choice : choices)
     if (CudaButteraugliLowMediumRollingTileHeight(choice[0],choice[1]) != choice[2])
@@ -266,6 +266,8 @@ int main(int argc, char** argv) {
       CheckCuda(LaunchCudaButteraugliLowMedium(empty, nullptr));
       CheckCuda(LaunchCudaButteraugliLowMediumReference(empty, nullptr));
       CheckCuda(LaunchCudaButteraugliLowMediumSequentialReference(empty, nullptr));
+      for (unsigned tile : {0u,64u,96u})
+        CheckCuda(LaunchCudaButteraugliLowMediumForTesting(empty, tile, nullptr));
     }
     for (unsigned invalid = 0; invalid < 3; ++invalid) {
       CudaButteraugliLowMediumPlan bad;
@@ -277,11 +279,15 @@ int main(int argc, char** argv) {
           (invalid != 1 && LaunchCudaButteraugliLowMedium(bad, nullptr) != cudaErrorInvalidValue) ||
           (invalid != 1 && LaunchCudaButteraugliLowMediumSequentialReference(bad, nullptr) != cudaErrorInvalidValue))
         throw std::runtime_error("Invalid low/medium stride not rejected");
+      if (invalid != 1)
+        for (unsigned tile : {0u,64u,96u})
+          if (LaunchCudaButteraugliLowMediumForTesting(bad, tile, nullptr) != cudaErrorInvalidValue)
+            throw std::runtime_error("Invalid forced low/medium stride not rejected");
     }
     CudaButteraugliLowMediumPlan empty;
-    for (unsigned tile : {0u,48u,96u})
+    for (unsigned tile : {0u,64u,96u})
       CheckCuda(LaunchCudaButteraugliLowMediumForTesting(empty,tile,nullptr));
-    for (unsigned tile : {1u,24u,64u,128u})
+    for (unsigned tile : {1u,24u,48u,128u})
       if (LaunchCudaButteraugliLowMediumForTesting(empty,tile,nullptr) != cudaErrorInvalidValue)
         throw std::runtime_error("Invalid low/medium tile not rejected");
     if (mode == "--ownership-only") {
@@ -309,14 +315,17 @@ int main(int argc, char** argv) {
       std::cout << "Verified paired horizontal case above 65535 tile rows\n" << std::flush;
       return 0;
     }
-    constexpr std::array<std::array<uint32_t, 2>, 46> shapes{{
+    constexpr std::array<std::array<uint32_t, 2>, 64> shapes{{
         {1,1}, {1,19}, {19,1}, {7,11}, {15,15}, {31,31}, {32,32}, {33,33},
         {47,47}, {48,48}, {49,49}, {63,63}, {64,64}, {65,65}, {95,95},
         {96,96}, {97,97}, {127,65}, {255,3}, {256,4}, {257,67}, {511,129},
         {1,3}, {1,4}, {1,5}, {255,5}, {256,3}, {256,5}, {257,3},
         {257,4}, {257,5}, {513,9}, {1,2}, {1,6}, {1,7},
         {33,16}, {33,17}, {33,18}, {2,3}, {3,4}, {4,5},
-        {16,3}, {17,4}, {18,5}, {34,3}, {35,5}}};
+        {16,3}, {17,4}, {18,5}, {34,3}, {35,5},
+        {33,127}, {33,128}, {33,129}, {65,127}, {65,128}, {65,129},
+        {33,191}, {33,192}, {33,193}, {65,191}, {65,192}, {65,193},
+        {33,255}, {33,256}, {33,257}, {65,255}, {65,256}, {65,257}}};
     size_t cases = 0;
     for (const auto& shape : shapes) {
       // Include tiny, all-border, and horizontal-tile-boundary cases without
@@ -327,7 +336,7 @@ int main(int argc, char** argv) {
           !(shape[0] == 257 && shape[1] == 5)) continue;
       for (bool padded : {false,true})
         for (unsigned pattern = 0; pattern < 5; ++pattern)
-          for (int schedule : {-1, 0, 48, 96}) {
+          for (int schedule : {-1, 0, 64, 96}) {
             Verify(shape[0], shape[1], padded, pattern, schedule);
             ++cases;
           }

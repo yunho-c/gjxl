@@ -2099,6 +2099,19 @@ mixed and duplicate controls vary substantially. Next qualify a clean mixed
 new crossover claim. S148 remains the runtime; compact defaults and all
 unrelated allocation/routing are unchanged.
 
+[S152](cuda-four-output-row-production-s152.md) integrates and retains the
+mixed four-row64/96 policy at those existing boundaries, removing the old
+three-row production bodies without a compatibility switch. All 84 CTests,
+4,666 frozen-oracle encodes, and eighteen CUDA sanitizer jobs pass. The two
+new bodies are native-exact S150 prototypes; the other 221 GPU bodies are
+unchanged. Actual mixed dispatch improves all twenty eligible full-vertical
+primary comparisons and all eighty cross-label comparisons. Changed 4K
+vertical intervals save roughly 0.50-0.89 ms per instrumented encode, but
+ordinary whole-encoder timing remains mixed (12/24 favorable primaries).
+This is a retained stage optimization, not a dependable whole-throughput
+claim or an optimal-crossover claim. Compact storage remains opt-in. Next
+refresh the fully resident critical-path profile before further tuning.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
