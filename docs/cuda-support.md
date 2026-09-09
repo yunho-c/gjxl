@@ -2013,6 +2013,18 @@ intervals without establishing its physical cause. S143 remains the retained
 runtime. Next qualify sustained full-pair/current resident use and small-image
 exclusions before selecting a production tile policy.
 
+[S145](cuda-rolling-sustained-s145.md) tests fresh current-path captures with
+short and sustained horizontal-plus-vertical work. Ten capture encodes match
+frozen codestream oracles; wide/compact/ASAN captures reduce to 24 identical-
+payload groups. Forty-eight replay preflights and 48 timing processes pass.
+Under 128-pair bursts, rolling 48/96 are favorable in only 5/24 and 8/24
+primary comparisons; full-4K rolling 48 regresses about 3.6%, while rolling 96
+is near even. Separate aligned probes observe large within-burst decreases
+in local cycle/timer ratio, despite 40 W limit endpoints, with measurable
+probe-on/off differences. No production policy is selected. S143 remains
+retained; next reduce the rolling design's extra weight/instruction work,
+then repeat sustained and current resident qualification.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
