@@ -2113,16 +2113,28 @@ Status codestream_internal::WriteAnsTokenStream(
       return status;
     }
     BitWriter temporary;
-    if (Status status = temporary.WriteBits(32, state); !status.ok()) {
-      return status;
-    }
+    // Coalesce adjacent chunks into the writer's supported width. Chunks are
+    // at most 31 extra bits or 16 renormalization bits; flush before shifting
+    // so no intermediate value exceeds 56 bits. Keep the temporary writer to
+    // preserve atomic publication and the exact unpadded stream length.
+    uint64_t pending = state;
+    size_t pending_bits = 32;
     for (auto chunk = reverse_chunks.rbegin(); chunk != reverse_chunks.rend();
          ++chunk) {
-      if (Status status = temporary.WriteBits(
-            chunk->bit_count, chunk->bits);
-          !status.ok()) {
-        return status;
+      if (pending_bits + chunk->bit_count > BitWriter::kMaxBitsPerWrite) {
+        if (Status status = temporary.WriteBits(pending_bits, pending);
+            !status.ok()) {
+          return status;
+        }
+        pending = 0;
+        pending_bits = 0;
       }
+      pending |= static_cast<uint64_t>(chunk->bits) << pending_bits;
+      pending_bits += chunk->bit_count;
+    }
+    if (Status status = temporary.WriteBits(pending_bits, pending);
+        !status.ok()) {
+      return status;
     }
     return writer->Append(temporary);
   } catch (const std::bad_alloc&) {

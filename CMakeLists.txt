@@ -1374,6 +1374,10 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_entropy_test
   )
 
+  add_executable(gjxl_ans_bit_emission_test tests/ans_bit_emission_test.cpp)
+  target_link_libraries(gjxl_ans_bit_emission_test PRIVATE gjxl_codestream)
+  add_test(NAME ans_bit_emission COMMAND gjxl_ans_bit_emission_test)
+
   add_executable(
     gjxl_sections_test
     tests/sections_test.cpp
