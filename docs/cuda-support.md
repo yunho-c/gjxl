@@ -2037,6 +2037,18 @@ noisy, so no production rule is retained. S143 remains the runtime baseline.
 Next test parameter-carried weights to reduce remaining coefficient traffic,
 then qualify any selected large-plane policy in the integrated encoder.
 
+[S147](cuda-parameter-weights-s147.md) passes 33 weights by value, keeping
+the original ordered device normalization. Both kernels use 46 registers,
+24 KiB shared memory, and four blocks per SM without spills. Per-case and
+captured-graph ownership pass release/ASAN and all four CUDA sanitizer tools.
+Compared with S146, executed warp instructions fall 1.24-1.49% and shared-load
+wavefronts about 14%. All 48 preflights and 48 timing processes pass; the
+96-row sustained full-4K gain repeats at 4.7-4.9%, with favorable large-image
+and HD results. Smaller inputs still regress, so no blanket or integrated
+policy is retained. S143 remains the runtime baseline. Next carry the CPU
+weights through the prepared plan, then qualify geometry selection and
+whole-encoder correctness/performance in both coefficient-storage modes.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
