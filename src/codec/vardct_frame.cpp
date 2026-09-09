@@ -105,7 +105,7 @@ Status VarDctEncoderFrame::GetAcGroup(
     *out = *dense;
     return Status::Ok();
   }
-  return Status::InvalidArgument("AC group is narrow; use GetNativeAcGroup");
+  return Status::InvalidArgument("AC group is narrow or sparse; use GetNativeAcGroup");
 }
 
 Status
@@ -121,14 +121,20 @@ VarDctEncoderFrame::GetNativeAcGroup(size_t group_index,
       group_index >= group_count ||
       group_count > std::numeric_limits<size_t>::max() / 3 ||
       group_count * 3 > std::numeric_limits<size_t>::max() /
-                            kVarDctAcGroupCoefficientCapacity ||
-      (ac_coefficients_.size() != 0) + (ac_coefficients_i8_.size() != 0) +
-              (ac_coefficients_i16_.size() != 0) !=
-          1 ||
-      ac_coefficients_.size() + ac_coefficients_i8_.size() +
-              ac_coefficients_i16_.size() !=
-          group_count * 3 * kVarDctAcGroupCoefficientCapacity) {
+                            kVarDctAcGroupCoefficientCapacity) {
     return Status::InvalidArgument("VarDCT AC-group index is invalid");
+  }
+  const size_t dense_count = ac_coefficients_.size() + ac_coefficients_i8_.size() +
+    ac_coefficients_i16_.size();
+  const bool sparse = sparse_ac_.index() != 0;
+  if (sparse) {
+    if (!sparse_validated_ || dense_count != 0 || sparse_group_offsets_.size() != group_count) {
+      return Status::InvalidArgument("Sparse VarDCT AC storage is invalid");
+    }
+  } else if ((ac_coefficients_.size() != 0) + (ac_coefficients_i8_.size() != 0) +
+               (ac_coefficients_i16_.size() != 0) != 1 ||
+             dense_count != group_count * 3 * kVarDctAcGroupCoefficientCapacity) {
+    return Status::InvalidArgument("Dense VarDCT AC storage is invalid");
   }
 
   size_t block_x = 0;
@@ -139,6 +145,29 @@ VarDctEncoderFrame::GetNativeAcGroup(size_t group_index,
     group_index,
     &block_x,
     &block_y);
+
+  if (sparse) {
+    return std::visit([&](const auto& storage) -> Status {
+      using Storage = std::decay_t<decltype(storage)>;
+      if constexpr (std::is_same_v<Storage, std::monostate>) {
+        return Status::InvalidArgument("Sparse VarDCT AC owner is absent");
+      } else {
+        const size_t begin = sparse_group_offsets_[group_index];
+        const size_t used = group_used_coefficient_count_[group_index];
+        if (!storage.ValidShape() || used > kVarDctAcGroupCoefficientCapacity ||
+            begin > storage.coefficient_count || 3 * used > storage.coefficient_count - begin) {
+          return Status::InvalidArgument("Sparse VarDCT AC group range is invalid");
+        }
+        VarDctSparseAcGroupViewT<typename Storage::value_type> result{
+          block_x, block_y, block_extent, used, {}};
+        for (size_t channel = 0; channel < 3; ++channel) {
+          result.coefficients[channel] = storage.view().subspan(begin + channel * used, used);
+        }
+        *out = result;
+        return Status::Ok();
+      }
+    }, sparse_ac_);
+  }
 
   const auto make_group = [&]<typename T>(const T *data) {
     VarDctAcGroupViewT<T> result{
@@ -226,12 +255,11 @@ bool VarDctEncoderFrame::valid() const {
 
   if (group_count > std::numeric_limits<size_t>::max() / 3 ||
       group_count * 3 > std::numeric_limits<size_t>::max() /
-                            kVarDctAcGroupCoefficientCapacity ||
-      ac_coefficients_.size() + ac_coefficients_i8_.size() +
-              ac_coefficients_i16_.size() !=
-          group_count * 3 * kVarDctAcGroupCoefficientCapacity) {
+                            kVarDctAcGroupCoefficientCapacity) {
     return false;
   }
+
+  size_t sparse_offset = 0;
 
   for (size_t group_index = 0; group_index < group_count; ++group_index) {
     size_t block_x = 0;
@@ -251,6 +279,12 @@ bool VarDctEncoderFrame::valid() const {
     if (group_used_coefficient_count_[group_index] != expected) {
       return false;
     }
+    if (sparse_ac_.index() != 0) {
+      if (sparse_group_offsets_.size() != group_count ||
+          sparse_group_offsets_[group_index] != sparse_offset ||
+          3 * expected > std::numeric_limits<size_t>::max() - sparse_offset) return false;
+      sparse_offset += 3 * expected;
+    }
     VarDctNativeAcGroupView native;
     if (!GetNativeAcGroup(group_index, &native).ok() ||
         !std::visit(
@@ -267,6 +301,13 @@ bool VarDctEncoderFrame::valid() const {
             native))
       return false;
   }
+
+  if (sparse_ac_.index() != 0 && !std::visit([&](const auto& storage) {
+        using Storage = std::decay_t<decltype(storage)>;
+        if constexpr (std::is_same_v<Storage, std::monostate>) return false;
+        else return sparse_validated_ && storage.ValidShape() &&
+          storage.coefficient_count == sparse_offset;
+      }, sparse_ac_)) return false;
 
   const Status strategy_status = strategies_.ForEachAnchor(
     [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
@@ -319,7 +360,8 @@ Status ValidateAssemblyInput(const QuantizedFrameAssemblyInputT<T> &input,
       !input.strategies->complete() || !input.raw_quant_field.valid() ||
       input.quantizer == nullptr || !input.quantizer->valid() ||
       !input.y_to_x.valid() || !input.y_to_b.valid() ||
-      !input.epf_sharpness.valid() || input.quantized_ac.empty() ||
+      !input.epf_sharpness.valid() ||
+      (input.sparse_ac_storage == nullptr && input.quantized_ac.empty()) ||
       !input.quantized_dc.valid() || !input.profile.valid() ||
       !ValidGeometry(input.geometry)) {
     return Status::InvalidArgument(
@@ -354,6 +396,14 @@ Status ValidateAssemblyInput(const QuantizedFrameAssemblyInputT<T> &input,
         kVarDctAcGroupCoefficientCapacity) {
     return Status::InvalidArgument(
       "Quantized VarDCT frame assembly group grid is too large");
+  }
+
+  if (input.sparse_ac_storage != nullptr &&
+      (input.ac_group_storage != nullptr || !input.quantized_ac.empty() ||
+       !input.sparse_ac_storage->ValidShape() ||
+       *block_count > std::numeric_limits<size_t>::max() / (3 * kJxlBlockArea) ||
+       input.sparse_ac_storage->coefficient_count != *block_count * 3 * kJxlBlockArea)) {
+    return Status::InvalidArgument("Sparse VarDCT assembly storage is inconsistent");
   }
 
   if (input.ac_group_storage != nullptr &&
@@ -422,7 +472,20 @@ Status AssembleVarDctEncoderFrameImpl(QuantizedFrameAssemblyInputT<T> input,
     result.raw_quant_field_.resize(block_count);
     result.epf_sharpness_.resize(block_count);
     result.group_used_coefficient_count_.assign(group_count, 0);
-    if (input.ac_group_storage == nullptr) {
+    if (input.sparse_ac_storage != nullptr) {
+      result.sparse_group_offsets_.resize(group_count);
+      size_t packed = 0;
+      for (size_t group = 0; group < group_count; ++group) {
+        size_t x = 0, y = 0;
+        const auto extent = GroupBlockExtent(input.geometry.block_grid().blocks,
+                                             group_extent, group, &x, &y);
+        result.sparse_group_offsets_[group] = packed;
+        packed += 3 * extent.width * extent.height * kJxlBlockArea;
+      }
+      if (packed != input.sparse_ac_storage->coefficient_count) {
+        return Status::InvalidArgument("Sparse VarDCT packed layout is incomplete");
+      }
+    } else if (input.ac_group_storage == nullptr) {
       storage->assign(group_count * 3 * kVarDctAcGroupCoefficientCapacity, 0);
     }
     for (size_t channel = 0; channel < 3; ++channel) {
@@ -504,8 +567,9 @@ Status AssembleVarDctEncoderFrameImpl(QuantizedFrameAssemblyInputT<T> input,
             "Quantized VarDCT transform coefficient count is invalid");
         }
         for (size_t offset : transform.coefficient_offsets) {
-          if (offset > input.quantized_ac.size() ||
-              coefficient_count > input.quantized_ac.size() - offset) {
+          if (input.sparse_ac_storage == nullptr &&
+              (offset > input.quantized_ac.size() ||
+               coefficient_count > input.quantized_ac.size() - offset)) {
             return Status::InvalidArgument(
               "Quantized VarDCT transform coefficient range is invalid");
           }
@@ -530,7 +594,7 @@ Status AssembleVarDctEncoderFrameImpl(QuantizedFrameAssemblyInputT<T> input,
             "Quantized VarDCT AC group coefficient capacity overflowed");
         }
         for (size_t channel = 0; channel < 3; ++channel) {
-          if (input.ac_group_storage != nullptr) {
+          if (input.ac_group_storage != nullptr || input.sparse_ac_storage != nullptr) {
             if (transform.coefficient_offsets[channel] !=
                   result.AcGroupChannelOffset(group_index, channel) + group_offset) {
               return Status::InvalidArgument(
@@ -608,7 +672,13 @@ Status AssembleVarDctEncoderFrameImpl(QuantizedFrameAssemblyInputT<T> input,
       result.coefficient_order_population_ =
         std::make_shared<const CoefficientOrderPopulation>(population);
     }
-    if (input.ac_group_storage != nullptr) {
+    if (input.sparse_ac_storage != nullptr) {
+      status = input.sparse_ac_storage->Validate(input.reject_unwritten_coefficients,
+                                                 kUnwrittenQuantizedCoefficient);
+      if (!status.ok()) return status;
+      result.sparse_ac_ = std::move(*input.sparse_ac_storage);
+      result.sparse_validated_ = true;
+    } else if (input.ac_group_storage != nullptr) {
       uint32_t invalid = 0;
       for (size_t group_index = 0; group_index < group_count; ++group_index) {
         const size_t used = result.group_used_coefficient_count_[group_index];
@@ -664,6 +734,13 @@ Status AssembleVarDctEncoderFrame(QuantizedFrameAssemblyInputT<int16_t> input,
 }
 
 AcStorageInfo GetAcStorageInfo(const VarDctEncoderFrame &frame) noexcept {
+  if (frame.sparse_ac_.index() != 0) {
+    return std::visit([](const auto& storage) -> AcStorageInfo {
+      using Storage = std::decay_t<decltype(storage)>;
+      if constexpr (std::is_same_v<Storage, std::monostate>) return {};
+      else return {sizeof(typename Storage::value_type), storage.bytes(), true};
+    }, frame.sparse_ac_);
+  }
   if (frame.ac_coefficients_i8_.size() != 0)
     return {1, frame.ac_coefficients_i8_.size()};
   if (frame.ac_coefficients_i16_.size() != 0)

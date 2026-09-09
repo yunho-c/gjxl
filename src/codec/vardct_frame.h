@@ -13,6 +13,7 @@
 
 #include "codec/chroma_from_luma.h"
 #include "codec/codestream.h"
+#include "codec/sparse_coefficients.h"
 #include "core/ac_strategy.h"
 #include "core/frame_geometry.h"
 #include "core/image.h"
@@ -39,6 +40,7 @@ struct CoefficientOrderPopulation;
 struct AcStorageInfo {
   size_t coefficient_bytes = 4;
   size_t native_bytes = 0;
+  bool sparse = false;
 };
 [[nodiscard]] AcStorageInfo
 GetAcStorageInfo(const VarDctEncoderFrame &) noexcept;
@@ -89,15 +91,24 @@ template <typename T> struct VarDctAcGroupViewT {
   std::array<std::span<const T>, 3> coefficients;
 };
 using VarDctAcGroupView = VarDctAcGroupViewT<int32_t>;
+template <typename T> struct VarDctSparseAcGroupViewT {
+  size_t block_x = 0;
+  size_t block_y = 0;
+  Extent2D block_extent;
+  size_t used_coefficient_count = 0;
+  std::array<SparseCoefficientSpan<T>, 3> coefficients;
+};
 using VarDctNativeAcGroupView =
     std::variant<VarDctAcGroupViewT<int8_t>, VarDctAcGroupViewT<int16_t>,
-                 VarDctAcGroupView>;
+                 VarDctAcGroupView, VarDctSparseAcGroupViewT<int8_t>,
+                 VarDctSparseAcGroupViewT<int16_t>, VarDctSparseAcGroupViewT<int32_t>>;
 
 /// Owns the native GJXL handoff from VarDCT analysis to entropy coding.
 ///
-/// AC coefficients use one fixed 65536-element row per group and channel.
-/// Complete transforms are appended in row-major anchor order; unused edge-
-/// group tails are zero. Quantized DC is authoritative; `dc()` is the
+/// Dense AC coefficients use fixed 65536-element rows with zero edge tails.
+/// Sparse AC storage contains only active logical coefficients and nonzero
+/// payloads. Both append complete transforms in row-major anchor order.
+/// Quantized DC is authoritative; `dc()` is the
 /// decoder-equivalent dequantized cache used by reconstruction and AQ.
 class VarDctEncoderFrame {
 public:
@@ -143,7 +154,7 @@ public:
     return group_used_coefficient_count_.size();
   }
 
-  /// Typed int32 query. Returns InvalidArgument for a narrow group; it never
+  /// Typed dense int32 query. Rejects narrow or sparse groups; it never
   /// expands storage. General consumers must use GetNativeAcGroup.
   [[nodiscard]] Status GetAcGroup(
     size_t group_index,
@@ -207,6 +218,14 @@ private:
   OverwriteArray<int32_t> ac_coefficients_;
   OverwriteArray<int8_t> ac_coefficients_i8_;
   OverwriteArray<int16_t> ac_coefficients_i16_;
+  std::variant<std::monostate,
+    vardct_frame_internal::SparseAcStorage<int8_t>,
+    vardct_frame_internal::SparseAcStorage<int16_t>,
+    vardct_frame_internal::SparseAcStorage<int32_t>> sparse_ac_;
+  std::vector<size_t> sparse_group_offsets_;
+  // Set only after exhaustive assembly validation. The published owner is
+  // private and immutable, so const queries need not repeat payload checks.
+  bool sparse_validated_ = false;
   // Immutable and frame-owned: copies may share counts, never mutable input.
   std::shared_ptr<const vardct_frame_internal::CoefficientOrderPopulation>
     coefficient_order_population_;

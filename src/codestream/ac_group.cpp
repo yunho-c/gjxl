@@ -249,6 +249,20 @@ Status ValidateAndCollectAnchors(const Group &group,
 }
 
 template <typename T>
+int32_t CountNonzerosExceptLlf(SparseCoefficientSpan<T> coefficients,
+                               const AcStrategyInfo& info) {
+  const auto extent = info.coefficient_extent();
+  const auto llf = info.low_frequency_extent();
+  int32_t nonzeros = static_cast<int32_t>(coefficients.NonzeroCount());
+  for (size_t y = 0; y < llf.height; ++y) {
+    for (size_t x = 0; x < llf.width; ++x) {
+      nonzeros -= coefficients[y * extent.width + x] != 0;
+    }
+  }
+  return nonzeros;
+}
+
+template <typename T>
 int32_t CountNonzerosExceptLlf(std::span<const T> coefficients,
                                const AcStrategyInfo &info) {
   const Extent2D coefficient_extent = info.coefficient_extent();

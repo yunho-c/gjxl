@@ -79,9 +79,13 @@ struct PopulationAssembly {
       gjxl::VarDctNativeAcGroupView native;
       PopulationCheck(frame.GetNativeAcGroup(group_index, &native));
       std::visit([&](const auto& group) {
-        for (size_t channel = 0; channel < 3; ++channel)
+        for (size_t channel = 0; channel < 3; ++channel) {
           std::copy(group.coefficients[channel].begin(), group.coefficients[channel].end(),
             coefficients.data() + (group_index * 3 + channel) * capacity);
+          std::fill_n(coefficients.data() + (group_index * 3 + channel) * capacity +
+                        group.coefficients[channel].size(),
+                      capacity - group.coefficients[channel].size(), 0);
+        }
       }, native);
     }
     std::vector<size_t> used(frame.ac_group_count(), 0);

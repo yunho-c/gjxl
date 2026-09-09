@@ -582,6 +582,7 @@ if(GJXL_ENABLE_CUDA)
     src/gpu/cuda/cuda_ac_strategy_kernels.cu
     src/gpu/cuda/cuda_ac_group_kernels.cu
     src/gpu/cuda/cuda_compact_ac_kernels.cu
+    src/gpu/cuda/cuda_sparse_ac_kernels.cu
     src/gpu/cuda/cuda_direct_ac_pack_kernels.cu
     src/gpu/cuda/cuda_coefficient_order_kernels.cu
     src/gpu/cuda/cuda_aq.cpp
@@ -1432,6 +1433,18 @@ if(GJXL_BUILD_TESTS)
   add_executable(gjxl_compact_frame_allocation_test tests/compact_frame_allocation_test.cpp)
   target_link_libraries(gjxl_compact_frame_allocation_test PRIVATE gjxl_codestream)
   add_test(NAME compact_frame_allocation COMMAND gjxl_compact_frame_allocation_test)
+
+  add_executable(gjxl_sparse_coefficients_test tests/sparse_coefficients_test.cpp)
+  target_link_libraries(gjxl_sparse_coefficients_test PRIVATE gjxl_codestream)
+  add_test(NAME sparse_coefficients COMMAND gjxl_sparse_coefficients_test)
+
+  add_executable(gjxl_sparse_vardct_frame_test tests/sparse_vardct_frame_test.cpp)
+  target_link_libraries(gjxl_sparse_vardct_frame_test PRIVATE gjxl_codestream)
+  add_test(NAME sparse_vardct_frame COMMAND gjxl_sparse_vardct_frame_test)
+
+  add_executable(gjxl_sparse_frame_allocation_test tests/sparse_frame_allocation_test.cpp)
+  target_link_libraries(gjxl_sparse_frame_allocation_test PRIVATE gjxl_codestream)
+  add_test(NAME sparse_frame_allocation COMMAND gjxl_sparse_frame_allocation_test)
 
   add_executable(gjxl_quantization_storage_test tests/quantization_storage_test.cpp)
   target_link_libraries(gjxl_quantization_storage_test PRIVATE gjxl_codec)
@@ -2448,6 +2461,11 @@ if(GJXL_BUILD_TESTS)
     target_link_libraries(gjxl_cuda_compact_ac_test PRIVATE gjxl_cuda CUDA::cudart)
     add_test(NAME cuda_compact_ac COMMAND gjxl_cuda_compact_ac_test)
     set_tests_properties(cuda_compact_ac PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_sparse_resident_test tests/cuda_sparse_resident_test.cpp)
+    target_link_libraries(gjxl_cuda_sparse_resident_test PRIVATE gjxl_codestream gjxl_cuda)
+    add_test(NAME cuda_sparse_resident COMMAND gjxl_cuda_sparse_resident_test)
+    set_tests_properties(cuda_sparse_resident PROPERTIES SKIP_RETURN_CODE 77)
 
     add_executable(gjxl_cuda_direct_ac_pack_test tests/cuda_direct_ac_pack_test.cpp)
     target_link_libraries(gjxl_cuda_direct_ac_pack_test PRIVATE gjxl_cuda CUDA::cudart)

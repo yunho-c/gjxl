@@ -3858,9 +3858,10 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
             anchor.index_in_batch * batch.coefficient_count;
         std::visit(
             [&](const auto &group) {
-              std::copy_n(group.coefficients[channel].data() + source_offset,
-                          batch.coefficient_count,
-                          quantized_readback_.data() + destination_offset);
+              const auto coefficients = group.coefficients[channel].subspan(
+                source_offset, batch.coefficient_count);
+              std::copy(coefficients.begin(), coefficients.end(),
+                        quantized_readback_.data() + destination_offset);
             },
             native);
         if (exact_coefficient_reconstruction_) {

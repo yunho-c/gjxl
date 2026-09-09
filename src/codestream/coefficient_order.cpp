@@ -204,8 +204,13 @@ Status CountGroupZeros(
             // Neither counter type can overflow for the selected frame.
             static_assert(std::numeric_limits<size_t>::digits <=
                           std::numeric_limits<uint64_t>::digits);
-            CountCoefficientZeros(
-              coefficients.data(), counts, coefficients.size());
+            if constexpr (requires { coefficients.data(); }) {
+              CountCoefficientZeros(coefficients.data(), counts, coefficients.size());
+            } else {
+              for (size_t index = 0; index < coefficients.size(); ++index) {
+                counts[index] += coefficients[index] == 0;
+              }
+            }
           }
         }
       }

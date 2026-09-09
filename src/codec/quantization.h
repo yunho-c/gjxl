@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "codec/sparse_coefficients.h"
+
 #include <array>
 #include <cstdint>
 #include <span>
@@ -112,5 +114,15 @@ struct AdjustedAcQuantization {
                                        AcQuantizationOptions options,
                                        std::span<const int16_t> quantized,
                                        std::span<float> coefficients);
+
+[[nodiscard]] Status DequantizeAcBlock(AcStrategyType strategy,
+  const Quantizer& quantizer, int32_t raw_quant, AcQuantizationOptions options,
+  SparseCoefficientSpan<int8_t> quantized, std::span<float> coefficients);
+[[nodiscard]] Status DequantizeAcBlock(AcStrategyType strategy,
+  const Quantizer& quantizer, int32_t raw_quant, AcQuantizationOptions options,
+  SparseCoefficientSpan<int16_t> quantized, std::span<float> coefficients);
+[[nodiscard]] Status DequantizeAcBlock(AcStrategyType strategy,
+  const Quantizer& quantizer, int32_t raw_quant, AcQuantizationOptions options,
+  SparseCoefficientSpan<int32_t> quantized, std::span<float> coefficients);
 
 }  // namespace gjxl

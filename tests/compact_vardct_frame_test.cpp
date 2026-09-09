@@ -76,7 +76,10 @@ const void *FirstPointer(const VarDctEncoderFrame &frame) {
   VarDctNativeAcGroupView group;
   Check(frame.GetNativeAcGroup(0, &group));
   return std::visit(
-      [](const auto &g) -> const void * { return g.coefficients[0].data(); },
+      [](const auto &g) -> const void * {
+        if constexpr (requires { g.coefficients[0].data(); }) return g.coefficients[0].data();
+        else throw std::runtime_error("Expected dense compact test storage");
+      },
       group);
 }
 

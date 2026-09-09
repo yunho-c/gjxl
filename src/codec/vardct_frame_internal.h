@@ -45,6 +45,10 @@ template <typename T> struct QuantizedFrameAssemblyInputT {
   /// Copied, never borrowed. Shape/bounds are checked; equality to quantized_ac
   /// is a producer invariant, just like the supplied quantized DC/AC decisions.
   const CoefficientOrderPopulation* coefficient_order_population = nullptr;
+  /// Alternative owned active-coefficient layout. quantized_ac must be empty
+  /// and ac_group_storage null. Transform offsets still identify the final
+  /// fixed-capacity logical group rows. Consumed only on complete success.
+  SparseAcStorage<T>* sparse_ac_storage = nullptr;
 };
 
 [[nodiscard]] Status AssembleVarDctEncoderFrame(
