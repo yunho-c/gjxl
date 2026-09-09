@@ -2025,6 +2025,18 @@ probe-on/off differences. No production policy is selected. S143 remains
 retained; next reduce the rolling design's extra weight/instruction work,
 then repeat sustained and current resident qualification.
 
+[S146](cuda-retired-ring-weights-s146.md) stores weights in unused rolling
+tile rows, retaining 24 KiB shared memory and four blocks per SM without
+spills. Both new kernels pass bitwise guard/reuse and all four CUDA sanitizer
+checks. Their executed warp instructions fall 5.68%/4.18% versus old 48/96
+rings, though shared-load wavefronts increase. Forty-eight current-input
+preflights and 48 timing processes pass. Sustained full 4K improves about
+1.2-1.4% for new 48 and 1.9-2.8% for new 96; full 2000x2000 also improves
+on both repeats. Small inputs still regress and HD duplicate controls are
+noisy, so no production rule is retained. S143 remains the runtime baseline.
+Next test parameter-carried weights to reduce remaining coefficient traffic,
+then qualify any selected large-plane policy in the integrated encoder.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
