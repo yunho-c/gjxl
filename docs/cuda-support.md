@@ -2085,6 +2085,20 @@ sanitizer jobs pass. Next compare the new schedules with actual S148
 dispatch in complete encodes, including rolling48 controls and both
 coefficient-storage modes. No whole-encoder gain is claimed yet.
 
+[S151](cuda-integrated-four-output-rows-s151.md) compares those bodies inside
+complete resident encodes against actual S148 dispatch and rolling48, with
+wide/compact storage and opposite-order repeats. All 15,064 frozen-oracle
+encodes and eight integrated CUDA memory/init checks pass; all 223 existing
+GPU bodies and three prototype bodies remain instruction-exact. Each new
+tile improves all sixteen larger-image full-vertical primary comparisons
+and all 64 cross-label comparisons against each old control. Tile64 also
+improves HD, while tiles96/128 regress there. Tile96 saves roughly 0.66-0.94 ms
+across changed 4K vertical intervals, but ordinary whole-encode results are
+mixed and duplicate controls vary substantially. Next qualify a clean mixed
+64/96 policy at the existing eligibility boundaries, without tile128 or a
+new crossover claim. S148 remains the runtime; compact defaults and all
+unrelated allocation/routing are unchanged.
+
 ### Math and kernel strategy
 
 CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
