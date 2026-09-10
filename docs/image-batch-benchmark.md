@@ -70,7 +70,13 @@ canonical input path and are CSV-escaped. Byte counts are per image.
 
 The raw destination must not exist and its parent must already exist. Rows are
 flushed as pairs complete; a failed run returns nonzero and may leave partial
-results. Use a new filename for each independent run. Compare downstream
-results only when workload, settings, thread policy, and timing boundary agree.
-libjxl comparison is deferred; no libjxl linkage or cross-codec speedup is part
-of this command.
+results. Use a new filename for each independent run. For downstream comparisons,
+match workloads and timing boundaries, and report settings and thread policies
+explicitly.
+The separate libjxl-side `jxl_image_batch_benchmark` emits the same raw schema;
+see `doc/image-batch-benchmark.md` in the libjxl checkout. Run both tools on the
+same prepared PFMs with unit scale (`+1` or `-1`). Its fixed per-image thread
+setting is recorded as `fixed_per_image:N`; report that alongside GJXL's
+automatic policy. Equal requested effort and distance describe a configuration
+comparison, not matched decoded quality. Neither command builds or invokes the
+other encoder, and paired speedups describe batching within each encoder.
