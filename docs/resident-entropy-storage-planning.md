@@ -29,7 +29,7 @@ historical capacity. Prefix preparation requires a cost output, as its API does.
 Stack arrays, immutable tables, small control objects and allocator headers
 retain the previously declared managed-memory exclusions.
 
-The only runtime changes are:
+The runtime changes at this checkpoint were:
 
 - The high-density ANS refinement priority queue now uses `Storage<Pair>`.
   The earlier serializer attachment missed its default `std::vector` backing.
@@ -106,9 +106,12 @@ may already contain preceding fields or sections.
 Prefix tokens emit at most 15 depth bits plus 31 extra bits. ANS emits at most
 31 extra bits plus one 16-bit renormalization chunk per token, and a 32-bit final
 state per section. Thus the respective payload bounds are `46*N` and
-`32 + 47*N`. ANS reserves exactly `2*N` reverse-chunk slots even if fewer are
-emitted. Temporary payload and destination backing can coexist. BitWriter bounds
-cover byte rounding, doubling and replacement; callers must include the largest
+`32 + 47*N`. The original checkpoint reserved `2*N` reverse-chunk slots.
+The current [bit-writing implementation](entropy-bit-writing.md) instead reserves
+`floor(47*N/56)` uint64 reverse words, keeping the partial word on the stack.
+Temporary payload and destination backing can coexist. BitWriter bounds cover
+byte rounding, seven writable padding bytes for nonempty writers, doubling and
+replacement; callers must include the largest
 allotment ever reserved, not just the bits finally written.
 
 ### Optimizer ownership inventory

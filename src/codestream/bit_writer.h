@@ -19,6 +19,9 @@ namespace gjxl {
 class BitWriter {
 public:
   static constexpr size_t kMaxBitsPerWrite = 56;
+  // A word store may extend seven bytes beyond the logical byte extent.
+  // This backing is charged by the serializer plan and never published.
+  static constexpr size_t kStoragePadding = sizeof(uint64_t) - 1;
 
   BitWriter() = default;
   BitWriter(const BitWriter&) = delete;

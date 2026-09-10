@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <new>
 #include <numeric>
@@ -110,10 +111,7 @@ struct AliasEntry {
   uint16_t frequency1 = 0;
 };
 
-struct ReverseBitChunk {
-  uint32_t bits = 0;
-  uint8_t bit_count = 0;
-};
+
 
 struct Remainder {
   size_t symbol = 0;
@@ -2116,11 +2114,23 @@ Status codestream_internal::WriteAnsTokenStream(
         !status.ok()) {
       return status;
     }
-    Storage<ReverseBitChunk> reverse_chunks;
-    reverse_chunks.reserve(chunk_count);
-    const auto append_chunk = [&reverse_chunks](
-                                uint32_t bits, uint8_t bit_count) {
-      reverse_chunks.push_back({bits, bit_count});
+    // Pack during reverse token processing. Every stored word contains 56
+    // bits; only the final pending word needs a separate logical width.
+    Storage<uint64_t> reverse_words;
+    reverse_words.reserve(chunk_count);
+    uint64_t pending = 0;
+    size_t pending_bits = 0;
+    const auto append_chunk = [&](uint32_t bits, uint8_t bit_count) {
+      if (pending_bits + bit_count >= BitWriter::kMaxBitsPerWrite) {
+        const size_t take = BitWriter::kMaxBitsPerWrite - pending_bits;
+        const size_t remaining = bit_count - take;
+        reverse_words.push_back((pending << take) | (uint64_t{bits} >> remaining));
+        pending = bits & ((uint64_t{1} << remaining) - 1);
+        pending_bits = remaining;
+      } else {
+        pending = (pending << bit_count) | bits;
+        pending_bits += bit_count;
+      }
     };
     uint32_t state = 0;
     if (Status status = ProcessAnsTokenStream(
@@ -2128,18 +2138,23 @@ Status codestream_internal::WriteAnsTokenStream(
         !status.ok()) {
       return status;
     }
+    // The checked token bound above also bounds this exact size calculation.
+    const size_t total_bits = 32 + pending_bits +
+      BitWriter::kMaxBitsPerWrite * reverse_words.size();
     BitWriter temporary;
-    if (Status status = temporary.WriteBits(32, state); !status.ok()) {
-      return status;
-    }
-    for (auto chunk = reverse_chunks.rbegin(); chunk != reverse_chunks.rend();
-         ++chunk) {
-      if (Status status = temporary.WriteBits(
-            chunk->bit_count, chunk->bits);
-          !status.ok()) {
-        return status;
+    const auto write_words = [&]() -> Status {
+      if (Status write = temporary.WriteBits(32, state); !write.ok()) return write;
+      if (Status write = temporary.WriteBits(pending_bits, pending); !write.ok())
+        return write;
+      for (auto word = reverse_words.rbegin(); word != reverse_words.rend(); ++word) {
+        if (Status write = temporary.WriteBits(BitWriter::kMaxBitsPerWrite, *word);
+            !write.ok()) return write;
       }
-    }
+      return Status::Ok();
+    };
+    // reference_wrapper keeps the synchronous callback allocation-free.
+    Status status = temporary.WithMaxBits(total_bits, std::cref(write_words));
+    if (!status.ok()) return status;
     return writer->Append(temporary);
   } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
     return error.status();
@@ -3025,9 +3040,16 @@ Status codestream_internal::ComputeAnsReverseChunkCount(size_t tokens,
                                                        size_t* out) {
   if (out == nullptr)
     return Status::InvalidArgument("ANS chunk count output is null");
-  if (tokens > Storage<ReverseBitChunk>{}.max_size() / 2)
+  // Every token emits at most 31 extra bits and 16 renormalization bits.
+  // Full packed words are 56 bits. Include the final state in the overflow
+  // proof used by emission's exact output reservation.
+  if (tokens > (std::numeric_limits<size_t>::max() - kAnsStreamStateBits) /
+                 kAnsMaximumTokenBits)
     return Status::OutOfMemory("ANS reverse chunk count overflows");
-  *out = 2 * tokens;
+  const size_t words = tokens * kAnsMaximumTokenBits / BitWriter::kMaxBitsPerWrite;
+  if (words > Storage<uint64_t>{}.max_size())
+    return Status::OutOfMemory("ANS reverse word count overflows");
+  *out = words;
   return Status::Ok();
 }
 
@@ -3050,7 +3072,7 @@ Status codestream_internal::ComputeEntropyTokenEmissionStoragePlan(
   if (mode == EntropyCodingMode::kAns) {
     status = ComputeAnsReverseChunkCount(tokens, &plan.reverse_chunks);
     if (!status.ok()) return status;
-    if (!plan.scratch.AddVector<ReverseBitChunk>(plan.reverse_chunks,
+    if (!plan.scratch.AddVector<uint64_t>(plan.reverse_chunks,
           resource_budget_internal::VectorCapacityPolicy::kFreshExact))
       return Status::OutOfMemory("Entropy emission storage overflows");
   }
