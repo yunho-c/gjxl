@@ -2784,6 +2784,26 @@ if(GJXL_BUILD_BENCHMARKS)
     )
   endif()
 
+  execute_process(COMMAND git rev-parse HEAD
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    OUTPUT_VARIABLE GJXL_QUALITY_REVISION OUTPUT_STRIP_TRAILING_WHITESPACE
+    RESULT_VARIABLE GJXL_QUALITY_REVISION_RESULT ERROR_QUIET)
+  if(NOT GJXL_QUALITY_REVISION_RESULT EQUAL 0)
+    set(GJXL_QUALITY_REVISION "unknown")
+  endif()
+  add_executable(gjxl_quality_benchmark benchmarks/quality_benchmark.cpp)
+  target_link_libraries(gjxl_quality_benchmark PRIVATE
+    gjxl_codestream gjxl_metal gjxl_pfm_io)
+  target_compile_definitions(gjxl_quality_benchmark PRIVATE
+    GJXL_QUALITY_REVISION="${GJXL_QUALITY_REVISION}")
+  add_dependencies(gjxl_quality_benchmark gjxl_embedded_metal_shaders)
+  if(GJXL_BUILD_TESTS)
+    add_test(NAME quality_benchmark_cli
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/quality_benchmark_cli_test.py"
+        --benchmark $<TARGET_FILE:gjxl_quality_benchmark>)
+    set_tests_properties(quality_benchmark_cli PROPERTIES LABELS "benchmark;cli;metal")
+  endif()
+
   add_executable(
     gjxl_encoding_benchmark
     benchmarks/encoding_benchmark.cpp
