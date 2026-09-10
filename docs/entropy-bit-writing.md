@@ -175,6 +175,9 @@ optimization is retained here, and no speedup is inferred from these diagnostic
 work totals. The initial diagnostic run overlapped qualification and is excluded;
 only `histogram-quiet-*` records feed the table.
 
+The follow-up [exact clustering study](entropy-clustering.md) evaluates this
+remaining target against the committed bit-writing implementation.
+
 ## Evidence and reproduction
 
 Local evidence is under `build/entropy-bit-writing/`: frozen baseline/append/batch/

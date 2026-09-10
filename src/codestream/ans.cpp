@@ -1086,35 +1086,36 @@ double DirectHistogramShannonBits(const Histogram& histogram) {
   return bits;
 }
 
+// This private hot loop returns static error text; callers construct Status
+// only on failure. Keep the ordered floating-point cost evaluation unchanged.
 template <typename Histogram>
-Status DirectHistogramDistance(
+const char* DirectHistogramDistance(
   const Histogram& left,
   const DirectAnsHistogram& right,
   const std::array<double, kExactLog2TableSize + 1>& log2_table,
   double* distance) {
 
   if (distance == nullptr) {
-    return Status::InvalidArgument("Direct ANS distance output is null");
+    return "Direct ANS distance output is null";
   }
   if (left.total_count >
       std::numeric_limits<uint64_t>::max() - right.total_count) {
-    return Status::InvalidArgument("Direct ANS histogram count overflow");
+    return "Direct ANS histogram count overflow";
   }
   const uint64_t total_count = left.total_count + right.total_count;
   if (total_count == 0) {
     *distance = 0.0;
-    return Status::Ok();
+    return nullptr;
   }
   double combined_bits = static_cast<double>(total_count) *
     ExactCountLog2(total_count, log2_table);
   const size_t alphabet_size = std::max(
     left.total_count == 0 ? 0 : left.maximum_symbol + 1,
     right.total_count == 0 ? 0 : right.maximum_symbol + 1);
+  // Counts come from checked token accumulation or validated fixed populations;
+  // AddHistogram preserves their totals. Each bin is bounded by its total, so
+  // the checked combined total above also proves that every bin sum fits.
   for (size_t symbol = 0; symbol < alphabet_size; ++symbol) {
-    if (left.counts[symbol] >
-        std::numeric_limits<uint64_t>::max() - right.counts[symbol]) {
-      return Status::InvalidArgument("Direct ANS histogram count overflow");
-    }
     const uint64_t count = left.counts[symbol] + right.counts[symbol];
     if (count != 0) {
       combined_bits -= static_cast<double>(count) *
@@ -1122,7 +1123,7 @@ Status DirectHistogramDistance(
     }
   }
   *distance = combined_bits - left.shannon_bits - right.shannon_bits;
-  return Status::Ok();
+  return nullptr;
 }
 
 template <typename Histogram>
@@ -1220,10 +1221,10 @@ Status FastClusterDirectAnsHistograms(
         continue;
       }
       double distance = 0.0;
-      if (Status status = DirectHistogramDistance(
+      if (const char* error = DirectHistogramDistance(
             source[index], clustered->back(), log2_table, &distance);
-          !status.ok()) {
-        return status;
+          error != nullptr) {
+        return Status::InvalidArgument(error);
       }
       distances[index] = std::min(distances[index], distance);
       if (distances[index] > distances[largest_index]) {
@@ -1242,10 +1243,10 @@ Status FastClusterDirectAnsHistograms(
     double best_distance = std::numeric_limits<double>::infinity();
     for (size_t cluster = 0; cluster < clustered->size(); ++cluster) {
       double distance = 0.0;
-      if (Status status = DirectHistogramDistance(
+      if (const char* error = DirectHistogramDistance(
             source[index], (*clustered)[cluster], log2_table, &distance);
-          !status.ok()) {
-        return status;
+          error != nullptr) {
+        return Status::InvalidArgument(error);
       }
       if (distance < best_distance) {
         best = cluster;
