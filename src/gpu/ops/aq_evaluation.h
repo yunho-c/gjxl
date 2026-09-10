@@ -36,6 +36,9 @@ struct AqEvaluationOptions {
   ButteraugliOptions butteraugli;
   AqEvaluationMetric metric = AqEvaluationMetric::kButteraugli;
   std::array<float, 3> maximum_error{};
+  /// Resident zero-update encoding without reconstruction or metric storage.
+  /// Only a final-frame policy with no evaluations may use this preparation.
+  bool evaluation_free = false;
 
   friend bool operator==(const AqEvaluationOptions&,
                          const AqEvaluationOptions&) = default;

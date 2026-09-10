@@ -192,7 +192,16 @@ void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
 void MetalPreparedAqEvaluation::EncodeReconstructionReset(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
 
-  if (exact_linear_reconstruction_) {
+  if (options_.evaluation_free) {
+    encoder->setComputePipelineState(
+      backend.aq_pipelines_.reset_frame_encoding.get());
+    BindPlane(encoder, quantized_coefficients_, 0);
+    BindPlane(encoder, quantized_dc_, 1);
+    BindPlane(encoder, reconstruction_error_, 2);
+    encoder->setBytes(&reset_params_, sizeof(reset_params_), 3);
+    DispatchThreads1d(encoder, reset_params_.poison_outputs != 0u
+      ? std::max(coefficient_value_count_, 3 * block_count_) : 1u);
+  } else if (exact_linear_reconstruction_) {
     encoder->setComputePipelineState(
         backend.aq_pipelines_.reset_exact_evaluation.get());
     BindPlane(encoder, reconstruction_error_, 0);
@@ -306,7 +315,10 @@ void MetalPreparedAqEvaluation::EncodeReconstructionCoefficientBatch(
     BindPlane(encoder, forward_coefficients_, 5);
     BindPlane(encoder, write_completed_coefficients_
         ? completed_coefficients_ : quantized_coefficients_, 6);
-    BindPlane(encoder, reconstruction_coefficients_, 7);
+    // The final-only specialization never accesses reconstruction storage.
+    // Bind valid scratch for the unused argument when that storage is absent.
+    BindPlane(encoder, options_.evaluation_free
+      ? gathered_pixels_ : reconstruction_coefficients_, 7);
     BindPlane(encoder, dc_, 8);
     BindPlane(encoder, quantized_dc_, 9);
     BindPlane(encoder, reconstruction_error_, 10);

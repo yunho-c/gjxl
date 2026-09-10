@@ -74,8 +74,7 @@ bool CheckPlans() {
         const size_t iterations = AdaptiveQuantizationIterations(o.encoding);
         if (!Ok(status) ||
             !Check(pending && p.maximum_attempts == 1 &&
-                       p.score_count == iterations + size_t(iterations == 0 ||
-                                                            bool(flags & 2)) &&
+                       p.score_count == iterations + size_t(bool(flags & 2)) &&
                        p.working.peak_bytes ==
                            std::max(p.search_phase.peak_bytes,
                                     p.completion_phase.peak_bytes) &&
@@ -85,7 +84,7 @@ bool CheckPlans() {
                                p.diagnostics.peak_bytes &&
                        p.output.peak_bytes <= p.working.peak_bytes &&
                        p.profile_shape.submissions ==
-                           (o.collect_gpu_profile ? 5 : 0) &&
+                           (o.collect_gpu_profile ? (p.score_count == 0 ? 4 : 5) : 0) &&
                        p.profile_shape.wall_stages ==
                            (o.collect_gpu_profile ? 13 : 0),
                    "Workflow plan formula or allocation-free contract failed"))
@@ -239,11 +238,19 @@ bool CheckProfile(const GpuExecutionProfile &profile,
           return false;
     }
   }
-  return Check(profile.wall_stages.size() <= plan.profile_shape.wall_stages &&
+  const bool valid = profile.wall_stages.size() <= plan.profile_shape.wall_stages &&
                    profile.submissions.size() ==
                        plan.profile_shape.submissions &&
                    stages <= plan.profile_shape.stages &&
-                   dispatches <= plan.profile_shape.dispatches,
+                   dispatches <= plan.profile_shape.dispatches;
+  if (!valid) {
+    std::cerr << "Profile observed/bound: walls " << profile.wall_stages.size()
+              << '/' << plan.profile_shape.wall_stages << ", submissions "
+              << profile.submissions.size() << '/' << plan.profile_shape.submissions
+              << ", stages " << stages << '/' << plan.profile_shape.stages
+              << ", dispatches " << dispatches << '/' << plan.profile_shape.dispatches << '\n';
+  }
+  return Check(valid,
                "Observed workflow profile exceeds preflight count");
 }
 
@@ -437,7 +444,7 @@ bool CheckRuntime(GpuBackend &gpu) {
       return false;
     ++cases;
   }
-  for (size_t flags = 0; flags < 16; ++flags) {
+  for (size_t flags = 0; flags < 24; ++flags) {
     ResidentWorkflowStorageOptions o;
     o.encoding.backend = VarDctBackendPreference::kMetal;
     o.encoding.rate_control_mode =
@@ -450,7 +457,7 @@ bool CheckRuntime(GpuBackend &gpu) {
     o.encoding.target_size_selection =
         flags & 2 ? TargetSizeSelectionPolicy::kClosestAbsolute
                   : TargetSizeSelectionPolicy::kLargestAtOrBelow;
-    o.encoding.effort = flags & 4 ? 4 : 7;
+    o.encoding.effort = flags >= 16 ? 1 : flags & 4 ? 4 : 7;
     o.encoding.cpu_thread_count = 1;
     o.collect_timing = bool(flags & 8);
     o.collect_profile = !o.collect_timing;

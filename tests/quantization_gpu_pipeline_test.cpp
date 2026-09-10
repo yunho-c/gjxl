@@ -815,6 +815,32 @@ bool CheckDefaultUpdatePipelineParity() {
     return false;
   }
 
+  // Reuse one pipeline while switching preparation contracts in both
+  // directions. The explicit score is an oracle for the omitted evaluation.
+  auto zero_options = options;
+  zero_options.adaptive_quantization.iterations = 0;
+  std::vector<uint8_t> zero_reference;
+  for (bool score : {true, false, false, true, false}) {
+    encoding_status = gjxl::quantization_pipeline_internal::
+      RunPreparedGpuQuantizationPipelineForEncoding(
+        *gpu, original.ConstView(), encoding_prepared, zero_options,
+        gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+        {.frame = &encoding_frame, .score_history = &encoding_scores,
+         .collect_final_butteraugli_score = score}, nullptr, &encoding_aq);
+    std::vector<uint8_t> bytes;
+    if (encoding_status.ok()) {
+      encoding_status = gjxl::EncodeVarDctCodestream(encoding_frame, &bytes);
+    }
+    if (zero_reference.empty()) zero_reference = bytes;
+    if (!encoding_status.ok() || bytes != zero_reference ||
+        encoding_scores.size() != size_t(score) ||
+        encoding_aq.evaluation_options.evaluation_free == score) {
+      std::cerr << "Reused pipeline changed zero-update output or retained stale evaluation storage: "
+                << encoding_status.message() << '\n';
+      return false;
+    }
+  }
+
   ImageStorage mismatched_original = original;
   mismatched_original.plane[0][7] =
     std::numeric_limits<float>::quiet_NaN();

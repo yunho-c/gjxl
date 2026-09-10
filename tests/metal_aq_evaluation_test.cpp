@@ -1999,6 +1999,111 @@ bool CheckResidentPolicyMaterialization(gjxl::GpuBackend& gpu) {
   return true;
 }
 
+bool CheckEvaluationFreePolicy(gjxl::GpuBackend& gpu) {
+  Fixture fixture;
+  if (!fixture.Initialize()) return false;
+  const auto blocks = fixture.strategies.extent();
+  const size_t block_count = blocks.width * blocks.height;
+  const std::vector<uint8_t> sharpness(block_count, 4);
+  const std::vector<float> initial(block_count, 0.75f);
+  gjxl::adaptive_quantization_internal::ButteraugliPolicySetup setup;
+  if (!CheckStatus(gjxl::adaptive_quantization_internal::PrepareButteraugliPolicy(
+        {initial.data(), blocks, blocks.width}, 1.0f, &setup),
+        "zero-update policy setup")) return false;
+  gjxl::AqResidentButteraugliPolicyInput input{
+    .adjusted_initial_quant_field = {initial.data(), blocks, blocks.width},
+    .quant_dc = setup.quant_dc,
+    .butteraugli_target = 1.0f,
+    .lower_bound = setup.lower_bound,
+    .upper_bound = setup.upper_bound,
+    .iterations = 0,
+  };
+  gjxl::VarDctEncoderFrame reference;
+  gjxl::AqEvaluationMemoryStats reference_memory;
+  // Both first-use execution modes must construct forward coefficients and
+  // final CfL; a reused evaluator must produce exactly the same integers.
+  for (int mode = 0; mode < 3; ++mode) {
+    auto options = MakeOptions();
+    options.evaluation_free = mode != 0;
+    input.evaluate_final_field = !options.evaluation_free;
+    std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+    const auto before = gpu.stats();
+    if (!CheckStatus(gjxl::PrepareAqEvaluation(gpu, {
+          .original_linear_rgb = fixture.original.View(),
+          .coding_opsin = fixture.coding.View(),
+          .strategies = &fixture.strategies,
+          .epf_sharpness = {sharpness.data(), blocks, blocks.width},
+          .options = options,
+          .resident_quantization = true,
+          .coefficient_decision_mode = gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant,
+        }, &prepared), "zero-update preparation") ||
+        !CheckStatus(prepared->PrepareInvariantColorCorrelationResident(
+          input.adjusted_initial_quant_field, input.quant_dc),
+          "zero-update final CfL preparation")) return false;
+    if (mode == 0) {
+      reference_memory = prepared->memory_stats();
+    } else if (gpu.stats().committed_submissions != before.committed_submissions ||
+               prepared->memory_stats().persistent_bytes >= reference_memory.persistent_bytes ||
+               prepared->memory_stats().staging_bytes >= reference_memory.staging_bytes) {
+      std::cerr << "Zero-update preparation submitted work or retained evaluation images\n";
+      return false;
+    }
+    for (int pass = 0; pass < 2; ++pass) {
+      gjxl::VarDctEncoderFrame frame;
+      std::vector<double> scores = {-1.0};
+      gjxl::gpu_profile_internal::GpuExecutionProfile profile;
+      const gjxl::AqResidentButteraugliPolicyOutput output{
+        .score_history = &scores, .frame = &frame};
+      auto* profiler = dynamic_cast<gjxl::gpu_profile_internal::PreparedAqEvaluationProfiler*>(prepared.get());
+      if (mode == 2 && profiler == nullptr) return false;
+      const auto status = mode == 2
+        ? profiler->EvaluateResidentButteraugliPolicyProfiled(
+            input, output, gjxl::gpu_profile_internal::GpuProfilingMode::kStage, &profile)
+        : prepared->EvaluateResidentButteraugliPolicy(input, output);
+      if (!CheckStatus(status, "zero-update policy") ||
+          scores.size() != size_t(mode == 0)) return false;
+      if (mode == 0 && pass == 0) reference = std::move(frame);
+      else if (!QuantizedCoefficientsEqual(reference, frame)) {
+        std::cerr << "Zero-update coefficient parity failed\n";
+        return false;
+      }
+      if (mode != 0) {
+        gjxl::metal_internal::MetalAqReadbackStatsForTesting stats;
+        if (!CheckStatus(gjxl::metal_internal::GetMetalAqReadbackStatsForTesting(
+              *prepared, &stats), "zero-update readbacks") ||
+            stats.score_history_bytes != 0 || stats.block_distance_map_bytes != 0 ||
+            stats.reconstructed_rgb_bytes != 0) return false;
+      }
+      if (mode == 2) {
+        bool reset = false, quantizer = false, final_cfl = false;
+        for (const auto& submission : profile.submissions) {
+          for (const auto& stage : submission.stages) {
+            if (stage.group_id != "aq.final_frame") {
+              std::cerr << "Evaluation stage in zero-update profile: " << stage.stage_id << '\n';
+              return false;
+            }
+            reset |= stage.stage_id == "aq.final_frame.reset";
+            quantizer |= stage.stage_id == "aq.final_frame.quantizer";
+            final_cfl |= stage.stage_id == "aq.final_frame.final_cfl";
+          }
+        }
+        if (!reset || !quantizer || final_cfl != (pass == 0)) return false;
+      }
+    }
+    if (mode != 0) {
+      auto scored_input = input;
+      scored_input.evaluate_final_field = true;
+      std::vector<double> sentinel = {-99.0};
+      gjxl::VarDctEncoderFrame frame;
+      if (!ExpectCode(prepared->EvaluateResidentButteraugliPolicy(
+            scored_input, {.score_history = &sentinel, .frame = &frame}),
+            gjxl::StatusCode::kFailedPrecondition, "score on evaluation-free preparation") ||
+          sentinel != std::vector<double>{-99.0} || frame.valid()) return false;
+    }
+  }
+  return true;
+}
+
 enum class ResidentPolicyFailure {
   kUpload,
   kSubmission,
@@ -2007,7 +2112,8 @@ enum class ResidentPolicyFailure {
   kReadback,
 };
 
-bool CheckResidentPolicyFailure(ResidentPolicyFailure failure, bool leased = false) {
+bool CheckResidentPolicyFailure(ResidentPolicyFailure failure, bool leased = false,
+                                bool evaluation_free = false) {
   Fixture fixture;
   std::unique_ptr<gjxl::GpuBackend> gpu;
   if (!fixture.Initialize() ||
@@ -2020,6 +2126,8 @@ bool CheckResidentPolicyFailure(ResidentPolicyFailure failure, bool leased = fal
   const std::vector<uint8_t> sharpness(block_count, 4);
   std::vector<float> initial(block_count, 0.75f);
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  auto options = MakeOptions();
+  options.evaluation_free = evaluation_free;
   if (!CheckStatus(gjxl::PrepareAqEvaluation(
         *gpu,
         {
@@ -2027,7 +2135,7 @@ bool CheckResidentPolicyFailure(ResidentPolicyFailure failure, bool leased = fal
           .coding_opsin = fixture.coding.View(),
           .strategies = &fixture.strategies,
           .epf_sharpness = {sharpness.data(), blocks, blocks.width},
-          .options = MakeOptions(),
+          .options = options,
           .resident_quantization = true,
           .coefficient_decision_mode =
             gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant,
@@ -2089,12 +2197,14 @@ bool CheckResidentPolicyFailure(ResidentPolicyFailure failure, bool leased = fal
     .butteraugli_target = 1.0f,
     .lower_bound = setup.lower_bound,
     .upper_bound = setup.upper_bound,
-    .iterations = 2,
+    .iterations = evaluation_free ? 0u : 2u,
+    .evaluate_final_field = !evaluation_free,
   };
   const auto make_output = [&] {
     return gjxl::AqResidentButteraugliPolicyOutput{
       .quant_field = {quant.data(), blocks, blocks.width},
-      .block_distance_map = {block.data(), blocks, blocks.width},
+      .block_distance_map = evaluation_free ? gjxl::PlaneF32View{}
+        : gjxl::PlaneF32View{block.data(), blocks, blocks.width},
       .score_history = &scores,
       .frame = leased ? nullptr : &frame,
       .completed_frame = leased ? &completed : nullptr,
@@ -3062,6 +3172,12 @@ int main() {
       !CheckInvariantColorCorrelation(*gpu) ||
       !CheckResidentButteraugliPolicy(*gpu) ||
       !CheckResidentPolicyMaterialization(*gpu) ||
+      !CheckEvaluationFreePolicy(*gpu) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kUpload, true, true) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kSubmission, true, true) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kCompletion, true, true) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kNumeric, true, true) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kReadback, true, true) ||
       !CheckResidentPolicyFailure(ResidentPolicyFailure::kUpload) ||
       !CheckResidentPolicyFailure(ResidentPolicyFailure::kSubmission) ||
       !CheckResidentPolicyFailure(ResidentPolicyFailure::kCompletion) ||

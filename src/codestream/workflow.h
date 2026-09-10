@@ -108,6 +108,8 @@ struct VarDctEncodingOptions {
   /// Metal encoding skips this diagnostic-only pass by default; CPU and exact
   /// coefficient workflows already produce the final score as part of their
   /// ordinary policy evaluation.
+  /// Resident encoding with zero AQ updates otherwise performs no perceptual
+  /// evaluation and returns an empty score history.
   bool collect_final_butteraugli_score = false;
   /// Shares one immutable managed-memory allowance with every call using this
   /// handle. Null selects the process-wide default, not a new per-call budget.

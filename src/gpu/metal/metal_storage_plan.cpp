@@ -60,6 +60,10 @@ Status ComputeAqStoragePlan(const AqStoragePlanOptions &options,
       (!options.frame_only && options.maximum_coefficient_count == 0) ||
       options.maximum_coefficient_count >
           std::numeric_limits<uint32_t>::max() ||
+      (options.evaluation_free &&
+       (options.frame_only || !options.resident_quantization ||
+        options.metric != AqEvaluationMetric::kButteraugli ||
+        options.filter_scratch_image_count != 0 || options.uses_butteraugli_sinks)) ||
       (options.frame_only_resident_quantizer &&
        (options.initial_quant_sort_count < block_count ||
         options.initial_quant_sort_count >
@@ -70,7 +74,8 @@ Status ComputeAqStoragePlan(const AqStoragePlanOptions &options,
   }
   AqStoragePlan candidate;
   DeviceScratchLayoutPlan persistent, staging;
-  if (!options.frame_only && !options.borrowed_original_linear_rgb) {
+  if (!options.frame_only && !options.evaluation_free &&
+      !options.borrowed_original_linear_rgb) {
     for (size_t channel = 0; channel < 3; ++channel) {
       status =
           persistent.AddPlane(DeviceElementType::kF32, options.source_extent,
@@ -100,7 +105,7 @@ Status ComputeAqStoragePlan(const AqStoragePlanOptions &options,
         return status;
     }
   }
-  if (!options.frame_only) {
+  if (!options.frame_only && !options.evaluation_free) {
     for (size_t channel = 0; channel < 3; ++channel) {
       status =
           persistent.AddPlane(DeviceElementType::kF32, options.source_extent,
@@ -109,6 +114,8 @@ Status ComputeAqStoragePlan(const AqStoragePlanOptions &options,
       if (!status.ok())
         return status;
     }
+  }
+  if (!options.frame_only) {
     status = persistent.AddPlane(
         DeviceElementType::kI32, {block_extent.width * 2, block_extent.height},
         block_extent.width * 2, kAqStorageAlignment, &candidate.strategies);
@@ -308,13 +315,15 @@ Status ComputeAqStoragePlan(const AqStoragePlanOptions &options,
                        &candidate.quantized_coefficients);
   if (!status.ok())
     return status;
-  if (!options.frame_only) {
+  if (!options.frame_only && !options.evaluation_free) {
     status =
         staging.AddPlane(DeviceElementType::kF32, {coefficient_value_count, 1},
                          coefficient_value_count, kAqStorageAlignment,
                          &candidate.reconstruction_coefficients);
     if (!status.ok())
       return status;
+  }
+  if (!options.frame_only) {
     status =
         staging.AddPlane(DeviceElementType::kF32, {3 * block_count, 1},
                          3 * block_count, kAqStorageAlignment, &candidate.dc);

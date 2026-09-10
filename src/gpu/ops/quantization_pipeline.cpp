@@ -195,6 +195,7 @@ Status PrepareResidentAcStrategyInputs(
   ConstImage3FView original_linear_rgb,
   quantization_pipeline_internal::PreparedQuantizationPipeline& prepared,
   CpuQuantizationPipelineOptions options,
+  bool evaluation_free,
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization& state,
   ResidentAcStrategySearchInputs* resident,
   gpu_profile_internal::GpuProfilingSession* profiling_session) {
@@ -211,6 +212,7 @@ Status PrepareResidentAcStrategyInputs(
       ? AqEvaluationMetric::kMaximumError
       : AqEvaluationMetric::kButteraugli,
     .maximum_error = options.adaptive_quantization.maximum_error,
+    .evaluation_free = evaluation_free,
   };
   const bool compatible = state.evaluation != nullptr &&
     state.quantization_pipeline_generation == prepared.generation &&
@@ -630,7 +632,12 @@ Status RunPreparedGpuQuantizationPipelineImpl(
     }
     if (aq_state == nullptr) aq_state = &local_prepared_aq;
     Status status = PrepareResidentAcStrategyInputs(
-        gpu, original_linear_rgb, prepared, options, *aq_state,
+        gpu, original_linear_rgb, prepared, options,
+        options.adaptive_quantization.iterations == 0 &&
+          !materialization.final_perceptual_evaluation &&
+          options.adaptive_quantization.control_mode ==
+            AdaptiveQuantizationControlMode::kButteraugli,
+        *aq_state,
         &resident_inputs, profiling_session);
     if (!status.ok()) return status;
   }

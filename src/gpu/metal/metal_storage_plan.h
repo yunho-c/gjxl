@@ -28,6 +28,7 @@ struct AqStoragePlanOptions {
   size_t initial_quant_sort_count = 0;
   size_t filter_scratch_image_count = 0;
   bool frame_only = false;
+  bool evaluation_free = false;
   bool borrowed_original_linear_rgb = false;
   bool borrowed_coding_opsin = false;
   bool needs_reconstructed = false;

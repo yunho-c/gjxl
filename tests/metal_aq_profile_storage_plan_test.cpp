@@ -104,8 +104,6 @@ bool Counts() {
         for (bool final : {false, true})
           for (bool gaborish : {false, true})
             for (size_t epf = 0; epf <= 3; ++epf) {
-              if (iterations == 0 && !final)
-                continue;
               ResidentAqProfileStoragePlan p;
               const size_t per_score =
                   23 + 4 * families + size_t(gaborish) + epf +
@@ -119,7 +117,7 @@ bool Counts() {
                              p.maximum_dispatches ==
                                  (iterations + size_t(final)) * per_score +
                                      2 * families + 2 +
-                                     size_t(!final) * (20 + 2 * families) &&
+                                     size_t(!final) * (20 + 2 * families) + families &&
                              p.working.peak_bytes >=
                                  p.metadata.input.peak_bytes +
                                      p.graph.recorded.peak_bytes &&
@@ -139,7 +137,7 @@ bool Counts() {
                    huge, huge, {4, true, true, true, 3},
                    AqProfileFrameOutput::kCompleted, &largest)
                        .ok() &&
-                   largest.maximum_dispatches == 636 &&
+                   largest.maximum_dispatches == 643 &&
                    ComputeAqAuxiliaryProfileStoragePlan(
                        {huge, huge, true, true, true, true}, &initial)
                        .ok() &&
@@ -170,8 +168,7 @@ bool Failures() {
   ResidentAqProfileStoragePlan sentinel;
   sentinel.maximum_dispatches = 123;
   const auto before = sentinel;
-  for (const auto bad : {ResidentAqProfileInputOptions{0, false},
-                         {5},
+  for (const auto bad : {ResidentAqProfileInputOptions{5},
                          {0, true, true},
                          {0, true, false, false, 4}})
     if (!Check(

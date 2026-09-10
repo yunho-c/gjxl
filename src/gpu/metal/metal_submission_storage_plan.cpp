@@ -79,8 +79,7 @@ Status ComputeAcSubmissionStoragePlan(const AcSubmissionStorageOptions &o,
 Status ComputeResidentAqProfileInputStoragePlan(
     const ResidentAqProfileInputOptions &o,
     ResidentAqProfileInputStoragePlan *out) {
-  if (out == nullptr || o.iterations > 4 || o.epf_iterations > 3 ||
-      (o.iterations == 0 && !o.evaluate_final_field))
+  if (out == nullptr || o.iterations > 4 || o.epf_iterations > 3)
     return Status::InvalidArgument("Metal resident profile policy is invalid");
   ResidentAqProfileInputStoragePlan p;
   p.score_count = o.iterations + static_cast<size_t>(o.evaluate_final_field);
@@ -94,6 +93,11 @@ Status ComputeResidentAqProfileInputStoragePlan(
                      static_cast<size_t>(!o.evaluate_final_field) *
                          (1 + kSupportedAqStrategies.size()) +
                      1;
+  if (p.score_count == 0) {
+    // First use also resets the error state, transforms the source, and
+    // prepares final CfL before the final coefficient pass.
+    p.stage_capacity += 2 + kSupportedAqStrategies.size();
+  }
   if (!p.input
            .AddVector<MetalPreparedAqEvaluation::ResidentProfileStageContext>(
                p.stage_capacity, kFreshExact) ||
