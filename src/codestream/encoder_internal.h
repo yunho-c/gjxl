@@ -8,6 +8,8 @@
 #include <span>
 #include <vector>
 
+#include "codestream/storage.h"
+
 #include "codestream/encoder.h"
 #include "codestream/entropy.h"
 #include "codestream/profile_internal.h"
@@ -16,6 +18,9 @@
 namespace gjxl {
 
 class VarDctEncoderFrame;
+namespace vardct_frame_internal {
+class VarDctFrameView;
+}
 
 namespace codestream_internal {
 
@@ -59,7 +64,20 @@ struct CandidateSelectionKey {
   std::span<const uint64_t> common_section_bits,
   std::span<const uint64_t> ac_section_bits,
   size_t ac_group_count,
-  std::vector<size_t>* sizes);
+  codestream_internal::Storage<size_t>* sizes);
+
+/// Compatibility adapter for caller-owned section-size vectors.
+template <typename Allocator>
+[[nodiscard]] Status PhysicalSectionSizesFromBitCounts(
+  std::span<const uint64_t> common_section_bits,
+  std::span<const uint64_t> ac_section_bits,
+  size_t ac_group_count,
+  std::vector<size_t, Allocator>* sizes) {
+  return LegacyStorageOutput(sizes, [&](auto* storage) {
+    return PhysicalSectionSizesFromBitCounts(
+      common_section_bits, ac_section_bits, ac_group_count, storage);
+  });
+}
 
 struct VarDctCodestreamProfile {
   VarDctEntropyBehavior entropy_behavior =
@@ -107,6 +125,23 @@ struct VarDctCodestreamProfile {
 
   bool operator==(const VarDctCodestreamProfile&) const = default;
 };
+
+/// Synchronously serializes a borrowed completed frame, including validation.
+/// All parallel workers finish before return; neither the view nor its backing
+/// is retained. Output and optional profile remain unchanged on failure.
+[[nodiscard]] Status EncodeVarDctCodestreamFromView(
+  const vardct_frame_internal::VarDctFrameView& frame,
+  VarDctCodestreamOptions options,
+  std::vector<uint8_t>* output,
+  VarDctCodestreamProfile* profile = nullptr);
+
+/// Internal handoff retains the backing charge through workflow/retry/batch
+/// ownership. Only the public adapter publishes an ordinary vector.
+[[nodiscard]] Status EncodeVarDctCodestreamToBuffer(
+  const vardct_frame_internal::VarDctFrameView& frame,
+  VarDctCodestreamOptions options,
+  CodestreamBuffer* output,
+  VarDctCodestreamProfile* profile = nullptr);
 
 /// Diagnostic-only serializer entry point. On failure, both `output` and
 /// `profile` remain unchanged.

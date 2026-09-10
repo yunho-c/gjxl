@@ -346,6 +346,36 @@ bool CheckPreparedResidentReuse(gjxl::GpuBackend& gpu) {
     std::cerr << "Prepared resident AC search did not reuse allocations\n";
     return false;
   }
+  gjxl::AcStrategyGrid omitted;
+  if (!gjxl::FindAcStrategyGridGpuResident(
+        gpu, {}, fixture.QuantField(), {}, color_map, resident,
+        {.butteraugli_target = 0.9f}, &omitted, nullptr, &prepared).ok() ||
+      !GridsEqual(second, omitted)) {
+    std::cerr << "Omitting the unused host mask changed the resident merge\n";
+    return false;
+  }
+  const auto before_rejection = gpu.stats();
+  const auto invalid = gjxl::FindAcStrategyGridGpuResident(
+    gpu, {}, fixture.QuantField(), {nullptr, {}, 1}, color_map, resident,
+    {.butteraugli_target = 0.9f}, &omitted, nullptr, &prepared);
+  if (invalid.code() != gjxl::StatusCode::kInvalidArgument ||
+      gpu.stats().committed_submissions != before_rejection.committed_submissions ||
+      gpu.stats().successful_allocations != before_rejection.successful_allocations ||
+      !GridsEqual(second, omitted)) {
+    std::cerr << "Malformed optional host mask was not rejected atomically\n";
+    return false;
+  }
+  prepared.Reset();
+  prepared.Reset();  // Empty/reset owners remain reusable; output is independent.
+  if (!first.complete() || !GridsEqual(second, omitted) ||
+      !gjxl::FindAcStrategyGridGpuResident(
+        gpu, {}, fixture.QuantField(), {}, color_map, resident,
+        {.butteraugli_target = 0.9f}, &omitted, nullptr, &prepared).ok() ||
+      !GridsEqual(second, omitted) ||
+      gpu.stats().successful_allocations <= before_rejection.successful_allocations) {
+    std::cerr << "Reset AC owner lost output or could not prepare again\n";
+    return false;
+  }
   return true;
 }
 

@@ -23,6 +23,7 @@
 #include "codec/maximum_error.h"
 #include "codec/reconstruction.h"
 #include "codec/vardct_frame.h"
+#include "codec/vardct_frame_view_internal.h"
 #include "core/ac_strategy.h"
 #include "core/status.h"
 #include "core/quantizer.h"
@@ -33,6 +34,7 @@
 #include "gpu/metal/metal_aq_butteraugli_test.h"
 #include "gpu/metal/metal_aq_postprocess_test.h"
 #include "gpu/metal/metal_backend.h"
+#include "gpu/metal/metal_butteraugli_test.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/resident_input.h"
 
@@ -622,12 +624,13 @@ bool CheckSmallButteraugliFallback(gjxl::GpuBackend& gpu) {
   return true;
 }
 
-bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
+bool CheckProductionEvaluation(
+    gjxl::GpuBackend& gpu, gjxl::AqEvaluationOptions options = MakeOptions()) {
   Fixture fixture;
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
   if (!fixture.Initialize() ||
       !Prepare(gpu, fixture.original, fixture.coding, fixture.strategies,
-               &prepared)) {
+               &prepared, options)) {
     return false;
   }
   g_memory_stats = prepared->memory_stats();
@@ -647,6 +650,9 @@ bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
 
   EvaluationOutputStorage profiled_output(fixture.strategies.extent());
   gjxl::metal_internal::MetalAqEvaluationProfile profile;
+  // A tiny host commit can finish within one clock tick. Verify publication,
+  // not a strictly positive duration; the numerical output checks stay exact.
+  profile.output_commit_nanoseconds = std::numeric_limits<uint64_t>::max();
   const gjxl::GpuBackendStats before_profile = gpu.stats();
   if (!ExpectCode(
           gjxl::metal_internal::EvaluateMetalAqProfiled(
@@ -673,13 +679,25 @@ bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
       profile.completion_wait_nanoseconds == 0 ||
       profile.command_buffer_gpu_nanoseconds == 0 ||
       profile.bounded_readback_nanoseconds == 0 ||
-      profile.output_commit_nanoseconds == 0 ||
+      profile.output_commit_nanoseconds == std::numeric_limits<uint64_t>::max() ||
       profile.final_readback_nanoseconds != 0 ||
       gpu.stats().successful_allocations !=
           before_profile.successful_allocations ||
       gpu.stats().committed_submissions !=
           before_profile.committed_submissions + 1) {
-    std::cerr << "Profiled AQ evaluation did not preserve its contract\n";
+    std::cerr << "Profiled AQ evaluation did not preserve its contract: "
+              << "upload_bytes=" << profile.input_upload_bytes
+              << " upload_ns=" << profile.input_upload_nanoseconds
+              << " submission_ns=" << profile.submission_nanoseconds
+              << " wait_ns=" << profile.completion_wait_nanoseconds
+              << " gpu_ns=" << profile.command_buffer_gpu_nanoseconds
+              << " readback_ns=" << profile.bounded_readback_nanoseconds
+              << " commit_ns=" << profile.output_commit_nanoseconds
+              << " final_readback_ns=" << profile.final_readback_nanoseconds
+              << " allocations=" << gpu.stats().successful_allocations
+              << '/' << before_profile.successful_allocations
+              << " submissions=" << gpu.stats().committed_submissions
+              << '/' << before_profile.committed_submissions << '\n';
     return false;
   }
 
@@ -828,7 +846,7 @@ bool CheckProductionEvaluation(gjxl::GpuBackend& gpu) {
               y * exact_cpu_cropped.stride);
     }
   }
-  const gjxl::AqEvaluationOptions exact_options = MakeOptions();
+  const gjxl::AqEvaluationOptions& exact_options = options;
   if (!CheckStatus(gjxl::ApplyLoopFilters(
                        exact_cpu_cropped.View(),
                        fixture.input.View().epf_inverse_sigma,
@@ -1328,7 +1346,8 @@ bool CheckResidentForwardDispatches(
   return true;
 }
 
-bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
+bool CheckResidentButteraugliPolicy(
+    gjxl::GpuBackend& gpu, gjxl::AqEvaluationOptions options = MakeOptions()) {
   Fixture fixture;
   if (!fixture.Initialize()) return false;
   const gjxl::Extent2D blocks = fixture.strategies.extent();
@@ -1347,7 +1366,7 @@ bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
         .coding_opsin = fixture.coding.View(),
         .strategies = &fixture.strategies,
         .epf_sharpness = {sharpness.data(), blocks, blocks.width},
-        .options = MakeOptions(),
+        .options = options,
         .resident_quantization = true,
         .coefficient_decision_mode =
           gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant,
@@ -1540,8 +1559,32 @@ bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
       saw_reconstruction_batch |=
         stage.stage_id.starts_with("aq.reconstruction.dct");
     }
-    saw_epf |= stage.stage_id == "aq.epf.pass_1";
+    saw_epf |= stage.stage_id == "aq.epf.pass_1" ||
+               stage.stage_id == "aq.epf_linear.pass_1";
     saw_malta |= stage.stage_id == "butteraugli.malta.main";
+    if (stage.stage_id.starts_with("aq.epf_linear.")) {
+      const bool valid_kernel = stage.dispatches.size() == 1 &&
+        (stage.dispatches[0].kernel_id == "gjxl_aq_epf_pass1_linear_direct" ||
+         stage.dispatches[0].kernel_id == "gjxl_aq_epf_pass1_linear_tile32x4_p2" ||
+         stage.dispatches[0].kernel_id == "gjxl_aq_epf_pass2_linear_direct" ||
+         stage.dispatches[0].kernel_id == "gjxl_aq_epf_pass2_linear_tile32x4_p2");
+      const bool extra_conversion = std::ranges::any_of(
+        gpu_profile.submissions[0].stages, [&](const auto& other) {
+          return other.iteration == stage.iteration &&
+                 other.stage_id == "aq.opsin_to_linear";
+        });
+      if (!valid_kernel || extra_conversion) {
+        std::cerr << "Resident final EPF fusion dispatch contract differs: "
+                  << stage.stage_id << " epf="
+                  << options.profile.loop_filter.epf_options.iterations
+                  << " gaborish=" << options.profile.loop_filter.gaborish
+                  << " extra_conversion=" << extra_conversion << " kernels=";
+        for (const auto& dispatch : stage.dispatches)
+          std::cerr << dispatch.kernel_id << ",";
+        std::cerr << '\n';
+        return false;
+      }
+    }
     if (stage.end_timestamp < stage.begin_timestamp ||
         stage.gpu_nanoseconds !=
           stage.end_timestamp - stage.begin_timestamp ||
@@ -1551,7 +1594,9 @@ bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
     }
   }
   if (!saw_reconstruction_reset || !saw_reconstruction_quantizer ||
-      !saw_reconstruction_batch || !saw_epf || !saw_malta) {
+      !saw_reconstruction_batch ||
+      saw_epf != (options.profile.loop_filter.epf_options.iterations != 0) ||
+      !saw_malta) {
     std::cerr << "Profiled resident stages are incomplete\n";
     return false;
   }
@@ -1562,7 +1607,7 @@ bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
     return false;
   }
   for (size_t index = 0; index < actual_scores.size(); ++index) {
-    if (std::abs(profiled_scores[index] - actual_scores[index]) > 2.0e-4) {
+    if (profiled_scores[index] != actual_scores[index]) {
       std::cerr << "Profiled resident scores changed\n";
       return false;
     }
@@ -1570,8 +1615,8 @@ bool CheckResidentButteraugliPolicy(gjxl::GpuBackend& gpu) {
   for (size_t y = 0; y < blocks.height; ++y) {
     for (size_t x = 0; x < blocks.width; ++x) {
       const size_t index = y * stride + x;
-      if (std::abs(profiled_quant[index] - actual_quant[index]) > 1.0e-5f ||
-          std::abs(profiled_block[index] - actual_block[index]) > 5.0e-4f) {
+      if (profiled_quant[index] != actual_quant[index] ||
+          profiled_block[index] != actual_block[index]) {
         std::cerr << "Profiled resident output changed\n";
         return false;
       }
@@ -1962,7 +2007,7 @@ enum class ResidentPolicyFailure {
   kReadback,
 };
 
-bool CheckResidentPolicyFailure(ResidentPolicyFailure failure) {
+bool CheckResidentPolicyFailure(ResidentPolicyFailure failure, bool leased = false) {
   Fixture fixture;
   std::unique_ptr<gjxl::GpuBackend> gpu;
   if (!fixture.Initialize() ||
@@ -2029,6 +2074,14 @@ bool CheckResidentPolicyFailure(ResidentPolicyFailure failure) {
   std::vector<float> block(block_count, kPoison);
   std::vector<double> scores = {-91.0};
   gjxl::VarDctEncoderFrame frame;
+  struct SentinelFrame final : gjxl::vardct_frame_internal::CompletedVarDctFrame {
+    gjxl::vardct_frame_internal::VarDctFrameView view() const noexcept override {
+      return {};
+    }
+  };
+  std::unique_ptr<gjxl::vardct_frame_internal::CompletedVarDctFrame> completed =
+    std::make_unique<SentinelFrame>();
+  const auto* sentinel = completed.get();
   const gjxl::AqResidentButteraugliPolicyInput input{
     .adjusted_initial_quant_field = {
       initial.data(), blocks, blocks.width},
@@ -2043,7 +2096,8 @@ bool CheckResidentPolicyFailure(ResidentPolicyFailure failure) {
       .quant_field = {quant.data(), blocks, blocks.width},
       .block_distance_map = {block.data(), blocks, blocks.width},
       .score_history = &scores,
-      .frame = &frame,
+      .frame = leased ? nullptr : &frame,
+      .completed_frame = leased ? &completed : nullptr,
     };
   };
   const gjxl::StatusCode expected =
@@ -2059,6 +2113,7 @@ bool CheckResidentPolicyFailure(ResidentPolicyFailure failure) {
       !std::ranges::all_of(block, [](float value) {
         return std::bit_cast<uint32_t>(value) == kPoisonBits;
       }) || scores != std::vector<double>{-91.0} || frame.valid() ||
+      completed.get() != sentinel ||
       !ExpectCode(prepared->EvaluateResidentButteraugliPolicy(
                     input, make_output()),
                   gjxl::StatusCode::kFailedPrecondition,
@@ -2386,8 +2441,8 @@ bool CheckScratchWorkspaceLeases() {
   }
   const gjxl::GpuBackendStats after_reuse = gpu->stats();
   if (after_reuse.successful_allocations !=
-        before_reuse.successful_allocations + 1) {
-    std::cerr << "Warm AQ preparation did not reuse both scratch arenas\n";
+        before_reuse.successful_allocations) {
+    std::cerr << "Warm AQ preparation did not reuse all three scratch arenas\n";
     return false;
   }
   EvaluationOutputStorage reused(fixture.strategies.extent());
@@ -2399,7 +2454,9 @@ bool CheckScratchWorkspaceLeases() {
   prepared.reset();
   if (!CheckStatus(
         gjxl::metal_internal::EmptyMetalAqScratchArenasForTesting(*gpu),
-        "scratch-lease pressure reclamation")) {
+        "scratch-lease pressure reclamation") ||
+      !CheckStatus(gjxl::EmptyMetalButteraugliCacheForTesting(*gpu),
+                   "Butteraugli pressure reclamation")) {
     return false;
   }
 
@@ -2457,10 +2514,18 @@ bool CheckScratchWorkspaceLeases() {
     return false;
   }
   EvaluationOutputStorage recovered(fixture.strategies.extent());
-  return CheckStatus(
-           prepared->Evaluate(fixture.input.View(), recovered.View()),
-           "scratch-lease recovery evaluation") &&
-         CompareOutputs(changed_expected, recovered);
+  if (!CheckStatus(prepared->Evaluate(fixture.input.View(), recovered.View()),
+                   "scratch-lease recovery evaluation") ||
+      !CompareOutputs(changed_expected, recovered)) return false;
+  bool waited = false;
+  if (!CheckStatus(gjxl::metal_internal::SetMetalAqWaitObserverForTesting(
+        *prepared, &waited), "trimmed AQ wait observer") ||
+      !CheckStatus(gjxl::metal_internal::SubmitMetalAqEvaluationForTesting(
+        *prepared, fixture.input.View()), "trimmed AQ outstanding submission") ||
+      !CheckStatus(gpu->TrimPreparationCache(), "trim during active AQ"))
+    return false;
+  prepared.reset();
+  return waited && gjxl::MetalPreparationCacheBytesForTesting(*gpu) == 0;
 }
 
 bool CheckIndependentConcurrency(gjxl::GpuBackend& gpu) {
@@ -2650,6 +2715,147 @@ bool CheckPublicPreparationRejectsNonFiniteImages(gjxl::GpuBackend& gpu) {
   return rejected_without_gpu_work("non-finite coding Opsin");
 }
 
+// Exercise the frontend state transition and optional mask independently of
+// the public workflow, including lazy materialization and atomic failure.
+bool CheckDeferredFrontend(gjxl::GpuBackend &gpu) {
+  Fixture fixture;
+  if (!fixture.Initialize())
+    return false;
+  const auto blocks = fixture.strategies.extent();
+  const size_t count = blocks.width * blocks.height;
+  const auto pixels = fixture.coding.extent;
+  const size_t mask_stride = pixels.width + 5;
+  std::vector<uint8_t> sharpness(count, 4);
+  gjxl::AqEvaluationPreparation descriptor{
+    .original_linear_rgb = fixture.original.View(),
+    .coding_opsin = fixture.coding.View(),
+    .strategies = &fixture.strategies,
+    .epf_sharpness = {sharpness.data(), blocks, blocks.width},
+    .options = MakeOptions(),
+    .resident_initial_cfl = true,
+    .frame_only_resident_initial_quant = true,
+    .resident_ac_strategy_inputs = true,
+    .resident_quantization = true,
+    .coefficient_decision_mode =
+      gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant,
+  };
+  std::unique_ptr<gjxl::PreparedAqEvaluation> eager, deferred;
+  if (!CheckStatus(gjxl::PrepareAqEvaluation(gpu, descriptor, &eager),
+                   "eager frontend"))
+    return false;
+  descriptor.defer_final_transform_metadata = true;
+  if (!CheckStatus(gjxl::PrepareAqEvaluation(gpu, descriptor, &deferred),
+                   "deferred frontend"))
+    return false;
+  std::vector<float> eager_quant(count), eager_strategy(count);
+  std::vector<float> quant(count), strategy(count);
+  std::vector<float> expected_mask(mask_stride * pixels.height, kPoison);
+  std::vector<float> mask(expected_mask);
+  const gjxl::InitialQuantizationOptions options{1.2f, 1.0f};
+  gjxl::InitialQuantFieldOutput output{{quant.data(), blocks, blocks.width},
+                                       {strategy.data(), blocks, blocks.width},
+                                       {}};
+  if (!CheckStatus(eager->ComputeInitialQuantization(
+                     options, {{eager_quant.data(), blocks, blocks.width},
+                               {eager_strategy.data(), blocks, blocks.width},
+                               {expected_mask.data(), pixels, mask_stride}}),
+                   "eager initial mask") ||
+      !CheckStatus(deferred->ComputeInitialQuantization(options, output),
+                   "resident-only initial mask") ||
+      quant != eager_quant || strategy != eager_strategy)
+    return false;
+  gjxl::ResidentAcStrategyInputs resident;
+  if (!CheckStatus(deferred->GetResidentAcStrategyInputs(&resident),
+                   "resident mask after omitted host output"))
+    return false;
+  gjxl::AqEvaluationInput input{
+    .quant_field = {quant.data(), blocks, blocks.width}, .quant_dc = 1.0f};
+  EvaluationOutputStorage blocked(blocks);
+  std::vector<double> blocked_scores{-123.0};
+  const auto before = gpu.stats().committed_submissions;
+  if (!ExpectCode(deferred->Evaluate(input, blocked.View()),
+                  gjxl::StatusCode::kFailedPrecondition,
+                  "evaluation before reconfigure") ||
+      !ExpectCode(deferred->PrepareInvariantColorCorrelationResident(
+                    input.quant_field, input.quant_dc),
+                  gjxl::StatusCode::kFailedPrecondition,
+                  "final CfL before reconfigure") ||
+      !ExpectCode(deferred->EvaluateResidentButteraugliPolicy(
+                    {.adjusted_initial_quant_field = input.quant_field,
+                     .quant_dc = 1.0f,
+                     .butteraugli_target = 1.2f,
+                     .lower_bound = 0.1f,
+                     .upper_bound = 2.0f,
+                     .iterations = 1},
+                    {.score_history = &blocked_scores}),
+                  gjxl::StatusCode::kFailedPrecondition,
+                  "policy before reconfigure") ||
+      !blocked.Poisoned() || blocked_scores != std::vector<double>{-123.0} ||
+      before != gpu.stats().committed_submissions)
+    return false;
+  output.pixel_mask = {nullptr, {}, 1};
+  if (!ExpectCode(deferred->ComputeInitialQuantization(options, output),
+                  gjxl::StatusCode::kInvalidArgument,
+                  "malformed omitted mask") ||
+      before != gpu.stats().committed_submissions)
+    return false;
+  output.pixel_mask = {mask.data(), pixels, mask_stride};
+  if (!CheckStatus(deferred->ComputeInitialQuantization(options, output),
+                   "lazy host mask") ||
+      quant != eager_quant || strategy != eager_strategy)
+    return false;
+  for (size_t i = 0; i < mask.size(); ++i) {
+    if (std::bit_cast<uint32_t>(mask[i]) !=
+        std::bit_cast<uint32_t>(expected_mask[i]))
+      return false;
+  }
+  for (auto *prepared : {eager.get(), deferred.get()}) {
+    if (!CheckStatus(
+          prepared->Reconfigure(fixture.strategies,
+                                {sharpness.data(), blocks, blocks.width}),
+          "frontend reconfigure") ||
+        !CheckStatus(prepared->PrepareInvariantColorCorrelationResident(
+                       input.quant_field, input.quant_dc),
+                     "frontend final CfL"))
+      return false;
+  }
+  EvaluationOutputStorage expected(blocks), actual(blocks);
+  if (!CheckStatus(eager->Evaluate(input, expected.View()),
+                   "eager evaluation") ||
+      !CheckStatus(deferred->Evaluate(input, actual.View()),
+                   "deferred evaluation") ||
+      !CompareOutputs(expected, actual))
+    return false;
+  // The omitted-mask path must still reject numeric and readback failures
+  // without committing even the smaller host fields.
+  for (bool numeric : {false, true}) {
+    std::unique_ptr<gjxl::PreparedAqEvaluation> failed;
+    if (!CheckStatus(gjxl::PrepareAqEvaluation(gpu, descriptor, &failed),
+                     "failure frontend"))
+      return false;
+    std::fill(quant.begin(), quant.end(), -17.0f);
+    std::fill(strategy.begin(), strategy.end(), -19.0f);
+    output.pixel_mask = {};
+    const auto injection =
+      numeric
+        ? gjxl::metal_internal::FailNextMetalAqNumericForTesting(*failed)
+        : gjxl::metal_internal::FailNextMetalAqReadbackForTesting(*failed);
+    if (!CheckStatus(injection, "frontend failure injection") ||
+        !ExpectCode(failed->ComputeInitialQuantization(options, output),
+                    gjxl::StatusCode::kDeviceError,
+                    "omitted mask atomic failure") ||
+        !std::ranges::all_of(quant, [](float v) { return v == -17.0f; }) ||
+        !std::ranges::all_of(strategy, [](float v) { return v == -19.0f; }))
+      return false;
+  }
+  descriptor.resident_quantization = false;
+  std::unique_ptr<gjxl::PreparedAqEvaluation> rejected;
+  return ExpectCode(gjxl::PrepareAqEvaluation(gpu, descriptor, &rejected),
+                    gjxl::StatusCode::kInvalidArgument,
+                    "inconsistent deferred preparation") &&
+         rejected == nullptr;
+}
+
 bool CheckResidentInputPreparation(gjxl::GpuBackend& gpu) {
   constexpr gjxl::Extent2D kSource{19, 13};
   constexpr gjxl::Extent2D kCoding{24, 16};
@@ -2744,6 +2950,87 @@ bool CheckResidentInputPreparation(gjxl::GpuBackend& gpu) {
     return false;
   }
 
+  struct FillContext {
+    gjxl::ConstImage3FView source;
+    size_t* calls;
+    bool fail;
+    bool invalid_numeric;
+  };
+  size_t calls = 0;
+  const auto fill = +[](const void* opaque, gjxl::Image3FView output) {
+    const auto& context = *static_cast<const FillContext*>(opaque);
+    ++*context.calls;
+    for (size_t c = 0; c < 3; ++c)
+      for (size_t y = 0; y < output.height(); ++y)
+        std::copy_n(context.source.plane[c].Row(y), output.width(),
+                    output.plane[c].Row(y));
+    if (context.invalid_numeric)
+      output.plane[0].Row(0)[0] = std::numeric_limits<float>::quiet_NaN();
+    return context.fail ? gjxl::Status::OutOfMemory("Injected resident fill failure")
+                        : gjxl::Status::Ok();
+  };
+  prepared.reset();
+  for (size_t attempt = 0; attempt < 4; ++attempt) {
+    const FillContext context{original.View(), &calls, attempt == 0, attempt == 1};
+    gjxl::ResidentInputPreparation descriptor{.coding_extent = kCoding,
+                                              .compute_matrix_scale_statistics = true,
+                                              .fill_extent = kSource,
+                                              .fill_original = fill,
+                                              .fill_context = &context};
+    if (attempt == 0) {
+      auto conflicting = descriptor;
+      conflicting.original_linear_rgb = original.View();
+      if (gjxl::PrepareResidentInput(gpu, conflicting, &prepared).code() !=
+            gjxl::StatusCode::kInvalidArgument ||
+          prepared || calls != 0)
+        return false;
+      auto missing_callback = descriptor;
+      missing_callback.fill_original = nullptr;
+      if (gjxl::PrepareResidentInput(gpu, missing_callback, &prepared).code() !=
+            gjxl::StatusCode::kInvalidArgument ||
+          prepared || calls != 0)
+        return false;
+    }
+    const auto result = gjxl::PrepareResidentInput(gpu, descriptor, &prepared);
+    if (calls != attempt + 1)
+      return false;
+    if (attempt < 2) {
+      const auto expected_code = attempt == 0 ? gjxl::StatusCode::kOutOfMemory
+                                              : gjxl::StatusCode::kInvalidArgument;
+      if (result.code() != expected_code || prepared)
+        return false;
+      continue;
+    }
+    if (!CheckStatus(result, "generated resident input") || !prepared)
+      return false;
+    const auto host = prepared->original_linear_rgb_host();
+    const auto stats = prepared->statistics();
+    if (!host.valid() || host.extent() != kSource ||
+        stats.x_edge != actual_stats.x_edge || stats.b_edge != actual_stats.b_edge ||
+        stats.exposed_blue != actual_stats.exposed_blue)
+      return false;
+    for (size_t c = 0; c < 3; ++c) {
+      for (size_t y = 0; y < kSource.height; ++y)
+        for (size_t x = 0; x < kSource.width; ++x)
+          if (host.plane[c].Row(y)[x] != original.View().plane[c].Row(y)[x])
+            return false;
+      const auto plane = prepared->coding_opsin().plane[c];
+      for (size_t y = 0; y < kCoding.height; ++y) {
+        if (!CheckStatus(gpu.CopyDeviceToHost(
+                           *plane.buffer, actual.plane[c].data() + y * actual.stride,
+                           kCoding.width * sizeof(float),
+                           plane.offset_bytes + y * plane.row_stride * sizeof(float)),
+                         "generated input readback"))
+          return false;
+        for (size_t x = 0; x < kCoding.width; ++x)
+          if (actual.plane[c][y * actual.stride + x] !=
+              expected.plane[c][y * expected.stride + x])
+            return false;
+      }
+    }
+    prepared.reset();
+  }
+
   original.plane[1][2 * original.stride + 3] =
     std::numeric_limits<float>::quiet_NaN();
   prepared.reset();
@@ -2765,13 +3052,11 @@ int main() {
   std::unique_ptr<gjxl::GpuBackend> gpu;
   if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
                    "Metal AQ backend") ||
-      !CheckProfilingSessionAggregation() ||
-      !CheckCapabilityBoundary() ||
+      !CheckProfilingSessionAggregation() || !CheckCapabilityBoundary() ||
       !CheckInvalidCoefficientDecisionMode(*gpu) ||
       !CheckPublicPreparationRejectsNonFiniteImages(*gpu) ||
-      !CheckResidentInputPreparation(*gpu) ||
-      !CheckReductionCorpus(*gpu) ||
-      !CheckMaximumErrorReduction(*gpu) ||
+      !CheckResidentInputPreparation(*gpu) || !CheckDeferredFrontend(*gpu) ||
+      !CheckReductionCorpus(*gpu) || !CheckMaximumErrorReduction(*gpu) ||
       !CheckSmallButteraugliFallback(*gpu) ||
       !CheckProductionEvaluation(*gpu) ||
       !CheckInvariantColorCorrelation(*gpu) ||
@@ -2782,6 +3067,11 @@ int main() {
       !CheckResidentPolicyFailure(ResidentPolicyFailure::kCompletion) ||
       !CheckResidentPolicyFailure(ResidentPolicyFailure::kNumeric) ||
       !CheckResidentPolicyFailure(ResidentPolicyFailure::kReadback) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kUpload, true) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kSubmission, true) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kCompletion, true) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kNumeric, true) ||
+      !CheckResidentPolicyFailure(ResidentPolicyFailure::kReadback, true) ||
       !CheckReconfiguration(*gpu) ||
       !CheckMemoryScaling(*gpu) ||
       !CheckSplitSeamAndDestruction(*gpu) ||
@@ -2790,10 +3080,29 @@ int main() {
       !CheckFailure(gjxl::StatusCode::kDeviceError, false, true, false) ||
       !CheckUploadOrNumericFailure(false) ||
       !CheckFailure(gjxl::StatusCode::kDeviceError, false, false, true) ||
-      !CheckFinalReadbackFailure() ||
-      !CheckScratchWorkspaceLeases() ||
+      !CheckFinalReadbackFailure() || !CheckScratchWorkspaceLeases() ||
       !CheckIndependentConcurrency(*gpu)) {
     return EXIT_FAILURE;
+  }
+  // Cover both borrowed and owned scratch, including alternating final
+  // filter buffers. Keep the same independent CPU reconstruction oracle.
+  for (bool gaborish : {false, true}) {
+    for (uint32_t epf = 0; epf <= 3; ++epf) {
+      if (gaborish && epf == 3) continue;  // Covered above.
+      auto options = MakeOptions();
+      options.profile.loop_filter.gaborish = gaborish;
+      options.profile.loop_filter.epf_options.iterations = epf;
+      if (!CheckProductionEvaluation(*gpu, options)) return EXIT_FAILURE;
+      if (epf != 0) {
+        // Failure tests above create many backends. Refresh this one so its
+        // kernel names remain in the bounded diagnostic pipeline registry.
+        std::unique_ptr<gjxl::GpuBackend> policy_gpu;
+        if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &policy_gpu),
+                         "filter-config resident backend") ||
+            !CheckResidentButteraugliPolicy(*policy_gpu, options))
+          return EXIT_FAILURE;
+      }
+    }
   }
   std::cout << "Metal AQ Milestone 7 evaluation tests passed; max block "
             << "reduction error " << g_max_reduction_error

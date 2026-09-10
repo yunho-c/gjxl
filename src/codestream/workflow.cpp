@@ -4,6 +4,7 @@
 #include "codestream/workflow.h"
 
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <chrono>
 #include <cmath>
@@ -12,8 +13,10 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <stdexcept>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -25,12 +28,16 @@
 #include "codec/quantization_pipeline.h"
 #include "codec/quantization_pipeline_internal.h"
 #include "codec/vardct_frame.h"
+#include "codec/vardct_frame_view_internal.h"
 #include "codestream/encoder.h"
 #include "codestream/encoder_internal.h"
 #include "codestream/rate_control_internal.h"
+#include "codestream/workflow_admission.h"
 #include "codestream/workflow_internal.h"
+#include "codestream/workflow_lifetime_test.h"
 #include "core/frame_geometry.h"
 #include "core/image_buffer.h"
+#include "core/managed_allocator.h"
 #include "core/thread_budget.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/ops/ac_strategy.h"
@@ -40,7 +47,12 @@
 #include "gpu/ops/resident_input.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 namespace {
+
+thread_local codestream_internal::WorkflowLifetimeObserverForTest
+  workflow_lifetime_observer;
 
 constexpr float kInitialProfileIntensityTarget = 255.0f;
 using WorkflowClock = std::chrono::steady_clock;
@@ -169,27 +181,6 @@ constexpr float kAutomaticMetalMinimumButteraugliTarget = 1.0f;
 constexpr float kAutomaticMetalMaximumButteraugliTarget = 1.2f;
 constexpr std::string_view kQualifiedMetalBackend = "Metal: Apple M4 Pro";
 
-size_t AdaptiveQuantizationIterations(
-  const VarDctEncodingOptions& options) {
-
-  if (options.density_mode == VarDctDensityMode::kHighDensity) {
-    return 4;
-  }
-  if (options.effort <= 3) {
-    return 0;
-  }
-  if (options.effort <= 6) {
-    return 1;
-  }
-  if (options.effort == 7) {
-    return 2;
-  }
-  if (options.effort <= 9) {
-    return 3;
-  }
-  return 4;
-}
-
 bool ValidQuantizationMatrixScaleStats(
   const codestream_internal::QuantizationMatrixScaleStats& stats) {
 
@@ -308,6 +299,78 @@ Status ValidateRateControlOptions(
   return Status::Ok();
 }
 
+Status ValidateWorkflowOptions(Extent2D source, const VarDctEncodingOptions &options,
+                               bool gpu_profiling, size_t *target_bytes, size_t *tolerance_bytes) {
+  size_t effective_target_bytes = 0, target_size_tolerance_bytes = 0;
+  Status status = ValidateRateControlOptions(source, options, &effective_target_bytes,
+                                             &target_size_tolerance_bytes);
+  if (!status.ok()) {
+    return status;
+  }
+  if (options.effort < 1 || options.effort > 10) {
+    return Status::InvalidArgument("VarDCT effort must be in [1, 10]");
+  }
+  if (options.cpu_thread_count > kMaximumCpuThreadCount) {
+    return Status::InvalidArgument("VarDCT CPU thread count must be zero or at most 256");
+  }
+  switch (options.backend) {
+  case VarDctBackendPreference::kAutomatic:
+  case VarDctBackendPreference::kCpu:
+  case VarDctBackendPreference::kMetal:
+    break;
+  default:
+    return Status::InvalidArgument("VarDCT encoding backend preference is invalid");
+  }
+  switch (options.density_mode) {
+  case VarDctDensityMode::kDefault:
+  case VarDctDensityMode::kHighDensity:
+    break;
+  default:
+    return Status::InvalidArgument("VarDCT density mode is invalid");
+  }
+  switch (options.compression_mode) {
+  case VarDctCompressionMode::kAutomatic:
+  case VarDctCompressionMode::kMaximumCompression:
+    break;
+  default:
+    return Status::InvalidArgument("VarDCT compression mode is invalid");
+  }
+  switch (options.metal_aq_mode) {
+  case GpuAdaptiveQuantizationMode::kExactCoefficients:
+  case GpuAdaptiveQuantizationMode::kFullyResident:
+    break;
+  case GpuAdaptiveQuantizationMode::kThroughput:
+  case GpuAdaptiveQuantizationMode::kMaximumThroughput:
+    if (options.backend != VarDctBackendPreference::kMetal) {
+      return Status::InvalidArgument("Throughput AQ requires an explicitly forced Metal backend");
+    }
+    break;
+  default:
+    return Status::InvalidArgument("VarDCT Metal AQ mode is invalid");
+  }
+  if (options.metal_aq_mode == GpuAdaptiveQuantizationMode::kMaximumThroughput &&
+      options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
+    return Status::InvalidArgument("Maximum-throughput AQ does not evaluate maximum error");
+  }
+  if (options.density_mode == VarDctDensityMode::kHighDensity &&
+      (options.rate_control_mode == VarDctRateControlMode::kMaximumError ||
+       options.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput ||
+       options.metal_aq_mode == GpuAdaptiveQuantizationMode::kMaximumThroughput)) {
+    return Status::InvalidArgument("High-density AQ requires iterative Butteraugli control");
+  }
+  if (gpu_profiling && (options.backend != VarDctBackendPreference::kMetal ||
+                        (options.metal_aq_mode != GpuAdaptiveQuantizationMode::kFullyResident &&
+                         options.metal_aq_mode != GpuAdaptiveQuantizationMode::kThroughput) ||
+                        options.rate_control_mode != VarDctRateControlMode::kButteraugliTarget)) {
+    return Status::InvalidArgument(
+        "GPU profiling requires a resident Metal Butteraugli-target workflow");
+  }
+
+  *target_bytes = effective_target_bytes;
+  *tolerance_bytes = target_size_tolerance_bytes;
+  return Status::Ok();
+}
+
 MetalBackendOptions ProductionMetalBackendOptions() {
   constexpr auto implementation =
     MetalDctImplementation::kSimdgroupMatmul;
@@ -330,25 +393,35 @@ MetalBackendOptions ProductionMetalBackendOptions() {
   };
 }
 
+struct ProductionMetalCache {
+  std::once_flag once;
+  std::unique_ptr<GpuBackend> backend;
+  std::atomic<GpuBackend*> published_backend{nullptr};
+  Status status = Status::Unavailable(
+    "Production Metal backend has not been initialized");
+};
+
+ProductionMetalCache& GetProductionMetalCache() {
+  static ProductionMetalCache cache;
+  return cache;
+}
+
 Status ResolveProductionMetalBackend(GpuBackend** out) {
   if (out == nullptr) {
     return Status::InvalidArgument(
       "Production Metal backend output pointer is null");
   }
   *out = nullptr;
-  struct Cache {
-    std::once_flag once;
-    std::unique_ptr<GpuBackend> backend;
-    Status status = Status::Unavailable(
-      "Production Metal backend has not been initialized");
-  };
-  static Cache cache;
+  ProductionMetalCache& cache = GetProductionMetalCache();
   std::call_once(cache.once, [&] {
     cache.status = CreateEmbeddedMetalBackend(
       ProductionMetalBackendOptions(), &cache.backend);
     if (cache.status.ok() && cache.backend == nullptr) {
       cache.status = Status::Internal(
         "Embedded Metal factory returned no backend");
+    }
+    if (cache.status.ok()) {
+      cache.published_backend.store(cache.backend.get(), std::memory_order_release);
     }
   });
   if (!cache.status.ok()) {
@@ -424,20 +497,21 @@ struct PipelineStorage {
 
   Extent2D block_extent;
   Extent2D padded_extent;
-  std::vector<float> initial_quant;
-  std::vector<float> strategy_mask;
-  std::vector<float> pixel_mask;
-  std::vector<float> final_quant;
-  std::vector<float> block_distance;
+  ManagedVector<float> initial_quant;
+  ManagedVector<float> strategy_mask;
+  ManagedVector<float> pixel_mask;
+  ManagedVector<float> final_quant;
+  ManagedVector<float> block_distance;
   Image3FBuffer reconstructed;
   VarDctEncoderFrame frame;
-  std::vector<double> score_history;
+  resource_budget_internal::PublicationVector<double> score_history;
   MaximumErrorResult maximum_error_result;
 };
 
 struct EncodingArtifacts {
   VarDctEncoderFrame frame;
-  std::vector<double> score_history;
+  std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame> completed_frame;
+  resource_budget_internal::PublicationVector<double> score_history;
   MaximumErrorResult maximum_error_result;
 };
 
@@ -459,8 +533,8 @@ struct PreparedWorkflow {
   }
 
   FrameGeometry geometry;
-  // Borrows the encode caller's immutable source for this synchronous
-  // prepared workflow and all of its target-size attempts.
+  // Borrows either the encode caller's immutable source or resident_input's
+  // completed shared source for this synchronous prepared workflow.
   ConstImage3FView linear_rgb;
   std::unique_ptr<Image3FBuffer> opsin;
   codestream_internal::QuantizationMatrixScaleStats matrix_scale_stats;
@@ -471,11 +545,23 @@ struct PreparedWorkflow {
   // Declared before its borrowers so it is destroyed after the resident
   // evaluator and AC-search state.
   std::unique_ptr<PreparedResidentInput> resident_input;
-  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization
-    gpu_adaptive_quantization;
+  std::optional<adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization>
+    gpu_adaptive_quantization{std::in_place};
   GpuBackend* selected_gpu = nullptr;
   bool selected_metal = false;
   bool backend_preselected = false;
+
+  // Only after a completed output has detached all serializer consumers and
+  // no further attempt can run. Destroy borrowers before their input owners.
+  void ReleaseBeforeSerialization() noexcept {
+    static_assert(std::is_nothrow_move_assignable_v<
+      quantization_pipeline_internal::PreparedQuantizationPipeline>);
+    gpu_adaptive_quantization.reset();
+    quantization = {};
+    resident_input.reset();
+    opsin.reset();
+    compatibility_output.reset();
+  }
 };
 
 [[nodiscard]] Status EnsureCompatibilityOutput(
@@ -493,6 +579,8 @@ struct PreparedWorkflow {
     }
     *output = prepared.compatibility_output.get();
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate compatibility pipeline output");
@@ -502,14 +590,12 @@ struct PreparedWorkflow {
   }
 }
 
-[[nodiscard]] Status PrepareWorkflow(
-  ConstImage3FView linear_rgb,
-  VarDctEncodingOptions options,
-  GpuBackend* selected_gpu,
-  bool selected_metal,
-  bool backend_preselected,
-  codestream_internal::VarDctEncodingProfile* profile,
-  std::unique_ptr<PreparedWorkflow>* prepared) {
+[[nodiscard]] Status
+PrepareWorkflow(ConstImage3FView linear_rgb, VarDctEncodingOptions options,
+                GpuBackend* selected_gpu, bool selected_metal, bool backend_preselected,
+                codestream_internal::VarDctEncodingProfile* profile,
+                std::unique_ptr<PreparedWorkflow>* prepared,
+                std::unique_ptr<PreparedResidentInput> resident_input = nullptr) {
 
   if (prepared == nullptr) {
     return Status::InvalidArgument(
@@ -539,16 +625,19 @@ struct PreparedWorkflow {
     }
     if (backend_preselected && selected_metal) {
       const WorkflowClock::time_point resident_begin = ProfileBegin(profile);
-      status = PrepareResidentInput(
-        *selected_gpu,
-        {
-          .original_linear_rgb = candidate->original_linear_rgb(),
-          .coding_extent = geometry.padded_frame(),
-          .compute_matrix_scale_statistics =
-            codestream_internal::ShouldComputeQuantizationMatrixScaleStats(
-              options),
-        },
-        &candidate->resident_input);
+      if (resident_input != nullptr) {
+        candidate->resident_input = std::move(resident_input);
+      } else {
+        status = PrepareResidentInput(
+          *selected_gpu,
+          {
+            .original_linear_rgb = candidate->original_linear_rgb(),
+            .coding_extent = geometry.padded_frame(),
+            .compute_matrix_scale_statistics =
+              codestream_internal::ShouldComputeQuantizationMatrixScaleStats(options),
+          },
+          &candidate->resident_input);
+      }
       if (!status.ok()) return status;
       if (profile != nullptr) {
         profile->input_resident_preparation_nanoseconds =
@@ -617,6 +706,8 @@ struct PreparedWorkflow {
         ElapsedNanoseconds(quantization_begin);
     }
     *prepared = std::move(candidate);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate prepared VarDCT workflow");
@@ -706,11 +797,16 @@ struct PreparedWorkflow {
   GpuBackend* supplied_backend,
   bool supplied_backend_is_qualified,
   bool resolve_production_backend,
-  std::vector<uint8_t>* codestream,
-  VarDctEncodingSummary* summary,
+  codestream_internal::CodestreamBuffer* codestream,
+  codestream_internal::OwnedEncodingSummary* summary,
   codestream_internal::VarDctEncodingProfile* profile,
   gpu_profile_internal::GpuProfilingMode gpu_profiling_mode,
-  gpu_profile_internal::GpuExecutionProfile* gpu_profile) {
+  gpu_profile_internal::GpuExecutionProfile* gpu_profile,
+  bool retain_preparation_for_retry) {
+
+  if (!prepared.gpu_adaptive_quantization.has_value()) {
+    return Status::FailedPrecondition("Encoding attempt uses released preparation");
+  }
 
   codestream_internal::VarDctEncodingProfile candidate_profile;
   gpu_profile_internal::GpuExecutionProfile candidate_gpu_profile;
@@ -718,7 +814,7 @@ struct PreparedWorkflow {
   CpuQuantizationPipelineOptions pipeline_options;
   pipeline_options.butteraugli_target = options.butteraugli_target;
   pipeline_options.adaptive_quantization.iterations =
-    AdaptiveQuantizationIterations(options);
+    codestream_internal::AdaptiveQuantizationIterations(options);
   if (options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
     pipeline_options.adaptive_quantization.control_mode =
       AdaptiveQuantizationControlMode::kMaximumError;
@@ -824,20 +920,22 @@ struct PreparedWorkflow {
         options.metal_aq_mode ==
           GpuAdaptiveQuantizationMode::kExactCoefficients ||
         options.rate_control_mode == VarDctRateControlMode::kMaximumError,
+      .completed_frame = &encoding.completed_frame,
     };
     status = gpu_profile == nullptr
       ? quantization_pipeline_internal::
           RunPreparedGpuQuantizationPipelineForEncoding(
             *selected_gpu, prepared.original_linear_rgb(),
             prepared.quantization, pipeline_options, options.metal_aq_mode,
-            encoding_output, nullptr, &prepared.gpu_adaptive_quantization)
+            encoding_output, nullptr, &*prepared.gpu_adaptive_quantization,
+            retain_preparation_for_retry)
       : quantization_pipeline_internal::
           RunPreparedGpuQuantizationPipelineForEncodingProfiled(
             *selected_gpu, prepared.original_linear_rgb(),
             prepared.quantization,
             pipeline_options, options.metal_aq_mode, encoding_output,
-            &prepared.gpu_adaptive_quantization, gpu_profiling_mode,
-            &candidate_gpu_profile);
+            &*prepared.gpu_adaptive_quantization, gpu_profiling_mode,
+            &candidate_gpu_profile, retain_preparation_for_retry);
   } else {
     PipelineStorage* compatibility_output = nullptr;
     status = EnsureCompatibilityOutput(prepared, &compatibility_output);
@@ -857,11 +955,20 @@ struct PreparedWorkflow {
   if (!status.ok()) {
     return status;
   }
+  if (!retain_preparation_for_retry && encoding.completed_frame != nullptr) {
+    prepared.ReleaseBeforeSerialization();
+  }
   ProfileEnd(
     profile, pipeline_begin,
     &candidate_profile.quantization_pipeline_nanoseconds);
 
-  std::vector<uint8_t> candidate;
+  if (workflow_lifetime_observer.before_serialization != nullptr) {
+    workflow_lifetime_observer.before_serialization(
+      encoding.completed_frame != nullptr, retain_preparation_for_retry,
+      workflow_lifetime_observer.context);
+  }
+
+  codestream_internal::CodestreamBuffer candidate;
   const WorkflowClock::time_point codestream_begin = ProfileBegin(profile);
   const VarDctCodestreamOptions codestream_options{
     .entropy_behavior =
@@ -869,12 +976,12 @@ struct PreparedWorkflow {
     .coefficient_order_behavior =
       codestream_internal::ResolveCoefficientOrderBehavior(options),
   };
-  status = profile == nullptr
-    ? EncodeVarDctCodestream(
-        encoding.frame, codestream_options, &candidate)
-    : codestream_internal::EncodeVarDctCodestreamProfiled(
-        encoding.frame, codestream_options, &candidate,
-        &candidate_profile.codestream);
+  const auto frame_view = encoding.completed_frame != nullptr
+    ? encoding.completed_frame->view()
+    : vardct_frame_internal::BorrowFrame(encoding.frame);
+  status = codestream_internal::EncodeVarDctCodestreamToBuffer(
+    frame_view, codestream_options, &candidate,
+    profile == nullptr ? nullptr : &candidate_profile.codestream);
   ProfileEnd(
     profile, codestream_begin,
     &candidate_profile.codestream_encoding_nanoseconds);
@@ -883,7 +990,8 @@ struct PreparedWorkflow {
   }
 
   const WorkflowClock::time_point summary_begin = ProfileBegin(profile);
-  VarDctEncodingSummary candidate_summary;
+  codestream_internal::OwnedEncodingSummary candidate_summary_owner;
+  auto& candidate_summary = candidate_summary_owner.value();
   candidate_summary.extent = prepared.geometry.frame();
   candidate_summary.encoded_bytes = candidate.size();
   candidate_summary.density_mode = options.density_mode;
@@ -925,7 +1033,7 @@ struct PreparedWorkflow {
       encoding.maximum_error_result.outcome;
   }
   candidate_summary.encode_attempt_count = 1;
-  candidate_summary.score_history = encoding.score_history;
+  candidate_summary_owner.SetField(std::move(encoding.score_history));
   candidate_summary.final_butteraugli_score_evaluated =
     options.rate_control_mode != VarDctRateControlMode::kMaximumError &&
     !candidate_summary.score_history.empty() &&
@@ -938,7 +1046,7 @@ struct PreparedWorkflow {
     ? VarDctExecutionBackend::kMetal
     : VarDctExecutionBackend::kCpu;
   candidate_summary.metal_aq_mode = options.metal_aq_mode;
-  status = encoding.frame.strategies().ForEachAnchor(
+  status = frame_view.strategies().ForEachAnchor(
     [&](size_t, size_t, AcStrategyType strategy) {
       const size_t index = static_cast<size_t>(strategy);
       if (index >= candidate_summary.strategy_counts.size()) {
@@ -960,7 +1068,7 @@ struct PreparedWorkflow {
 
   *codestream = std::move(candidate);
   if (summary != nullptr) {
-    *summary = std::move(candidate_summary);
+    *summary = std::move(candidate_summary_owner);
   }
   if (profile != nullptr) {
     *profile = candidate_profile;
@@ -972,6 +1080,12 @@ struct PreparedWorkflow {
 }
 
 }  // namespace
+
+codestream_internal::WorkflowLifetimeObserverForTest
+codestream_internal::SetWorkflowLifetimeObserverForTest(
+  WorkflowLifetimeObserverForTest observer) noexcept {
+  return std::exchange(workflow_lifetime_observer, observer);
+}
 
 Status codestream_internal::ComputeQuantizationMatrixScaleStats(
   ConstImage3FView opsin,
@@ -1232,18 +1346,95 @@ Status codestream_internal::SelectQuantizationMatrixScales(
   return Status::Ok();
 }
 
+Status codestream_internal::PrepareResidentEncodingInput(
+  Extent2D source, const VarDctEncodingOptions& options,
+  Status (*fill)(const void*, Image3FView), const void* context,
+  ResidentEncodingInput* input) {
+  if (input == nullptr || fill == nullptr ||
+      options.backend != VarDctBackendPreference::kMetal ||
+      options.metal_aq_mode != GpuAdaptiveQuantizationMode::kFullyResident ||
+      options.rate_control_mode != VarDctRateControlMode::kButteraugliTarget) {
+    return Status::InvalidArgument("Generated input requires forced resident Metal");
+  }
+  GpuBackend* gpu = nullptr;
+  Status status = ResolveProductionMetalBackend(&gpu);
+  if (!status.ok())
+    return status;
+  FrameGeometry geometry;
+  status = FrameGeometry::Create(source, &geometry);
+  if (!status.ok())
+    return status;
+  ResidentEncodingInput candidate;
+  status = PrepareResidentInput(*gpu,
+                                {.coding_extent = geometry.padded_frame(),
+                                 .compute_matrix_scale_statistics =
+                                   ShouldComputeQuantizationMatrixScaleStats(options),
+                                 .fill_extent = source,
+                                 .fill_original = fill,
+                                 .fill_context = context},
+                                &candidate.owner);
+  if (!status.ok())
+    return status;
+  candidate.linear_rgb = candidate.owner->original_linear_rgb_host();
+  if (!candidate.linear_rgb.valid() || candidate.linear_rgb.extent() != source) {
+    return Status::Internal("Resident input has no matching completed host view");
+  }
+  *input = std::move(candidate);
+  return Status::Ok();
+}
+
+Status codestream_internal::PlanWorkflowAdmission(
+    Extent2D source, const WorkflowStorageOptions &options, GpuBackend *supplied_backend,
+    bool supplied_backend_is_qualified, bool resolve_production_backend, WorkflowStoragePlan *out) {
+  if (out == nullptr)
+    return Status::InvalidArgument("Workflow admission plan output is null");
+  size_t target = 0, tolerance = 0;
+  Status status = ValidateWorkflowOptions(source, options.encoding, options.collect_gpu_profile,
+                                          &target, &tolerance);
+  if (!status.ok())
+    return status;
+  FrameGeometry geometry;
+  status = FrameGeometry::Create(source, &geometry);
+  if (!status.ok())
+    return status;
+  auto selected = options;
+  auto e = options.encoding;
+  const bool search = e.rate_control_mode == VarDctRateControlMode::kTargetBytes ||
+                      e.rate_control_mode == VarDctRateControlMode::kTargetBitsPerPixel;
+  const bool automatic_search = search && e.backend == VarDctBackendPreference::kAutomatic;
+  selected.route = WorkflowStorageRoute::kCpu;
+  if (automatic_search && (e.metal_aq_mode == GpuAdaptiveQuantizationMode::kFullyResident ||
+                           !TargetSizeSearchMayEvaluate(e.target_size_maximum_attempts,
+                                                        IsAutomaticMetalTargetEligible))) {
+    return ComputeWorkflowStoragePlan(source, selected, out);
+  }
+  if (automatic_search) {
+    e.rate_control_mode = VarDctRateControlMode::kButteraugliTarget;
+    e.butteraugli_target = 1.0f; // Qualify the existing automatic target interval.
+  }
+  GpuBackend *gpu = nullptr;
+  bool metal = false;
+  status = SelectAttemptBackend(geometry, e, supplied_backend, supplied_backend_is_qualified,
+                                resolve_production_backend, &gpu, &metal);
+  if (!status.ok())
+    return status;
+  if (metal)
+    selected.route = automatic_search ? WorkflowStorageRoute::kAutomaticExactSearch
+                                      : WorkflowStorageRoute::kMetal;
+  return ComputeWorkflowStoragePlan(source, selected, out);
+}
+
 Status EncodeLinearRgbVarDctCodestreamImpl(
-  ConstImage3FView linear_rgb,
-  VarDctEncodingOptions options,
-  GpuBackend* supplied_backend,
-  bool supplied_backend_is_qualified,
-  bool resolve_production_backend,
-  std::vector<uint8_t>* codestream,
-  VarDctEncodingSummary* summary,
-  VarDctEncodingTiming* timing,
+  ConstImage3FView linear_rgb, VarDctEncodingOptions options,
+  GpuBackend* supplied_backend, bool supplied_backend_is_qualified,
+  bool resolve_production_backend, codestream_internal::CodestreamBuffer* codestream,
+  codestream_internal::OwnedEncodingSummary* summary,
+  codestream_internal::OwnedEncodingTiming* timing,
   codestream_internal::VarDctEncodingProfile* profile,
   gpu_profile_internal::GpuProfilingMode gpu_profiling_mode,
-  gpu_profile_internal::GpuExecutionProfile* gpu_profile) {
+  gpu_profile_internal::GpuExecutionProfile* gpu_profile,
+  thread_budget_internal::CpuExecutionScope* outer_cpu_execution = nullptr,
+  std::unique_ptr<PreparedResidentInput> resident_input = nullptr) {
 
   const bool gpu_profiling =
     gpu_profiling_mode != gpu_profile_internal::GpuProfilingMode::kDisabled;
@@ -1256,7 +1447,10 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
   const auto total_begin = !profiling
     ? WorkflowClock::time_point{}
     : WorkflowClock::now();
-  VarDctEncodingTiming local_timing;
+  thread_budget_internal::CpuExecutionScope local_cpu_execution;
+  codestream_internal::OwnedEncodingTiming timing_owner;
+  auto& local_timing = timing_owner.value();
+  resource_budget_internal::PublicationVector<VarDctEncodingAttemptTiming> attempt_timings;
   codestream_internal::VarDctEncodingProfile local_profile;
   gpu_profile_internal::GpuExecutionProfile local_gpu_profile;
   if (codestream == nullptr || !linear_rgb.valid()) {
@@ -1265,93 +1459,44 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
   }
   size_t effective_target_bytes = 0;
   size_t target_size_tolerance_bytes = 0;
-  Status status = ValidateRateControlOptions(
-    linear_rgb.extent(),
-    options,
-    &effective_target_bytes,
-    &target_size_tolerance_bytes);
-  if (!status.ok()) {
+  Status status = ValidateWorkflowOptions(linear_rgb.extent(), options, gpu_profiling,
+                                          &effective_target_bytes, &target_size_tolerance_bytes);
+  if (!status.ok())
     return status;
+  codestream_internal::WorkflowAdmission admission;
+  size_t admission_bytes = 0;
+  if (resource_budget_internal::CurrentResourceContext().reservation == nullptr) {
+    codestream_internal::WorkflowStoragePlan plan;
+    status = codestream_internal::PlanWorkflowAdmission(
+        linear_rgb.extent(),
+        {options, codestream_internal::WorkflowStorageRoute::kCpu,
+         codestream_internal::WorkflowStorageAdapter::kBorrowedLinearRgb, timing != nullptr,
+         profile != nullptr, gpu_profiling},
+        supplied_backend, supplied_backend_is_qualified, resolve_production_backend, &plan);
+    if (!status.ok())
+      return status;
+    admission_bytes = plan.working.peak_bytes;
   }
-  if (options.effort < 1 || options.effort > 10) {
-    return Status::InvalidArgument(
-      "VarDCT effort must be in [1, 10]");
-  }
-  if (options.cpu_thread_count > kMaximumCpuThreadCount) {
-    return Status::InvalidArgument(
-      "VarDCT CPU thread count must be zero or at most 256");
-  }
+  status = admission.Start(admission_bytes, options.execution_domain);
+  if (!status.ok())
+    return status;
+  auto& cpu_execution = outer_cpu_execution != nullptr ? *outer_cpu_execution : local_cpu_execution;
+  status = cpu_execution.Start(options.execution_domain, options.cpu_thread_count, timing != nullptr);
+  if (!status.ok()) return status;
   thread_budget_internal::CpuParticipantTracker participant_tracker;
+  const resource_budget_internal::ManagedHostScope managed_host(
+    resource_budget_internal::ResourceClass::kPreparation);
   const thread_budget_internal::EncodeScope thread_budget(
     options.cpu_thread_count,
     profile == nullptr ? nullptr : &participant_tracker);
-  switch (options.backend) {
-    case VarDctBackendPreference::kAutomatic:
-    case VarDctBackendPreference::kCpu:
-    case VarDctBackendPreference::kMetal:
-      break;
-    default:
-      return Status::InvalidArgument(
-        "VarDCT encoding backend preference is invalid");
-  }
-  switch (options.density_mode) {
-    case VarDctDensityMode::kDefault:
-    case VarDctDensityMode::kHighDensity:
-      break;
-    default:
-      return Status::InvalidArgument(
-        "VarDCT density mode is invalid");
-  }
-  switch (options.compression_mode) {
-    case VarDctCompressionMode::kAutomatic:
-    case VarDctCompressionMode::kMaximumCompression:
-      break;
-    default:
-      return Status::InvalidArgument(
-        "VarDCT compression mode is invalid");
-  }
-  switch (options.metal_aq_mode) {
-    case GpuAdaptiveQuantizationMode::kExactCoefficients:
-    case GpuAdaptiveQuantizationMode::kFullyResident:
-      break;
-    case GpuAdaptiveQuantizationMode::kThroughput:
-    case GpuAdaptiveQuantizationMode::kMaximumThroughput:
-      if (options.backend != VarDctBackendPreference::kMetal) {
-        return Status::InvalidArgument(
-          "Throughput AQ requires an explicitly forced Metal backend");
-      }
-      break;
-    default:
-      return Status::InvalidArgument(
-        "VarDCT Metal AQ mode is invalid");
-  }
-  if (options.metal_aq_mode ==
-        GpuAdaptiveQuantizationMode::kMaximumThroughput &&
-      options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
-    return Status::InvalidArgument(
-      "Maximum-throughput AQ does not evaluate maximum error");
-  }
-  if (options.density_mode == VarDctDensityMode::kHighDensity &&
-      (options.rate_control_mode == VarDctRateControlMode::kMaximumError ||
-       options.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput ||
-       options.metal_aq_mode ==
-         GpuAdaptiveQuantizationMode::kMaximumThroughput)) {
-    return Status::InvalidArgument(
-      "High-density AQ requires iterative Butteraugli control");
-  }
-  if (gpu_profiling &&
-      (options.backend != VarDctBackendPreference::kMetal ||
-       (options.metal_aq_mode !=
-          GpuAdaptiveQuantizationMode::kFullyResident &&
-        options.metal_aq_mode != GpuAdaptiveQuantizationMode::kThroughput) ||
-       options.rate_control_mode !=
-          VarDctRateControlMode::kButteraugliTarget)) {
-    return Status::InvalidArgument(
-      "GPU profiling requires a resident Metal Butteraugli-target workflow");
-  }
   const bool target_size_control =
     options.rate_control_mode == VarDctRateControlMode::kTargetBytes ||
     options.rate_control_mode == VarDctRateControlMode::kTargetBitsPerPixel;
+  if (timing != nullptr) {
+    status = resource_budget_internal::PublicationVector<VarDctEncodingAttemptTiming>::CreateForAppend(
+      target_size_control ? options.target_size_maximum_attempts : 1, &attempt_timings);
+    if (!status.ok()) return status;
+  }
   const bool resident_input_candidate =
     (options.metal_aq_mode == GpuAdaptiveQuantizationMode::kFullyResident ||
      options.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput) &&
@@ -1377,6 +1522,10 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
         ElapsedNanoseconds(selection_begin);
     }
   }
+  if (resident_input != nullptr &&
+      (!backend_preselected || !workflow_metal || target_size_control)) {
+    return Status::InvalidArgument("Prepared input requires a resident Metal attempt");
+  }
   if (options.rate_control_mode == VarDctRateControlMode::kTargetBytes ||
       options.rate_control_mode ==
         VarDctRateControlMode::kTargetBitsPerPixel) {
@@ -1400,10 +1549,11 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
         local_profile.input_preparation_nanoseconds =
           ElapsedNanoseconds(preparation_begin);
       }
-      codestream_internal::TargetSizeSearchResult search_result;
+      codestream_internal::ManagedTargetSizeSearchResult search_result;
       const auto search_begin = timing == nullptr
         ? WorkflowClock::time_point{}
         : WorkflowClock::now();
+      size_t attempted_encodes = 0;
       status = codestream_internal::SearchTargetSize(
         {
           .target_bytes = effective_target_bytes,
@@ -1412,8 +1562,8 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
           .selection = options.target_size_selection,
         },
         [&](float butteraugli_target,
-            std::vector<uint8_t>* attempt_codestream,
-            VarDctEncodingSummary* attempt_summary) {
+            codestream_internal::CodestreamBuffer* attempt_codestream,
+            codestream_internal::OwnedEncodingSummary* attempt_summary) {
           const auto attempt_begin = timing == nullptr
             ? WorkflowClock::time_point{}
             : WorkflowClock::now();
@@ -1436,12 +1586,13 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
             supplied_backend_is_qualified, resolve_production_backend,
             attempt_codestream, attempt_summary,
             profile == nullptr ? nullptr : &attempt_profile,
-            gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
+            gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr,
+            ++attempted_encodes < options.target_size_maximum_attempts);
           if (profile != nullptr && attempt_status.ok()) {
             AccumulateEncodingProfile(attempt_profile, &local_profile);
           }
           if (timing != nullptr) {
-            local_timing.attempts.push_back({
+            const Status timing_status = attempt_timings.Append({
               .butteraugli_target = butteraugli_target,
               .encode_and_serialize_nanoseconds =
                 ElapsedNanoseconds(attempt_begin),
@@ -1450,6 +1601,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
                 : 0,
               .succeeded = attempt_status.ok(),
             });
+            if (!timing_status.ok()) return timing_status;
           }
           return attempt_status;
         },
@@ -1457,27 +1609,28 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       if (timing != nullptr) {
         local_timing.aggregate_search_nanoseconds =
           ElapsedNanoseconds(search_begin);
+        timing_owner.SetField(std::move(attempt_timings));
       }
       if (!status.ok()) {
         return status;
       }
 
-      search_result.summary.rate_control_mode = options.rate_control_mode;
-      search_result.summary.effective_target_bytes = effective_target_bytes;
-      search_result.summary.target_size_tolerance_bytes =
+      search_result.summary.value().rate_control_mode = options.rate_control_mode;
+      search_result.summary.value().effective_target_bytes = effective_target_bytes;
+      search_result.summary.value().target_size_tolerance_bytes =
         target_size_tolerance_bytes;
-      search_result.summary.encode_attempt_count = search_result.attempt_count;
-      search_result.summary.failed_encode_attempt_count =
+      search_result.summary.value().encode_attempt_count = search_result.attempt_count;
+      search_result.summary.value().failed_encode_attempt_count =
         search_result.failed_attempt_count;
-      search_result.summary.target_size_selection =
+      search_result.summary.value().target_size_selection =
         options.target_size_selection;
-      search_result.summary.target_size_met = search_result.target_size_met;
-      search_result.summary.target_size_search_exhausted =
+      search_result.summary.value().target_size_met = search_result.target_size_met;
+      search_result.summary.value().target_size_search_exhausted =
         search_result.search_exhausted;
       if (options.rate_control_mode == VarDctRateControlMode::kTargetBytes) {
-        search_result.summary.requested_target_bytes = options.target_bytes;
+        search_result.summary.value().requested_target_bytes = options.target_bytes;
       } else {
-        search_result.summary.requested_target_bits_per_pixel =
+        search_result.summary.value().requested_target_bits_per_pixel =
           options.target_bits_per_pixel;
       }
       if (timing != nullptr) {
@@ -1486,7 +1639,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
           [&](const VarDctEncodingAttemptTiming& attempt) {
             return attempt.succeeded &&
               attempt.butteraugli_target ==
-                search_result.summary.selected_butteraugli_target &&
+                search_result.summary.value().selected_butteraugli_target &&
               attempt.encoded_bytes == search_result.codestream.size();
           });
         if (selected == local_timing.attempts.end()) {
@@ -1498,7 +1651,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       }
       if (profile != nullptr) {
         local_profile.execution_backend =
-          search_result.summary.execution_backend;
+          search_result.summary.value().execution_backend;
         local_profile.total_nanoseconds = ElapsedNanoseconds(total_begin);
       }
       *codestream = std::move(search_result.codestream);
@@ -1506,13 +1659,19 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
         *summary = std::move(search_result.summary);
       }
       if (timing != nullptr) {
+        const auto cpu_timing = cpu_execution.timing();
+        local_timing.cpu_admission_wait_nanoseconds = cpu_timing.initial_queue_nanoseconds;
+        local_timing.cpu_resume_wait_nanoseconds = cpu_timing.resume_queue_nanoseconds;
+        local_timing.cpu_blocked_nanoseconds = cpu_timing.blocked_nanoseconds;
         local_timing.total_nanoseconds = ElapsedNanoseconds(total_begin);
-        *timing = std::move(local_timing);
+        *timing = std::move(timing_owner);
       }
       if (profile != nullptr) {
         local_profile.peak_cpu_participants = participant_tracker.peak();
         *profile = local_profile;
       }
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      return failure.status();
     } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
         "Unable to allocate target-size workflow storage");
@@ -1528,10 +1687,10 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     const auto preparation_begin = !profiling
       ? WorkflowClock::time_point{}
       : WorkflowClock::now();
-    status = PrepareWorkflow(
-      linear_rgb, options, workflow_gpu, workflow_metal,
-      backend_preselected,
-      profile == nullptr ? nullptr : &local_profile, &prepared);
+    status =
+      PrepareWorkflow(linear_rgb, options, workflow_gpu, workflow_metal,
+                      backend_preselected, profile == nullptr ? nullptr : &local_profile,
+                      &prepared, std::move(resident_input));
     if (!status.ok()) {
       return status;
     }
@@ -1543,8 +1702,8 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       local_profile.input_preparation_nanoseconds =
         ElapsedNanoseconds(preparation_begin);
     }
-    std::vector<uint8_t> candidate;
-    VarDctEncodingSummary candidate_summary;
+    codestream_internal::CodestreamBuffer candidate;
+    codestream_internal::OwnedEncodingSummary candidate_summary;
     codestream_internal::VarDctEncodingProfile attempt_profile;
     const auto attempt_begin = timing == nullptr
       ? WorkflowClock::time_point{}
@@ -1555,9 +1714,9 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       supplied_backend_is_qualified, resolve_production_backend,
       &candidate, &candidate_summary,
       profile == nullptr ? nullptr : &attempt_profile,
-      gpu_profiling_mode, gpu_profiling ? &local_gpu_profile : nullptr);
+      gpu_profiling_mode, gpu_profiling ? &local_gpu_profile : nullptr, false);
     if (timing != nullptr) {
-      local_timing.attempts.push_back({
+      const Status timing_status = attempt_timings.Append({
         .butteraugli_target =
           options.rate_control_mode == VarDctRateControlMode::kMaximumError
             ? 0.0f
@@ -1567,6 +1726,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
         .encoded_bytes = status.ok() ? candidate.size() : 0,
         .succeeded = status.ok(),
       });
+      if (!timing_status.ok()) return timing_status;
     }
     if (!status.ok()) {
       return status;
@@ -1576,6 +1736,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     }
 
     if (timing != nullptr) {
+      timing_owner.SetField(std::move(attempt_timings));
       local_timing.selected_attempt_nanoseconds =
         local_timing.attempts.front().encode_and_serialize_nanoseconds;
     }
@@ -1584,8 +1745,12 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       *summary = std::move(candidate_summary);
     }
     if (timing != nullptr) {
+      const auto cpu_timing = cpu_execution.timing();
+      local_timing.cpu_admission_wait_nanoseconds = cpu_timing.initial_queue_nanoseconds;
+      local_timing.cpu_resume_wait_nanoseconds = cpu_timing.resume_queue_nanoseconds;
+      local_timing.cpu_blocked_nanoseconds = cpu_timing.blocked_nanoseconds;
       local_timing.total_nanoseconds = ElapsedNanoseconds(total_begin);
-      *timing = std::move(local_timing);
+      *timing = std::move(timing_owner);
     }
     if (profile != nullptr) {
       local_profile.execution_backend =
@@ -1595,6 +1760,8 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
       *profile = local_profile;
     }
     if (gpu_profiling) *gpu_profile = std::move(local_gpu_profile);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate public VarDCT encoding storage");
@@ -1605,13 +1772,54 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
   return Status::Ok();
 }
 
+Status EncodeLinearRgbVarDctCodestreamPublishedImpl(
+  ConstImage3FView linear_rgb,
+  VarDctEncodingOptions options,
+  GpuBackend* supplied_backend,
+  bool supplied_backend_is_qualified,
+  bool resolve_production_backend,
+  std::vector<uint8_t>* codestream,
+  VarDctEncodingSummary* summary,
+  VarDctEncodingTiming* timing,
+  codestream_internal::VarDctEncodingProfile* profile,
+  gpu_profile_internal::GpuProfilingMode gpu_profiling_mode,
+  gpu_profile_internal::GpuExecutionProfile* gpu_profile) {
+  if (codestream == nullptr) return Status::InvalidArgument("Codestream output is null");
+  // Started by the implementation only after memory admission; retained here
+  // through evaluator teardown and the complete public ownership handoff.
+  thread_budget_internal::CpuExecutionScope cpu_execution;
+  codestream_internal::CodestreamBuffer candidate;
+  codestream_internal::OwnedEncodingSummary candidate_summary;
+  codestream_internal::OwnedEncodingTiming candidate_timing;
+  const Status status = EncodeLinearRgbVarDctCodestreamImpl(
+    linear_rgb, options, supplied_backend, supplied_backend_is_qualified,
+    resolve_production_backend, &candidate,
+    summary == nullptr ? nullptr : &candidate_summary,
+    timing == nullptr ? nullptr : &candidate_timing, profile,
+    gpu_profiling_mode, gpu_profile, &cpu_execution);
+  if (status.ok()) {
+    auto byte_charge = candidate.MoveToPublication(codestream);
+    resource_budget_internal::ResourceAllocation summary_charge, timing_charge;
+    if (summary != nullptr) summary_charge = candidate_summary.MoveToPublication(summary);
+    if (timing != nullptr) timing_charge = candidate_timing.MoveToPublication(timing);
+    if (gpu_profile != nullptr) gpu_profile->ReleaseResourceChargesAfterPublication();
+  }
+  return status;
+}
+
+Status TrimVarDctPreparationCache() {
+  GpuBackend* backend = GetProductionMetalCache().published_backend.load(
+    std::memory_order_acquire);
+  return backend == nullptr ? Status::Ok() : backend->TrimPreparationCache();
+}
+
 Status EncodeLinearRgbVarDctCodestream(
   ConstImage3FView linear_rgb,
   VarDctEncodingOptions options,
   std::vector<uint8_t>* codestream,
   VarDctEncodingSummary* summary) {
 
-  return EncodeLinearRgbVarDctCodestreamImpl(
+  return EncodeLinearRgbVarDctCodestreamPublishedImpl(
     linear_rgb, options, nullptr, false, true, codestream, summary, nullptr,
     nullptr, gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
 }
@@ -1627,12 +1835,36 @@ Status EncodeLinearRgbVarDctCodestreamProfiled(
     return Status::InvalidArgument(
       "Profiled VarDCT encoding timing output is null");
   }
-  return EncodeLinearRgbVarDctCodestreamImpl(
+  return EncodeLinearRgbVarDctCodestreamPublishedImpl(
     linear_rgb, options, nullptr, false, true, codestream, summary, timing,
     nullptr, gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
 }
 
 namespace codestream_internal {
+
+Status EncodeLinearRgbVarDctCodestreamOwned(
+  ConstImage3FView linear_rgb, VarDctEncodingOptions options,
+  CodestreamBuffer* codestream, OwnedEncodingSummary* summary,
+  OwnedEncodingTiming* timing,
+  thread_budget_internal::CpuExecutionScope* outer_cpu_execution) {
+  return EncodeLinearRgbVarDctCodestreamImpl(
+    linear_rgb, options, nullptr, false, true, codestream, summary, timing,
+    nullptr, gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr, outer_cpu_execution);
+}
+
+Status EncodeResidentLinearRgbVarDctCodestreamOwned(ResidentEncodingInput input,
+                                                    VarDctEncodingOptions options,
+                                                    CodestreamBuffer* codestream) {
+  if (input.owner == nullptr || options.backend != VarDctBackendPreference::kMetal ||
+      options.metal_aq_mode != GpuAdaptiveQuantizationMode::kFullyResident ||
+      options.rate_control_mode != VarDctRateControlMode::kButteraugliTarget) {
+    return Status::InvalidArgument("Prepared input requires forced resident Metal");
+  }
+  return EncodeLinearRgbVarDctCodestreamImpl(
+    input.linear_rgb, options, nullptr, false, true, codestream, nullptr, nullptr,
+    nullptr, gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr, nullptr,
+    std::move(input.owner));
+}
 
 bool ShouldComputeQuantizationMatrixScaleStats(
   const VarDctEncodingOptions& options) noexcept {
@@ -1709,7 +1941,7 @@ Status EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
   std::vector<uint8_t>* codestream,
   VarDctEncodingSummary* summary) {
 
-  return EncodeLinearRgbVarDctCodestreamImpl(
+  return EncodeLinearRgbVarDctCodestreamPublishedImpl(
     linear_rgb, options, backend, backend_is_qualified_for_automatic, false,
     codestream, summary, nullptr, nullptr,
     gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
@@ -1727,7 +1959,7 @@ Status EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
   if (profile == nullptr) {
     return Status::InvalidArgument("VarDCT encoding profile output is null");
   }
-  return EncodeLinearRgbVarDctCodestreamImpl(
+  return EncodeLinearRgbVarDctCodestreamPublishedImpl(
     linear_rgb, options, backend, backend_is_qualified_for_automatic, false,
     codestream, summary, nullptr, profile,
     gpu_profile_internal::GpuProfilingMode::kDisabled, nullptr);
@@ -1748,7 +1980,7 @@ Status EncodeLinearRgbVarDctCodestreamGpuProfiledWithBackendForTesting(
     return Status::InvalidArgument(
       "VarDCT GPU profile outputs are null");
   }
-  return EncodeLinearRgbVarDctCodestreamImpl(
+  return EncodeLinearRgbVarDctCodestreamPublishedImpl(
     linear_rgb, options, backend, backend_is_qualified_for_automatic, false,
     codestream, summary, nullptr, profile, profiling_mode, gpu_profile);
 }

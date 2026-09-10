@@ -57,9 +57,14 @@ struct PreparedQuantizationPipeline;
 
 struct GpuEncodingQuantizationPipelineOutput {
   VarDctEncoderFrame* frame = nullptr;
-  std::vector<double>* score_history = nullptr;
+  resource_budget_internal::PublicationOutput<double> score_history;
   MaximumErrorResult* maximum_error_result = nullptr;
   bool collect_final_butteraugli_score = true;
+  /// Optional resident lease. `frame` remains the required compatibility
+  /// destination and is empty on leased success. Other modes fill `frame` and
+  /// clear the lease on success; failure preserves the previous lease.
+  std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame>*
+    completed_frame = nullptr;
 };
 
 /// Reuses target-invariant host preparation across complete GPU attempts.
@@ -76,6 +81,9 @@ struct GpuEncodingQuantizationPipelineOutput {
 
 /// Runs a Metal pipeline for codestream encoding without materializing
 /// diagnostic quant fields, block maps, or reconstructed RGB.
+/// Set retain_ac_search_storage=false only when no later search needs the
+/// cached capacity. The final search still reuses existing backing, then
+/// releases it after placement and before adaptive quantization.
 [[nodiscard]] Status RunPreparedGpuQuantizationPipelineForEncoding(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,
@@ -85,7 +93,8 @@ struct GpuEncodingQuantizationPipelineOutput {
   GpuEncodingQuantizationPipelineOutput output,
   AcStrategyGpuSearchStats* stats = nullptr,
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
-    prepared_aq = nullptr);
+    prepared_aq = nullptr,
+  bool retain_ac_search_storage = true);
 
 }  // namespace quantization_pipeline_internal
 

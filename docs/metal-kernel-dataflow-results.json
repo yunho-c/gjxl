@@ -1,0 +1,611 @@
+{
+  "artifacts": {
+    "asan-commands.json": "4fd3c7a4180a2407d230899ac5d4e4e61d5f10ef88cd3ae53a4b913a9577034d",
+    "combined-stage/identity.json": "79fc965b6d3dfc5a0a5f1818696beeebc4f810a9c0db8f39436c7d87fe325db8",
+    "combined-stage/pairs.json": "fcdc1b4cc8fd5887bccc1b0fe544286f6fd99c5eed65f77e6724ef87b7c97370",
+    "combined-wall/identity.json": "981724f12f8eaf0f3851a0dab7c7a6327eb1acb39da5fc4626d0c6fb9dbc2b07",
+    "combined-wall/pairs.json": "d6ce078a29d6e7eca2d017048a68b6bbb63812e0b566e19c3453567181005098",
+    "environment-final.json": "0b2eaf79e3bff4a14443af7a0520c5c7f5f9a248227d658b7a70289e19cbfd63",
+    "final-parity/identity.json": "8735c913d418e098e01bb05d49e149780115ad77b0b37fb78444ea768f7ad9b9",
+    "final-parity/summary.json": "8d6c1ff23089d48e968db51514bf7ab3d3c3b7dfeefc6c62388d8a3cce1f68a5",
+    "final-resources/identity.json": "e9929a1dc8369ac3a3fb16a7a02757d296bb37515311d513b4c6652460480756",
+    "final-resources/summary.json": "02ef26a7dd6dc493cfc2ba5b29a1c95ecb0858426e2e591cafba4348639a1f6a",
+    "metal-validation-commands.json": "34033639ad5ca6bea5d7dda0671db9a9c3d9bb3e4ed8d1b86310a792fc6cdc28",
+    "qualified/identity.json": "822693e9d28ce93b67a95e65017d2ccf06d3604a32ae980b09360c010f1d0d08",
+    "qualified/summary.json": "b67c774f4ede0b26b3d986cbfcca459a7adda99654dbaf65c92750e713c4e803",
+    "setup-comparison/identity.json": "841d779f69fae8aeab54b602767e7688663ac021c6200d53c133ea4b97de3d74",
+    "setup-comparison/pairs.json": "a283528ab98746dbc6825bff75b9e9b1bcd23706db9eaeb0dc670dbc6d752601"
+  },
+  "baseline_revision": "1f16769bef87b42094fcd6a3f6dc50722662e20b",
+  "gpu_stages": [
+    {
+      "metrics": {
+        "group.ac_strategy": {
+          "baseline_ms": 41.170416,
+          "candidate_ms": 37.952583,
+          "median_change_percent": -7.815886533670213,
+          "paired_changes_percent": [
+            -7.815886533670213,
+            -7.466873135020647,
+            -7.938771761887342
+          ]
+        },
+        "group.all_stages": {
+          "baseline_ms": 155.638334,
+          "candidate_ms": 142.621869,
+          "median_change_percent": -8.815182176784386,
+          "paired_changes_percent": [
+            -8.815182176784386,
+            -8.133901645801133,
+            -8.845532232438302
+          ]
+        },
+        "group.coefficients": {
+          "baseline_ms": 9.116082,
+          "candidate_ms": 7.581246,
+          "median_change_percent": -16.840461256642502,
+          "paired_changes_percent": [
+            -16.836575186576862,
+            -16.840461256642502,
+            -17.38174837161467
+          ]
+        },
+        "group.dct_io": {
+          "baseline_ms": 10.464707,
+          "candidate_ms": 3.165668,
+          "median_change_percent": -69.78182884163971,
+          "paired_changes_percent": [
+            -69.78182884163971,
+            -69.73020816779942,
+            -69.99716284459755
+          ]
+        },
+        "group.epf": {
+          "baseline_ms": 6.080001,
+          "candidate_ms": 4.440167,
+          "median_change_percent": -27.016887003801482,
+          "paired_changes_percent": [
+            -27.016887003801482,
+            -26.541741315956948,
+            -27.09335590946058
+          ]
+        }
+      },
+      "name": "padded_4k"
+    },
+    {
+      "metrics": {
+        "group.ac_strategy": {
+          "baseline_ms": 1.848915,
+          "candidate_ms": 1.708916,
+          "median_change_percent": -6.848611212521938,
+          "paired_changes_percent": [
+            -6.848611212521938,
+            -7.609501574564259,
+            -6.782264522280624
+          ]
+        },
+        "group.all_stages": {
+          "baseline_ms": 12.641291,
+          "candidate_ms": 11.926962,
+          "median_change_percent": -5.365353902540493,
+          "paired_changes_percent": [
+            -5.365353902540493,
+            -7.53226597224973,
+            -4.413226616469091
+          ]
+        },
+        "group.coefficients": {
+          "baseline_ms": 4.008125,
+          "candidate_ms": 3.916291,
+          "median_change_percent": -1.7653334149386302,
+          "paired_changes_percent": [
+            -1.4148760330578436,
+            -3.857116613054179,
+            -1.7653334149386302
+          ]
+        },
+        "group.dct_io": {
+          "baseline_ms": 0.637959,
+          "candidate_ms": 0.275047,
+          "median_change_percent": -56.93180071393191,
+          "paired_changes_percent": [
+            -56.93180071393191,
+            -57.508241125213374,
+            -56.09202815376977
+          ]
+        },
+        "group.epf": {
+          "baseline_ms": 0.267042,
+          "candidate_ms": 0.211251,
+          "median_change_percent": -20.9848986199754,
+          "paired_changes_percent": [
+            -20.9848986199754,
+            -23.014731765040708,
+            -19.34429609380072
+          ]
+        }
+      },
+      "name": "kodak-kodim17"
+    }
+  ],
+  "local_manifest": {
+    "files": 1264,
+    "path": "build/dataflow/evidence/manifest.json",
+    "sha256": "e1ca77aa61ced3bb299c1c53663cbebe77dfc7355c7a3f755b35ee8e72b42688"
+  },
+  "metal_api_and_shader_validation": {
+    "coefficient_cases": 1344,
+    "dct_pairs": 56,
+    "epf_cases": 432
+  },
+  "parity": {
+    "codestream_pairs": 56,
+    "decoded_pairs": 3,
+    "resource_scenarios": 8,
+    "retained_changed_image_pairs": 24
+  },
+  "qualification": {
+    "coefficient_cases": 1344,
+    "conformance_per_revision": 22,
+    "dct_cases": 56,
+    "epf_cases": 432,
+    "tests": {
+      "baseline": {
+        "count": 122,
+        "failures": [
+          "quantization_pipeline"
+        ],
+        "xml_sha256": "2c379f48c02c970d0a9525711e0e7938cf64c6f1ca3fedc2fd5328e073046bb4"
+      },
+      "candidate": {
+        "count": 122,
+        "failures": [
+          "quantization_pipeline"
+        ],
+        "xml_sha256": "7d3ed9cf05fe54ad25a54f588ef553cd434e51f6315da6110cc79ed02658bc0e"
+      }
+    }
+  },
+  "sanitizers": {
+    "leak_detection": false,
+    "metal_ubsan_suppression": "tools/resident_qualification/metal-ubsan.supp",
+    "objcxx_instrumented": false,
+    "results": {
+      "asan-cpu": {
+        "passed": 11,
+        "xml_sha256": "73e7f6046f8098f4a4cba8542a07745f709c2591b17b169e0b35c711a891c530"
+      },
+      "asan-metal": {
+        "passed": 13,
+        "xml_sha256": "8d6541534bb08545b4e344dbb52c1806a66447feb0394deed5ab99c2e56aa9e9"
+      }
+    }
+  },
+  "scope": "Apple M4 Pro, Release, distance 1.2, effort 7, fully resident; same codestream bytes",
+  "setup_and_footprint": [
+    {
+      "metrics": {
+        "first_call_ms": {
+          "baseline": 10.447625,
+          "candidate": 9.9135,
+          "paired_changes_percent": [
+            -4.464889572984432,
+            -2.7452551584452256,
+            -7.431909165958772,
+            -9.705059034399287,
+            -4.985240787147949,
+            6.787649944774099,
+            -13.429143998707183
+          ]
+        },
+        "peak_footprint": {
+          "baseline": 126517872,
+          "candidate": 127222360,
+          "paired_changes_percent": [
+            0.6718120124981741,
+            1.165873255715555,
+            0.09012724004873185,
+            0.6089631639158988,
+            0.5828606189970387,
+            0.49206012570304214,
+            0.25775459041172954
+          ]
+        },
+        "post_trim_footprint": {
+          "baseline": 114819696,
+          "candidate": 115524184,
+          "paired_changes_percent": [
+            0.7115160509591156,
+            2.01214563136638,
+            0.08505355358530142,
+            0.6566703714507849,
+            0.6278981300682718,
+            0.5564620202443304,
+            0.269648185368232
+          ]
+        },
+        "setup_ms": {
+          "baseline": 47.451042,
+          "candidate": 47.264,
+          "paired_changes_percent": [
+            -10.860456329731571,
+            -1.5327363755476053,
+            -8.481562768965956,
+            7.456017509583868,
+            -4.395179043015018,
+            11.295880808421144,
+            1.8959008985060422
+          ]
+        }
+      },
+      "name": "small",
+      "pairs": 7
+    },
+    {
+      "metrics": {
+        "first_call_ms": {
+          "baseline": 295.991166,
+          "candidate": 279.104583,
+          "paired_changes_percent": [
+            -4.116944152312973,
+            -5.572096077769251,
+            -7.247338529264102,
+            -3.749006255248355,
+            -8.597705998872762,
+            -3.3845294032379125,
+            -5.2451745329340715
+          ]
+        },
+        "peak_footprint": {
+          "baseline": 2913698752,
+          "candidate": 2915222512,
+          "paired_changes_percent": [
+            0.05567109499178269,
+            0.06354081390003152,
+            0.2140703394815091,
+            0.21059226105779594,
+            -0.07974419383616205,
+            0.03379683815873946,
+            -0.1534914964792411
+          ]
+        },
+        "post_trim_footprint": {
+          "baseline": 2134115744,
+          "candidate": 2132854152,
+          "paired_changes_percent": [
+            -3.1449339985033853,
+            -0.6578011805726924,
+            -0.19512182386992594,
+            0.13629561293806436,
+            -0.6264604924820838,
+            0.14891677909028012,
+            2.909138653597565
+          ]
+        },
+        "setup_ms": {
+          "baseline": 47.484334,
+          "candidate": 48.30525,
+          "paired_changes_percent": [
+            -2.636448053182816,
+            0.3143101832769002,
+            2.3276306813783787,
+            7.835904911751634,
+            1.6929279926406249,
+            -0.8413322170634063,
+            1.568685193905739
+          ]
+        }
+      },
+      "name": "4k",
+      "pairs": 7
+    }
+  ],
+  "workflow": [
+    {
+      "metrics": {
+        "codestream_encoding": {
+          "baseline_ms": 2.040417,
+          "candidate_ms": 1.952167,
+          "median_change_percent": -0.44543505253172855,
+          "paired_changes_percent": [
+            6.458412629716026,
+            0.6298748902219486,
+            -6.2188439730408,
+            -2.638196438059448,
+            -0.44543505253172855,
+            6.421373217429793,
+            -4.325096291591379
+          ]
+        },
+        "input_preparation": {
+          "baseline_ms": 0.52125,
+          "candidate_ms": 0.529459,
+          "median_change_percent": 1.0380431246773014,
+          "paired_changes_percent": [
+            2.608554827445908,
+            -1.8150915750915653,
+            1.0380431246773014,
+            1.0527060440485903,
+            1.9987131177227724,
+            0.0976975169300287,
+            -4.100719424460431
+          ]
+        },
+        "quantization_pipeline": {
+          "baseline_ms": 6.67575,
+          "candidate_ms": 6.5945,
+          "median_change_percent": 0.6099688274362247,
+          "paired_changes_percent": [
+            0.6099688274362247,
+            30.107205041695593,
+            0.620020508135144,
+            -3.077676665543194,
+            38.40942430372682,
+            -1.1498367312186897,
+            -23.418306130151002
+          ]
+        },
+        "total": {
+          "baseline_ms": 9.222083,
+          "candidate_ms": 9.07375,
+          "median_change_percent": -0.43514342405804873,
+          "paired_changes_percent": [
+            0.3027528203470853,
+            19.43943515277762,
+            -1.6084544023297065,
+            -3.3582397378284057,
+            24.964527282996517,
+            -0.43514342405804873,
+            -18.332698983887518
+          ]
+        }
+      },
+      "name": "synthetic_128x96"
+    },
+    {
+      "metrics": {
+        "codestream_encoding": {
+          "baseline_ms": 17.327375,
+          "candidate_ms": 17.417167,
+          "median_change_percent": 0.8192700856303858,
+          "paired_changes_percent": [
+            -4.255549851699747,
+            -3.5093739987592465,
+            2.9406133154353364,
+            0.1478196855134284,
+            1.094497325417243,
+            0.8192700856303858,
+            17.1692865773585
+          ]
+        },
+        "input_preparation": {
+          "baseline_ms": 1.658292,
+          "candidate_ms": 1.692041,
+          "median_change_percent": -1.17647058823529,
+          "paired_changes_percent": [
+            5.490054370556252,
+            3.01876637407692,
+            -4.327541783057153,
+            1.4281971093846213,
+            -7.7816210896512805,
+            -4.782469708571946,
+            -1.17647058823529
+          ]
+        },
+        "quantization_pipeline": {
+          "baseline_ms": 52.04825,
+          "candidate_ms": 48.60475,
+          "median_change_percent": -6.388090954279225,
+          "paired_changes_percent": [
+            -5.673748986594951,
+            -8.709985722882319,
+            -6.212686390303601,
+            -6.695833843873511,
+            -6.615976521785072,
+            -6.388090954279225,
+            -2.2739212823850607
+          ]
+        },
+        "total": {
+          "baseline_ms": 71.225125,
+          "candidate_ms": 67.714125,
+          "median_change_percent": -4.613440171321226,
+          "paired_changes_percent": [
+            -4.613440171321226,
+            -6.61585656895306,
+            -4.227715302997536,
+            -5.141911649856712,
+            -4.124913241492445,
+            -5.050584721521123,
+            1.785650869442379
+          ]
+        }
+      },
+      "name": "padded_1080p"
+    },
+    {
+      "metrics": {
+        "codestream_encoding": {
+          "baseline_ms": 40.531583,
+          "candidate_ms": 40.840291,
+          "median_change_percent": 0.7600830038998918,
+          "paired_changes_percent": [
+            4.5938050284219045,
+            1.4802380589043151,
+            0.7600830038998918,
+            -0.783751772044039,
+            3.0432387186303256,
+            -1.7303563233334152,
+            -3.0050908286996414
+          ]
+        },
+        "input_preparation": {
+          "baseline_ms": 4.465458,
+          "candidate_ms": 4.36375,
+          "median_change_percent": 0.3900030793286824,
+          "paired_changes_percent": [
+            -3.45335237729254,
+            1.4121967288272863,
+            2.346209981167613,
+            -2.864092981573174,
+            -2.280329984847629,
+            1.691481031166986,
+            0.3900030793286824
+          ]
+        },
+        "quantization_pipeline": {
+          "baseline_ms": 194.400166,
+          "candidate_ms": 180.450959,
+          "median_change_percent": -7.121225617366733,
+          "paired_changes_percent": [
+            -7.33597900421874,
+            -7.267954699174483,
+            -6.782538933965521,
+            -7.121225617366733,
+            -6.0276490831239204,
+            -7.353627178611511,
+            -6.959755927517164
+          ]
+        },
+        "total": {
+          "baseline_ms": 240.37375,
+          "candidate_ms": 226.134167,
+          "median_change_percent": -5.755298229494099,
+          "paired_changes_percent": [
+            -5.797309025282926,
+            -5.716618391151284,
+            -5.690478228299001,
+            -5.755298229494099,
+            -4.317658139409475,
+            -6.214882889232099,
+            -6.766688619951722
+          ]
+        }
+      },
+      "name": "padded_4k"
+    },
+    {
+      "metrics": {
+        "codestream_encoding": {
+          "baseline_ms": 6.428875,
+          "candidate_ms": 6.509834,
+          "median_change_percent": 0.2538803756796826,
+          "paired_changes_percent": [
+            -7.974146307842567,
+            0.2538803756796826,
+            10.244901825915665,
+            -0.5082523078326906,
+            -5.553631598991682,
+            1.0739359530244519,
+            8.102214380588002
+          ]
+        },
+        "input_preparation": {
+          "baseline_ms": 0.866709,
+          "candidate_ms": 0.777041,
+          "median_change_percent": -2.5762071756136984,
+          "paired_changes_percent": [
+            9.145594081936848,
+            -13.1064679817538,
+            -18.65777444703015,
+            -2.5762071756136984,
+            1.1882810099021146,
+            9.571494007792714,
+            -22.31818302563421
+          ]
+        },
+        "quantization_pipeline": {
+          "baseline_ms": 15.024042,
+          "candidate_ms": 14.395,
+          "median_change_percent": -3.79255174567229,
+          "paired_changes_percent": [
+            -3.79255174567229,
+            -4.408318818137758,
+            -4.387998254414615,
+            -3.636265115312698,
+            -3.399929720051542,
+            -3.5163936157648457,
+            -4.534405588056789
+          ]
+        },
+        "total": {
+          "baseline_ms": 22.315209,
+          "candidate_ms": 21.855125,
+          "median_change_percent": -2.1891943962788707,
+          "paired_changes_percent": [
+            -4.235944252165824,
+            -2.1891943962788707,
+            -0.9924568744033135,
+            -2.798916201053725,
+            -3.480084090014035,
+            -0.7458726432284513,
+            -2.0178425586597326
+          ]
+        }
+      },
+      "name": "kodak-kodim17"
+    },
+    {
+      "metrics": {
+        "codestream_encoding": {
+          "baseline_ms": 47.824292,
+          "candidate_ms": 46.898084,
+          "median_change_percent": -1.936689412987025,
+          "paired_changes_percent": [
+            -2.2036680149434495,
+            -1.936689412987025,
+            -1.4360906843116639,
+            1.2856297256447213,
+            -2.2153981072020823,
+            -1.7016025326331174,
+            -2.570961077305167
+          ]
+        },
+        "input_preparation": {
+          "baseline_ms": 6.695792,
+          "candidate_ms": 6.829167,
+          "median_change_percent": 1.991922688159975,
+          "paired_changes_percent": [
+            4.270214149216667,
+            10.444086450275147,
+            -14.500592457355587,
+            14.253350524972985,
+            -2.2571919746334324,
+            -5.593866852064123,
+            1.991922688159975
+          ]
+        },
+        "quantization_pipeline": {
+          "baseline_ms": 201.719625,
+          "candidate_ms": 188.882792,
+          "median_change_percent": -6.405161778041246,
+          "paired_changes_percent": [
+            -8.330116160005275,
+            -7.100451494549576,
+            -6.438267967234235,
+            -4.267148204037863,
+            -5.675205208860456,
+            -6.091229210414351,
+            -6.405161778041246
+          ]
+        },
+        "total": {
+          "baseline_ms": 256.186917,
+          "candidate_ms": 243.907333,
+          "median_change_percent": -5.107852169767724,
+          "paired_changes_percent": [
+            -6.204849149648684,
+            -6.1216263084802325,
+            -5.107852169767724,
+            -4.646263940388429,
+            -4.8313794696213,
+            -5.550613447260067,
+            -4.172685758188033
+          ]
+        }
+      },
+      "name": "imazen26-1029-planter-4k"
+    }
+  ]
+}

@@ -22,6 +22,8 @@
 
 namespace gjxl {
 
+namespace vardct_frame_internal { class CompletedVarDctFrame; }
+
 class ColorCorrelationMap;
 
 enum class AqEvaluationMetric {
@@ -82,6 +84,12 @@ struct AqEvaluationPreparation {
   /// quant or applies the encoder's shared AdjustQuantBlockAC decision.
   AcCoefficientDecisionMode coefficient_decision_mode =
     AcCoefficientDecisionMode::kFixedRawQuant;
+  /// Prepare initial fields and reference data for the resident AC search,
+  /// postponing final transform layouts/CfL metadata until Reconfigure.
+  /// Requires resident_ac_strategy_inputs and resident_quantization. Evaluation
+  /// and final CfL preparation fail until a successful Reconfigure supplies
+  /// final strategy.
+  bool defer_final_transform_metadata = false;
 };
 
 struct ResidentAcStrategyInputs {
@@ -150,9 +158,13 @@ struct AqResidentButteraugliPolicyOutput {
   /// resident instead of transferring it to the host.
   PlaneF32View quant_field;
   PlaneF32View block_distance_map;
-  std::vector<double>* score_history = nullptr;
+  resource_budget_internal::PublicationOutput<double> score_history;
   Image3FView reconstructed_linear_rgb;
   VarDctEncoderFrame* frame = nullptr;
+  /// Internal encoding handoff. Mutually exclusive with owned `frame`.
+  /// On success the lease is independent of this prepared operation/backend.
+  std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame>*
+    completed_frame = nullptr;
 };
 
 struct AqEvaluationMemoryStats {
@@ -252,6 +264,9 @@ public:
 
   /// Computes initial quantization from the prepared coding image. Backends
   /// may expose this only for an explicitly enabled frame-only preparation.
+  /// With resident_ac_strategy_inputs, an entirely empty pixel_mask output
+  /// retains the validated mask on device. A later call may request a host
+  /// mask normally; quant_field and strategy_mask remain required outputs.
   [[nodiscard]] virtual Status ComputeInitialQuantization(
     InitialQuantizationOptions options,
     InitialQuantFieldOutput output,

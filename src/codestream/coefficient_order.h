@@ -10,6 +10,8 @@
 #include <cstdint>
 #include <vector>
 
+#include "codestream/storage.h"
+
 #include "codestream/entropy.h"
 #include "codestream/simple_ac_context.h"
 #include "core/status.h"
@@ -17,6 +19,9 @@
 namespace gjxl {
 
 class VarDctEncoderFrame;
+namespace vardct_frame_internal {
+class VarDctFrameView;
+}
 enum class VarDctCoefficientOrderBehavior : uint8_t;
 
 inline constexpr size_t kSimplePermutationContextCount = 8;
@@ -27,7 +32,7 @@ inline constexpr size_t kSimplePermutationContextCount = 8;
 struct SimpleCoefficientOrders {
   uint16_t used_order_mask = 0;
   std::array<
-    std::array<std::vector<uint32_t>, 3>,
+    std::array<codestream_internal::Storage<uint32_t>, 3>,
     codestream_internal::kSimpleCoefficientOrderCount> orders;
 
   friend bool operator==(
@@ -45,7 +50,7 @@ namespace codestream_internal {
 
 /// Serializer-only entry point for an already validated frame.
 [[nodiscard]] Status ComputeSimpleCoefficientOrdersForEncoder(
-  const VarDctEncoderFrame& frame,
+  const vardct_frame_internal::VarDctFrameView& frame,
   VarDctCoefficientOrderBehavior behavior,
   SimpleCoefficientOrders* orders);
 
@@ -59,6 +64,15 @@ namespace codestream_internal {
 /// Converts all selected physical scans to natural-order Lehmer tokens.
 [[nodiscard]] Status TokenizeSimpleCoefficientOrders(
   const SimpleCoefficientOrders& orders,
-  std::vector<EntropyToken>* tokens);
+  codestream_internal::Storage<EntropyToken>* tokens);
+
+/// Compatibility adapter; managed callers select the non-template overload.
+template <typename Allocator>
+[[nodiscard]] Status TokenizeSimpleCoefficientOrders(
+  const SimpleCoefficientOrders& orders,
+  std::vector<EntropyToken, Allocator>* tokens) {
+  return codestream_internal::LegacyStorageOutput(
+    tokens, [&](auto* storage) { return TokenizeSimpleCoefficientOrders(orders, storage); });
+}
 
 }  // namespace gjxl

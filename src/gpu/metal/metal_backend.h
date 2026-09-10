@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -12,6 +13,14 @@
 #include "gpu/backend.h"
 
 namespace gjxl {
+
+namespace resource_budget_internal { class ResourceBudget; }
+namespace metal_internal {
+/// Evict matching-domain idle pools across all live Metal backends. Does not
+/// create a backend or touch active leases. Caller must not hold a budget lock.
+[[nodiscard]] Status TrimMetalPreparationCachesForDomain(
+  const resource_budget_internal::ResourceBudget& budget);
+}  // namespace metal_internal
 
 // Built-in DCT kernel implementations. Availability is strategy-dependent.
 enum class MetalDctImplementation {
@@ -88,6 +97,11 @@ struct MetalBackendOptions {
   MetalAcResidualInverseMode ac_residual_inverse =
     MetalAcResidualInverseMode::kFusedTuned;
 
+  // One idle Butteraugli allocation, made volatile while idle. Zero disables
+  // this cache. The process-wide sum across all Metal backends is additionally
+  // capped at 1 GiB. Active encodes and the existing AQ pools are not counted.
+  size_t butteraugli_cache_bytes = size_t{1024} * 1024 * 1024;
+
   // Deterministic failure injection used by real-device backend tests.
   bool test_fail_submission = false;
   bool test_fail_completion = false;
@@ -128,5 +142,11 @@ Status CreateEmbeddedMetalBackend(
   GpuBackend& backend,
   bool fail_submission,
   bool fail_completion);
+
+/// Fails the next backing allocation after its resource ticket is prepared.
+[[nodiscard]] Status ArmNextMetalAllocationFailureForTest(GpuBackend& backend);
+
+/// Sum of idle AQ/resident-input and Butteraugli backing capacities.
+[[nodiscard]] size_t MetalPreparationCacheBytesForTesting(GpuBackend& backend);
 
 }  // namespace gjxl

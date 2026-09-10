@@ -10,6 +10,7 @@
 
 #include "codestream/entropy_behavior.h"
 #include "core/ac_strategy.h"
+#include "core/execution_domain.h"
 #include "core/image.h"
 #include "core/status.h"
 #include "gpu/ops/adaptive_quantization.h"
@@ -65,7 +66,8 @@ struct VarDctEncodingOptions {
   /// deterministic DCT8-only coefficient-order sampling.
   int32_t effort = 7;
   /// Maximum participating CPU threads per encode. Zero selects the existing
-  /// automatic stage-specific worker policy. GPU execution is not constrained.
+  /// automatic stage-specific desired parallelism. Both are additionally bounded
+  /// by the shared execution domain. GPU execution is not constrained.
   size_t cpu_thread_count = 0;
   /// Compatibility override that performs four AQ updates regardless of
   /// effort. It is meaningful only for Butteraugli-target and target-size
@@ -107,6 +109,10 @@ struct VarDctEncodingOptions {
   /// coefficient workflows already produce the final score as part of their
   /// ordinary policy evaluation.
   bool collect_final_butteraugli_score = false;
+  /// Shares one immutable managed-memory allowance with every call using this
+  /// handle. Null selects the process-wide default, not a new per-call budget.
+  /// Its CPU cap includes callers, reserved workers and dormant joined workers.
+  std::shared_ptr<const ExecutionDomain> execution_domain;
 };
 
 /// Encoder analysis reported without exposing temporary pipeline storage.
@@ -179,8 +185,19 @@ struct VarDctEncodingTiming {
   uint64_t aggregate_search_nanoseconds = 0;
   /// Duration of the successful attempt retained as the final codestream.
   uint64_t selected_attempt_nanoseconds = 0;
-  /// End-to-end workflow time, including validation and output commit.
+  /// Time through the internal workflow's successful-result commit, including
+  /// validation. Excludes prepared-state teardown and the outer public adapter's
+  /// ownership handoff; surround the public call to measure complete latency.
   uint64_t total_nanoseconds = 0;
+  /// Initial CPU-slot queue after memory admission. Does not include memory
+  /// admission, batch-driver queueing, or caller-owned input preparation.
+  uint64_t cpu_admission_wait_nanoseconds = 0;
+  /// Calling-thread queue time when resuming after a GPU wait or worker join.
+  uint64_t cpu_resume_wait_nanoseconds = 0;
+  /// Calling-thread wall spans yielded for GPU waits and worker joins, excluding
+  /// the subsequent resume queue. Not worker CPU time or GPU execution time.
+  /// These three CPU diagnostics stop at the same internal commit as total.
+  uint64_t cpu_blocked_nanoseconds = 0;
   std::vector<VarDctEncodingAttemptTiming> attempts;
 };
 
@@ -194,6 +211,13 @@ struct VarDctEncodingTiming {
   VarDctEncodingOptions options,
   std::vector<uint8_t>* codestream,
   VarDctEncodingSummary* summary = nullptr);
+
+/// Releases idle AQ/resident-input and Butteraugli capacity on the process-wide Metal
+/// backend shared by single-image, batch and C API encoders. Does not initialize
+/// Metal or wait for active encodes. Active preparation leases acquired before
+/// the trim cannot repopulate these caches;
+/// subsequent encodes may cache again. Call when an application becomes idle.
+[[nodiscard]] Status TrimVarDctPreparationCache();
 
 /// Encodes identically to EncodeLinearRgbVarDctCodestream and atomically
 /// returns wall-clock diagnostics. Timing values are observational and are

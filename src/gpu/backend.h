@@ -46,6 +46,13 @@ public:
     };
   }
 
+  /// Releases idle preparation capacity, if supported. Metal releases both AQ
+  /// arenas (including resident input) and Butteraugli scratch.
+  /// Safe during independent encodes: active storage remains valid, but leases
+  /// already acquired at the trim boundary cannot repopulate this cache.
+  /// Does not initialize a device or wait for active work.
+  virtual Status TrimPreparationCache() { return Status::Ok(); }
+
   virtual Status Allocate(
     size_t size_bytes,
     std::unique_ptr<DeviceBuffer>* out) = 0;

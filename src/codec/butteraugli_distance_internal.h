@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "codec/butteraugli_internal.h"
 
 namespace gjxl::butteraugli_internal {
@@ -59,7 +60,7 @@ public:
 private:
   Extent2D extent_;
   size_t plane_size_ = 0;
-  std::vector<float> values_;
+  resource_budget_internal::ManagedVector<float> values_;
 };
 
 /// Reusable allocation state for one single-scale difference computation.

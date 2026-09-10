@@ -16,9 +16,12 @@
 
 #include "codec/chroma_from_luma.h"
 #include "codec/codestream.h"
-#include "codec/vardct_frame.h"
+#include "codec/vardct_frame_view_internal.h"
+#include "codestream/token_storage_plan.h"
 
 namespace gjxl {
+using codestream_internal::Storage;
+using vardct_frame_internal::VarDctFrameView;
 namespace {
 
 static_assert(kSimpleDcGroupDimension / kJxlBlockDimension
@@ -82,19 +85,28 @@ int32_t ClampedGradient(int32_t top, int32_t left, int32_t top_left) {
   return static_cast<int32_t>(static_cast<int64_t>(top) + left - top_left);
 }
 
-uint32_t GradientContext(int64_t gradient_property) {
-  const uint16_t clamped =
-    static_cast<uint16_t>(std::clamp<int64_t>(gradient_property, 0, 1023));
+// Expand the pinned runs at compile time. Per-value context selection then
+// needs one clamped byte lookup instead of a linear run search.
+constexpr std::array<uint8_t, 1024> kGradientContexts = [] {
+  std::array<uint8_t, 1024> result{};
+  size_t begin = 0;
   for (const GradientContextRun run : kGradientContextRuns) {
-    if (clamped <= run.inclusive_end) {
-      return run.context;
+    for (; begin <= run.inclusive_end; ++begin) {
+      result[begin] = run.context;
     }
   }
-  return kGradientContextRuns.back().context;
+  return result;
+}();
+static_assert(kGradientContextRuns.back().inclusive_end + 1 ==
+              kGradientContexts.size());
+
+uint32_t GradientContext(int64_t gradient_property) {
+  return kGradientContexts[static_cast<size_t>(
+    std::clamp<int64_t>(gradient_property, 0, 1023))];
 }
 
 Status AppendResidual(uint32_t context, int32_t value, int32_t prediction,
-                      std::vector<EntropyToken>* tokens) {
+                      Storage<EntropyToken>* tokens) {
   const int64_t residual = static_cast<int64_t>(value) - prediction;
   if (residual < std::numeric_limits<int32_t>::min()
       || residual > std::numeric_limits<int32_t>::max()) {
@@ -119,7 +131,7 @@ PlaneView<T> SlicePlane(PlaneView<T> plane, size_t x, size_t y,
 }
 
 Status ValidateAndCollectAnchors(const SimpleAcMetadataInput& input,
-                                 std::vector<StrategyAnchor>* anchors) {
+                                 Storage<StrategyAnchor>* anchors) {
   const Extent2D extent = input.raw_quant_field.extent;
   size_t block_count = 0;
   if (input.strategies == nullptr || !input.strategies->valid()
@@ -151,7 +163,7 @@ Status ValidateAndCollectAnchors(const SimpleAcMetadataInput& input,
     }
   }
 
-  std::vector<uint8_t> covered(block_count, 0);
+  Storage<uint8_t> covered(block_count, 0);
   anchors->clear();
   anchors->reserve(block_count);
   for (size_t y = 0; y < extent.height; ++y) {
@@ -207,7 +219,7 @@ Status ValidateAndCollectAnchors(const SimpleAcMetadataInput& input,
 }
 
 Status AppendCflTokens(ConstPlaneI8View map, uint32_t context,
-                       std::vector<EntropyToken>* tokens) {
+                       Storage<EntropyToken>* tokens) {
   for (size_t y = 0; y < map.extent.height; ++y) {
     for (size_t x = 0; x < map.extent.width; ++x) {
       const int32_t left = x != 0   ? map.Row(y)[x - 1]
@@ -227,8 +239,42 @@ Status AppendCflTokens(ConstPlaneI8View map, uint32_t context,
 
 }  // namespace
 
+Status codestream_internal::ComputeDcGroupTokenCounts(
+  Extent2D blocks, size_t anchors, DcGroupTokenCounts* out) {
+  DcGroupTokenCounts counts;
+  if (out == nullptr || !IsValidGroupExtent(blocks, &counts.block_count) ||
+      anchors == 0 || anchors > counts.block_count ||
+      !blocks.ceil_div(kColorTileDimension / kJxlBlockDimension)
+         .try_area(&counts.color_tile_count)) {
+    return Status::InvalidArgument("DC token plan geometry or anchors are invalid");
+  }
+  // At most 256x256 blocks and 32x32 color tiles, checked above.
+  counts.dc_tokens = 3 * counts.block_count;
+  counts.metadata_tokens =
+    2 * counts.color_tile_count + 2 * anchors + counts.block_count;
+  *out = counts;
+  return Status::Ok();
+}
+
+Status codestream_internal::ComputeDcGroupTokenStoragePlan(
+  Extent2D blocks, size_t anchors, DcGroupTokenStoragePlan* out) {
+  if (out == nullptr) return Status::InvalidArgument("DC token storage plan is null");
+  DcGroupTokenStoragePlan plan;
+  Status status = ComputeDcGroupTokenCounts(blocks, anchors, &plan.counts);
+  if (!status.ok()) return status;
+  using enum resource_budget_internal::VectorCapacityPolicy;
+  if (!plan.output.AddVector<EntropyToken>(plan.counts.dc_tokens, kFreshExact) ||
+      !plan.output.AddVector<EntropyToken>(plan.counts.metadata_tokens, kFreshExact) ||
+      !plan.scratch.AddVector<StrategyAnchor>(plan.counts.block_count, kFreshExact) ||
+      !plan.scratch.AddVector<uint8_t>(plan.counts.block_count, kFreshExact)) {
+    return Status::OutOfMemory("DC token storage bound overflows");
+  }
+  *out = plan;
+  return Status::Ok();
+}
+
 Status TokenizeSimpleDcGroup(ConstImage3I32View quantized_dc,
-                             std::vector<EntropyToken>* tokens) {
+                             Storage<EntropyToken>* tokens) {
   if (tokens == nullptr) {
     return Status::InvalidArgument("DC token output is null");
   }
@@ -239,9 +285,13 @@ Status TokenizeSimpleDcGroup(ConstImage3I32View quantized_dc,
     return Status::InvalidArgument("Quantized DC group view is invalid");
   }
 
+  codestream_internal::DcGroupTokenCounts counts;
+  Status count_status = codestream_internal::ComputeDcGroupTokenCounts(
+    quantized_dc.extent(), block_count, &counts);
+  if (!count_status.ok()) return count_status;
   try {
-    std::vector<EntropyToken> candidate;
-    candidate.reserve(block_count * 3);
+    Storage<EntropyToken> candidate;
+    candidate.reserve(counts.dc_tokens);
     constexpr std::array<size_t, 3> kChannelOrder = {1, 0, 2};
     for (const size_t channel : kChannelOrder) {
       const ConstPlaneI32View plane = quantized_dc.plane[channel];
@@ -256,15 +306,23 @@ Status TokenizeSimpleDcGroup(ConstImage3I32View quantized_dc,
           const int32_t prediction = ClampedGradient(top, left, top_left);
           const uint32_t context =
             GradientContext(int64_t{512} + top + left - top_left);
-          const Status status =
-            AppendResidual(context, plane.Row(y)[x], prediction, &candidate);
-          if (!status.ok()) {
-            return status;
+          // Construct Status only on failure, not once per successful value.
+          const int64_t residual =
+            static_cast<int64_t>(plane.Row(y)[x]) - prediction;
+          if (residual < std::numeric_limits<int32_t>::min() ||
+              residual > std::numeric_limits<int32_t>::max()) {
+            return Status::InvalidArgument(
+              "Modular predictor residual exceeds int32_t");
           }
+          candidate.push_back({
+            context, PackSigned(static_cast<int32_t>(residual)),
+          });
         }
       }
     }
     *tokens = std::move(candidate);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -274,32 +332,26 @@ Status TokenizeSimpleDcGroup(ConstImage3I32View quantized_dc,
 }
 
 Status TokenizeSimpleAcMetadata(const SimpleAcMetadataInput& input,
-                                std::vector<EntropyToken>* tokens,
+                                Storage<EntropyToken>* tokens,
                                 size_t* transform_anchor_count) {
   if (tokens == nullptr || transform_anchor_count == nullptr) {
     return Status::InvalidArgument("AC-metadata output is null");
   }
 
   try {
-    std::vector<StrategyAnchor> anchors;
+    Storage<StrategyAnchor> anchors;
     Status status = ValidateAndCollectAnchors(input, &anchors);
     if (!status.ok()) {
       return status;
     }
 
-    size_t block_count = 0;
-    size_t map_count = 0;
-    if (!input.raw_quant_field.extent.try_area(&block_count)
-        || !input.y_to_x_map.extent.try_area(&map_count)
-        || map_count > (std::numeric_limits<size_t>::max() - block_count) / 2
-        || anchors.size() > (std::numeric_limits<size_t>::max() - block_count
-                             - 2 * map_count)
-                              / 2) {
-      return Status::OutOfMemory("AC-metadata token count overflow");
-    }
+    codestream_internal::DcGroupTokenCounts counts;
+    status = codestream_internal::ComputeDcGroupTokenCounts(
+      input.raw_quant_field.extent, anchors.size(), &counts);
+    if (!status.ok()) return status;
 
-    std::vector<EntropyToken> candidate;
-    candidate.reserve(2 * map_count + 2 * anchors.size() + block_count);
+    Storage<EntropyToken> candidate;
+    candidate.reserve(counts.metadata_tokens);
     status = AppendCflTokens(input.y_to_x_map, 2, &candidate);
     if (!status.ok()) {
       return status;
@@ -349,6 +401,8 @@ Status TokenizeSimpleAcMetadata(const SimpleAcMetadataInput& input,
 
     *tokens = std::move(candidate);
     *transform_anchor_count = anchors.size();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -358,7 +412,7 @@ Status TokenizeSimpleAcMetadata(const SimpleAcMetadataInput& input,
 }
 
 Status TokenizeSimpleDcGroups(const VarDctEncoderFrame& frame,
-                              std::vector<SimpleDcGroupTokenStreams>* groups) {
+                              Storage<SimpleDcGroupTokenStreams>* groups) {
   if (groups == nullptr) {
     return Status::InvalidArgument("DC-group token output is null");
   }
@@ -368,12 +422,12 @@ Status TokenizeSimpleDcGroups(const VarDctEncoderFrame& frame,
   }
 
   return codestream_internal::TokenizeSimpleDcGroupsForEncoder(
-    frame, groups);
+    vardct_frame_internal::BorrowFrame(frame), groups);
 }
 
 Status codestream_internal::TokenizeSimpleDcGroupsForEncoder(
-  const VarDctEncoderFrame& frame,
-  std::vector<SimpleDcGroupTokenStreams>* groups) {
+  const VarDctFrameView& frame,
+  Storage<SimpleDcGroupTokenStreams>* groups) {
 
   if (groups == nullptr) {
     return Status::InvalidArgument("DC-group token output is null");
@@ -387,7 +441,7 @@ Status codestream_internal::TokenizeSimpleDcGroupsForEncoder(
   }
 
   try {
-    std::vector<SimpleDcGroupTokenStreams> candidate;
+    Storage<SimpleDcGroupTokenStreams> candidate;
     candidate.reserve(group_count);
     const ConstImage3I32View dc = frame.quantized_dc();
     const ConstPlaneI32View quant = frame.raw_quant_field();
@@ -443,6 +497,8 @@ Status codestream_internal::TokenizeSimpleDcGroupsForEncoder(
       }
     }
     *groups = std::move(candidate);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {

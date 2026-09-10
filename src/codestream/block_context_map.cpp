@@ -18,10 +18,13 @@
 #include <vector>
 
 #include "codec/codestream.h"
-#include "codec/vardct_frame.h"
+#include "codec/vardct_frame_view_internal.h"
 #include "codestream/simple_ac_context.h"
+#include "codestream/representation_storage_plan.h"
 
 namespace gjxl {
+using codestream_internal::Storage;
+using vardct_frame_internal::VarDctFrameView;
 namespace {
 
 constexpr size_t kMinimumAdaptiveBlockCount = 1024;
@@ -47,7 +50,7 @@ uint8_t ContextCount(std::span<const uint8_t> map) {
 
 void AddCandidate(
   SimpleBlockContextMap candidate,
-  std::vector<SimpleBlockContextMap>* maps) {
+  Storage<SimpleBlockContextMap>* maps) {
 
   if (std::ranges::find(*maps, candidate) == maps->end()) {
     maps->push_back(std::move(candidate));
@@ -63,7 +66,7 @@ SimpleBlockContextMap MakeSingleContextMap() {
 }
 
 Status CountRawQuantAndOrders(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   std::array<std::array<size_t, 256>,
              codestream_internal::kSimpleCoefficientOrderCount>* counts,
   std::array<size_t, 256>* qf_counts,
@@ -100,7 +103,7 @@ Status CountRawQuantAndOrders(
   return Status::Ok();
 }
 
-std::vector<uint32_t> MedianQuantThreshold(
+Storage<uint32_t> MedianQuantThreshold(
   const std::array<size_t, 256>& qf_counts,
   size_t block_count) {
 
@@ -129,7 +132,7 @@ SimpleBlockContextMap BuildAdaptiveMap(
   const size_t segment_count = qf_thresholds.size() + 1;
   const size_t cell_count =
     codestream_internal::kSimpleCoefficientOrderCount * segment_count;
-  std::vector<size_t> cell_counts(cell_count, 0);
+  Storage<size_t> cell_counts(cell_count, 0);
   for (size_t order = 0;
        order < codestream_internal::kSimpleCoefficientOrderCount; ++order) {
     for (size_t qf = 0; qf < 256; ++qf) {
@@ -142,15 +145,23 @@ SimpleBlockContextMap BuildAdaptiveMap(
     }
   }
 
-  std::vector<uint8_t> remap(cell_count);
+  Storage<uint8_t> remap(cell_count);
   std::iota(remap.begin(), remap.end(), uint8_t{0});
-  std::vector<uint8_t> clusters = remap;
+  Storage<uint8_t> clusters = remap;
   const size_t desired_luma = std::clamp<size_t>(block_count / 2048, 2, 9);
+  std::array<uint8_t, 256> previous_rank{};
   while (clusters.size() > desired_luma) {
-    std::stable_sort(
+    // Preserve this iteration's incoming order on ties, without an untracked
+    // stable_sort temporary. Numeric cluster order is not equivalent after a merge.
+    for (size_t index = 0; index < clusters.size(); ++index) {
+      previous_rank[clusters[index]] = static_cast<uint8_t>(index);
+    }
+    std::sort(
       clusters.begin(), clusters.end(),
       [&](uint8_t left, uint8_t right) {
-        return cell_counts[left] > cell_counts[right];
+        return cell_counts[left] != cell_counts[right]
+          ? cell_counts[left] > cell_counts[right]
+          : previous_rank[left] < previous_rank[right];
       });
     const uint8_t destination = clusters[clusters.size() - 2];
     const uint8_t source = clusters.back();
@@ -164,7 +175,7 @@ SimpleBlockContextMap BuildAdaptiveMap(
       remap[index] = remap[remap[index]];
     }
   }
-  std::vector<uint8_t> labels(remap.size(), 0xFF);
+  Storage<uint8_t> labels(remap.size(), 0xFF);
   uint8_t next_label = 0;
   for (size_t index = 0; index < remap.size(); ++index) {
     if (labels[remap[index]] == 0xFF) {
@@ -190,6 +201,47 @@ SimpleBlockContextMap BuildAdaptiveMap(
 
 }  // namespace
 
+Status codestream_internal::ComputeBlockContextMapStoragePlan(
+  Extent2D blocks, bool exhaustive, BlockContextMapStoragePlan* out) {
+  static_assert(stdlib_storage_internal::kVectorGrowthFactor <= 3);
+  using enum resource_budget_internal::VectorCapacityPolicy;
+  size_t block_count = 0;
+  if (out == nullptr || blocks.empty() || !blocks.try_area(&block_count)) {
+    return Status::InvalidArgument("Block-context storage plan is invalid");
+  }
+  BlockContextMapStoragePlan plan;
+  const bool adaptive = block_count >= kMinimumAdaptiveBlockCount;
+  plan.maximum_thresholds = block_count >= kMinimumQuantSplitBlockCount ? 1 : 0;
+  plan.maximum_maps = !exhaustive || !adaptive
+    ? 1 : 5 + plan.maximum_thresholds;
+  const size_t cells = kSimpleCoefficientOrderCount *
+    (1 + plan.maximum_thresholds);
+  plan.maximum_map_entries = 3 * cells;
+  plan.maximum_block_contexts = adaptive ? kMaximumBlockContexts : 4;
+  plan.maximum_ac_contexts = plan.maximum_block_contexts *
+    (kSimpleNonzeroBucketCount + kSimpleZeroDensityContextCount);
+  if (!plan.map.AddVector<uint32_t>(plan.maximum_thresholds, kFreshExact) ||
+      !plan.map.AddVector<uint8_t>(plan.maximum_map_entries, kFreshExact) ||
+      !plan.output.Add(plan.map, plan.maximum_maps) ||
+      (exhaustive && !plan.output.AddVector<SimpleBlockContextMap>(
+        plan.maximum_maps, kGrowing)) ||
+      !plan.working.Add(plan.output)) {
+    return Status::OutOfMemory("Block-context storage bound overflow");
+  }
+  if (adaptive &&
+      (!plan.working.AddVector<size_t>(cells, kFreshExact) ||
+       // remap, clusters, labels, and the old map backing during resize.
+       // The audited vector growth rule makes this resize to 3*cells exact.
+       !plan.working.AddVector<uint8_t>(cells, kFreshExact, 4) ||
+       // MedianQuantThreshold remains alive beside the map's copied threshold.
+       !plan.working.AddVector<uint32_t>(plan.maximum_thresholds,
+                                         kFreshExact))) {
+    return Status::OutOfMemory("Adaptive block-context storage overflow");
+  }
+  *out = plan;
+  return Status::Ok();
+}
+
 SimpleBlockContextMap DefaultSimpleBlockContextMap() {
   SimpleBlockContextMap map;
   map.context_map.assign(
@@ -205,6 +257,13 @@ SimpleBlockContextMap JxlDefaultSimpleBlockContextMap() {
     kJxlDefaultBlockContextMap.begin(), kJxlDefaultBlockContextMap.end());
   map.num_contexts = ContextCount(map.context_map);
   return map;
+}
+
+bool codestream_internal::IsJxlDefaultBlockContextMap(
+  const SimpleBlockContextMap& map) noexcept {
+  return map.qf_thresholds.empty() &&
+    map.num_contexts == ContextCount(kJxlDefaultBlockContextMap) &&
+    std::ranges::equal(map.context_map, kJxlDefaultBlockContextMap);
 }
 
 SimpleBlockContextMap TwoChannelSimpleBlockContextMap() {
@@ -290,7 +349,7 @@ Status SimpleBlockContext(
 
 Status ComputeSimpleBlockContextMapCandidates(
   const VarDctEncoderFrame& frame,
-  std::vector<SimpleBlockContextMap>* maps) {
+  Storage<SimpleBlockContextMap>* maps) {
 
   if (maps == nullptr) {
     return Status::InvalidArgument("Block-context candidate output is null");
@@ -300,19 +359,19 @@ Status ComputeSimpleBlockContextMapCandidates(
     return status;
   }
   return codestream_internal::ComputeSimpleBlockContextMapCandidatesForEncoder(
-    frame, maps);
+    vardct_frame_internal::BorrowFrame(frame), maps);
 }
 
 Status codestream_internal::ComputeSimpleBlockContextMapCandidatesForEncoder(
-  const VarDctEncoderFrame& frame,
-  std::vector<SimpleBlockContextMap>* maps) {
+  const VarDctFrameView& frame,
+  Storage<SimpleBlockContextMap>* maps) {
 
   if (maps == nullptr) {
     return Status::InvalidArgument("Block-context candidate output is null");
   }
   Status status;
   try {
-    std::vector<SimpleBlockContextMap> candidate;
+    Storage<SimpleBlockContextMap> candidate;
     AddCandidate(DefaultSimpleBlockContextMap(), &candidate);
     size_t block_count = 0;
     const Extent2D blocks = frame.geometry().block_grid().blocks;
@@ -332,7 +391,7 @@ Status codestream_internal::ComputeSimpleBlockContextMapCandidatesForEncoder(
         return status;
       }
       AddCandidate(BuildAdaptiveMap(counts, {}, block_count), &candidate);
-      const std::vector<uint32_t> thresholds =
+      const Storage<uint32_t> thresholds =
         MedianQuantThreshold(qf_counts, block_count);
       if (!thresholds.empty()) {
         AddCandidate(
@@ -346,6 +405,8 @@ Status codestream_internal::ComputeSimpleBlockContextMapCandidatesForEncoder(
       }
     }
     *maps = std::move(candidate);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -366,11 +427,11 @@ Status ComputeSimpleBlockContextMap(
     return status;
   }
   return codestream_internal::ComputeSimpleBlockContextMapForEncoder(
-    frame, map);
+    vardct_frame_internal::BorrowFrame(frame), map);
 }
 
 Status codestream_internal::ComputeSimpleBlockContextMapForEncoder(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   SimpleBlockContextMap* map) {
 
   if (map == nullptr) {
@@ -395,7 +456,7 @@ Status codestream_internal::ComputeSimpleBlockContextMapForEncoder(
       if (!status.ok()) {
         return status;
       }
-      const std::vector<uint32_t> thresholds =
+      const Storage<uint32_t> thresholds =
         MedianQuantThreshold(qf_counts, block_count);
       candidate = BuildAdaptiveMap(counts, thresholds, block_count);
     }
@@ -404,6 +465,8 @@ Status codestream_internal::ComputeSimpleBlockContextMapForEncoder(
       return status;
     }
     *map = std::move(candidate);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {

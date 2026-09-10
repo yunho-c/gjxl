@@ -8,6 +8,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <random>
 
 #include "gpu/backend.h"
 #include "gpu/image.h"
@@ -208,11 +209,71 @@ bool CheckScratchArena() {
   return true;
 }
 
+bool CheckLayoutPlanning() {
+  using namespace gjxl;
+  constexpr size_t maximum = std::numeric_limits<size_t>::max();
+  std::mt19937_64 rng(0x37a19);
+  const std::array<size_t, 11> values{0, 1, 2, 3, 4, 63, 64, 255, 256, maximum - 1, maximum};
+  for (size_t iteration = 0; iteration < 20000; ++iteration) {
+    const auto type = static_cast<DeviceElementType>(rng() % 5);
+    const size_t element_size = static_cast<size_t>(type) < 2 ? 4 :
+      static_cast<size_t>(type) < 4 ? 1 : 0;
+    const auto choose = [&] { return values[rng() % values.size()]; };
+    const Extent2D extent{choose(), choose()};
+    const size_t stride = choose(), initial = choose(), alignment = choose();
+    bool valid = element_size != 0 && extent.width != 0 && extent.height != 0 &&
+      stride >= extent.width && alignment >= element_size && (alignment & (alignment - 1)) == 0;
+    size_t expected_offset = 0, expected_bytes = 0, expected_end = 0;
+    using Wide = __uint128_t;
+    if (valid) {
+      const Wide elements = (Wide{extent.height} - 1) * stride + extent.width;
+      const Wide offset = ((Wide{initial} + alignment - 1) / alignment) * alignment;
+      valid = elements <= maximum / element_size && offset <= maximum;
+      if (valid) {
+        const Wide bytes = elements * element_size;
+        valid = offset + bytes <= maximum;
+        expected_offset = static_cast<size_t>(offset);
+        expected_bytes = static_cast<size_t>(bytes);
+        expected_end = static_cast<size_t>(offset + bytes);
+      }
+    }
+    DeviceScratchLayoutPlan plan(initial);
+    DevicePlaneLayout plane{DeviceElementType::kI8, {5, 3}, 7, 9, 11};
+    const auto before = plane;
+    const Status status = plan.AddPlane(type, extent, stride, alignment, &plane);
+    if (status.ok() != valid || (!valid && (plane != before || plan.capacity_bytes() != initial)) ||
+        (valid && (plane.element_type != type || plane.extent != extent || plane.row_stride != stride ||
+          plane.offset_bytes != expected_offset || plane.size_bytes != expected_bytes ||
+          plan.capacity_bytes() != expected_end))) {
+      std::cerr << "Scratch layout differs from 128-bit reference at " << iteration << '\n';
+      return false;
+    }
+    if (!valid) continue;
+    FakeBackend backend;
+    DeviceScratchArena arena;
+    DevicePlaneView view;
+    if (!arena.Prepare(backend, expected_end).ok() || !arena.BindPlane(plane, &view).ok() ||
+        view.offset_bytes != expected_offset || arena.layout_bytes() != expected_end) return false;
+    const auto* buffer = view.buffer;
+    const auto peak = arena.peak_layout_bytes();
+    ++plane.size_bytes;
+    if (!IsInvalid(arena.BindPlane(plane, &view)) || view.buffer != buffer ||
+        view.offset_bytes != expected_offset || arena.peak_layout_bytes() != peak) return false;
+  }
+  DeviceScratchLayoutPlan plan;
+  if (!IsInvalid(plan.AddPlane(DeviceElementType::kF32, {1, 1}, 1, 4, nullptr)) ||
+      plan.capacity_bytes() != 0) return false;
+  size_t size = 123;
+  if (!IsInvalid(ComputeDevicePlaneSizeBytes(static_cast<DeviceElementType>(99), {1, 1}, 1, &size)) ||
+      size != 123 || !IsInvalid(ComputeDevicePlaneSizeBytes(DeviceElementType::kF32, {1, 1}, 1, nullptr))) return false;
+  return true;
+}
+
 }  // namespace
 
 int main() {
   if (!CheckPlaneRanges() || !CheckImageAndOverlap() ||
-      !CheckScratchArena()) {
+      !CheckScratchArena() || !CheckLayoutPlanning()) {
     return EXIT_FAILURE;
   }
   std::cout << "All device-image and scratch tests passed.\n";

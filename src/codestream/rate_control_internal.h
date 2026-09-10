@@ -9,13 +9,27 @@
 #include <vector>
 
 #include "codestream/workflow.h"
+#include "codestream/storage.h"
+#include "codestream/encoding_result_internal.h"
 #include "core/status.h"
+#include "core/host_storage_bound.h"
 
 namespace gjxl::codestream_internal {
 
 inline constexpr float kMinimumTargetSizeButteraugliTarget = 0.01f;
 inline constexpr float kMaximumTargetSizeButteraugliTarget = 10.0f;
 inline constexpr size_t kMaximumTargetSizeEncodeAttempts = 64;
+
+/// Whether the default bounded search can reach a matching target before its
+/// attempt cap, ignoring data-dependent early success. Uses the runtime's
+/// interval ordering without encoding or allocating a search vector.
+[[nodiscard]] bool TargetSizeSearchMayEvaluate(size_t maximum_attempts,
+                                               bool (*predicate)(float)) noexcept;
+
+/// Search-interval vector only; current and retained-best encode results are
+/// separate owners. This does not run a search or validate its byte target.
+[[nodiscard]] Status ComputeTargetSizeControlStorageBound(
+  size_t maximum_attempts, resource_budget_internal::HostStorageBound* out);
 
 struct TargetSizeSearchOptions {
   size_t target_bytes = 0;
@@ -29,23 +43,34 @@ struct TargetSizeSearchOptions {
     kMaximumTargetSizeButteraugliTarget;
 };
 
-struct TargetSizeSearchResult {
-  std::vector<uint8_t> codestream;
-  VarDctEncodingSummary summary;
+template <typename Bytes>
+using TargetSizeSummaryFor = std::conditional_t<std::is_same_v<Bytes, CodestreamBuffer>,
+  OwnedEncodingSummary, VarDctEncodingSummary>;
+
+template <typename Bytes>
+struct TargetSizeSearchResultFor {
+  Bytes codestream;
+  TargetSizeSummaryFor<Bytes> summary;
   size_t attempt_count = 0;
   size_t failed_attempt_count = 0;
   bool target_size_met = false;
   bool search_exhausted = false;
 
   friend bool operator==(
-    const TargetSizeSearchResult&,
-    const TargetSizeSearchResult&) = default;
+    const TargetSizeSearchResultFor&,
+    const TargetSizeSearchResultFor&) = default;
 };
 
-using TargetSizeEvaluator = std::function<Status(
+using TargetSizeSearchResult = TargetSizeSearchResultFor<std::vector<uint8_t>>;
+using ManagedTargetSizeSearchResult = TargetSizeSearchResultFor<CodestreamBuffer>;
+
+template <typename Bytes>
+using TargetSizeEvaluatorFor = std::function<Status(
   float butteraugli_target,
-  std::vector<uint8_t>* codestream,
-  VarDctEncodingSummary* summary)>;
+  Bytes* codestream,
+  TargetSizeSummaryFor<Bytes>* summary)>;
+using TargetSizeEvaluator = TargetSizeEvaluatorFor<std::vector<uint8_t>>;
+using ManagedTargetSizeEvaluator = TargetSizeEvaluatorFor<CodestreamBuffer>;
 
 /// Performs a bounded target-size search over complete encodes controlled by a
 /// Butteraugli-target-like scalar. Score history is optional; when present its
@@ -54,5 +79,10 @@ using TargetSizeEvaluator = std::function<Status(
   const TargetSizeSearchOptions& options,
   const TargetSizeEvaluator& evaluator,
   TargetSizeSearchResult* result);
+
+[[nodiscard]] Status SearchTargetSize(
+  const TargetSizeSearchOptions& options,
+  const ManagedTargetSizeEvaluator& evaluator,
+  ManagedTargetSizeSearchResult* result);
 
 }  // namespace gjxl::codestream_internal

@@ -93,6 +93,7 @@ extern "C" {
 #endif
 
 typedef struct GJXLContext GJXLContext;
+typedef struct GJXLExecutionDomain GJXLExecutionDomain;
 
 typedef int32_t GJXLResult;
 enum {
@@ -103,6 +104,7 @@ enum {
     GJXL_ERROR_OUT_OF_MEMORY = 4,
     GJXL_ERROR_BACKEND = 5,
     GJXL_ERROR_INTERNAL = 6,
+    GJXL_ERROR_RESOURCE_PLAN_EXCEEDED = 7,
 };
 
 typedef int32_t GJXLBackend;
@@ -120,6 +122,7 @@ typedef struct {
     uint32_t struct_size;
     GJXLBackend backend;
     uint32_t num_cpu_threads;
+    const GJXLExecutionDomain* execution_domain;
 } GJXLContextOptions;
 
 typedef int32_t GJXLCompressionMode;
@@ -347,20 +350,70 @@ called concurrently on one context. Destroying a context must not overlap an
 active call using it.
 
 `num_cpu_threads` limits the participating host CPU threads in each encode.
-Zero retains the existing automatic, stage-specific worker policy; one runs
+Zero selects automatic, stage-specific desired parallelism; one runs
 CPU work serially; larger values allow the caller plus at most `N - 1`
 background workers. The current maximum explicit value is 256. An explicit
 budget also suppresses nested worker fan-out, so a parallel codestream task
 does not create another pool beneath itself.
 
-The limit is per encode, not a process-wide pool or a cap across concurrent
-calls. It does not constrain Metal threadgroups, although host preparation and
-codestream assembly remain within the CPU budget. The field is an appended
-sized-struct tail: callers built against the original prefix retain automatic
-behavior.
+This field remains a per-encode upper bound, additionally constrained by the
+shared execution domain below. Neither limit constrains Metal threadgroups.
+The caller participates even with automatic parallelism; additional workers
+require both per-image and domain capacity before they are created. Explicit
+limits still suppress nested fan-out; automatic nested work draws from the same
+allowances. The appended sized-struct field preserves automatic selection for
+callers built against the original context prefix.
 
 Device indexes remain omitted because the current factory uses the
 system-default Metal device.
+
+### Shared memory and CPU domains
+
+`GJXLExecutionDomainOptions::managed_memory_bytes` configures an immutable
+allowance shared by every context retaining the same `GJXLExecutionDomain`.
+Initialize options with `gjxl_execution_domain_options_init`, create a handle
+with `gjxl_execution_domain_create`, and set the context's appended
+`execution_domain` field before context creation. Check each result. The context
+retains the domain independently; `gjxl_execution_domain_destroy` releases only
+the caller's handle. Null context domains use one shared, unlimited-but-accounted
+default for memory; creating with null domain options instead creates an
+independent unlimited-memory domain. Neither has unlimited CPU participation.
+
+`gjxl_execution_domain_snapshot` reports managed live/idle/reserved capacity,
+peaks and admission counts. This is not RSS: caller buffers, published output,
+immutable setup, driver internals and small control/allocator overhead are
+excluded. Converted C input and the final output copy are included until
+publication. Impossible plans fail before conversion; temporary occupancy can
+wait in FIFO order. An admitted plan violation is terminal and reported as
+`GJXL_ERROR_RESOURCE_PLAN_EXCEEDED`, distinct from an allocation failure.
+
+The original 8-byte and 12-byte context layouts retain default-domain behavior.
+C++ callers can share the identical domain using the installed
+`gjxl/execution_domain.hpp` bridge. See [public admission](resident-public-admission.md)
+for memory admission and [CPU coordination](resident-cpu-coordination.md) for
+the scheduling checkpoint and its remaining qualification work.
+
+`GJXLExecutionDomainOptions::cpu_participant_limit` caps aggregate CPU
+participation across those C/C++ contexts, independent calls and batch drivers.
+Zero resolves to hardware concurrency, clamped to 1..256; an explicit value must
+be in that range. Memory admission precedes the main CPU slot. Packed RGBA alpha
+validation uses a temporary CPU slot, released before waiting for memory.
+Image callers yield CPU capacity during GPU waits and joins; created workers
+retain reserved capacity while inactive to bound dormant nested workers too.
+New and resumed image callers queue FIFO, and new workers cannot bypass them.
+
+Snapshot tails report the effective CPU cap, active participants, not-yet-started
+reserved workers, suspended workers, waiting callers and peaks. The sum of active,
+reserved and suspended capacity stays within the cap. These are GJXL scheduling
+counts, not hardware occupancy or total process thread counts; caller threads,
+idle persistent batch drivers and backend/OS internals are not an OS-thread pool
+governed by this API. Memory and CPU counter sets are sampled separately.
+
+The original 16-byte domain options and 72-byte snapshots remain accepted on the
+supported 64-bit ABI. Missing CPU options select automatic; optional snapshot
+fields are written only when fully covered by the caller's supplied size. C++
+layouts grew and must be rebuilt. The Rust wrapper remains compatible with its
+older C declarations but does not yet expose explicit domain configuration.
 
 ## Image-view contract
 
@@ -435,7 +488,8 @@ Internal status translation should preserve these distinctions:
 | `INVALID_ARGUMENT` | Malformed pointers, sizes, layouts, or option values |
 | `UNSUPPORTED` | Valid concept outside the current profile, such as lossless or alpha |
 | `UNAVAILABLE` | Requested execution backend cannot be created or selected |
-| `OUT_OF_MEMORY` | Host or device allocation failure |
+| `OUT_OF_MEMORY` | Host/device allocation failure or a complete plan above the managed limit |
+| `RESOURCE_PLAN_EXCEEDED` | An admitted plan was exceeded; terminal without retry or partial publication |
 | `BACKEND` | Submission, completion, or device execution failure |
 | `INTERNAL` | Invariant failure or unexpected exception |
 

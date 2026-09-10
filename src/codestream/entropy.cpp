@@ -19,10 +19,12 @@
 
 #include "codestream/ans_internal.h"
 #include "codestream/entropy_internal.h"
+#include "codestream/entropy_storage_plan.h"
 #include "codestream/huffman.h"
 #include "codestream/profile_internal.h"
 
 namespace gjxl {
+using codestream_internal::Storage;
 namespace {
 
 using ProfileClock = std::chrono::steady_clock;
@@ -207,12 +209,12 @@ double HistogramShapeDistance(
 }
 
 Status FastClusterHistograms(
-  const std::vector<Histogram>& input,
+  const Storage<Histogram>& input,
   size_t maximum_histograms,
   bool fill_to_limit,
-  std::vector<Histogram>* output,
-  std::vector<uint32_t>* histogram_symbols,
-  std::vector<size_t>* seed_indexes = nullptr) {
+  Storage<Histogram>* output,
+  Storage<uint32_t>* histogram_symbols,
+  Storage<size_t>* seed_indexes = nullptr) {
 
   if (input.empty() || maximum_histograms == 0 ||
       output == nullptr || histogram_symbols == nullptr) {
@@ -227,7 +229,7 @@ Status FastClusterHistograms(
   histogram_symbols->assign(input.size(),
                             static_cast<uint32_t>(maximum_histograms));
 
-  std::vector<double> distances(
+  Storage<double> distances(
     input.size(), std::numeric_limits<double>::max());
   // Shape-only seed discovery returns before exact assignment and never reads
   // bit_cost. Every other path needs prepared costs for HistogramDistance.
@@ -323,11 +325,11 @@ Status FastClusterHistograms(
 }
 
 Status AssignHistogramsToSeeds(
-  const std::vector<Histogram>& input,
+  const Storage<Histogram>& input,
   std::span<const size_t> seed_indexes,
   bool use_shape_distance,
-  std::vector<Histogram>* output,
-  std::vector<uint32_t>* histogram_symbols) {
+  Storage<Histogram>* output,
+  Storage<uint32_t>* histogram_symbols) {
 
   if (input.empty() || seed_indexes.empty() || output == nullptr ||
       histogram_symbols == nullptr) {
@@ -406,15 +408,15 @@ Status AssignHistogramsToSeeds(
 }
 
 Status CompactClusters(
-  const std::vector<Histogram>& input,
-  std::vector<Histogram>* clustered,
-  std::vector<uint32_t>* symbols) {
+  const Storage<Histogram>& input,
+  Storage<Histogram>* clustered,
+  Storage<uint32_t>* symbols) {
 
   if (clustered == nullptr || symbols == nullptr ||
       symbols->size() != input.size()) {
     return Status::InvalidArgument("Invalid histogram compaction input");
   }
-  std::vector<size_t> new_indexes(
+  Storage<size_t> new_indexes(
     clustered->size(), std::numeric_limits<size_t>::max());
   size_t next_index = 0;
   for (size_t index = 0; index < input.size(); ++index) {
@@ -435,7 +437,7 @@ Status CompactClusters(
     return Status::Ok();
   }
 
-  std::vector<Histogram> reordered(next_index);
+  Storage<Histogram> reordered(next_index);
   for (size_t index = 0; index < input.size(); ++index) {
     if (input[index].total_count == 0) {
       (*symbols)[index] = 0;
@@ -458,17 +460,17 @@ Status CompactClusters(
 }
 
 Status RefineHistogramClusters(
-  const std::vector<Histogram>& input,
+  const Storage<Histogram>& input,
   size_t maximum_sweeps,
-  std::vector<Histogram>* clustered,
-  std::vector<uint32_t>* symbols) {
+  Storage<Histogram>* clustered,
+  Storage<uint32_t>* symbols) {
 
   if (clustered == nullptr || clustered->empty() || symbols == nullptr ||
       symbols->size() != input.size()) {
     return Status::InvalidArgument("Invalid histogram refinement input");
   }
   for (size_t sweep = 0; sweep < maximum_sweeps; ++sweep) {
-    std::vector<PrefixCode> cluster_codes(clustered->size());
+    Storage<PrefixCode> cluster_codes(clustered->size());
     for (size_t cluster = 0; cluster < clustered->size(); ++cluster) {
       if (Status status = BuildPrefixCode(
             std::span<const uint64_t>((*clustered)[cluster].counts).first(
@@ -536,12 +538,12 @@ Status RefineHistogramClusters(
 }
 
 Status ClusterHistograms(
-  const std::vector<Histogram>& input,
+  const Storage<Histogram>& input,
   size_t maximum_histograms,
   bool fill_to_limit,
   size_t refinement_sweeps,
-  std::vector<Histogram>* histograms,
-  std::vector<uint8_t>* context_map) {
+  Storage<Histogram>* histograms,
+  Storage<uint8_t>* context_map) {
 
   if (histograms == nullptr || context_map == nullptr || input.empty() ||
       maximum_histograms == 0) {
@@ -554,8 +556,8 @@ Status ClusterHistograms(
   }
 
   maximum_histograms = std::min(maximum_histograms, input.size());
-  std::vector<Histogram> clustered;
-  std::vector<uint32_t> symbols;
+  Storage<Histogram> clustered;
+  Storage<uint32_t> symbols;
   if (Status status = FastClusterHistograms(
         input, maximum_histograms, fill_to_limit, &clustered, &symbols);
       !status.ok()) {
@@ -569,9 +571,9 @@ Status ClusterHistograms(
     }
   }
 
-  std::vector<size_t> new_indexes(
+  Storage<size_t> new_indexes(
     clustered.size(), std::numeric_limits<size_t>::max());
-  std::vector<Histogram> reordered(clustered.size());
+  Storage<Histogram> reordered(clustered.size());
   size_t next_index = 0;
   for (uint32_t symbol : symbols) {
     if (symbol >= clustered.size()) {
@@ -594,18 +596,18 @@ Status ClusterHistograms(
 }
 
 Status ClusterHistogramsFromSeeds(
-  const std::vector<Histogram>& input,
+  const Storage<Histogram>& input,
   std::span<const size_t> seed_indexes,
   bool use_shape_distance,
   size_t refinement_sweeps,
-  std::vector<Histogram>* histograms,
-  std::vector<uint8_t>* context_map) {
+  Storage<Histogram>* histograms,
+  Storage<uint8_t>* context_map) {
 
   if (histograms == nullptr || context_map == nullptr) {
     return Status::InvalidArgument("Invalid seeded histogram output");
   }
-  std::vector<Histogram> clustered;
-  std::vector<uint32_t> symbols;
+  Storage<Histogram> clustered;
+  Storage<uint32_t> symbols;
   if (Status status = AssignHistogramsToSeeds(
         input, seed_indexes, use_shape_distance, &clustered, &symbols);
       !status.ok()) {
@@ -738,7 +740,7 @@ Status WriteBits(BitWriter* writer, size_t count, uint64_t bits) {
   return writer->WriteBits(count, bits);
 }
 
-void ReverseRange(std::vector<uint8_t>* values, size_t begin, size_t end) {
+void ReverseRange(Storage<uint8_t>* values, size_t begin, size_t end) {
   std::reverse(values->begin() + static_cast<ptrdiff_t>(begin),
                values->begin() + static_cast<ptrdiff_t>(end));
 }
@@ -747,8 +749,8 @@ void WriteHuffmanTreeRepetitions(
   uint8_t previous_value,
   uint8_t value,
   size_t repetitions,
-  std::vector<uint8_t>* tree,
-  std::vector<uint8_t>* extra_bits) {
+  Storage<uint8_t>* tree,
+  Storage<uint8_t>* extra_bits) {
 
   if (previous_value != value) {
     tree->push_back(value);
@@ -785,8 +787,8 @@ void WriteHuffmanTreeRepetitions(
 
 void WriteHuffmanTreeZeroRepetitions(
   size_t repetitions,
-  std::vector<uint8_t>* tree,
-  std::vector<uint8_t>* extra_bits) {
+  Storage<uint8_t>* tree,
+  Storage<uint8_t>* extra_bits) {
 
   if (repetitions == 11) {
     tree->push_back(0);
@@ -848,8 +850,8 @@ void DecideHuffmanRle(
 
 void EncodeHuffmanTree(
   std::span<const uint8_t> depths,
-  std::vector<uint8_t>* tree,
-  std::vector<uint8_t>* extra_bits) {
+  Storage<uint8_t>* tree,
+  Storage<uint8_t>* extra_bits) {
 
   size_t encoded_length = depths.size();
   while (encoded_length != 0 && depths[encoded_length - 1] == 0) {
@@ -932,8 +934,8 @@ Status StoreHuffmanTree(
   std::span<const uint8_t> depths,
   BitWriter* writer) {
 
-  std::vector<uint8_t> tree;
-  std::vector<uint8_t> extra_bits;
+  Storage<uint8_t> tree;
+  Storage<uint8_t> extra_bits;
   tree.reserve(2 * depths.size());
   extra_bits.reserve(2 * depths.size());
   EncodeHuffmanTree(depths, &tree, &extra_bits);
@@ -1038,11 +1040,14 @@ Status StoreSimpleHuffmanTree(
   if (Status status = WriteBits(writer, 2, symbol_count - 1); !status.ok()) {
     return status;
   }
-  std::stable_sort(
+  // WritePrefixCodeInternal supplies ascending symbols. Preserve its stable
+  // depth ties explicitly, without allocating sort scratch.
+  std::sort(
     symbols.begin(),
     symbols.begin() + static_cast<ptrdiff_t>(symbol_count),
     [&code](size_t left, size_t right) {
-      return code.depths[left] < code.depths[right];
+      return code.depths[left] != code.depths[right]
+        ? code.depths[left] < code.depths[right] : left < right;
     });
   for (size_t index = 0; index < symbol_count; ++index) {
     if (Status status = WriteBits(writer, symbol_bits, symbols[index]);
@@ -1296,7 +1301,7 @@ Status MeasureSectionTokenBits(
   std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCode& code,
   uint64_t expected_total,
-  std::vector<uint64_t>* section_bits) {
+  Storage<uint64_t>* section_bits) {
 
   if (section_bits == nullptr) {
     return Status::InvalidArgument("Section token-bit output is null");
@@ -1308,7 +1313,7 @@ Status MeasureSectionTokenBits(
     return Status::InvalidArgument(
       "Prefix section measurement requires a prefix entropy code");
   }
-  std::vector<uint64_t> candidate;
+  Storage<uint64_t> candidate;
   candidate.reserve(section_tokens.size());
   uint64_t total = 0;
   for (const EntropyTokenStreamView section : section_tokens) {
@@ -1342,7 +1347,7 @@ Status BuildClusterCode(
       selected_token_bits == nullptr) {
     return Status::InvalidArgument("Cluster-code output is null");
   }
-  std::vector<HybridUintConfig> configs = {base_config};
+  Storage<HybridUintConfig> configs = {base_config};
   if (optimize_config) {
     for (const HybridUintConfig config : kBalancedUintConfigs) {
       if (std::find(configs.begin(), configs.end(), config) == configs.end()) {
@@ -1477,7 +1482,7 @@ Status BuildEntropyCodeForPartition(
   // The selected partition maps each already-counted source histogram to one
   // final cluster. Use those exact populations to allocate a single raw-value
   // buffer, avoiding per-cluster growth and capacity slack.
-  std::vector<size_t> cluster_offsets(cluster_count + 1);
+  Storage<size_t> cluster_offsets(cluster_count + 1);
   for (size_t histogram = 0; histogram < source_histograms.size();
        ++histogram) {
     const size_t cluster = clustered_map[histogram];
@@ -1499,8 +1504,8 @@ Status BuildEntropyCodeForPartition(
     }
     cluster_offsets[cluster + 1] += cluster_offsets[cluster];
   }
-  std::vector<uint32_t> values(cluster_offsets.back());
-  std::vector<size_t> write_offsets(
+  Storage<uint32_t> values(cluster_offsets.back());
+  Storage<size_t> write_offsets(
     cluster_offsets.begin(), cluster_offsets.end() - 1);
   for (const EntropyTokenStreamView section : section_tokens) {
     if (!section.valid()) {
@@ -1536,11 +1541,11 @@ Status BuildEntropyCodeForPartition(
     ProfileBegin(profile);
   candidate.uint_configs.resize(cluster_count);
   candidate.prefix_codes.resize(cluster_count);
-  std::vector<uint64_t> cluster_token_bits(cluster_count);
-  std::vector<std::vector<codestream_internal::WeightedValue>>
+  Storage<uint64_t> cluster_token_bits(cluster_count);
+  Storage<Storage<codestream_internal::WeightedValue>>
     prepared_values(prepared == nullptr ? 0 : cluster_count);
   for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
-    std::vector<codestream_internal::WeightedValue> weighted_values;
+    Storage<codestream_internal::WeightedValue> weighted_values;
     const size_t begin = cluster_offsets[cluster];
     const size_t size = cluster_offsets[cluster + 1] - begin;
     if (Status status = codestream_internal::AggregateEntropyValues(
@@ -1676,28 +1681,7 @@ Status EncodeHybridUint(
     return Status::InvalidArgument("Invalid HybridUint configuration");
   }
 
-  HybridUintToken result;
-  const uint32_t split_token = uint32_t{1} << config.split_exponent;
-  if (value < split_token) {
-    result.symbol = value;
-  } else {
-    const uint32_t exponent =
-      31u - static_cast<uint32_t>(std::countl_zero(value));
-    const uint32_t mantissa = value - (uint32_t{1} << exponent);
-    result.symbol = split_token +
-      ((exponent - config.split_exponent) <<
-       (config.msb_in_token + config.lsb_in_token)) +
-      ((mantissa >> (exponent - config.msb_in_token)) <<
-       config.lsb_in_token) +
-      (mantissa & ((uint32_t{1} << config.lsb_in_token) - 1));
-    result.extra_bit_count = static_cast<uint8_t>(
-      exponent - config.msb_in_token - config.lsb_in_token);
-    const uint64_t mask =
-      (uint64_t{1} << result.extra_bit_count) - 1;
-    result.extra_bits = static_cast<uint32_t>(
-      (value >> config.lsb_in_token) & mask);
-  }
-  *token = result;
+  *token = codestream_internal::EncodeHybridUintValidated(value, config);
   return Status::Ok();
 }
 
@@ -1782,7 +1766,7 @@ Status OptimizeEntropyCodeImpl(
     };
     const ProfileClock::time_point histogram_build_begin =
       ProfileBegin(profile);
-    std::vector<Histogram> histograms(histogram_count);
+    Storage<Histogram> histograms(histogram_count);
     uint64_t fixed_extra_bits = 0;
     for (const EntropyTokenStreamView section : section_tokens) {
       if (!section.valid()) {
@@ -1833,8 +1817,8 @@ Status OptimizeEntropyCodeImpl(
       &EntropyWorkProfile::prefix_histogram_cost_nanoseconds);
 
     if (fast_fixed_partition) {
-      std::vector<Histogram> clustered_histograms;
-      std::vector<uint8_t> clustered_map;
+      Storage<Histogram> clustered_histograms;
+      Storage<uint8_t> clustered_map;
       if (Status status = profile_call(
             &EntropyWorkProfile::prefix_clustering_nanoseconds,
             [&] {
@@ -1873,8 +1857,8 @@ Status OptimizeEntropyCodeImpl(
       return Status::Ok();
     }
 
-    std::vector<Histogram> legacy_histograms;
-    std::vector<uint8_t> legacy_map;
+    Storage<Histogram> legacy_histograms;
+    Storage<uint8_t> legacy_map;
     if (Status status = profile_call(
           &EntropyWorkProfile::prefix_clustering_nanoseconds,
           [&] {
@@ -1903,13 +1887,13 @@ Status OptimizeEntropyCodeImpl(
     if (!AddBits(best_cost.token_bits, &best_total)) {
       return Status::InvalidArgument("Entropy cost overflow");
     }
-    std::vector<uint8_t> best_partition_map = legacy_map;
+    Storage<uint8_t> best_partition_map = legacy_map;
     size_t best_partition_count = legacy_histograms.size();
     // Build one deterministic farthest-first seed order, then reuse its
     // prefixes to screen all supported cluster caps by serialized cost.
-    std::vector<Histogram> maximum_seeded_histograms;
-    std::vector<uint32_t> maximum_seeded_symbols;
-    std::vector<size_t> seed_indexes;
+    Storage<Histogram> maximum_seeded_histograms;
+    Storage<uint32_t> maximum_seeded_symbols;
+    Storage<size_t> seed_indexes;
     if (Status status = profile_call(
           &EntropyWorkProfile::prefix_clustering_nanoseconds,
           [&] {
@@ -1932,8 +1916,8 @@ Status OptimizeEntropyCodeImpl(
         continue;
       }
       previous_cap = cap;
-      std::vector<Histogram> candidate_histograms;
-      std::vector<uint8_t> candidate_map;
+      Storage<Histogram> candidate_histograms;
+      Storage<uint8_t> candidate_map;
       if (Status status = profile_call(
             &EntropyWorkProfile::prefix_clustering_nanoseconds,
             [&] {
@@ -1974,8 +1958,8 @@ Status OptimizeEntropyCodeImpl(
     // Refine the screened winner and its next larger cap with actual prefix
     // depths. This captures most of the exact-search benefit without scoring
     // every cap through repeated Huffman rebuilds.
-    std::vector<Histogram> refined_histograms;
-    std::vector<uint8_t> refined_map;
+    Storage<Histogram> refined_histograms;
+    Storage<uint8_t> refined_map;
     if (Status status = profile_call(
           &EntropyWorkProfile::prefix_clustering_nanoseconds,
           [&] {
@@ -2014,8 +1998,8 @@ Status OptimizeEntropyCodeImpl(
     const size_t higher_cap =
       std::min(seed_indexes.size(), best_partition_cap * 2);
     if (higher_cap > best_partition_cap) {
-      std::vector<Histogram> higher_histograms;
-      std::vector<uint8_t> higher_map;
+      Storage<Histogram> higher_histograms;
+      Storage<uint8_t> higher_map;
       if (Status status = profile_call(
             &EntropyWorkProfile::prefix_clustering_nanoseconds,
             [&] {
@@ -2098,6 +2082,8 @@ Status OptimizeEntropyCodeImpl(
       *prepared = std::move(configured_values);
     }
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory("Entropy-code allocation failed");
   } catch (const std::length_error&) {
@@ -2147,12 +2133,14 @@ Status OptimizeEntropyCode(
   EntropyCodeCost* cost,
   codestream_internal::EntropyWorkProfile* profile) {
   try {
-    std::vector<EntropyTokenStreamView> views;
+    Storage<EntropyTokenStreamView> views;
     views.reserve(section_tokens.size());
     for (const std::vector<EntropyToken>& section : section_tokens) {
       views.push_back(EntropyTokenStreamView::Interleaved(section));
     }
     return OptimizeEntropyCode(views, options, code, cost, profile);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory("Entropy token-view allocation failed");
   } catch (const std::length_error&) {
@@ -2166,8 +2154,10 @@ Status WritePrefixCodes(
   BitWriter* writer) {
 
   try {
-    const std::vector<HybridUintConfig> configs(prefix_codes.size(), config);
+    const Storage<HybridUintConfig> configs(prefix_codes.size(), config);
     return WritePrefixCodes(prefix_codes, configs, writer);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory("Prefix-code serialization allocation failed");
   } catch (const std::length_error&) {
@@ -2185,28 +2175,29 @@ Status WritePrefixCodes(
       configs.size() != prefix_codes.size()) {
     return Status::InvalidArgument("Invalid prefix-code serialization input");
   }
-  EntropyCode validation;
-  validation.context_count = 1;
-  validation.context_map = {0};
-  validation.uint_configs.assign(configs.begin(), configs.end());
-  validation.prefix_codes.assign(prefix_codes.begin(), prefix_codes.end());
-  if (Status status = ValidateEntropyCode(validation); !status.ok()) {
-    return status;
-  }
-
-  BitWriter temporary;
   try {
+    EntropyCode validation;
+    validation.context_count = 1;
+    validation.context_map = {0};
+    validation.uint_configs.assign(configs.begin(), configs.end());
+    validation.prefix_codes.assign(prefix_codes.begin(), prefix_codes.end());
+    if (Status status = ValidateEntropyCode(validation); !status.ok()) {
+      return status;
+    }
+    BitWriter temporary;
     if (Status status = WritePrefixCodesInternal(
           prefix_codes, configs, &temporary);
         !status.ok()) {
       return status;
     }
+    return AppendTemporary(writer, &temporary);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory("Prefix-code serialization allocation failed");
   } catch (const std::length_error&) {
     return Status::OutOfMemory("Prefix-code serialization is too large");
   }
-  return AppendTemporary(writer, &temporary);
 }
 
 Status WriteContextMap(const EntropyCode& code, BitWriter* writer) {
@@ -2222,6 +2213,8 @@ Status WriteContextMap(const EntropyCode& code, BitWriter* writer) {
         !status.ok()) {
       return status;
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory("Context-map serialization allocation failed");
   } catch (const std::length_error&) {
@@ -2251,6 +2244,8 @@ Status WriteEntropyCode(const EntropyCode& code, BitWriter* writer) {
         !status.ok()) {
       return status;
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory("Entropy-code serialization allocation failed");
   } catch (const std::length_error&) {
@@ -2325,6 +2320,83 @@ Status codestream_internal::CountTokenStreamBits(
   uint64_t* bit_count) {
   return CountTokenStreamBits(
     EntropyTokenStreamView::Interleaved(tokens), code, bit_count);
+}
+
+Status codestream_internal::ComputePrefixOptimizationStoragePlan(
+  const EntropyOptimizationStorageOptions& o,
+  EntropyOptimizationStoragePlan* out) {
+  using enum resource_budget_internal::VectorCapacityPolicy;
+  if (out == nullptr || o.contexts == 0 || o.contexts > UINT32_MAX ||
+      o.initial_histograms > 256 || o.borrow_prepared_clusters ||
+      (o.policy != EntropyStoragePolicy::kFastPrefix &&
+       o.policy != EntropyStoragePolicy::kPrefix) ||
+      (o.retain_prepared_clusters &&
+       (o.policy == EntropyStoragePolicy::kFastPrefix || !o.return_cost)))
+    return Status::InvalidArgument("Prefix optimization plan is invalid");
+  const bool fast = o.policy == EntropyStoragePolicy::kFastPrefix;
+  const size_t histograms = o.initial_histograms == 0
+    ? o.contexts : o.initial_histograms;
+  EntropyOptimizationStoragePlan plan;
+  const size_t k = plan.clusters = std::min(kMaximumPrefixClusters, histograms);
+  const auto overflow = [] {
+    return Status::OutOfMemory("Prefix optimization storage overflows");
+  };
+  EntropyModelStoragePlan model;
+  Status status = ComputeEntropyModelStoragePlan(
+    EntropyCodingMode::kPrefix, o.contexts, k, &model);
+  if (!status.ok()) return status;
+  if (!plan.output.Add(model.owned) ||
+      (o.return_cost && !plan.output.AddVector<uint64_t>(o.sections, kFreshExact)))
+    return overflow();
+  HostStorageBound prepared;
+  if (o.retain_prepared_clusters) {
+    if (!prepared.AddVector<uint8_t>(o.contexts, kFreshExact) ||
+        !prepared.AddVector<Storage<WeightedValue>>(k, kFreshExact) ||
+        !prepared.AddVector<WeightedValue>(o.tokens, kGrowing) ||
+        !plan.output.Add(prepared))
+      return overflow();
+  }
+  auto& work = plan.working;
+  // Legacy, maximum-seeded, refined and current candidate histograms plus a
+  // clustering helper and its compacted replacement. The fast path needs only
+  // one clustered owner and its replacement. Same-size reserve/assign can reuse.
+  if (!work.AddVector<Histogram>(histograms, kFreshExact) ||
+      !work.AddVector<Histogram>(k, kReusedExact, fast ? 2 : 6) ||
+      !work.AddVector<uint8_t>(histograms, kReusedExact, fast ? 1 : 6) ||
+      !work.AddVector<uint32_t>(histograms, kFreshExact, fast ? 1 : 2) ||
+      !work.AddVector<double>(histograms, kFreshExact) ||
+      !work.AddVector<size_t>(k, kFreshExact, fast ? 1 : 2) ||
+      (!fast && !work.AddVector<PrefixCode>(k, kFreshExact)) ||
+      // Best/refined/configured/candidate models and a local builder output.
+      // Six covers the returned model too; it is not added again from output.
+      !work.Add(model.owned, fast ? 1 : 6) ||
+      !work.Add(model.write_scratch) ||
+      (o.return_cost && !work.AddVector<uint64_t>(o.sections, kFreshExact)))
+    return overflow();
+  HostStorageBound writer;
+  status = ComputeEntropyWriterStorageBound(model.maximum_bits, &writer);
+  if (!status.ok()) return status;
+  if (!work.Add(writer)) return overflow();
+  EntropyAggregationStoragePlan aggregate;
+  status = ComputeEntropyAggregationStoragePlan(o.tokens, &aggregate);
+  if (!status.ok()) return status;
+  // Only the final configured partition collects raw values, not every screened
+  // cluster cap. It owns one exact N-value array, sliced across clusters.
+  if (!work.AddVector<uint32_t>(o.tokens, kFreshExact) ||
+      !work.AddVector<size_t>(k + 1, kFreshExact) ||
+      !work.AddVector<size_t>(k, kFreshExact) ||
+      !work.AddVector<uint64_t>(k, kFreshExact) ||
+      !work.AddVector<HybridUintConfig>(fast ? 1 : 1 + kBalancedUintConfigs.size(),
+                                       kGrowing) ||
+      !work.Add(aggregate.scratch))
+    return overflow();
+  if (o.retain_prepared_clusters) {
+    if (!work.Add(prepared)) return overflow();
+  } else if (!work.AddVector<WeightedValue>(o.tokens, kGrowing)) {
+    return overflow();
+  }
+  *out = plan;
+  return Status::Ok();
 }
 
 }  // namespace gjxl

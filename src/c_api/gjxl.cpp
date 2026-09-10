@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include "gjxl/gjxl.h"
+#include "gjxl/execution_domain.hpp"
 
 #include <algorithm>
 #include <array>
@@ -19,6 +20,8 @@
 
 #include "c_api/image_conversion.h"
 #include "codestream/workflow.h"
+#include "codestream/workflow_admission.h"
+#include "core/cpu_execution.h"
 #include "codestream/workflow_internal.h"
 #include "core/image_buffer.h"
 #include "core/status.h"
@@ -27,6 +30,11 @@ struct GJXLContext {
   gjxl::VarDctBackendPreference backend =
     gjxl::VarDctBackendPreference::kAutomatic;
   size_t cpu_thread_count = 0;
+  std::shared_ptr<const gjxl::ExecutionDomain> execution_domain;
+};
+
+struct GJXLExecutionDomain {
+  std::shared_ptr<const gjxl::ExecutionDomain> value;
 };
 
 namespace {
@@ -36,12 +44,18 @@ constexpr size_t kContextOptionsV1Size =
   offsetof(GJXLContextOptions, num_cpu_threads);
 constexpr size_t kContextOptionsCpuThreadsSize =
   offsetof(GJXLContextOptions, num_cpu_threads) + sizeof(uint32_t);
+constexpr size_t kContextOptionsDomainSize =
+    offsetof(GJXLContextOptions, execution_domain) + sizeof(GJXLExecutionDomain *);
+constexpr size_t kDomainOptionsV1Size = offsetof(GJXLExecutionDomainOptions, cpu_participant_limit);
+constexpr size_t kDomainOptionsCpuSize = kDomainOptionsV1Size + sizeof(uint32_t);
+constexpr size_t kDomainSnapshotV1Size = offsetof(GJXLExecutionDomainSnapshot, effective_cpu_participant_limit);
 constexpr size_t kEncoderOptionsV1Size =
   offsetof(GJXLEncoderOptions, compression_mode);
 constexpr size_t kEncoderOptionsCompressionModeSize =
   offsetof(GJXLEncoderOptions, compression_mode) +
   sizeof(GJXLCompressionMode);
 static_assert(gjxl::kMaximumCpuThreadCount == GJXL_MAX_CPU_THREADS);
+static_assert(gjxl::kMaximumDomainCpuParticipants == GJXL_MAX_CPU_THREADS);
 thread_local std::array<char, kDiagnosticCapacity> last_error{};
 
 void ClearLastError() noexcept {
@@ -66,6 +80,8 @@ GJXLResult TranslateStatus(const gjxl::Status& status) noexcept {
     return GJXL_OK;
   }
   SetLastError(status.message());
+  if (status.resource_plan_exceeded())
+    return GJXL_ERROR_RESOURCE_PLAN_EXCEEDED;
   switch (status.code()) {
     case gjxl::StatusCode::kInvalidArgument:
       return GJXL_ERROR_INVALID_ARGUMENT;
@@ -92,6 +108,8 @@ GJXLResult Guard(Function&& function) noexcept {
   ClearLastError();
   try {
     return std::forward<Function>(function)();
+  } catch (const gjxl::resource_budget_internal::ManagedAllocationFailure& failure) {
+    return TranslateStatus(failure.status());
   } catch (const std::bad_alloc&) {
     return Fail(GJXL_ERROR_OUT_OF_MEMORY, "C API allocation failed");
   } catch (const std::exception& exception) {
@@ -211,7 +229,99 @@ GJXLResult ParseCompressionMode(
 
 }  // namespace
 
+namespace gjxl {
+Status CreateCExecutionDomain(std::shared_ptr<const ExecutionDomain> domain,
+                              GJXLExecutionDomain **out) {
+  if (out == nullptr || *out != nullptr)
+    return Status::InvalidArgument("C execution domain output must be empty");
+  try {
+    auto candidate = std::make_unique<GJXLExecutionDomain>();
+    candidate->value = domain ? std::move(domain) : ExecutionDomain::Default();
+    *out = candidate.release();
+    return Status::Ok();
+  } catch (const std::bad_alloc &) {
+    return Status::OutOfMemory("Unable to allocate C execution domain handle");
+  }
+}
+
+std::shared_ptr<const ExecutionDomain> RetainExecutionDomain(const GJXLExecutionDomain *domain) {
+  return domain == nullptr ? ExecutionDomain::Default() : domain->value;
+}
+} // namespace gjxl
+
 extern "C" {
+
+GJXLResult gjxl_execution_domain_options_init(GJXLExecutionDomainOptions *options,
+                                              size_t caller_size) noexcept {
+  return Guard([&] { return InitializeOptions(options, caller_size, kDomainOptionsV1Size); });
+}
+
+GJXLResult gjxl_execution_domain_create(const GJXLExecutionDomainOptions *options,
+                                        GJXLExecutionDomain **domain) noexcept {
+  return Guard([&]() -> GJXLResult {
+    if (domain == nullptr || *domain != nullptr)
+      return Fail(GJXL_ERROR_INVALID_ARGUMENT, "Execution domain output must be empty");
+    gjxl::ExecutionDomainOptions parsed;
+    if (options != nullptr) {
+      const auto status = ValidateSizedStruct(options->struct_size, kDomainOptionsV1Size,
+                                              "Execution domain options struct is too small");
+      if (status != GJXL_OK)
+        return status;
+      if (options->managed_memory_bytes > std::numeric_limits<size_t>::max())
+        return Fail(GJXL_ERROR_INVALID_ARGUMENT, "Managed memory limit is not representable");
+      parsed.managed_memory_bytes = static_cast<size_t>(options->managed_memory_bytes);
+      if (options->struct_size >= kDomainOptionsCpuSize)
+        parsed.cpu_participant_limit = options->cpu_participant_limit;
+    }
+    auto candidate = std::make_unique<GJXLExecutionDomain>();
+    const auto status = TranslateStatus(gjxl::ExecutionDomain::Create(parsed, &candidate->value));
+    if (status != GJXL_OK)
+      return status;
+    *domain = candidate.release();
+    return GJXL_OK;
+  });
+}
+
+void gjxl_execution_domain_destroy(GJXLExecutionDomain *domain) noexcept {
+  ClearLastError();
+  delete domain;
+}
+
+GJXLResult gjxl_execution_domain_snapshot(const GJXLExecutionDomain *domain,
+                                          GJXLExecutionDomainSnapshot *snapshot,
+                                          size_t caller_size) noexcept {
+  return Guard([&]() -> GJXLResult {
+    if (snapshot == nullptr || caller_size < kDomainSnapshotV1Size ||
+        caller_size > std::numeric_limits<uint32_t>::max())
+      return Fail(GJXL_ERROR_INVALID_ARGUMENT, "Execution domain snapshot allocation is invalid");
+    const auto handle = domain == nullptr ? gjxl::ExecutionDomain::Default() : domain->value;
+    const auto state = handle->snapshot();
+    std::memset(snapshot, 0, caller_size);
+    snapshot->struct_size = static_cast<uint32_t>(caller_size);
+    snapshot->live_requested_bytes = state.live_requested_bytes;
+    snapshot->live_capacity_bytes = state.live_capacity_bytes;
+    snapshot->idle_capacity_bytes = state.idle_capacity_bytes;
+    snapshot->reserved_unbacked_bytes = state.reserved_unbacked_bytes;
+    snapshot->peak_backing_bytes = state.peak_backing_bytes;
+    snapshot->peak_committed_bytes = state.peak_committed_bytes;
+    snapshot->active_reservations = state.active_reservations;
+    snapshot->waiting_requests = state.waiting_requests;
+    // Old callers supply only the v1 memory prefix. Never touch a field that
+    // is not wholly covered by their allocation (including intermediate sizes).
+#define GJXL_STORE_CPU_SNAPSHOT(field) \
+    if (caller_size >= offsetof(GJXLExecutionDomainSnapshot, field) + sizeof(snapshot->field)) \
+      snapshot->field = state.field
+    GJXL_STORE_CPU_SNAPSHOT(effective_cpu_participant_limit);
+    GJXL_STORE_CPU_SNAPSHOT(active_cpu_participants);
+    GJXL_STORE_CPU_SNAPSHOT(reserved_cpu_workers);
+    GJXL_STORE_CPU_SNAPSHOT(suspended_cpu_workers);
+    GJXL_STORE_CPU_SNAPSHOT(waiting_cpu_callers);
+    GJXL_STORE_CPU_SNAPSHOT(peak_cpu_participants);
+    GJXL_STORE_CPU_SNAPSHOT(peak_cpu_protected_slots);
+#undef GJXL_STORE_CPU_SNAPSHOT
+    return GJXL_OK;
+  });
+}
 
 GJXLResult gjxl_context_options_init(
   GJXLContextOptions* options, size_t caller_size) noexcept {
@@ -289,9 +399,16 @@ GJXLResult gjxl_context_create(
     auto candidate = std::make_unique<GJXLContext>();
     candidate->backend = backend;
     candidate->cpu_thread_count = cpu_thread_count;
+    if (options != nullptr && options->struct_size >= kContextOptionsDomainSize &&
+        options->execution_domain != nullptr)
+      candidate->execution_domain = options->execution_domain->value;
     *context = candidate.release();
     return GJXL_OK;
   });
+}
+
+GJXLResult gjxl_trim_preparation_cache(void) noexcept {
+  return Guard([] { return TranslateStatus(gjxl::TrimVarDctPreparationCache()); });
 }
 
 void gjxl_context_destroy(GJXLContext* context) noexcept {
@@ -354,35 +471,96 @@ GJXLResult gjxl_encode(
       .row_stride_bytes = image->row_stride_bytes,
       .format = packed_format,
     };
-    gjxl::Image3FBuffer linear_rgb;
-    result = TranslateStatus(
-      gjxl::c_api_internal::ConvertPackedSrgbToLinearRgb(
-        packed_image, &linear_rgb));
-    if (result != GJXL_OK) {
-      return result;
+    {
+      // RGBA validation scans alpha before memory admission. Account that CPU
+      // work, then release the slot before waiting for a memory reservation.
+      gjxl::thread_budget_internal::CpuExecutionScope validation_cpu;
+      result = TranslateStatus(validation_cpu.Start(context->execution_domain, context->cpu_thread_count));
+      if (result != GJXL_OK) return result;
+      result = TranslateStatus(gjxl::c_api_internal::ValidatePackedSrgbImage(packed_image));
+      if (result != GJXL_OK) return result;
     }
-
     gjxl::VarDctEncodingOptions encoding_options;
     encoding_options.butteraugli_target = options->distance;
     encoding_options.effort = options->effort;
     encoding_options.compression_mode = compression_mode;
     encoding_options.backend = context->backend;
     encoding_options.cpu_thread_count = context->cpu_thread_count;
-    std::vector<uint8_t> codestream;
-    result = TranslateStatus(gjxl::EncodeLinearRgbVarDctCodestream(
-      linear_rgb.const_view(), encoding_options, &codestream));
-    if (result != GJXL_OK) {
-      return result;
+    encoding_options.execution_domain = context->execution_domain;
+    gjxl::codestream_internal::WorkflowAdmission admission;
+    size_t admission_bytes = 0;
+    if (gjxl::resource_budget_internal::CurrentResourceContext().reservation == nullptr) {
+      gjxl::codestream_internal::WorkflowStoragePlan plan;
+      result = TranslateStatus(gjxl::codestream_internal::PlanWorkflowAdmission(
+          {image->width, image->height},
+          {encoding_options, gjxl::codestream_internal::WorkflowStorageRoute::kCpu,
+           gjxl::codestream_internal::WorkflowStorageAdapter::kPackedSrgbC},
+          nullptr, false, true, &plan));
+      if (result != GJXL_OK)
+        return result;
+      admission_bytes = plan.working.peak_bytes;
     }
+    result = TranslateStatus(admission.Start(admission_bytes, context->execution_domain));
+    if (result != GJXL_OK)
+      return result;
+    gjxl::thread_budget_internal::CpuExecutionScope cpu_execution;
+    result = TranslateStatus(cpu_execution.Start(context->execution_domain, context->cpu_thread_count));
+    if (result != GJXL_OK) return result;
+    const gjxl::resource_budget_internal::ManagedHostScope managed_input(
+      gjxl::resource_budget_internal::ResourceClass::kInput);
+    gjxl::Image3FBuffer linear_rgb;
+    gjxl::codestream_internal::CodestreamBuffer codestream;
+    if (context->backend == gjxl::VarDctBackendPreference::kMetal) {
+      gjxl::codestream_internal::ResidentEncodingInput resident_input;
+      result = TranslateStatus(gjxl::codestream_internal::PrepareResidentEncodingInput(
+        {image->width, image->height}, encoding_options,
+        +[](const void* context, gjxl::Image3FView destination) {
+          return gjxl::c_api_internal::ConvertValidatedPackedSrgbInto(
+            *static_cast<const gjxl::c_api_internal::PackedSrgbImageView*>(context),
+            destination);
+        },
+        &packed_image, &resident_input));
+      if (result != GJXL_OK)
+        return result;
+      result = TranslateStatus(
+        gjxl::codestream_internal::EncodeResidentLinearRgbVarDctCodestreamOwned(
+          std::move(resident_input), encoding_options, &codestream));
+    } else {
+      result =
+        TranslateStatus(gjxl::c_api_internal::ConvertValidatedPackedSrgbToLinearRgb(
+          packed_image, &linear_rgb));
+      if (result != GJXL_OK)
+        return result;
+      result =
+        TranslateStatus(gjxl::codestream_internal::EncodeLinearRgbVarDctCodestreamOwned(
+          linear_rgb.const_view(), encoding_options, &codestream));
+    }
+    if (result != GJXL_OK)
+      return result;
     if (codestream.empty()) {
       return Fail(GJXL_ERROR_INTERNAL,
                   "Encoder returned an empty codestream");
     }
 
+    // Keep both allocations charged through the C publication copy. Member
+    // lifetime order frees the array before its ticket on any failure.
+    gjxl::resource_budget_internal::ResourceAllocation publication;
+    {
+      const gjxl::resource_budget_internal::ResourceClassScope resource_class(
+        gjxl::resource_budget_internal::ResourceClass::kRetainedResult);
+      result = TranslateStatus(gjxl::resource_budget_internal::PrepareResourceAllocation(
+        codestream.size(), codestream.size(), &publication));
+    }
+    if (result != GJXL_OK) return result;
+    gjxl::resource_budget_internal::ManagedHostAllocationCheckpointForTest(
+      gjxl::resource_budget_internal::ResourceClass::kRetainedResult);
     auto data = std::make_unique<uint8_t[]>(codestream.size());
+    result = TranslateStatus(publication.Commit());
+    if (result != GJXL_OK) return result;
     std::memcpy(data.get(), codestream.data(), codestream.size());
     output->data = data.release();
     output->size = codestream.size();
+    publication.Reset();
     return GJXL_OK;
   });
 }

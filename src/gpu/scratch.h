@@ -12,6 +12,30 @@
 
 namespace gjxl {
 
+struct DevicePlaneLayout {
+  DeviceElementType element_type = DeviceElementType::kF32;
+  Extent2D extent;
+  size_t row_stride = 0;
+  size_t offset_bytes = 0;
+  size_t size_bytes = 0;
+
+  bool operator==(const DevicePlaneLayout&) const = default;
+};
+
+/// Checked layout construction, heap-allocation-free on success, used by arena
+/// slicing. A successful append commits both the plane and the new capacity;
+/// failure leaves both unchanged. This owns neither views nor backing memory.
+class DeviceScratchLayoutPlan {
+public:
+  explicit DeviceScratchLayoutPlan(size_t initial_bytes = 0) : capacity_bytes_(initial_bytes) {}
+  [[nodiscard]] Status AddPlane(
+    DeviceElementType element_type, Extent2D extent, size_t row_stride,
+    size_t alignment_bytes, DevicePlaneLayout* plane);
+  [[nodiscard]] size_t capacity_bytes() const noexcept { return capacity_bytes_; }
+private:
+  size_t capacity_bytes_ = 0;
+};
+
 /// One reusable device allocation with checked, non-owning slice planning.
 class DeviceScratchArena {
 public:
@@ -35,6 +59,11 @@ public:
     size_t row_stride,
     size_t alignment_bytes,
     DevicePlaneView* view);
+
+  /// Binds a precomputed slice without allocation. Validates its byte size and
+  /// backing bounds; layout/peak usage become the maximum bound end. Planning
+  /// owns ordering/non-overlap, and borrowed aliases do not need another slice.
+  [[nodiscard]] Status BindPlane(const DevicePlaneLayout& plane, DevicePlaneView* view);
 
   [[nodiscard]] size_t capacity_bytes() const noexcept {
     return capacity_bytes_;

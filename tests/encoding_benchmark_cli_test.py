@@ -391,6 +391,18 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         for submission in sample["submissions"]:
             self.assertEqual(submission["invocation"], 0)
             self.assertGreater(submission["command_buffer_gpu_nanoseconds"], 0)
+        psycho_phases = ["opsin", "low_medium", "high_x", "high_y",
+                         "medium_b", "suppress_x", "ultra_x", "ultra_y"]
+        reference = sample["submissions"][0]["stages"]
+        self.assertEqual([stage["stage_id"] for stage in reference], [
+            f"frontend.prepare_aq.reference.{scale}.{phase}"
+            for scale in ("main", "sub") for phase in psycho_phases + ["mask"]
+        ])
+        self.assertEqual([len(stage["dispatches"]) for stage in reference],
+                         [1, 1, 2, 2, 2, 1, 2, 2, 3,
+                          4, 1, 2, 2, 2, 1, 2, 2, 3])
+        self.assertTrue(all(stage["group_id"] == "frontend.prepare_aq.reference"
+                            for stage in reference))
         wall_stages = {
             (stage["stage_id"], stage["kind"]): stage
             for stage in sample["wall_stages"]
@@ -417,6 +429,16 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         )
         self.assertGreater(submission["command_buffer_gpu_nanoseconds"], 0)
         stages = submission["stages"]
+        for iteration in {stage["iteration"] for stage in stages
+                          if stage["group_id"] == "butteraugli.psycho.main"}:
+            for scale in ("main", "sub"):
+                parts = [stage for stage in stages
+                         if stage["group_id"] == f"butteraugli.psycho.{scale}"
+                         and stage["iteration"] == iteration]
+                self.assertEqual([stage["stage_id"] for stage in parts],
+                    [f"butteraugli.psycho.{scale}.{phase}" for phase in psycho_phases])
+                self.assertEqual([len(stage["dispatches"]) for stage in parts],
+                    [4 if scale == "sub" else 1, 1, 2, 2, 2, 1, 2, 2])
         reconstruction_stages = {
             stage["stage_id"]
             for stage in stages
@@ -430,7 +452,12 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                 for stage in reconstruction_stages
             )
         )
-        self.assertIn("aq.epf.pass_1", {stage["stage_id"] for stage in stages})
+        self.assertFalse(any(stage.startswith("aq.reconstruction.scatter.")
+                             for stage in reconstruction_stages))
+        self.assertTrue(
+            {"aq.epf.pass_1", "aq.epf_linear.pass_1"}
+            & {stage["stage_id"] for stage in stages}
+        )
         self.assertIn(
             "butteraugli.malta.main", {stage["stage_id"] for stage in stages}
         )
@@ -479,34 +506,66 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                 for stage in ac_stages
             )
         )
-        self.assertTrue(all(len(stage["dispatches"]) == 3 for stage in ac_stages))
         for stage in ac_stages:
             kernel_ids = {
                 dispatch["kernel_id"] for dispatch in stage["dispatches"]
             }
+            candidate_kernel = next((kernel for kernel in kernel_ids
+                                     if kernel.endswith("_candidate_loss_parallel")), None)
+            if candidate_kernel:
+                shape = stage["stage_id"].removeprefix("frontend.ac_strategy.")
+                self.assertIn(shape, ("dct16", "dct16x8", "dct8x16"))
+                self.assertEqual(candidate_kernel,
+                                 f"gjxl_ac_strategy_{shape}_candidate_loss_parallel")
+                self.assertEqual(len(stage["dispatches"]), 2)
+                self.assertEqual(kernel_ids, {
+                    candidate_kernel,
+                    "gjxl_ac_strategy_cost_from_loss",
+                })
+                continue
+            self.assertEqual(len(stage["dispatches"]), 3)
             self.assertNotIn("gjxl_ac_strategy_gather", kernel_ids)
-            self.assertEqual(
-                sum(
-                    kernel_id.startswith("gjxl_ac_strategy_dct")
-                    and kernel_id.endswith("_forward_fused")
-                    for kernel_id in kernel_ids
-                ),
-                1,
-            )
+            shape = stage["stage_id"].removeprefix("frontend.ac_strategy.")
+            forward, inverse, finalizer = stage["dispatches"]
+            prefix = f"gjxl_ac_strategy_{shape}"
+            allowed_forward = {prefix + "_forward_fused"}
+            if shape in {"dct32", "dct32x16", "dct16x32"}:
+                allowed_forward.add(prefix + "_forward_grouped")
+            self.assertIn(forward["kernel_id"], allowed_forward)
+            grouped = forward["kernel_id"].endswith("_forward_grouped")
+            workers = {
+                "dct8": 32, "dct16": 64, "dct32": 128,
+                "dct16x8": 64, "dct8x16": 32,
+                "dct32x16": 128, "dct16x32": 64,
+            }[shape]
+            candidates = finalizer["grid"][0]
+            self.assertEqual(forward["kind"], "threadgroups")
+            self.assertEqual(forward["grid"],
+                             [candidates * (1 if grouped else 3), 1, 1])
+            self.assertEqual(forward["threads_per_threadgroup"],
+                             [workers * (3 if grouped else 1), 1, 1])
+            self.assertEqual(inverse["kind"], "threadgroups")
+            self.assertEqual(inverse["grid"], [candidates * 3, 1, 1])
+            self.assertEqual(inverse["threads_per_threadgroup"],
+                             [{"dct32": 512, "dct16x32": 256}.get(shape, workers),
+                              1, 1])
+            self.assertEqual(finalizer["kind"], "threads")
+            self.assertEqual(finalizer["kernel_id"],
+                             "gjxl_ac_strategy_cost_from_loss")
             self.assertNotIn("gjxl_ac_strategy_residual", kernel_ids)
             inverse_suffix = (
-                "_residual_inverse_tuned"
+                "_residual_inverse_tuned_loss"
                 if stage["stage_id"]
                 in {
                     "frontend.ac_strategy.dct16x32",
                     "frontend.ac_strategy.dct32",
                 }
-                else "_residual_inverse_compact"
+                else "_residual_inverse_compact_loss"
             )
             self.assertEqual(
                 sum(name.endswith(inverse_suffix) for name in kernel_ids), 1
             )
-            self.assertIn("gjxl_ac_strategy_cost", kernel_ids)
+            self.assertIn("gjxl_ac_strategy_cost_from_loss", kernel_ids)
 
     def test_ac_residual_inverse_modes_select_expected_kernels(
         self,
@@ -558,14 +617,34 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                             inverse_suffix = "_residual_inverse_tuned"
                         else:
                             inverse_suffix = "_residual_inverse_compact"
+                    if mode == "fused-tuned":
+                        inverse_suffix += "_loss"
                     kernel_ids = {
                         dispatch["kernel_id"]
                         for dispatch in stage["dispatches"]
                     }
+                    candidate_kernel = next((kernel for kernel in kernel_ids
+                        if kernel.endswith("_candidate_loss_parallel")), None)
+                    if candidate_kernel:
+                        self.assertEqual(mode, "fused-tuned")
+                        shape = stage["stage_id"].removeprefix("frontend.ac_strategy.")
+                        self.assertIn(shape, ("dct16", "dct16x8", "dct8x16"))
+                        self.assertEqual(candidate_kernel,
+                            f"gjxl_ac_strategy_{shape}_candidate_loss_parallel")
+                        self.assertEqual(len(stage["dispatches"]), 2)
+                        self.assertEqual(kernel_ids, {
+                            candidate_kernel,
+                            "gjxl_ac_strategy_cost_from_loss",
+                        })
+                        continue
                     self.assertEqual(len(stage["dispatches"]), dispatch_count)
                     self.assertEqual(
                         sum(name.endswith(inverse_suffix) for name in kernel_ids),
                         1,
+                    )
+                    self.assertIn(
+                        "gjxl_ac_strategy_cost_from_loss" if mode == "fused-tuned"
+                        else "gjxl_ac_strategy_cost", kernel_ids
                     )
                     if mode == "split":
                         self.assertIn("gjxl_ac_strategy_residual", kernel_ids)

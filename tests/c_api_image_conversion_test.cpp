@@ -168,6 +168,66 @@ bool CheckPaddedRgbAndRgba() {
   return true;
 }
 
+bool CheckCallerOwnedPlanes() {
+  constexpr gjxl::Extent2D extent{256, 2};
+  constexpr size_t stride = 263;
+  for (size_t channels : {size_t{3}, size_t{4}}) {
+    const size_t packed_stride = extent.width * channels + 7;
+    std::vector<uint8_t> packed(packed_stride * extent.height, 0);
+    for (size_t y = 0; y < extent.height; ++y) {
+      for (size_t x = 0; x < extent.width; ++x) {
+        for (size_t c = 0; c < 3; ++c)
+          packed[y * packed_stride + x * channels + c] =
+            static_cast<uint8_t>(x + y * 11 + c * 73);
+        if (channels == 4)
+          packed[y * packed_stride + x * channels + 3] = 255;
+      }
+    }
+    const PackedSrgbImageView input{packed.data(),
+                                    packed.size(),
+                                    256,
+                                    2,
+                                    packed_stride,
+                                    channels == 3 ? PackedPixelFormat::kRgb8Srgb
+                                                  : PackedPixelFormat::kRgba8Srgb};
+    if (!gjxl::c_api_internal::ValidatePackedSrgbImage(input).ok())
+      return false;
+    std::array<std::vector<float>, 3> planes;
+    gjxl::Image3FView output;
+    for (size_t c = 0; c < 3; ++c) {
+      planes[c].assign(stride * extent.height + 2, -123.0f);
+      output.plane[c] = {planes[c].data() + 1, extent, stride};
+    }
+    auto invalid = output;
+    invalid.plane[1].extent.width -= 1;
+    if (gjxl::c_api_internal::ConvertValidatedPackedSrgbInto(input, invalid).code() !=
+        StatusCode::kInvalidArgument)
+      return false;
+    for (const auto& plane : planes)
+      for (float value : plane)
+        if (value != -123.0f)
+          return false;
+    if (!gjxl::c_api_internal::ConvertValidatedPackedSrgbInto(input, output).ok())
+      return false;
+    for (size_t c = 0; c < 3; ++c) {
+      if (planes[c].front() != -123.0f || planes[c].back() != -123.0f)
+        return false;
+      for (size_t y = 0; y < extent.height; ++y) {
+        for (size_t x = 0; x < stride; ++x) {
+          const float expected =
+            x < extent.width
+              ? ReferenceSrgbToLinear(packed[y * packed_stride + x * channels + c])
+              : -123.0f;
+          if (std::bit_cast<uint32_t>(planes[c][1 + y * stride + x]) !=
+              std::bit_cast<uint32_t>(expected))
+            return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 bool CheckSingleRowIgnoresUnusedStride() {
   constexpr std::array<uint8_t, 3> pixels{64, 128, 255};
   const PackedSrgbImageView view{
@@ -300,7 +360,7 @@ bool CheckInvalidViews() {
 int main() {
   if (!CheckKnownTransferPoints() || !CheckPaddedRgbAndRgba() ||
       !CheckSingleRowIgnoresUnusedStride() || !CheckNonOpaqueAlpha() ||
-      !CheckInvalidViews()) {
+      !CheckInvalidViews() || !CheckCallerOwnedPlanes()) {
     return 1;
   }
   return 0;

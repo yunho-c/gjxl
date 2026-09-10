@@ -20,10 +20,12 @@
 #include <utility>
 
 #include "core/ac_strategy.h"
+#include "core/resource_context.h"
 #include "core/status.h"
 #include "gpu/backend.h"
 #include "gpu/image.h"
 #include "gpu/metal/metal_backend.h"
+#include "gpu/metal/metal_submission_storage_plan.h"
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/aq_evaluation_internal.h"
@@ -36,6 +38,8 @@
 namespace gjxl::metal_internal {
 
 class MetalBackend;
+struct MetalBackendRegistry;
+struct MetalButteraugliScratch;
 
 using MetalComputeEncodeCallback = void (*)(
   MetalBackend&,
@@ -50,6 +54,26 @@ struct MetalProfiledComputeStage {
   MetalComputeEncodeCallback encode = nullptr;
   const void* context = nullptr;
 };
+
+// Stage contexts are borrowed until synchronous command recording returns.
+// Never let an append reallocate their array and invalidate earlier pointers.
+// Reserve both fresh arrays from the shared plan before using this helper.
+template <typename Context>
+void AppendMetalProfileStage(
+    resource_budget_internal::ManagedVector<Context>& contexts,
+    resource_budget_internal::ManagedVector<MetalProfiledComputeStage>& stages,
+    const Context& context, MetalProfiledComputeStage stage) {
+  static_assert(std::is_nothrow_copy_constructible_v<Context>);
+  if (contexts.size() != stages.size() ||
+      contexts.size() == contexts.capacity() ||
+      stages.size() == stages.capacity()) {
+    throw resource_budget_internal::ManagedAllocationFailure(
+      Status::ResourcePlanExceeded("Metal profile stage capacity exhausted"));
+  }
+  contexts.push_back(context);
+  stage.context = &contexts.back();
+  stages.push_back(stage);
+}
 
 void DispatchMetalThreads(
   MTL::ComputeCommandEncoder* encoder,
@@ -84,6 +108,8 @@ struct TransformPipeline {
 struct TransformPipelinePair {
   TransformPipeline forward;
   TransformPipeline inverse;
+  TransformPipeline forward_image;
+  TransformPipeline inverse_image;
 };
 
 using TransformPipelineRegistry =
@@ -112,6 +138,7 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_gradient;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_fuzzy_erosion;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_modulation;
+  NS::SharedPtr<MTL::ComputePipelineState> validate_initial_mask;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_sort_prepare;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_sort_step;
   NS::SharedPtr<MTL::ComputePipelineState> initial_quant_capture_median;
@@ -128,12 +155,20 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> gather_transform_pixels;
   NS::SharedPtr<MTL::ComputePipelineState> select_adjusted_quantization;
   NS::SharedPtr<MTL::ComputePipelineState> encode_reconstruction_coefficients;
+  NS::SharedPtr<MTL::ComputePipelineState> encode_scored_coefficients;
+  NS::SharedPtr<MTL::ComputePipelineState> encode_final_coefficients;
+  NS::SharedPtr<MTL::ComputePipelineState> count_coefficient_zeros;
   NS::SharedPtr<MTL::ComputePipelineState> encode_frame_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> scatter_reconstructed_pixels;
   NS::SharedPtr<MTL::ComputePipelineState> quantization_probe;
   NS::SharedPtr<MTL::ComputePipelineState> adjustment_probe;
   NS::SharedPtr<MTL::ComputePipelineState> gaborish;
   NS::SharedPtr<MTL::ComputePipelineState> epf;
+  // The measured Apple-family-9 table is resolved once per prepared image.
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 3> epf_direct;
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 3> epf_tiled;
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 3> epf_linear_direct;
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 3> epf_linear_tiled;
   NS::SharedPtr<MTL::ComputePipelineState> opsin_to_linear;
 };
 
@@ -141,13 +176,18 @@ struct AcStrategyPipelines {
   struct FusedStages {
     NS::SharedPtr<MTL::ComputePipelineState> forward;
     NS::SharedPtr<MTL::ComputePipelineState> residual_inverse;
+    NS::SharedPtr<MTL::ComputePipelineState> candidate_loss;
     NS::UInteger forward_threads_per_threadgroup = 0;
     NS::UInteger residual_inverse_threads_per_threadgroup = 0;
+    NS::UInteger candidate_loss_threads_per_threadgroup = 0;
+    bool forward_channels_grouped = false;
+    bool reduces_loss = false;
   };
 
   NS::SharedPtr<MTL::ComputePipelineState> gather;
   NS::SharedPtr<MTL::ComputePipelineState> residual;
   NS::SharedPtr<MTL::ComputePipelineState> cost;
+  NS::SharedPtr<MTL::ComputePipelineState> cost_from_loss;
   std::array<FusedStages, kAcStrategyCount> fused;
   NS::UInteger gather_threads_per_threadgroup = 0;
 };
@@ -209,6 +249,7 @@ struct ButteraugliPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> crop;
   NS::SharedPtr<MTL::ComputePipelineState> compose;
   NS::SharedPtr<MTL::ComputePipelineState> resident_reduction;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_reduction_small;
   NS::SharedPtr<MTL::ComputePipelineState> maximum_reduction;
 };
 
@@ -219,8 +260,10 @@ public:
   MetalBuffer(
     NS::SharedPtr<MTL::Buffer> buffer,
     BackendId backend_id,
-    size_t size_bytes)
+    size_t size_bytes,
+    resource_budget_internal::ResourceAllocation allocation)
     : DeviceBuffer(BackendKind::kMetal, backend_id, size_bytes),
+      allocation_(std::move(allocation)),
       buffer_(std::move(buffer)) {}
 
   ~MetalBuffer() override = default;
@@ -241,7 +284,16 @@ public:
     return buffer_->contents();
   }
 
+  [[nodiscard]] resource_budget_internal::ResourceAllocation& allocation() noexcept {
+    return allocation_;
+  }
+
+  // Set at scratch acquisition, checked at return under the backend cache lock.
+  uint64_t cache_generation = 0;
+
 private:
+  // Reverse member destruction releases the Metal backing before its charge.
+  resource_budget_internal::ResourceAllocation allocation_;
   NS::SharedPtr<MTL::Buffer> buffer_;
 };
 
@@ -269,9 +321,17 @@ public:
     AqPipelines aq_pipelines,
     ButteraugliPipelines butteraugli_pipelines,
     bool test_fail_submission,
-    bool test_fail_completion);
+    bool test_fail_completion,
+    size_t butteraugli_cache_bytes);
 
-  ~MetalBackend() override = default;
+  ~MetalBackend() override;
+
+  Status TrimPreparationCache() override;
+  Status TrimPreparationCacheForDomain(
+    const resource_budget_internal::ResourceBudget& budget);
+  Status EmptyButteraugliCacheForTesting();
+  size_t ButteraugliCacheBytesForTesting();
+  size_t PreparationCacheBytesForTesting();
 
   [[nodiscard]] BackendKind kind() const noexcept override;
   [[nodiscard]] std::string_view name() const noexcept override;
@@ -370,17 +430,25 @@ public:
     bool fail_submission,
     bool fail_completion) noexcept;
 
+  void ArmNextAllocationFailureForTest() noexcept {
+    test_fail_next_allocation_.store(true, std::memory_order_relaxed);
+  }
+
 private:
+  friend Status ComputeAcSubmissionStoragePlan(
+    const AcSubmissionStorageOptions&, AcSubmissionStoragePlan*);
   friend class MetalPreparedAqEvaluation;
   friend class MetalPreparedResidentInput;
   friend class MetalPreparedDeviceButteraugli;
+  friend struct MetalCacheAdmissionTestAccess;
   friend Status EmptyMetalAqScratchArenasForTesting(GpuBackend& backend);
 
   Status PrepareDeviceButteraugliImpl(
-    const DeviceButteraugliPrepareDescriptor& descriptor,
+    const DeviceButteraugliPrepareDescriptor &descriptor,
     gpu_profile_internal::GpuProfilingMode mode,
-    std::unique_ptr<PreparedDeviceButteraugli>* prepared,
-    gpu_profile_internal::GpuExecutionProfile* profile);
+    std::unique_ptr<PreparedDeviceButteraugli> *prepared,
+    gpu_profile_internal::GpuExecutionProfile *profile,
+    const MetalButteraugliScratch *borrowed_scratch = nullptr);
 
   Status PrepareAqEvaluationImpl(
     const AqEvaluationPreparation& preparation,
@@ -398,6 +466,13 @@ private:
     MetalAqScratchArena kind,
     DeviceScratchArena arena,
     bool reusable) noexcept;
+
+  Status AcquireButteraugliArena(
+    size_t required_capacity_bytes, DeviceScratchArena* arena,
+    uint64_t* generation);
+  void ReleaseButteraugliArena(
+    DeviceScratchArena arena, uint64_t generation, bool reusable) noexcept;
+  void DropButteraugliCacheLocked() noexcept;
 
   Status EmptyAqScratchArenasForTesting();
   struct TransformEncodeContext {
@@ -616,11 +691,17 @@ private:
   bool test_fail_completion_ = false;
   std::atomic<bool> test_fail_next_submission_{false};
   std::atomic<bool> test_fail_next_completion_{false};
-  std::mutex aq_scratch_pool_mutex_;
+  std::atomic<bool> test_fail_next_allocation_{false};
+  std::mutex preparation_cache_mutex_;
   std::array<
     std::optional<DeviceScratchArena>,
     static_cast<size_t>(MetalAqScratchArena::kCount)> idle_aq_scratch_;
+  const size_t butteraugli_cache_limit_;
+  std::optional<DeviceScratchArena> idle_butteraugli_scratch_;
+  uint64_t preparation_cache_generation_ = 0;
   std::string name_;
+  // Keep the registry alive through backend teardown, including static teardown.
+  std::shared_ptr<MetalBackendRegistry> registry_;
 };
 
 Status CreateAcStrategyPipelines(

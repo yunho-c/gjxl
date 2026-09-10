@@ -3,15 +3,46 @@
 
 #pragma once
 
+#include <bit>
 #include <cstdint>
 #include <span>
 #include <vector>
+
+#include "codestream/storage.h"
 
 #include "codestream/entropy.h"
 
 namespace gjxl::codestream_internal {
 
 struct EntropyWorkProfile;
+
+/// Converts a value after the caller has established config.valid(). The
+/// value itself is unrestricted: every uint32_t has a HybridUint encoding.
+[[nodiscard]] constexpr HybridUintToken EncodeHybridUintValidated(
+  uint32_t value, HybridUintConfig config) noexcept {
+  HybridUintToken result;
+  const uint32_t split_token = uint32_t{1} << config.split_exponent;
+  if (value < split_token) {
+    result.symbol = value;
+  } else {
+    const uint32_t exponent =
+      31u - static_cast<uint32_t>(std::countl_zero(value));
+    const uint32_t mantissa = value - (uint32_t{1} << exponent);
+    result.symbol = split_token +
+      ((exponent - config.split_exponent) <<
+       (config.msb_in_token + config.lsb_in_token)) +
+      ((mantissa >> (exponent - config.msb_in_token)) <<
+       config.lsb_in_token) +
+      (mantissa & ((uint32_t{1} << config.lsb_in_token) - 1));
+    result.extra_bit_count = static_cast<uint8_t>(
+      exponent - config.msb_in_token - config.lsb_in_token);
+    const uint64_t mask =
+      (uint64_t{1} << result.extra_bit_count) - 1;
+    result.extra_bits = static_cast<uint32_t>(
+      (value >> config.lsb_in_token) & mask);
+  }
+  return result;
+}
 
 struct WeightedValue {
   uint32_t value = 0;
@@ -39,10 +70,10 @@ struct PreparedFixedAnsCluster {
 /// collecting and sorting every token a second time.
 struct PreparedEntropyClusters {
   uint32_t context_count = 0;
-  std::vector<uint8_t> context_map;
-  std::vector<std::vector<WeightedValue>> values;
+  codestream_internal::Storage<uint8_t> context_map;
+  codestream_internal::Storage<codestream_internal::Storage<WeightedValue>> values;
   HybridUintConfig fixed_uint_config = kDefaultHybridUintConfig;
-  std::vector<PreparedFixedAnsCluster> fixed_ans_clusters;
+  codestream_internal::Storage<PreparedFixedAnsCluster> fixed_ans_clusters;
 
   friend bool operator==(
     const PreparedEntropyClusters&,
@@ -53,12 +84,30 @@ struct PreparedEntropyClusters {
 /// large inputs count the bounded dense prefix and sort only sparse values.
 [[nodiscard]] Status AggregateEntropyValues(
   std::span<uint32_t> values,
-  std::vector<WeightedValue>* aggregated);
+  codestream_internal::Storage<WeightedValue>* aggregated);
+
+/// Compatibility adapter; managed callers select the non-template overload.
+template <typename Allocator>
+[[nodiscard]] Status AggregateEntropyValues(
+  std::span<uint32_t> values,
+  std::vector<WeightedValue, Allocator>* aggregated) {
+  return codestream_internal::LegacyStorageOutput(
+    aggregated, [&](auto* storage) { return AggregateEntropyValues(values, storage); });
+}
 
 /// Owning convenience overload that releases the raw values after aggregation.
 [[nodiscard]] Status AggregateEntropyValues(
+  codestream_internal::Storage<uint32_t> values,
+  codestream_internal::Storage<WeightedValue>* aggregated);
+
+/// Compatibility adapter; managed callers select the non-template overload.
+template <typename Allocator>
+[[nodiscard]] Status AggregateEntropyValues(
   std::vector<uint32_t> values,
-  std::vector<WeightedValue>* aggregated);
+  std::vector<WeightedValue, Allocator>* aggregated) {
+  return codestream_internal::LegacyStorageOutput(
+    aggregated, [&](auto* storage) { return AggregateEntropyValues(std::span<uint32_t>(values), storage); });
+}
 
 /// Builds the prefix model and retains its exact aggregated cluster values.
 /// All outputs remain unchanged on failure.

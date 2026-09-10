@@ -51,6 +51,8 @@ Status ApplyLoopFilters(
       inverse_sigma,
       options.epf_options,
       output);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate loop-filter scratch storage");

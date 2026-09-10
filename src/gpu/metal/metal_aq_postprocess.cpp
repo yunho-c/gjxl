@@ -15,12 +15,15 @@
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
+#include "core/managed_allocator.h"
 
 #define setComputePipelineState(state)                                    \
   setComputePipelineState(state);                                         \
   ::gjxl::metal_internal::RecordMetalComputePipelineState(state)
 
 namespace gjxl::metal_internal {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 template <typename T> bool ValidHostPlaneLayout(PlaneView<T> plane) noexcept {
@@ -103,7 +106,7 @@ void BindPlane(MTL::ComputeCommandEncoder *encoder, DevicePlaneView plane,
 }
 
 Status CopyPlane(MetalBackend &backend, DevicePlaneView source,
-                 std::vector<float> *destination) {
+                 ManagedVector<float> *destination) {
   return backend.CopyDeviceToHost(*source.buffer, destination->data(),
                                   destination->size() * sizeof(float),
                                   source.offset_bytes);
@@ -123,8 +126,23 @@ MetalPreparedAqEvaluation::FinalFilteredImage() const noexcept {
                                                final_filter_scratch_index_)];
 }
 
+bool MetalPreparedAqEvaluation::IsFinalEpfPass(uint32_t pass) const noexcept {
+  const uint32_t iterations = options_.profile.loop_filter.epf_options.iterations;
+  return iterations != 0 && pass == (iterations == 1 ? 1u : 2u);
+}
+
+bool MetalPreparedAqEvaluation::CanFuseFinalEpf() const noexcept {
+  const uint32_t iterations = options_.profile.loop_filter.epf_options.iterations;
+  return iterations != 0 &&
+    epf_dispatch_[iterations == 1 ? 1 : 2].linear_pipeline != nullptr;
+}
+
 void MetalPreparedAqEvaluation::EncodePostprocess(
-    MetalBackend &backend, MTL::ComputeCommandEncoder *encoder) const {
+    MetalBackend &backend, MTL::ComputeCommandEncoder *encoder,
+    bool linear_only) const {
+  // Only the resident Butteraugli policy consumes linear RGB exclusively.
+  // Diagnostics and maximum-error evaluation still materialize filtered XYB.
+  const bool fuse_linear = linear_only && CanFuseFinalEpf();
   if (options_.profile.loop_filter.gaborish) {
     EncodeGaborish(backend, encoder);
   }
@@ -133,10 +151,11 @@ void MetalPreparedAqEvaluation::EncodePostprocess(
     options_.profile.loop_filter.epf_options.iterations;
   const uint32_t first_pass = iterations == 3 ? 0 : 1;
   for (uint32_t pass = first_pass; pass < first_pass + iterations; ++pass) {
-    EncodeEpfPass(backend, encoder, pass);
+    EncodeEpfPass(backend, encoder, pass,
+                  fuse_linear && IsFinalEpfPass(pass));
   }
 
-  EncodeOpsinToLinear(backend, encoder);
+  if (!fuse_linear) EncodeOpsinToLinear(backend, encoder);
 }
 
 void MetalPreparedAqEvaluation::EncodeGaborish(
@@ -152,7 +171,7 @@ void MetalPreparedAqEvaluation::EncodeGaborish(
 
 void MetalPreparedAqEvaluation::EncodeEpfPass(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
-    uint32_t pass) const {
+    uint32_t pass, bool linear_output) const {
   const uint32_t iterations =
     options_.profile.loop_filter.epf_options.iterations;
   const uint32_t first_pass = iterations == 3 ? 0 : 1;
@@ -163,14 +182,27 @@ void MetalPreparedAqEvaluation::EncodeEpfPass(
     ? reconstructed_
     : filter_scratch_[(filter_stage - 1) % 2];
   const std::array<DevicePlaneView, 3> output =
-    filter_scratch_[filter_stage % 2];
-  encoder->setComputePipelineState(backend.aq_pipelines_.epf.get());
+    linear_output ? reconstructed_linear_ : filter_scratch_[filter_stage % 2];
+  const EpfDispatch& dispatch = epf_dispatch_[pass];
+  encoder->setComputePipelineState(
+    linear_output ? dispatch.linear_pipeline : dispatch.pipeline);
   BindImage(encoder, current, 0);
   BindPlane(encoder, inverse_sigma_, 3);
   BindImage(encoder, output, 4);
   BindPlane(encoder, reconstruction_error_, 7);
-  encoder->setBytes(&epf_params_[pass], sizeof(epf_params_[pass]), 8);
-  MetalBackend::DispatchPlane(encoder, source_extent_);
+  AqEpfParams params = epf_params_[pass];
+  if (linear_output) {
+    params.output_stride = opsin_to_linear_params_.output_stride;
+    encoder->setBytes(&opsin_to_linear_params_.scale, sizeof(float), 9);
+  }
+  encoder->setBytes(&params, sizeof(params), 8);
+  if (dispatch.tiled) {
+    DispatchMetalThreadgroups(encoder,
+      MTL::Size((source_extent_.width + 31) / 32, (source_extent_.height + 7) / 8, 1),
+      MTL::Size(32, 4, 1));
+  } else {
+    MetalBackend::DispatchPlane(encoder, source_extent_);
+  }
 }
 
 void MetalPreparedAqEvaluation::EncodeOpsinToLinear(
@@ -244,12 +276,15 @@ Status MetalPreparedAqEvaluation::FinishPostprocess(
     result.coding_extent = coding_extent_;
     result.source_extent = source_extent_;
     for (size_t channel = 0; channel < 3; ++channel) {
-      result.reconstructed_opsin[channel] = reconstructed_readback_[channel];
-      result.filtered_opsin[channel] = filtered_readback_[channel];
-      result.reconstructed_linear[channel] = linear_readback_[channel];
+      result.reconstructed_opsin[channel].assign(reconstructed_readback_[channel].begin(), reconstructed_readback_[channel].end());
+      result.filtered_opsin[channel].assign(filtered_readback_[channel].begin(), filtered_readback_[channel].end());
+      result.reconstructed_linear[channel].assign(linear_readback_[channel].begin(), linear_readback_[channel].end());
     }
     *snapshot = std::move(result);
-  } catch (const std::bad_alloc &) {
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    CompleteOperation();
+    return failure.status();
+  } catch (const std::bad_alloc&) {
     CompleteOperation();
     return Status::OutOfMemory(
         "Unable to allocate AQ postprocess diagnostic snapshot");
@@ -374,14 +409,16 @@ Status MetalPreparedAqEvaluation::PreparePostprocessDiagnosticReadback() {
   Status status = PrepareLinearReadback();
   if (!status.ok()) return status;
   try {
-    for (std::vector<float> &plane : reconstructed_readback_) {
+    for (ManagedVector<float> &plane : reconstructed_readback_) {
       plane.resize(pixel_count_);
     }
-    for (std::vector<float> &plane : filtered_readback_) {
+    for (ManagedVector<float> &plane : filtered_readback_) {
       plane.resize(pixel_count_);
     }
     return Status::Ok();
-  } catch (const std::bad_alloc &) {
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
+  } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
         "Unable to allocate AQ postprocess diagnostic readback");
   } catch (const std::length_error &) {

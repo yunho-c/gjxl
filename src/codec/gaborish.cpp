@@ -85,6 +85,8 @@ Status ApplyGaborishInverse(
     }
 
     CopyImage(filtered.const_view(), output);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate Gaborish scratch storage");
@@ -172,6 +174,8 @@ Status ApplyGaborish(
     }
 
     CopyImage(result.const_view(), output);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate Gaborish scratch storage");

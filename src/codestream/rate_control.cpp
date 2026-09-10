@@ -4,10 +4,12 @@
 #include "codestream/rate_control_internal.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <limits>
 #include <new>
+#include <span>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -55,13 +57,16 @@ struct SearchInterval {
     : summary.score_history.back();
 }
 
+template <typename Bytes>
 [[nodiscard]] bool BetterCandidate(
   const TargetSizeSearchOptions& options,
   float candidate_target,
-  const std::vector<uint8_t>& candidate,
-  const VarDctEncodingSummary& candidate_summary,
-  const TargetSizeSearchResult& best) noexcept {
+  const Bytes& candidate,
+  const TargetSizeSummaryFor<Bytes>& candidate_summary_owner,
+  const TargetSizeSearchResultFor<Bytes>& best) noexcept {
 
+  const auto& candidate_summary = SummaryValue(candidate_summary_owner);
+  const auto& best_summary = SummaryValue(best.summary);
   if (best.codestream.empty()) {
     return true;
   }
@@ -90,17 +95,18 @@ struct SearchInterval {
     }
   }
   const double candidate_score = FinalScore(candidate_summary);
-  const double best_score = FinalScore(best.summary);
+  const double best_score = FinalScore(best_summary);
   if (candidate_score != best_score) {
     return candidate_score < best_score;
   }
-  return candidate_target < best.summary.selected_butteraugli_target;
+  return candidate_target < best_summary.selected_butteraugli_target;
 }
 
+template <typename Bytes>
 [[nodiscard]] Status ValidateSearchOptions(
   const TargetSizeSearchOptions& options,
-  const TargetSizeEvaluator& evaluator,
-  const TargetSizeSearchResult* result) {
+  const TargetSizeEvaluatorFor<Bytes>& evaluator,
+  const TargetSizeSearchResultFor<Bytes>* result) {
 
   switch (options.selection) {
     case TargetSizeSelectionPolicy::kLargestAtOrBelow:
@@ -124,21 +130,24 @@ struct SearchInterval {
   return Status::Ok();
 }
 
-/// Evaluator failures are candidate-local. An invalid successful result is a
-/// search-contract violation and remains terminal.
+/// Ordinary evaluator failures are candidate-local. A resource-plan overrun
+/// or invalid successful result is a contract violation and remains terminal.
+template <typename Bytes>
 [[nodiscard]] Status EvaluateCandidate(
   float butteraugli_target,
   const TargetSizeSearchOptions& options,
-  const TargetSizeEvaluator& evaluator,
-  TargetSizeSearchResult* best,
+  const TargetSizeEvaluatorFor<Bytes>& evaluator,
+  TargetSizeSearchResultFor<Bytes>* best,
   Status* first_failure) {
 
-  std::vector<uint8_t> codestream;
-  VarDctEncodingSummary summary;
+  Bytes codestream;
+  TargetSizeSummaryFor<Bytes> summary_owner;
+  const auto& summary = SummaryValue(summary_owner);
   ++best->attempt_count;
   Status status = evaluator(
-    butteraugli_target, &codestream, &summary);
+    butteraugli_target, &codestream, &summary_owner);
   if (!status.ok()) {
+    if (status.resource_plan_exceeded()) return status;
     ++best->failed_attempt_count;
     if (first_failure->ok()) {
       *first_failure = std::move(status);
@@ -158,15 +167,14 @@ struct SearchInterval {
   }
 
   if (BetterCandidate(
-        options, butteraugli_target, codestream, summary, *best)) {
+        options, butteraugli_target, codestream, summary_owner, *best)) {
     best->codestream = std::move(codestream);
-    best->summary = std::move(summary);
+    best->summary = std::move(summary_owner);
   }
   return Status::Ok();
 }
 
-[[nodiscard]] size_t WidestInterval(
-  const std::vector<SearchInterval>& intervals) noexcept {
+[[nodiscard]] size_t WidestInterval(std::span<const SearchInterval> intervals) noexcept {
 
   size_t best = 0;
   for (size_t index = 1; index < intervals.size(); ++index) {
@@ -184,10 +192,61 @@ struct SearchInterval {
 
 }  // namespace
 
-Status SearchTargetSize(
+bool TargetSizeSearchMayEvaluate(size_t maximum_attempts, bool (*predicate)(float)) noexcept {
+  if (predicate == nullptr || maximum_attempts == 0 ||
+      maximum_attempts > kMaximumTargetSizeEncodeAttempts)
+    return false;
+  const float lower = kMinimumTargetSizeButteraugliTarget;
+  const float upper = kMaximumTargetSizeButteraugliTarget;
+  if (predicate(lower))
+    return true;
+  if (maximum_attempts == 1)
+    return false;
+  if (predicate(upper))
+    return true;
+  std::array<SearchInterval, kMaximumTargetSizeEncodeAttempts> intervals{};
+  intervals[0] = {lower, upper};
+  size_t count = 1, attempts = 2;
+  while (attempts < maximum_attempts && count != 0) {
+    const size_t index = WidestInterval(std::span(intervals).first(count));
+    const auto interval = intervals[index];
+    for (size_t i = index + 1; i < count; ++i)
+      intervals[i - 1] = intervals[i];
+    --count;
+    const float midpoint = interval.lower + 0.5f * (interval.upper - interval.lower);
+    if (midpoint == interval.lower || midpoint == interval.upper)
+      continue;
+    ++attempts;
+    if (predicate(midpoint))
+      return true;
+    intervals[count++] = {interval.lower, midpoint};
+    intervals[count++] = {midpoint, interval.upper};
+  }
+  return false;
+}
+
+Status ComputeTargetSizeControlStorageBound(
+  size_t maximum_attempts, resource_budget_internal::HostStorageBound* out) {
+  if (out == nullptr || maximum_attempts == 0 ||
+      maximum_attempts > kMaximumTargetSizeEncodeAttempts) {
+    return Status::InvalidArgument("Target-size control storage shape is invalid");
+  }
+  resource_budget_internal::HostStorageBound bound;
+  // One initial interval exists even when the first endpoint meets tolerance.
+  // Every subsequent midpoint removes one and appends two; endpoints add none.
+  if (!bound.AddVector<SearchInterval>(std::max(size_t{1}, maximum_attempts - 1),
+        resource_budget_internal::VectorCapacityPolicy::kGrowing)) {
+    return Status::OutOfMemory("Target-size control storage bound overflows");
+  }
+  *out = bound;
+  return Status::Ok();
+}
+
+template <typename Bytes>
+Status SearchTargetSizeImpl(
   const TargetSizeSearchOptions& options,
-  const TargetSizeEvaluator& evaluator,
-  TargetSizeSearchResult* result) {
+  const TargetSizeEvaluatorFor<Bytes>& evaluator,
+  TargetSizeSearchResultFor<Bytes>* result) {
 
   Status status = ValidateSearchOptions(options, evaluator, result);
   if (!status.ok()) {
@@ -195,7 +254,7 @@ Status SearchTargetSize(
   }
 
   try {
-    TargetSizeSearchResult candidate;
+    TargetSizeSearchResultFor<Bytes> candidate;
     Status first_failure;
     const float lower = options.minimum_butteraugli_target;
     const float upper = options.maximum_butteraugli_target;
@@ -214,7 +273,7 @@ Status SearchTargetSize(
       }
     }
 
-    std::vector<SearchInterval> intervals;
+    Storage<SearchInterval> intervals;
     intervals.push_back({lower, upper});
     while (candidate.attempt_count < options.maximum_attempts &&
            (candidate.codestream.empty() ||
@@ -249,6 +308,8 @@ Status SearchTargetSize(
       (candidate.attempt_count == options.maximum_attempts ||
        intervals.empty());
     *result = std::move(candidate);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate target-size search storage");
@@ -257,6 +318,20 @@ Status SearchTargetSize(
       "Target-size search storage is too large");
   }
   return Status::Ok();
+}
+
+Status SearchTargetSize(
+  const TargetSizeSearchOptions& options,
+  const TargetSizeEvaluator& evaluator,
+  TargetSizeSearchResult* result) {
+  return SearchTargetSizeImpl(options, evaluator, result);
+}
+
+Status SearchTargetSize(
+  const TargetSizeSearchOptions& options,
+  const ManagedTargetSizeEvaluator& evaluator,
+  ManagedTargetSizeSearchResult* result) {
+  return SearchTargetSizeImpl(options, evaluator, result);
 }
 
 }  // namespace gjxl::codestream_internal

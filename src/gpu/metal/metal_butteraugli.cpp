@@ -2,6 +2,9 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include "gpu/metal/metal_backend_internal.h"
+#include "gpu/metal/metal_aq_profile_storage_plan.h"
+
+#include "core/managed_allocator.h"
 #include "gpu/metal/metal_butteraugli_encoding.h"
 
 #include <algorithm>
@@ -20,6 +23,7 @@
 #include <vector>
 
 #include "gpu/metal/metal_status.h"
+#include "gpu/metal/metal_storage_plan.h"
 #include "gpu/metal/metal_butteraugli_test.h"
 #include "gpu/scratch.h"
 
@@ -28,10 +32,11 @@
   ::gjxl::metal_internal::RecordMetalComputePipelineState(state)
 
 namespace gjxl::metal_internal {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
-constexpr size_t kPlaneAlignment = 64;
-constexpr size_t kReductionWidth = 256;
+constexpr size_t kReductionWidth = kButteraugliReductionWidth;
 constexpr std::array<float, 5> kBlurSigmas{
   1.2f,
   7.15593339443f,
@@ -39,11 +44,11 @@ constexpr std::array<float, 5> kBlurSigmas{
   1.56416327805f,
   2.7f,
 };
-constexpr std::array<size_t, 5> kKernelSizes{5, 33, 15, 7, 13};
+constexpr auto kKernelSizes = kButteraugliKernelSizes;
 
 constexpr size_t kPsychoReference = 0;
 constexpr size_t kPsychoDistorted = 10;
-constexpr size_t kPsychoPlaneCount = 10;
+constexpr size_t kPsychoPlaneCount = kButteraugliPsychoPlaneCount;
 constexpr size_t kReferenceMask = 20;
 
 // Psycho-image encoding finishes before difference encoding begins. Reuse its
@@ -51,7 +56,7 @@ constexpr size_t kReferenceMask = 20;
 // its convolution intermediates for difference scratch. The final staging
 // plane remains distinct because multiscale composition and diagnostic capture
 // can keep it live alongside the difference scratch.
-constexpr size_t kImage = 21;
+constexpr size_t kImage = kButteraugliBorrowedFirstPlane;
 constexpr size_t kAc = kImage;
 constexpr size_t kDc = kImage + 3;
 constexpr size_t kPsychoWork = 27;
@@ -59,8 +64,8 @@ constexpr size_t kWork = kPsychoWork;
 // Psycho construction uses kWork through kWork + 2 and raw masks use + 4.
 // Packed subscale caches leave this full-size mask slot invariant after prep.
 constexpr size_t kReferenceErodedMask = kWork + 3;
-constexpr size_t kFinalStaging = 32;
-constexpr size_t kWorkingPlaneCount = 33;
+constexpr size_t kFinalStaging = kButteraugliFinalStagingPlane;
+constexpr size_t kWorkingPlaneCount = kButteraugliWorkingPlaneCount;
 constexpr size_t kMaltaTileWidth = 32;
 constexpr size_t kMaltaTileHeight = 8;
 constexpr size_t kMaltaRadius = 4;
@@ -107,7 +112,6 @@ constexpr std::array<double, 6> kMaltaNorms{
   71.7800275169,
   5.0,
 };
-constexpr std::array<size_t, 6> kMaltaAccumulationOrder{4, 5, 2, 3, 0, 1};
 constexpr std::array<size_t, 6> kMaltaPsychoPlane{4, 3, 7, 6, 9, 8};
 
 struct PlaneParams {
@@ -302,22 +306,6 @@ static_assert(sizeof(CropParams) == 24);
 static_assert(sizeof(ComposeParams) == 20);
 static_assert(sizeof(ReductionParams) == 12);
 
-[[nodiscard]] bool AddAlignedAllocation(
-  size_t size_bytes,
-  size_t* capacity) noexcept {
-
-  if (capacity == nullptr ||
-      *capacity > std::numeric_limits<size_t>::max() - (kPlaneAlignment - 1)) {
-    return false;
-  }
-  const size_t aligned =
-    (*capacity + kPlaneAlignment - 1) & ~(kPlaneAlignment - 1);
-  if (aligned > std::numeric_limits<size_t>::max() - size_bytes) {
-    return false;
-  }
-  *capacity = aligned + size_bytes;
-  return true;
-}
 
 [[nodiscard]] Status CreatePipeline(
   MTL::Device* device,
@@ -349,10 +337,10 @@ static_assert(sizeof(ReductionParams) == 12);
   return Status::Ok();
 }
 
-[[nodiscard]] std::vector<float> MakeGaussianKernel(float sigma) {
+[[nodiscard]] ManagedVector<float> MakeGaussianKernel(float sigma) {
   const int radius = std::max(1, static_cast<int>(2.25f * std::abs(sigma)));
   const size_t size = 2 * static_cast<size_t>(radius) + 1;
-  std::vector<float> result(size);
+  ManagedVector<float> result(size);
   const double exponent_scale = -1.0 / (2.0 * sigma * sigma);
   for (int index = -radius; index <= radius; ++index) {
     result[static_cast<size_t>(index + radius)] =
@@ -371,151 +359,114 @@ class MetalPreparedDeviceButteraugli final
     : public PreparedDeviceButteraugli {
 public:
   MetalPreparedDeviceButteraugli(
-    MetalBackend& backend,
-    DeviceButteraugliPrepareDescriptor descriptor)
-    : PreparedDeviceButteraugli(backend, descriptor),
-      metal_(backend) {}
+    MetalBackend &backend, DeviceButteraugliPrepareDescriptor descriptor,
+    const MetalButteraugliScratch *borrowed_scratch)
+      : PreparedDeviceButteraugli(backend, descriptor), metal_(backend) {
+    if (borrowed_scratch != nullptr)
+      borrowed_scratch_ = *borrowed_scratch;
+  }
+
+  ~MetalPreparedDeviceButteraugli() override {
+    metal_.ReleaseButteraugliArena(
+      std::move(scratch_), cache_generation_, prepared_ok_ && valid());
+  }
+
+  void DiscardScratchLease() noexcept { prepared_ok_ = false; }
 
   [[nodiscard]] Status PrepareStorage() {
     const Extent2D requested = extent();
-    if (requested.width > std::numeric_limits<uint32_t>::max() ||
-        requested.height > std::numeric_limits<uint32_t>::max()) {
-      return Status::InvalidArgument(
-        "Device Butteraugli extent exceeds Metal shader limits");
-    }
-    expanded_ = requested.width < 8 || requested.height < 8;
-    working_extent_ = expanded_
-      ? Extent2D{std::max<size_t>(8, requested.width),
-                 std::max<size_t>(8, requested.height)}
-      : requested;
-    xborder_ = requested.width < 8 ? (8 - requested.width) / 2 : 0;
-    yborder_ = requested.height < 8 ? (8 - requested.height) / 2 : 0;
-    multiscale_ = !expanded_ && requested.width >= 15 &&
-                  requested.height >= 15;
-    if (multiscale_) {
-      sub_extent_ = {(requested.width + 1) / 2,
-                     (requested.height + 1) / 2};
-    }
-
-    size_t working_area = 0;
-    size_t requested_area = 0;
-    if (!working_extent_.try_area(&working_area) ||
-        !requested.try_area(&requested_area) ||
-        requested_area > std::numeric_limits<uint32_t>::max() ||
-        working_area > std::numeric_limits<size_t>::max() / sizeof(float)) {
-      return Status::InvalidArgument(
-        "Device Butteraugli scratch geometry overflows");
-    }
-    const size_t plane_bytes = working_area * sizeof(float);
-    size_t sub_area = 0;
-    size_t sub_plane_bytes = 0;
-    if (multiscale_) {
-      if (!sub_extent_.try_area(&sub_area) ||
-          sub_area >
-          std::numeric_limits<size_t>::max() / sizeof(float)) {
-        return Status::InvalidArgument(
-          "Device Butteraugli cached-reference geometry overflows");
+    const bool borrowing = borrowed_scratch_.has_value();
+    ButteraugliStoragePlan storage_plan;
+    Status status = ComputeButteraugliStoragePlan(requested, borrowing, &storage_plan);
+    if (!status.ok()) return status;
+    expanded_ = storage_plan.expanded;
+    working_extent_ = storage_plan.working_extent;
+    xborder_ = storage_plan.xborder;
+    yborder_ = storage_plan.yborder;
+    multiscale_ = storage_plan.multiscale;
+    sub_extent_ = storage_plan.sub_extent;
+    const size_t plane_bytes = storage_plan.working_plane_bytes;
+    if (borrowing) {
+      if (!multiscale_) {
+        return Status::InvalidArgument("Borrowed Butteraugli scratch requires "
+                                       "an unexpanded multiscale image");
       }
-      sub_plane_bytes = sub_area * sizeof(float);
-    }
-    const size_t partial_count =
-      requested_area / kReductionWidth +
-      static_cast<size_t>(requested_area % kReductionWidth != 0);
-    if (partial_count >
-        std::numeric_limits<size_t>::max() / sizeof(float)) {
-      return Status::InvalidArgument(
-        "Device Butteraugli reduction scratch overflows");
-    }
-
-    size_t capacity = 0;
-    for (size_t index = 0; index < kWorkingPlaneCount; ++index) {
-      if (!AddAlignedAllocation(plane_bytes, &capacity)) {
-        return Status::InvalidArgument(
-          "Device Butteraugli scratch capacity overflows");
-      }
-    }
-    if (multiscale_) {
-      for (size_t index = 0; index < reference_sub_.size() + 2; ++index) {
-        if (!AddAlignedAllocation(sub_plane_bytes, &capacity)) {
+      std::array<DeviceMemoryRange, 9> ranges;
+      for (size_t index = 0; index < borrowed_scratch_->planes.size();
+           ++index) {
+        DevicePlaneView &plane = borrowed_scratch_->planes[index];
+        DeviceMemoryRange available;
+        Status status = ComputeDevicePlaneRange(plane, metal_.id(), &available);
+        if (!status.ok())
+          return status;
+        if (plane.element_type != DeviceElementType::kF32 ||
+            plane_bytes > available.size_bytes) {
           return Status::InvalidArgument(
-            "Device Butteraugli cached-reference capacity overflows");
+            "Borrowed Butteraugli plane is too small");
+        }
+        // Use packed unpadded rows within the caller's padded plane capacity.
+        plane.extent = working_extent_;
+        plane.row_stride = working_extent_.width;
+        status = ComputeDevicePlaneRange(plane, metal_.id(), &ranges[index]);
+        if (!status.ok())
+          return status;
+        for (size_t prior = 0; prior < index; ++prior) {
+          if (DeviceRangesOverlap(ranges[index], ranges[prior])) {
+            return Status::InvalidArgument(
+              "Borrowed Butteraugli planes overlap");
+          }
+        }
+        for (ConstDevicePlaneView reference : reference_linear_rgb().plane) {
+          DeviceMemoryRange reference_range;
+          status =
+            ComputeDevicePlaneRange(reference, metal_.id(), &reference_range);
+          if (!status.ok())
+            return status;
+          if (DeviceRangesOverlap(ranges[index], reference_range)) {
+            return Status::InvalidArgument(
+              "Borrowed scratch overlaps reference");
+          }
         }
       }
     }
-    for (size_t index = 0; index < 2; ++index) {
-      if (!AddAlignedAllocation(partial_count * sizeof(float), &capacity)) {
-        return Status::InvalidArgument(
-          "Device Butteraugli reduction capacity overflows");
-      }
-    }
-    for (size_t kernel_size : kKernelSizes) {
-      if (!AddAlignedAllocation(kernel_size * sizeof(float), &capacity)) {
-        return Status::InvalidArgument(
-          "Device Butteraugli kernel capacity overflows");
-      }
-    }
-
-    cached_reference_bytes_ =
-      (kPsychoPlaneCount + 2) * plane_bytes +
-      (multiscale_ ? (kPsychoPlaneCount + 2) * sub_plane_bytes : 0);
-    gaussian_kernel_bytes_ = 0;
-    for (size_t kernel_size : kKernelSizes) {
-      gaussian_kernel_bytes_ += kernel_size * sizeof(float);
-    }
-    peak_comparison_scratch_bytes_ =
-      (kWorkingPlaneCount - (kPsychoPlaneCount + 2)) * plane_bytes +
-      2 * partial_count * sizeof(float);
-
-    Status status = scratch_.Prepare(metal_, capacity);
+    const auto is_borrowed = [borrowing](size_t slot) {
+      return borrowing && slot >= kImage && slot < kImage + 9;
+    };
+    cached_reference_bytes_ = storage_plan.cached_reference_bytes;
+    gaussian_kernel_bytes_ = storage_plan.gaussian_kernel_bytes;
+    peak_comparison_scratch_bytes_ = storage_plan.peak_comparison_scratch_bytes;
+    status = metal_.AcquireButteraugliArena(
+      storage_plan.capacity_bytes, &scratch_, &cache_generation_);
     if (!status.ok()) return status;
-    for (DevicePlaneView& plane : planes_) {
-      status = scratch_.AllocatePlane(
-        DeviceElementType::kF32,
-        working_extent_,
-        working_extent_.width,
-        kPlaneAlignment,
-        &plane);
+    for (size_t index = 0; index < planes_.size(); ++index) {
+      DevicePlaneView &plane = planes_[index];
+      if (is_borrowed(index)) {
+        plane = borrowed_scratch_->planes[index - kImage];
+        continue;
+      }
+      status = scratch_.BindPlane(storage_plan.planes[index], &plane);
       if (!status.ok()) return status;
     }
     reference_eroded_mask_ = Plane(kReferenceErodedMask, working_extent_);
     if (multiscale_) {
-      for (DevicePlaneView& plane : reference_sub_) {
-        status = scratch_.AllocatePlane(
-          DeviceElementType::kF32,
-          sub_extent_,
-          sub_extent_.width,
-          kPlaneAlignment,
-          &plane);
+      for (size_t index = 0; index < reference_sub_.size(); ++index) {
+        status = scratch_.BindPlane(storage_plan.reference_sub[index], &reference_sub_[index]);
         if (!status.ok()) return status;
       }
-      status = scratch_.AllocatePlane(
-        DeviceElementType::kF32, sub_extent_, sub_extent_.width,
-        kPlaneAlignment, &reference_sub_mask_);
+      status = scratch_.BindPlane(storage_plan.reference_sub_mask, &reference_sub_mask_);
       if (!status.ok()) return status;
-      status = scratch_.AllocatePlane(
-        DeviceElementType::kF32, sub_extent_, sub_extent_.width,
-        kPlaneAlignment, &reference_sub_eroded_mask_);
+      status = scratch_.BindPlane(storage_plan.reference_sub_eroded_mask, &reference_sub_eroded_mask_);
       if (!status.ok()) return status;
     }
-    const Extent2D reduction_extent{partial_count, 1};
-    status = scratch_.AllocatePlane(
-      DeviceElementType::kF32, reduction_extent, partial_count,
-      kPlaneAlignment, &reduction_a_);
+    status = scratch_.BindPlane(storage_plan.reduction[0], &reduction_a_);
     if (!status.ok()) return status;
-    status = scratch_.AllocatePlane(
-      DeviceElementType::kF32, reduction_extent, partial_count,
-      kPlaneAlignment, &reduction_b_);
+    status = scratch_.BindPlane(storage_plan.reduction[1], &reduction_b_);
     if (!status.ok()) return status;
 
     for (size_t index = 0; index < kernels_.size(); ++index) {
-      status = scratch_.AllocatePlane(
-        DeviceElementType::kF32,
-        {kKernelSizes[index], 1},
-        kKernelSizes[index],
-        kPlaneAlignment,
-        &kernels_[index]);
+      status = scratch_.BindPlane(storage_plan.kernels[index], &kernels_[index]);
       if (!status.ok()) return status;
-      const std::vector<float> kernel = MakeGaussianKernel(kBlurSigmas[index]);
+      const ManagedVector<float> kernel = MakeGaussianKernel(kBlurSigmas[index]);
       if (kernel.size() != kKernelSizes[index]) {
         return Status::Internal(
           "Device Butteraugli Gaussian kernel size is inconsistent");
@@ -526,6 +477,9 @@ public:
         kernel.size() * sizeof(float),
         kernels_[index].offset_bytes);
       if (!status.ok()) return status;
+    }
+    if (scratch_.layout_bytes() != storage_plan.capacity_bytes) {
+      return Status::Internal("Butteraugli bindings disagree with storage plan");
     }
     return Status::Ok();
   }
@@ -545,15 +499,34 @@ public:
     std::unique_ptr<GpuSubmission> submission;
     Status status;
     if (profiling) {
-      const MetalProfiledComputeStage stage{
-        .stage_id = "frontend.prepare_aq.reference",
-        .encode =
-          &MetalPreparedDeviceButteraugli::EncodePreparationSubmission,
-        .context = &context,
+      constexpr size_t per_scale = kMetalButteraugliPsychoProfiles.size() + 1;
+      std::array<PreparationContext, 2 * per_scale> contexts;
+      std::array<MetalProfiledComputeStage, 2 * per_scale> stages;
+      size_t count = 0;
+      const auto append = [&](const char* id, bool sub,
+                              MetalButteraugliPsychoStage part, bool mask) {
+        contexts[count] = {this, part, sub, mask};
+        stages[count] = {
+          .stage_id = id,
+          .group_id = "frontend.prepare_aq.reference",
+          .encode = &MetalPreparedDeviceButteraugli::EncodePreparationProfileStage,
+          .context = &contexts[count],
+        };
+        ++count;
       };
+      for (size_t scale = 0; scale < (multiscale_ ? 2u : 1u); ++scale) {
+        const bool sub = scale != 0;
+        for (const auto& part : kMetalButteraugliPsychoProfiles) {
+          append(sub ? part.reference_sub_id : part.reference_main_id,
+                 sub, part.stage, false);
+        }
+        append(sub ? "frontend.prepare_aq.reference.sub.mask"
+                   : "frontend.prepare_aq.reference.main.mask",
+               sub, MetalButteraugliPsychoStage::kAll, true);
+      }
       status = metal_.SubmitComputeProfiled(
         "gjxl Butteraugli reference preparation profile",
-        std::span<const MetalProfiledComputeStage>(&stage, 1),
+        std::span<const MetalProfiledComputeStage>(stages.data(), count),
         profiling_mode, &submission);
     } else {
       status = metal_.SubmitCompute(
@@ -567,10 +540,13 @@ public:
         "Metal Butteraugli preparation submission is null");
     }
     status = submission->Wait();
-    if (!status.ok() || !profiling) return status;
-    return metal_.ResolveGpuSubmissionProfile(
-      *submission, "frontend.prepare_aq.reference", profiling_mode,
-      profile);
+    if (!status.ok()) return status;
+    if (profiling) {
+      status = metal_.ResolveGpuSubmissionProfile(
+        *submission, "frontend.prepare_aq.reference", profiling_mode, profile);
+    }
+    prepared_ok_ = status.ok();
+    return status;
   }
 
   [[nodiscard]] DeviceButteraugliMemoryStats memory_stats()
@@ -607,7 +583,7 @@ public:
         "Metal Butteraugli stage capture extent overflows");
     }
     try {
-      std::vector<float> candidate(area);
+      ManagedVector<float> candidate(area);
       const DevicePlaneView capture = Plane(kFinalStaging, extent());
       const size_t row_bytes = extent().width * sizeof(float);
       for (size_t y = 0; y < extent().height; ++y) {
@@ -631,6 +607,8 @@ public:
           output.Row(y));
       }
       return Status::Ok();
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      return failure.status();
     } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
         "Unable to allocate Metal Butteraugli stage readback");
@@ -774,17 +752,19 @@ public:
   void EncodeValidatedResidentComparisonProfileStage(
     MTL::ComputeCommandEncoder* encoder,
     const MetalButteraugliResidentComparisonDescriptor& descriptor,
-    MetalButteraugliProfileStage stage) {
+    MetalButteraugliProfileStage stage,
+    MetalButteraugliPsychoStage psycho) {
 
-    EncodeResidentComparisonProfileStage(encoder, descriptor, stage);
+    EncodeResidentComparisonProfileStage(encoder, descriptor, stage, psycho);
   }
 
   void EncodeValidatedComparisonProfileStage(
     MTL::ComputeCommandEncoder* encoder,
     const DeviceButteraugliComparisonDescriptor& descriptor,
-    MetalButteraugliProfileStage stage) {
+    MetalButteraugliProfileStage stage,
+    MetalButteraugliPsychoStage psycho) {
 
-    EncodeComparisonProfileStage(encoder, descriptor, stage);
+    EncodeComparisonProfileStage(encoder, descriptor, stage, psycho);
   }
 
 private:
@@ -796,6 +776,9 @@ private:
   };
   struct PreparationContext {
     MetalPreparedDeviceButteraugli* prepared = nullptr;
+    MetalButteraugliPsychoStage stage = MetalButteraugliPsychoStage::kAll;
+    bool sub = false;
+    bool mask_only = false;
   };
 
   struct ComparisonContext {
@@ -900,6 +883,13 @@ private:
 
     const auto& context = *static_cast<const PreparationContext*>(opaque);
     context.prepared->EncodePreparation(encoder);
+  }
+
+  static void EncodePreparationProfileStage(
+    MetalBackend&, MTL::ComputeCommandEncoder* encoder, const void* opaque) {
+    const auto& context = *static_cast<const PreparationContext*>(opaque);
+    context.prepared->EncodePreparationPart(
+      encoder, context.sub, context.stage, context.mask_only);
   }
 
   void EncodeCopy(
@@ -1074,92 +1064,103 @@ private:
     const PsychoPlanes& psycho,
     Extent2D scale_extent,
     bool capture_reference,
-    bool prepare_mask = true) {
+    bool prepare_mask = true,
+    MetalButteraugliPsychoStage stage = MetalButteraugliPsychoStage::kAll) {
 
-    const OpsinParams opsin_params{
-      static_cast<uint32_t>(scale_extent.width),
-      static_cast<uint32_t>(scale_extent.height),
-      static_cast<uint32_t>(input.plane[0].row_stride),
-      static_cast<uint32_t>(input.plane[1].row_stride),
-      static_cast<uint32_t>(input.plane[2].row_stride),
-      static_cast<uint32_t>(working_extent_.width),
-      options().intensity_target,
+    const auto selected = [stage](MetalButteraugliPsychoStage part) {
+      return stage == MetalButteraugliPsychoStage::kAll || stage == part;
     };
-    encoder->setComputePipelineState(
-      metal_.butteraugli_pipelines_.opsin_blur5_tiled.get());
-    for (size_t channel = 0; channel < 3; ++channel) {
-      Bind(encoder, Handle(metal_, input.plane[channel]),
-           input.plane[channel].offset_bytes, channel);
-      DevicePlaneView xyb = Plane(kImage + channel, scale_extent);
-      Bind(encoder, Handle(metal_, xyb), xyb.offset_bytes, 4 + channel);
-    }
-    Bind(encoder, Handle(metal_, kernels_[0]), kernels_[0].offset_bytes, 3);
-    encoder->setBytes(&opsin_params, sizeof(opsin_params), 7);
-    encoder->setThreadgroupMemoryLength(
-      kOpsinBlur5ThreadgroupMemoryBytes, 0);
-    DispatchMetalThreadgroups(
-      encoder,
-      MTL::Size(
-        (scale_extent.width + kOpsinBlur5TileWidth - 1) /
-          kOpsinBlur5TileWidth,
-        (scale_extent.height + kOpsinBlur5TileHeight - 1) /
-          kOpsinBlur5TileHeight,
-        1),
-      MTL::Size(kOpsinBlur5TileWidth, kOpsinBlur5TileHeight, 1));
-    if (capture_reference) {
+
+    if (selected(MetalButteraugliPsychoStage::kOpsin)) {
+      const OpsinParams opsin_params{
+        static_cast<uint32_t>(scale_extent.width),
+        static_cast<uint32_t>(scale_extent.height),
+        static_cast<uint32_t>(input.plane[0].row_stride),
+        static_cast<uint32_t>(input.plane[1].row_stride),
+        static_cast<uint32_t>(input.plane[2].row_stride),
+        static_cast<uint32_t>(working_extent_.width),
+        options().intensity_target,
+      };
+      encoder->setComputePipelineState(
+        metal_.butteraugli_pipelines_.opsin_blur5_tiled.get());
       for (size_t channel = 0; channel < 3; ++channel) {
-        MaybeCapture(
-          encoder,
-          static_cast<MetalButteraugliStage>(
-            static_cast<size_t>(MetalButteraugliStage::kOpsinX) + channel),
-          AsConst(Plane(kImage + channel, scale_extent)),
-          scale_extent);
+        Bind(encoder, Handle(metal_, input.plane[channel]),
+             input.plane[channel].offset_bytes, channel);
+        DevicePlaneView xyb = Plane(kImage + channel, scale_extent);
+        Bind(encoder, Handle(metal_, xyb), xyb.offset_bytes, 4 + channel);
+      }
+      Bind(encoder, Handle(metal_, kernels_[0]), kernels_[0].offset_bytes, 3);
+      encoder->setBytes(&opsin_params, sizeof(opsin_params), 7);
+      encoder->setThreadgroupMemoryLength(
+        kOpsinBlur5ThreadgroupMemoryBytes, 0);
+      DispatchMetalThreadgroups(
+        encoder,
+        MTL::Size(
+          (scale_extent.width + kOpsinBlur5TileWidth - 1) /
+            kOpsinBlur5TileWidth,
+          (scale_extent.height + kOpsinBlur5TileHeight - 1) /
+            kOpsinBlur5TileHeight,
+          1),
+        MTL::Size(kOpsinBlur5TileWidth, kOpsinBlur5TileHeight, 1));
+      if (capture_reference) {
+        for (size_t channel = 0; channel < 3; ++channel) {
+          MaybeCapture(
+            encoder,
+            static_cast<MetalButteraugliStage>(
+              static_cast<size_t>(MetalButteraugliStage::kOpsinX) + channel),
+            AsConst(Plane(kImage + channel, scale_extent)),
+            scale_extent);
+        }
       }
     }
 
-    const FrequencyLowMediumTiledParams frequency_params{
-      static_cast<uint32_t>(scale_extent.width),
-      static_cast<uint32_t>(scale_extent.height),
-      static_cast<uint32_t>(working_extent_.width),
-      static_cast<uint32_t>(psycho[0].row_stride),
-    };
-    encoder->setComputePipelineState(
-      metal_.butteraugli_pipelines_.frequency_low_medium_tiled.get());
-    for (size_t channel = 0; channel < 3; ++channel) {
-      DevicePlaneView xyb = Plane(kImage + channel, scale_extent);
-      DevicePlaneView low = psycho[channel];
-      DevicePlaneView medium = psycho[3 + channel];
-      Bind(encoder, Handle(metal_, xyb), xyb.offset_bytes, channel);
-      Bind(encoder, Handle(metal_, low), low.offset_bytes, 4 + channel);
-      Bind(encoder, Handle(metal_, medium),
-           medium.offset_bytes, 7 + channel);
-    }
-    Bind(encoder, Handle(metal_, kernels_[1]), kernels_[1].offset_bytes, 3);
-    encoder->setBytes(&frequency_params, sizeof(frequency_params), 10);
-    encoder->setThreadgroupMemoryLength(
-      kLowMediumThreadgroupMemoryBytes, 0);
-    DispatchMetalThreadgroups(
-      encoder,
-      MTL::Size(
-        (scale_extent.width + kLowMediumTileWidth - 1) /
-          kLowMediumTileWidth,
-        (scale_extent.height + kLowMediumTileHeight - 1) /
-          kLowMediumTileHeight,
-        1),
-      MTL::Size(kLowMediumTileWidth, kLowMediumTileHeight, 1));
-    if (capture_reference) {
+    if (selected(MetalButteraugliPsychoStage::kLowMedium)) {
+      const FrequencyLowMediumTiledParams frequency_params{
+        static_cast<uint32_t>(scale_extent.width),
+        static_cast<uint32_t>(scale_extent.height),
+        static_cast<uint32_t>(working_extent_.width),
+        static_cast<uint32_t>(psycho[0].row_stride),
+      };
+      encoder->setComputePipelineState(
+        metal_.butteraugli_pipelines_.frequency_low_medium_tiled.get());
       for (size_t channel = 0; channel < 3; ++channel) {
-        MaybeCapture(
-          encoder,
-          static_cast<MetalButteraugliStage>(
-            static_cast<size_t>(MetalButteraugliStage::kLowFrequencyX) +
-            channel),
-          AsConst(psycho[channel]),
-          scale_extent);
+        DevicePlaneView xyb = Plane(kImage + channel, scale_extent);
+        DevicePlaneView low = psycho[channel];
+        DevicePlaneView medium = psycho[3 + channel];
+        Bind(encoder, Handle(metal_, xyb), xyb.offset_bytes, channel);
+        Bind(encoder, Handle(metal_, low), low.offset_bytes, 4 + channel);
+        Bind(encoder, Handle(metal_, medium),
+             medium.offset_bytes, 7 + channel);
+      }
+      Bind(encoder, Handle(metal_, kernels_[1]), kernels_[1].offset_bytes, 3);
+      encoder->setBytes(&frequency_params, sizeof(frequency_params), 10);
+      encoder->setThreadgroupMemoryLength(
+        kLowMediumThreadgroupMemoryBytes, 0);
+      DispatchMetalThreadgroups(
+        encoder,
+        MTL::Size(
+          (scale_extent.width + kLowMediumTileWidth - 1) /
+            kLowMediumTileWidth,
+          (scale_extent.height + kLowMediumTileHeight - 1) /
+            kLowMediumTileHeight,
+          1),
+        MTL::Size(kLowMediumTileWidth, kLowMediumTileHeight, 1));
+      if (capture_reference) {
+        for (size_t channel = 0; channel < 3; ++channel) {
+          MaybeCapture(
+            encoder,
+            static_cast<MetalButteraugliStage>(
+              static_cast<size_t>(MetalButteraugliStage::kLowFrequencyX) +
+              channel),
+            AsConst(psycho[channel]),
+            scale_extent);
+        }
       }
     }
 
     for (size_t channel = 0; channel < 2; ++channel) {
+      if (!selected(channel == 0 ? MetalButteraugliPsychoStage::kHighX
+                                 : MetalButteraugliPsychoStage::kHighY)) continue;
       DevicePlaneView medium = psycho[3 + channel];
       DevicePlaneView high = psycho[6 + channel];
       DevicePlaneView intermediate =
@@ -1202,26 +1203,32 @@ private:
       encoder->setBytes(&channel_params, sizeof(channel_params), 4);
       metal_.DispatchPlane(encoder, scale_extent);
     }
-    DevicePlaneView medium_b = psycho[5];
-    EncodeBlur(
-      encoder, AsConst(medium_b), 2, kPsychoWork, medium_b, scale_extent);
+    if (selected(MetalButteraugliPsychoStage::kMediumB)) {
+      DevicePlaneView medium_b = psycho[5];
+      EncodeBlur(
+        encoder, AsConst(medium_b), 2, kPsychoWork, medium_b, scale_extent);
+    }
 
-    DevicePlaneView high_x = psycho[6];
-    DevicePlaneView high_y = psycho[7];
-    const PlaneParams suppress_params{
-      static_cast<uint32_t>(scale_extent.width),
-      static_cast<uint32_t>(scale_extent.height),
-      static_cast<uint32_t>(high_y.row_stride),
-      static_cast<uint32_t>(high_x.row_stride),
-    };
-    encoder->setComputePipelineState(
-      metal_.butteraugli_pipelines_.frequency_suppress_x.get());
-    Bind(encoder, Handle(metal_, high_x), high_x.offset_bytes, 0);
-    Bind(encoder, Handle(metal_, high_y), high_y.offset_bytes, 1);
-    encoder->setBytes(&suppress_params, sizeof(suppress_params), 2);
-    metal_.DispatchPlane(encoder, scale_extent);
+    if (selected(MetalButteraugliPsychoStage::kSuppressX)) {
+      DevicePlaneView high_x = psycho[6];
+      DevicePlaneView high_y = psycho[7];
+      const PlaneParams suppress_params{
+        static_cast<uint32_t>(scale_extent.width),
+        static_cast<uint32_t>(scale_extent.height),
+        static_cast<uint32_t>(high_y.row_stride),
+        static_cast<uint32_t>(high_x.row_stride),
+      };
+      encoder->setComputePipelineState(
+        metal_.butteraugli_pipelines_.frequency_suppress_x.get());
+      Bind(encoder, Handle(metal_, high_x), high_x.offset_bytes, 0);
+      Bind(encoder, Handle(metal_, high_y), high_y.offset_bytes, 1);
+      encoder->setBytes(&suppress_params, sizeof(suppress_params), 2);
+      metal_.DispatchPlane(encoder, scale_extent);
+    }
 
     for (size_t channel = 0; channel < 2; ++channel) {
+      if (!selected(channel == 0 ? MetalButteraugliPsychoStage::kUltraX
+                                 : MetalButteraugliPsychoStage::kUltraY)) continue;
       DevicePlaneView high = psycho[6 + channel];
       DevicePlaneView ultra = psycho[8 + channel];
       DevicePlaneView intermediate =
@@ -1276,7 +1283,7 @@ private:
       }
       metal_.DispatchPlane(encoder, scale_extent);
     }
-    if (capture_reference) {
+    if (capture_reference && selected(MetalButteraugliPsychoStage::kUltraY)) {
       for (size_t channel = 0; channel < 3; ++channel) {
         MaybeCapture(
           encoder,
@@ -1321,7 +1328,7 @@ private:
     const float sqrt_asymmetry = std::sqrt(asymmetry);
     if (profile_stage == DifferenceProfileStage::kAll ||
         profile_stage == DifferenceProfileStage::kMalta) {
-      for (size_t stage_index : kMaltaAccumulationOrder) {
+      for (size_t stage_index : kButteraugliMaltaAccumulationOrder) {
       const double weight_up = stage_index < 2
         ? kMaltaWeights[stage_index]
         : stage_index < 4
@@ -1669,9 +1676,7 @@ private:
       static_cast<uint32_t>(input.row_stride),
       static_cast<uint32_t>(input_count),
     };
-    const size_t output_count =
-      input_count / kReductionWidth +
-      static_cast<size_t>(input_count % kReductionWidth != 0);
+    const size_t output_count = NextButteraugliReductionCount(input_count);
     encoder->setComputePipelineState(
       metal_.butteraugli_pipelines_.maximum_reduction.get());
     Bind(encoder, Handle(metal_, input), input.offset_bytes, 0);
@@ -1692,9 +1697,7 @@ private:
     (void)input.extent.try_area(&input_count);
     bool use_a = true;
     while (true) {
-      const size_t output_count =
-        input_count / kReductionWidth +
-        static_cast<size_t>(input_count % kReductionWidth != 0);
+      const size_t output_count = NextButteraugliReductionCount(input_count);
       DevicePlaneView destination = output_count == 1
         ? output
         : (use_a ? reduction_a_ : reduction_b_);
@@ -1713,8 +1716,6 @@ private:
     ConstDevicePlaneView sub_map,
     const MetalButteraugliResidentComparisonDescriptor& descriptor) {
 
-    encoder->setComputePipelineState(
-      metal_.butteraugli_pipelines_.resident_reduction.get());
     const PsychoPlanes reference = PsychoSlots(kPsychoReference, working_extent_);
     const PsychoPlanes distorted = PsychoSlots(kPsychoDistorted, working_extent_);
     for (size_t index = 0; index < 8; ++index) {
@@ -1749,6 +1750,11 @@ private:
 
     for (const MetalButteraugliResidentBatch& batch : descriptor.batches) {
       if (batch.anchor_count == 0) continue;
+      const bool small = batch.pixel_width == 8 && batch.pixel_height == 8 &&
+        bool(metal_.butteraugli_pipelines_.resident_reduction_small);
+      encoder->setComputePipelineState(small
+        ? metal_.butteraugli_pipelines_.resident_reduction_small.get()
+        : metal_.butteraugli_pipelines_.resident_reduction.get());
       const ResidentReductionParams params{
         static_cast<uint32_t>(extent().width),
         static_cast<uint32_t>(extent().height),
@@ -1768,7 +1774,7 @@ private:
       DispatchMetalThreadgroups(
         encoder,
         MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
-        MTL::Size(kReductionWidth, 1, 1));
+        MTL::Size(small ? 64 : kReductionWidth, 1, 1));
     }
     EncodeMaximumReduction(
       encoder, descriptor.score_partials, descriptor.score);
@@ -1811,7 +1817,8 @@ private:
   void EncodeResidentComparisonProfileStage(
     MTL::ComputeCommandEncoder* encoder,
     const MetalButteraugliResidentComparisonDescriptor& descriptor,
-    MetalButteraugliProfileStage stage) {
+    MetalButteraugliProfileStage stage,
+    MetalButteraugliPsychoStage psycho) {
 
     const Extent2D requested = extent();
     const PsychoPlanes reference_main =
@@ -1819,16 +1826,19 @@ private:
     const PsychoPlanes distorted =
       PsychoSlots(kPsychoDistorted, working_extent_);
     if (stage == MetalButteraugliProfileStage::kDistortedPsychoSub) {
-      EncodeSubsample(
-        encoder, descriptor.distorted_linear_rgb, requested, sub_extent_);
+      if (psycho == MetalButteraugliPsychoStage::kAll ||
+          psycho == MetalButteraugliPsychoStage::kOpsin) {
+        EncodeSubsample(
+          encoder, descriptor.distorted_linear_rgb, requested, sub_extent_);
+      }
       EncodePsychoImage(
-        encoder, PsychoInputSlots(sub_extent_), distorted, sub_extent_, false);
+        encoder, PsychoInputSlots(sub_extent_), distorted, sub_extent_, false, true, psycho);
       return;
     }
     if (stage == MetalButteraugliProfileStage::kDistortedPsychoMain) {
       EncodePsychoImage(
         encoder, descriptor.distorted_linear_rgb, distorted, requested,
-        false);
+        false, true, psycho);
       return;
     }
     if (stage == MetalButteraugliProfileStage::kResidentReduction) {
@@ -1873,43 +1883,38 @@ private:
              static_cast<size_t>(MetalButteraugliStage::kUltraHighFrequencyY);
   }
 
-  void EncodePreparation(MTL::ComputeCommandEncoder* encoder) {
-    const Extent2D requested = extent();
-    const PsychoPlanes reference_main =
-      PsychoSlots(kPsychoReference, working_extent_);
-    if (expanded_) {
-      EncodeExpand(
-        encoder, reference_linear_rgb(), requested, working_extent_);
-      EncodePsychoImage(
-        encoder, PsychoInputSlots(working_extent_), reference_main,
-        working_extent_, false);
-      EncodeReferenceMask(
-        encoder, Plane(kReferenceMask, working_extent_),
-        working_extent_);
-      EncodeReferenceErosion(
-        encoder, AsConst(Plane(kReferenceMask, working_extent_)),
-        reference_eroded_mask_, working_extent_);
-      return;
+  void EncodePreparationPart(
+    MTL::ComputeCommandEncoder* encoder, bool sub,
+    MetalButteraugliPsychoStage stage = MetalButteraugliPsychoStage::kAll,
+    bool mask_only = false) {
+    const Extent2D scale_extent = sub ? sub_extent_ : working_extent_;
+    const PsychoPlanes psycho = sub ? ReferenceSubSlots()
+      : PsychoSlots(kPsychoReference, working_extent_);
+    if (!mask_only) {
+      if (stage == MetalButteraugliPsychoStage::kAll ||
+          stage == MetalButteraugliPsychoStage::kOpsin) {
+        if (sub) {
+          EncodeSubsample(encoder, reference_linear_rgb(), extent(), sub_extent_);
+        } else if (expanded_) {
+          EncodeExpand(encoder, reference_linear_rgb(), extent(), working_extent_);
+        }
+      }
+      const ConstDeviceImage3View input = sub || expanded_
+        ? PsychoInputSlots(scale_extent) : reference_linear_rgb();
+      EncodePsychoImage(encoder, input, psycho, scale_extent, false, true, stage);
     }
+    if (mask_only || stage == MetalButteraugliPsychoStage::kAll) {
+      const DevicePlaneView mask = sub ? reference_sub_mask_
+        : Plane(kReferenceMask, scale_extent);
+      EncodeReferenceMask(encoder, mask, scale_extent);
+      EncodeReferenceErosion(encoder, AsConst(mask),
+        sub ? reference_sub_eroded_mask_ : reference_eroded_mask_, scale_extent);
+    }
+  }
 
-    EncodePsychoImage(
-      encoder, reference_linear_rgb(), reference_main, requested, false);
-    EncodeReferenceMask(
-      encoder, Plane(kReferenceMask, requested), requested);
-    EncodeReferenceErosion(
-      encoder, AsConst(Plane(kReferenceMask, requested)),
-      reference_eroded_mask_, requested);
-    if (multiscale_) {
-      EncodeSubsample(
-        encoder, reference_linear_rgb(), requested, sub_extent_);
-      EncodePsychoImage(
-        encoder, PsychoInputSlots(sub_extent_), ReferenceSubSlots(),
-        sub_extent_, false);
-      EncodeReferenceMask(encoder, reference_sub_mask_, sub_extent_);
-      EncodeReferenceErosion(
-        encoder, AsConst(reference_sub_mask_), reference_sub_eroded_mask_,
-        sub_extent_);
-    }
+  void EncodePreparation(MTL::ComputeCommandEncoder* encoder) {
+    EncodePreparationPart(encoder, false);
+    if (multiscale_) EncodePreparationPart(encoder, true);
   }
 
   void EncodeComparison(
@@ -2010,7 +2015,8 @@ private:
   void EncodeComparisonProfileStage(
     MTL::ComputeCommandEncoder* encoder,
     const DeviceButteraugliComparisonDescriptor& descriptor,
-    MetalButteraugliProfileStage stage) {
+    MetalButteraugliProfileStage stage,
+    MetalButteraugliPsychoStage psycho) {
 
     const Extent2D requested = extent();
     const PsychoPlanes reference_main =
@@ -2020,27 +2026,32 @@ private:
 
     if (stage == MetalButteraugliProfileStage::kDistortedPsychoMain) {
       if (expanded_) {
-        EncodeExpand(
-          encoder, descriptor.distorted_linear_rgb, requested,
-          working_extent_);
+        if (psycho == MetalButteraugliPsychoStage::kAll ||
+            psycho == MetalButteraugliPsychoStage::kOpsin) {
+          EncodeExpand(encoder, descriptor.distorted_linear_rgb, requested,
+                       working_extent_);
+        }
         EncodePsychoImage(
           encoder, PsychoInputSlots(working_extent_), distorted_main,
-          working_extent_, false);
+          working_extent_, false, true, psycho);
       } else {
         EncodePsychoImage(
           encoder, descriptor.distorted_linear_rgb, distorted_main,
-          requested, false);
+          requested, false, true, psycho);
       }
       return;
     }
 
     if (stage == MetalButteraugliProfileStage::kDistortedPsychoSub) {
       if (multiscale_) {
-        EncodeSubsample(
-          encoder, descriptor.distorted_linear_rgb, requested, sub_extent_);
+        if (psycho == MetalButteraugliPsychoStage::kAll ||
+            psycho == MetalButteraugliPsychoStage::kOpsin) {
+          EncodeSubsample(
+            encoder, descriptor.distorted_linear_rgb, requested, sub_extent_);
+        }
         EncodePsychoImage(
           encoder, PsychoInputSlots(sub_extent_), distorted_main,
-          sub_extent_, false);
+          sub_extent_, false, true, psycho);
       }
       return;
     }
@@ -2127,6 +2138,9 @@ private:
 
   MetalBackend& metal_;
   DeviceScratchArena scratch_;
+  uint64_t cache_generation_ = 0;
+  bool prepared_ok_ = false;
+  std::optional<MetalButteraugliScratch> borrowed_scratch_;
   std::array<DevicePlaneView, kWorkingPlaneCount> planes_;
   PsychoPlanes reference_sub_;
   DevicePlaneView reference_sub_mask_;
@@ -2147,6 +2161,12 @@ private:
   std::optional<MetalButteraugliStage> capture_stage_;
   bool capture_ready_ = false;
 };
+
+void DiscardPreparedMetalButteraugliLease(
+  PreparedDeviceButteraugli& prepared) noexcept {
+  auto* metal = dynamic_cast<MetalPreparedDeviceButteraugli*>(&prepared);
+  if (metal != nullptr) metal->DiscardScratchLease();
+}
 
 Status ValidatePreparedMetalButteraugliEncoding(
   PreparedDeviceButteraugli& prepared,
@@ -2198,12 +2218,13 @@ void EncodePreparedMetalButteraugliResidentProfileStage(
   PreparedDeviceButteraugli& prepared,
   MTL::ComputeCommandEncoder* encoder,
   const MetalButteraugliResidentComparisonDescriptor& descriptor,
-  MetalButteraugliProfileStage stage) {
+  MetalButteraugliProfileStage stage,
+  MetalButteraugliPsychoStage psycho) {
 
   auto* metal = dynamic_cast<MetalPreparedDeviceButteraugli*>(&prepared);
   if (metal != nullptr && encoder != nullptr) {
     metal->EncodeValidatedResidentComparisonProfileStage(
-      encoder, descriptor, stage);
+      encoder, descriptor, stage, psycho);
   }
 }
 
@@ -2211,11 +2232,12 @@ void EncodePreparedMetalButteraugliProfileStage(
   PreparedDeviceButteraugli& prepared,
   MTL::ComputeCommandEncoder* encoder,
   const DeviceButteraugliComparisonDescriptor& descriptor,
-  MetalButteraugliProfileStage stage) {
+  MetalButteraugliProfileStage stage,
+  MetalButteraugliPsychoStage psycho) {
 
   auto* metal = dynamic_cast<MetalPreparedDeviceButteraugli*>(&prepared);
   if (metal != nullptr && encoder != nullptr) {
-    metal->EncodeValidatedComparisonProfileStage(encoder, descriptor, stage);
+    metal->EncodeValidatedComparisonProfileStage(encoder, descriptor, stage, psycho);
   }
 }
 
@@ -2240,7 +2262,9 @@ Status CreateButteraugliPipelines(
     {"gjxl_butteraugli_convolve_transpose_f32", &pipelines.convolution_transpose},
     {"gjxl_butteraugli_opsin_blur5_tiled_f32",
      &pipelines.opsin_blur5_tiled},
-    {"gjxl_butteraugli_frequency_low_medium_tiled_f32",
+    {device->supportsFamily(MTL::GPUFamilyApple9)
+       ? "gjxl_butteraugli_low_medium_p1_device"
+       : "gjxl_butteraugli_frequency_low_medium_tiled_f32",
      &pipelines.frequency_low_medium_tiled},
     {"gjxl_butteraugli_frequency_high_convolve_f32",
      &pipelines.frequency_high_convolve},
@@ -2251,7 +2275,9 @@ Status CreateButteraugliPipelines(
      &pipelines.frequency_ultra_mask_convolve},
     {"gjxl_butteraugli_malta_scale_f32", &pipelines.malta_scale},
     {"gjxl_butteraugli_malta_response_f32", &pipelines.malta_response},
-    {"gjxl_butteraugli_malta_fused_f32", &pipelines.malta_fused},
+    {device->supportsFamily(MTL::GPUFamilyApple9)
+       ? "gjxl_butteraugli_malta_fixed_f32" : "gjxl_butteraugli_malta_fused_f32",
+     &pipelines.malta_fused},
     {"gjxl_butteraugli_l2_f32", &pipelines.l2},
     {"gjxl_butteraugli_mask_precompute_f32", &pipelines.mask_precompute},
     {"gjxl_butteraugli_fuzzy_erosion_f32", &pipelines.fuzzy_erosion},
@@ -2316,6 +2342,17 @@ Status CreateButteraugliPipelines(
     return Status::Unavailable(
       "Metal lacks memory for the tiled Butteraugli low/medium threadgroup");
   }
+  // The explicit shuffle tree requires 32 lanes; other devices retain the
+  // original reduction. Eight-by-eight blocks never have more than 64 pixels.
+  if (device->supportsFamily(MTL::GPUFamilyApple9)) {
+    NS::SharedPtr<MTL::ComputePipelineState> small;
+    const Status status = CreatePipeline(device, library,
+      "gjxl_butteraugli_resident_l2_reduce_w64_simd", &small);
+    if (status.ok() && small->threadExecutionWidth() == 32 &&
+        small->maxTotalThreadsPerThreadgroup() >= 64) {
+      pipelines.resident_reduction_small = std::move(small);
+    }
+  }
   *out = std::move(pipelines);
   return Status::Ok();
 }
@@ -2340,10 +2377,11 @@ Status MetalBackend::Prepare(
 }
 
 Status MetalBackend::PrepareDeviceButteraugliImpl(
-  const DeviceButteraugliPrepareDescriptor& descriptor,
+  const DeviceButteraugliPrepareDescriptor &descriptor,
   gpu_profile_internal::GpuProfilingMode mode,
-  std::unique_ptr<PreparedDeviceButteraugli>* prepared,
-  gpu_profile_internal::GpuExecutionProfile* profile) {
+  std::unique_ptr<PreparedDeviceButteraugli> *prepared,
+  gpu_profile_internal::GpuExecutionProfile *profile,
+  const MetalButteraugliScratch *borrowed_scratch) {
 
   if (prepared == nullptr) {
     return Status::InvalidArgument(
@@ -2361,7 +2399,7 @@ Status MetalBackend::PrepareDeviceButteraugliImpl(
   if (!status.ok()) return status;
   try {
     auto candidate = std::make_unique<MetalPreparedDeviceButteraugli>(
-      *this, descriptor);
+      *this, descriptor, borrowed_scratch);
     status = candidate->PrepareStorage();
     if (!status.ok()) return status;
     gpu_profile_internal::GpuExecutionProfile candidate_profile;
@@ -2371,6 +2409,8 @@ Status MetalBackend::PrepareDeviceButteraugliImpl(
     *prepared = std::move(candidate);
     if (profiling) *profile = std::move(candidate_profile);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate Metal Butteraugli prepared state");

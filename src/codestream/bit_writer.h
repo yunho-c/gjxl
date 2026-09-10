@@ -9,8 +9,8 @@
 #include <cstdint>
 #include <functional>
 #include <span>
-#include <vector>
 
+#include "core/managed_allocator.h"
 #include "core/status.h"
 
 namespace gjxl {
@@ -78,7 +78,8 @@ private:
     uint8_t previous_last_byte) noexcept;
 
   size_t bits_written_ = 0;
-  std::vector<uint8_t> storage_;
+  resource_budget_internal::ManagedVector<
+    uint8_t, resource_budget_internal::ResourceClass::kSerializer> storage_;
   const AllotmentState* active_allotment_ = nullptr;
 };
 

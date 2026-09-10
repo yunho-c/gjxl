@@ -8,6 +8,7 @@
 #include <memory>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "codec/chroma_from_luma.h"
 #include "codec/quantization_pipeline.h"
 #include "core/image_buffer.h"
@@ -73,10 +74,10 @@ struct PreparedQuantizationPipeline {
   ColorCorrelationMap initial_color_correlation;
   bool preprocessing_ready = false;
   bool fast_initial_color_correlation = false;
-  std::vector<uint8_t> epf_sharpness;
-  std::vector<float> initial_quant;
-  std::vector<float> strategy_mask;
-  std::vector<float> pixel_mask;
+  resource_budget_internal::ManagedVector<uint8_t> epf_sharpness;
+  resource_budget_internal::ManagedVector<float> initial_quant;
+  resource_budget_internal::ManagedVector<float> strategy_mask;
+  resource_budget_internal::ManagedVector<float> pixel_mask;
   AcStrategyGrid strategies;
   ButteraugliOptions butteraugli_options;
   std::unique_ptr<PreparedButteraugliReference> butteraugli_reference;
@@ -110,6 +111,8 @@ struct QuantizationPipelineMaterialization {
 
 /// Prepares the metadata and host result fields used by a fully resident
 /// pipeline whose validated coding image exists only on the selected backend.
+/// Leaves the host pixel mask empty until diagnostic materialization requests
+/// it; ordinary resident AC scoring consumes the device mask directly.
 [[nodiscard]] Status PrepareResidentQuantizationPipeline(
   ConstImage3FView original_linear_rgb,
   Extent2D padded_extent,

@@ -8,9 +8,11 @@
 #include <stdexcept>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "codec/chroma_from_luma_internal.h"
 #include "codec/gaborish.h"
 #include "codec/quantization_pipeline_internal.h"
+#include "codec/vardct_frame_view_internal.h"
 #include "core/block_grid.h"
 #include "core/image_ops.h"
 #include "gpu/ops/adaptive_quantization.h"
@@ -23,6 +25,8 @@
 #include "gpu/ops/quantization_pipeline_profile_internal.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 class GpuPipelineGaborishProvider final
@@ -60,9 +64,11 @@ public:
       GpuBackend& gpu,
       const ResidentAcStrategySearchInputs* resident = nullptr,
       PreparedAcStrategySearch* prepared = nullptr,
-      gpu_profile_internal::GpuProfilingSession* profiling_session = nullptr)
+      gpu_profile_internal::GpuProfilingSession* profiling_session = nullptr,
+      bool retain_storage = true)
     : gpu_(gpu), resident_(resident),
-      prepared_(prepared), profiling_session_(profiling_session) {}
+      prepared_(prepared), profiling_session_(profiling_session),
+      retain_storage_(retain_storage) {}
 
   Status Find(
     ConstImage3FView opsin,
@@ -77,13 +83,18 @@ public:
         gpu_, opsin, quant_field, pixel_mask, color_correlation,
         options, out, &stats_);
     }
-    return profiling_session_ == nullptr
+    const Status status = profiling_session_ == nullptr
       ? FindAcStrategyGridGpuResident(
           gpu_, opsin, quant_field, pixel_mask, color_correlation,
           *resident_, options, out, &stats_, prepared_)
       : gpu_profile_internal::FindAcStrategyGridGpuResidentProfiled(
           gpu_, opsin, quant_field, pixel_mask, color_correlation,
           *resident_, options, out, prepared_, profiling_session_, &stats_);
+    // Search waits for its submission and exports an independent grid. Reuse
+    // existing capacity for the last search too, then release it on either
+    // success or failure. Returned statistics do not borrow that storage.
+    if (!retain_storage_ && prepared_ != nullptr) prepared_->Reset();
+    return status;
   }
 
   [[nodiscard]] const AcStrategyGpuSearchStats& stats() const noexcept {
@@ -96,6 +107,7 @@ private:
   PreparedAcStrategySearch* prepared_ = nullptr;
   gpu_profile_internal::GpuProfilingSession* profiling_session_ = nullptr;
   AcStrategyGpuSearchStats stats_;
+  bool retain_storage_ = true;
 };
 
 class GpuAdaptiveQuantizationProvider final
@@ -222,13 +234,11 @@ Status PrepareResidentAcStrategyInputs(
     const AqEvaluationPreparation evaluation_preparation{
       .original_linear_rgb = original_linear_rgb,
       .coding_opsin = prepared.coding_opsin,
-      .resident_original_linear_rgb =
-        prepared.resident_original_linear_rgb,
+      .resident_original_linear_rgb = prepared.resident_original_linear_rgb,
       .resident_coding_opsin = prepared.resident_coding_opsin,
       .strategies = &provisional_strategies,
-      .epf_sharpness = {
-        prepared.epf_sharpness.data(), prepared.block_extent,
-        prepared.block_extent.width},
+      .epf_sharpness = {prepared.epf_sharpness.data(), prepared.block_extent,
+                        prepared.block_extent.width},
       .options = evaluation_options,
       .resident_initial_cfl = true,
       .frame_only_resident_initial_quant = true,
@@ -236,6 +246,7 @@ Status PrepareResidentAcStrategyInputs(
       .resident_quantization = true,
       .coefficient_decision_mode =
         AcCoefficientDecisionMode::kAdjustedSharedQuant,
+      .defer_final_transform_metadata = true,
     };
     auto* const validated_preparation = HasValidatedHostImages(
         prepared, original_linear_rgb)
@@ -305,15 +316,15 @@ Status PrepareResidentAcStrategyInputs(
     .rescale = options.initial_quant_rescale,
   };
   const InitialQuantFieldOutput initial_output{
-    .quant_field = {
-      prepared.initial_quant.data(), prepared.block_extent,
-      prepared.block_extent.width},
-    .strategy_mask = {
-      prepared.strategy_mask.data(), prepared.block_extent,
-      prepared.block_extent.width},
-    .pixel_mask = {
-      prepared.pixel_mask.data(), prepared.padded_extent,
-      prepared.padded_extent.width},
+    .quant_field = {prepared.initial_quant.data(), prepared.block_extent,
+                    prepared.block_extent.width},
+    .strategy_mask = {prepared.strategy_mask.data(), prepared.block_extent,
+                      prepared.block_extent.width},
+    .pixel_mask =
+      prepared.pixel_mask.empty()
+        ? PlaneF32View{}
+        : PlaneF32View{prepared.pixel_mask.data(), prepared.padded_extent,
+                       prepared.padded_extent.width},
   };
   const auto initial_begin = profiling_session == nullptr
     ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
@@ -410,9 +421,9 @@ Status RunGpuFrameOnlyQuantizationPipeline(
       "GPU frame-only pipeline dimensions are too large");
   }
   try {
-    std::vector<float> initial_quant(block_count);
-    std::vector<float> strategy_mask(block_count);
-    std::vector<float> pixel_mask(pixel_count);
+    ManagedVector<float> initial_quant(block_count);
+    ManagedVector<float> strategy_mask(block_count);
+    ManagedVector<float> pixel_mask(pixel_count);
     const float initial_quant_target =
       options.adaptive_quantization.profile.loop_filter.gaborish
         ? options.butteraugli_target
@@ -421,11 +432,11 @@ Status RunGpuFrameOnlyQuantizationPipeline(
     Status status = AcStrategyGrid::Create(block_extent, &strategies);
     if (!status.ok()) return status;
     strategies.fill_dct8();
-    std::vector<uint8_t> sharpness(block_count);
+    ManagedVector<uint8_t> sharpness(block_count);
     status = FillDefaultEpfSharpness(
       {sharpness.data(), block_extent, block_extent.width});
     if (!status.ok()) return status;
-    std::vector<float> final_quant(block_count);
+    ManagedVector<float> final_quant(block_count);
     VarDctEncoderFrame frame;
     AdaptiveQuantizationOptions adaptive_options =
       options.adaptive_quantization;
@@ -461,6 +472,8 @@ Status RunGpuFrameOnlyQuantizationPipeline(
     CopyContiguousPlane(final_quant, output.quant_field);
     *output.frame = std::move(frame);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate GPU frame-only pipeline storage");
@@ -532,7 +545,10 @@ Status RunPreparedGpuQuantizationPipelineImpl(
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
     prepared_aq,
   QuantizationPipelineMaterialization materialization,
-  gpu_profile_internal::GpuProfilingSession* profiling_session) {
+  gpu_profile_internal::GpuProfilingSession* profiling_session,
+  std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame>*
+    completed_frame = nullptr,
+  bool retain_ac_search_storage = true) {
 
   switch (aq_mode) {
     case GpuAdaptiveQuantizationMode::kExactCoefficients:
@@ -600,6 +616,18 @@ Status RunPreparedGpuQuantizationPipelineImpl(
     aq_state = prepared_aq;
   ResidentAcStrategySearchInputs resident_inputs;
   if (resident) {
+    if (materialization.initial_quantization && prepared.pixel_mask.empty()) {
+      try {
+        prepared.pixel_mask.resize(prepared.padded_extent.width *
+                                   prepared.padded_extent.height);
+      } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+        return failure.status();
+      } catch (const std::bad_alloc&) {
+        return Status::OutOfMemory("Unable to allocate resident mask output");
+      } catch (const std::length_error &) {
+        return Status::InvalidArgument("Resident mask output is too large");
+      }
+    }
     if (aq_state == nullptr) aq_state = &local_prepared_aq;
     Status status = PrepareResidentAcStrategyInputs(
         gpu, original_linear_rgb, prepared, options, *aq_state,
@@ -609,7 +637,7 @@ Status RunPreparedGpuQuantizationPipelineImpl(
   GpuAcStrategySearchProvider strategy_search(
       gpu, resident ? &resident_inputs : nullptr,
       resident ? &aq_state->ac_strategy_search : nullptr,
-      profiling_session);
+      profiling_session, retain_ac_search_storage);
   GpuAdaptiveQuantizationProvider adaptive_quantization(
     gpu, aq_mode, aq_state,
     {
@@ -619,6 +647,7 @@ Status RunPreparedGpuQuantizationPipelineImpl(
         materialization.reconstructed_linear_rgb,
       .final_perceptual_evaluation =
         materialization.final_perceptual_evaluation,
+      .completed_frame = completed_frame,
     }, profiling_session);
   const Status status = RunPreparedQuantizationPipelineWithProviders(
     original_linear_rgb, prepared, strategy_search, adaptive_quantization,
@@ -659,7 +688,8 @@ Status RunPreparedGpuQuantizationPipelineForEncoding(
   GpuEncodingQuantizationPipelineOutput output,
   AcStrategyGpuSearchStats* stats,
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
-    prepared_aq) {
+    prepared_aq,
+  bool retain_ac_search_storage) {
 
   if ((aq_mode != GpuAdaptiveQuantizationMode::kExactCoefficients &&
        aq_mode != GpuAdaptiveQuantizationMode::kFullyResident &&
@@ -678,7 +708,8 @@ Status RunPreparedGpuQuantizationPipelineForEncoding(
       .maximum_error_result = output.maximum_error_result,
     },
   };
-  return RunPreparedGpuQuantizationPipelineImpl(
+  std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame> completed;
+  const Status status = RunPreparedGpuQuantizationPipelineImpl(
     gpu, original_linear_rgb, prepared, options, aq_mode, pipeline_output,
     stats, prepared_aq,
     {
@@ -690,7 +721,12 @@ Status RunPreparedGpuQuantizationPipelineForEncoding(
         output.collect_final_butteraugli_score,
       .apply_throughput_iteration_limit = false,
     },
-    nullptr);
+    nullptr, output.completed_frame == nullptr ? nullptr : &completed,
+    retain_ac_search_storage);
+  if (status.ok() && output.completed_frame != nullptr) {
+    *output.completed_frame = std::move(completed);
+  }
+  return status;
 }
 
 Status RunPreparedGpuQuantizationPipelineForEncodingProfiled(
@@ -703,7 +739,8 @@ Status RunPreparedGpuQuantizationPipelineForEncodingProfiled(
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
     prepared_aq,
   gpu_profile_internal::GpuProfilingMode profiling_mode,
-  gpu_profile_internal::GpuExecutionProfile* profile) {
+  gpu_profile_internal::GpuExecutionProfile* profile,
+  bool retain_ac_search_storage) {
 
   if ((aq_mode != GpuAdaptiveQuantizationMode::kFullyResident &&
        aq_mode != GpuAdaptiveQuantizationMode::kThroughput) ||
@@ -739,6 +776,7 @@ Status RunPreparedGpuQuantizationPipelineForEncodingProfiled(
       .maximum_error_result = output.maximum_error_result,
     },
   };
+  std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame> completed;
   Status status = RunPreparedGpuQuantizationPipelineImpl(
     gpu, original_linear_rgb, prepared, options, aq_mode, pipeline_output,
     nullptr, prepared_aq,
@@ -751,9 +789,14 @@ Status RunPreparedGpuQuantizationPipelineForEncodingProfiled(
         output.collect_final_butteraugli_score,
       .apply_throughput_iteration_limit = false,
     },
-    &profiling_session);
+    &profiling_session,
+    output.completed_frame == nullptr ? nullptr : &completed,
+    retain_ac_search_storage);
   if (!status.ok()) return status;
   *profile = std::move(profiling_session).Finish();
+  if (output.completed_frame != nullptr) {
+    *output.completed_frame = std::move(completed);
+  }
   return Status::Ok();
 }
 

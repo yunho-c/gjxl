@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "core/ac_strategy.h"
 #include "core/geometry.h"
 #include "core/image.h"
@@ -28,10 +29,10 @@ struct PreparedForwardDctCoefficients {
   Extent2D pixel_extent;
   Extent2D block_extent;
   Extent2D color_tile_extent;
-  std::vector<PreparedTransform> transforms;
-  std::vector<size_t> color_tile_offsets;
-  std::vector<size_t> color_tile_transform_indices;
-  std::array<std::vector<float>, 3> coefficients;
+  resource_budget_internal::ManagedVector<PreparedTransform> transforms;
+  resource_budget_internal::ManagedVector<size_t> color_tile_offsets;
+  resource_budget_internal::ManagedVector<size_t> color_tile_transform_indices;
+  std::array<resource_budget_internal::ManagedVector<float>, 3> coefficients;
 
   [[nodiscard]] bool valid() const noexcept;
 };

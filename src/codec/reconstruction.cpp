@@ -5,19 +5,20 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <new>
 #include <stdexcept>
-#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "codec/dc_conversion.h"
 #include "codec/dc_quantization.h"
 #include "codec/dct.h"
+#include "codec/frontend_storage_plan.h"
+#include "codec/frontend_dispatch_internal.h"
 #include "codec/quantization.h"
 #include "codec/reconstruction_internal.h"
 #include "core/block_grid.h"
@@ -25,8 +26,11 @@
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
 #include "core/thread_budget.h"
+#include "core/parallel_work_internal.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 constexpr std::array<XybChannel, 3> kChannels = {
@@ -42,18 +46,12 @@ Status RunParallelForwardTransforms(
   Function&& function) {
 
   if (count == 0) return Status::Ok();
-  constexpr size_t kMinimumParallelCoefficients = 256 * 256;
-  constexpr size_t kMaximumWorkers = 8;
-  const size_t hardware_workers = std::max<size_t>(
-    std::thread::hardware_concurrency(), 1);
-  const size_t automatic_worker_count =
-    coefficient_count < kMinimumParallelCoefficients
-    ? 1
-    : std::min(count, std::min(kMaximumWorkers, hardware_workers));
-  const size_t cpu_thread_count =
-    thread_budget_internal::CpuThreadCount();
+  const size_t cpu_thread_count = thread_budget_internal::CpuThreadCount();
+  const size_t desired_participants = frontend_dispatch_internal::kForwardTransform.Participants(
+      count, coefficient_count, cpu_thread_count, std::thread::hardware_concurrency());
   auto* const participant_tracker =
     thread_budget_internal::ParticipantTracker();
+  const auto resource_context = resource_budget_internal::CurrentResourceContext();
   if (thread_budget_internal::InExplicitParallelScope()) {
     for (size_t index = 0; index < count; ++index) {
       Status status = function(index);
@@ -61,12 +59,11 @@ Status RunParallelForwardTransforms(
     }
     return Status::Ok();
   }
-  const size_t participant_count = cpu_thread_count == 0
-    ? automatic_worker_count
-    : std::min(automatic_worker_count, cpu_thread_count);
+  thread_budget_internal::CpuWorkerGroup cpu_workers(desired_participants);
+  const size_t participant_count = cpu_workers.participants();
   if (participant_count == 1) {
     thread_budget_internal::ParallelScope scope(
-      cpu_thread_count, participant_tracker);
+      cpu_thread_count, participant_tracker, resource_context, &cpu_workers);
     for (size_t index = 0; index < count; ++index) {
       Status status = function(index);
       if (!status.ok()) return status;
@@ -74,53 +71,20 @@ Status RunParallelForwardTransforms(
     return Status::Ok();
   }
 
-  std::vector<Status> statuses(count);
-  std::atomic<size_t> next_index{0};
-  std::vector<std::thread> workers;
-  const size_t spawned_worker_count = cpu_thread_count == 0
-    ? participant_count
-    : participant_count - 1;
-  workers.reserve(spawned_worker_count);
-  const auto run_worker = [&] {
-    thread_budget_internal::ParallelScope scope(
-      cpu_thread_count, participant_tracker);
-    while (true) {
-      const size_t index =
-        next_index.fetch_add(1, std::memory_order_relaxed);
-      if (index >= count) break;
-      try {
-        statuses[index] = function(index);
-      } catch (const std::bad_alloc&) {
-        statuses[index] = Status::OutOfMemory(
-          "Unable to allocate forward-transform worker storage");
-      } catch (const std::length_error&) {
-        statuses[index] = Status::InvalidArgument(
-          "Forward-transform worker storage is too large");
-      } catch (...) {
-        statuses[index] = Status::Internal(
-          "Forward-transform worker failed unexpectedly");
-      }
-    }
+  const size_t spawned_worker_count = frontend_dispatch_internal::SpawnedWorkers(
+    participant_count, cpu_thread_count != 0 || cpu_workers.enabled());
+  constexpr thread_budget_internal::ParallelWorkErrors errors{
+    .allocation = "Unable to allocate forward-transform worker storage",
+    .unexpected = "Forward-transform worker failed unexpectedly",
+    .length_code = StatusCode::kInvalidArgument,
+    .length = "Forward-transform worker storage is too large",
+    .launch_allocation = "Unable to allocate CPU worker state",
+    .launch_action = thread_budget_internal::LaunchFailureAction::kRetrySerial,
   };
-  try {
-    for (size_t worker = 0; worker < spawned_worker_count; ++worker) {
-      workers.emplace_back(run_worker);
-    }
-  } catch (const std::system_error&) {
-    next_index.store(count, std::memory_order_relaxed);
-    for (std::thread& worker : workers) worker.join();
-    for (size_t index = 0; index < count; ++index) {
-      Status status = function(index);
-      if (!status.ok()) return status;
-    }
-    return Status::Ok();
-  }
-  if (cpu_thread_count != 0) run_worker();
-  for (std::thread& worker : workers) worker.join();
-  for (const Status& status : statuses) {
-    if (!status.ok()) return status;
-  }
-  return Status::Ok();
+  return thread_budget_internal::RunParallelWork<ManagedVector>(
+    count, cpu_workers, spawned_worker_count,
+    thread_budget_internal::WorkerLaunchSite::kForwardTransforms, errors,
+    [&](size_t index, size_t) { return function(index); });
 }
 
 float MatrixMultiplier(
@@ -311,7 +275,7 @@ Status PrepareForwardDctCoefficients(
     for (auto& channel : candidate.coefficients) {
       channel.resize(pixel_count);
     }
-    std::vector<std::vector<size_t>> tile_transforms(tile_count);
+    ManagedVector<ManagedVector<size_t>> tile_transforms(tile_count);
     size_t coefficient_offset = 0;
     Status status = strategies.ForEachAnchor(
       [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
@@ -408,6 +372,8 @@ Status PrepareForwardDctCoefficients(
     }
     *out = std::move(candidate);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate prepared forward coefficients");
@@ -463,6 +429,9 @@ Status ComputeQuantizedCoefficientsImpl(
         "Coefficient coding block grid is too large");
     }
 
+
+    const resource_budget_internal::ResourceClassScope resource_class(
+      resource_budget_internal::ResourceClass::kCompletedFrame);
     VarDctEncoderFrame result;
     result.geometry_ = input.geometry;
     result.strategies_ = *input.strategies;
@@ -763,6 +732,8 @@ Status ComputeQuantizedCoefficientsImpl(
     }
 
     *out = std::move(result);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate coefficient coding scratch storage");
@@ -817,7 +788,7 @@ Status ReconstructQuantizedCoefficients(
     Image3FBuffer result(output.extent());
     const Image3FView result_view = result.view();
 
-    std::vector<size_t> group_offsets(frame.ac_group_count(), 0);
+    ManagedVector<size_t> group_offsets(frame.ac_group_count(), 0);
     const ConstImage3FView frame_dc = frame.dc();
     const Status reconstruct_status = frame.strategies_.ForEachAnchor(
       [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
@@ -843,7 +814,7 @@ Status ReconstructQuantizedCoefficients(
 
         const int32_t raw_quant = frame.raw_quant_field_[
           block_y * block_extent.width + block_x];
-        std::array<std::vector<float>, 3> coefficients;
+        std::array<ManagedVector<float>, 3> coefficients;
         for (size_t channel = 0; channel < coefficients.size(); ++channel) {
           coefficients[channel].resize(coefficient_count);
           const size_t source =
@@ -875,7 +846,7 @@ Status ReconstructQuantizedCoefficients(
         }
 
         for (size_t channel = 0; channel < coefficients.size(); ++channel) {
-          std::vector<float> dc(
+          ManagedVector<float> dc(
             info->covered_blocks.width * info->covered_blocks.height);
           for (size_t dy = 0; dy < info->covered_blocks.height; ++dy) {
             for (size_t dx = 0; dx < info->covered_blocks.width; ++dx) {
@@ -896,7 +867,7 @@ Status ReconstructQuantizedCoefficients(
             return status;
           }
 
-          std::vector<float> pixels(coefficient_count);
+          ManagedVector<float> pixels(coefficient_count);
           status = InverseDctCpu(strategy, coefficients[channel], pixels);
           if (!status.ok()) {
             return status;
@@ -921,6 +892,8 @@ Status ReconstructQuantizedCoefficients(
     }
 
     CopyImage(result.const_view(), output);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate coefficient reconstruction scratch storage");

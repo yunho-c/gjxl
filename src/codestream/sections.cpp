@@ -4,6 +4,7 @@
 // Adapted for GJXL from libjxl-tiny's frame-section assembly.
 
 #include "codestream/sections.h"
+#include "codestream/storage.h"
 
 #include <array>
 #include <limits>
@@ -12,6 +13,7 @@
 #include <vector>
 
 namespace gjxl {
+using codestream_internal::Storage;
 namespace {
 
 constexpr std::array<size_t, 4> kTocBitWidths = {10, 14, 22, 30};
@@ -84,7 +86,7 @@ Status WriteTocSizesInternal(
 
 Status SectionSizes(
   std::span<const BitWriter> sections,
-  std::vector<size_t>* sizes,
+  Storage<size_t>* sizes,
   size_t* payload_bits) {
 
   if (sizes == nullptr || payload_bits == nullptr) {
@@ -147,13 +149,15 @@ Status WriteTocAndSections(
   if (output == nullptr) {
     return Status::InvalidArgument("Section output is null");
   }
-  std::vector<size_t> sizes;
+  Storage<size_t> sizes;
   size_t payload_bits = 0;
   try {
     if (Status status = SectionSizes(sections, &sizes, &payload_bits);
         !status.ok()) {
       return status;
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory("Section-size allocation failed");
   } catch (const std::length_error&) {

@@ -17,6 +17,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "core/ac_strategy.h"
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/submission.h"
@@ -27,6 +28,8 @@
   ::gjxl::metal_internal::RecordMetalComputePipelineState(state)
 
 namespace gjxl::metal_internal {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 Status CreatePipeline(
@@ -64,27 +67,6 @@ Status CreatePipeline(
   RegisterMetalComputePipeline(pipeline.get(), function_name);
   *out = std::move(pipeline);
   return Status::Ok();
-}
-
-const char* AcStrategyProfileStageId(AcStrategyType strategy) {
-  switch (strategy) {
-    case AcStrategyType::kDct8:
-      return "frontend.ac_strategy.dct8";
-    case AcStrategyType::kDct16x8:
-      return "frontend.ac_strategy.dct16x8";
-    case AcStrategyType::kDct8x16:
-      return "frontend.ac_strategy.dct8x16";
-    case AcStrategyType::kDct16x16:
-      return "frontend.ac_strategy.dct16";
-    case AcStrategyType::kDct32x16:
-      return "frontend.ac_strategy.dct32x16";
-    case AcStrategyType::kDct16x32:
-      return "frontend.ac_strategy.dct16x32";
-    case AcStrategyType::kDct32x32:
-      return "frontend.ac_strategy.dct32";
-    default:
-      return "frontend.ac_strategy.unsupported";
-  }
 }
 
 struct FusedStageSpec {
@@ -202,6 +184,9 @@ Status CreateAcStrategyPipelines(
   if (!status.ok()) {
     return status;
   }
+  status = CreatePipeline(device, library, "gjxl_ac_strategy_cost_from_loss",
+                          &pipelines.cost_from_loss);
+  if (!status.ok()) return status;
 
   for (const FusedStageSpec& spec : kFusedStageSpecs) {
     const size_t strategy_index = static_cast<size_t>(spec.strategy);
@@ -232,6 +217,7 @@ Status CreateAcStrategyPipelines(
       std::string_view function_name = spec.residual_inverse_function_name;
       size_t residual_inverse_simdgroups =
         spec.simdgroups_per_threadgroup;
+      std::string loss_function_name;
       if (residual_inverse_mode ==
           MetalAcResidualInverseMode::kFusedCompact) {
         function_name = spec.compact_residual_inverse_function_name;
@@ -240,6 +226,9 @@ Status CreateAcStrategyPipelines(
         function_name = spec.tuned_residual_inverse_function_name;
         residual_inverse_simdgroups =
           spec.tuned_simdgroups_per_threadgroup;
+        loss_function_name = std::string(function_name) + "_loss";
+        function_name = loss_function_name;
+        fused.reduces_loss = true;
       }
       status = CreatePipeline(
         device,
@@ -279,6 +268,64 @@ Status CreateAcStrategyPipelines(
             fused.residual_inverse_threads_per_threadgroup) {
         return Status::Unavailable(
           "Metal cannot launch the fused AC-strategy inverse kernel");
+      }
+    }
+  }
+
+  // Small candidates keep X/Y/B local. Select each optional pipeline
+  // independently so unsupported shapes retain the split implementation.
+  constexpr struct {
+    AcStrategyType strategy;
+    const char* kernel;
+    NS::UInteger threads;
+  } kCandidateLossKernels[] = {
+    {AcStrategyType::kDct16x16,
+     "gjxl_ac_strategy_dct16_candidate_loss_parallel", 192},
+    {AcStrategyType::kDct16x8,
+     "gjxl_ac_strategy_dct16x8_candidate_loss_parallel", 192},
+    {AcStrategyType::kDct8x16,
+     "gjxl_ac_strategy_dct8x16_candidate_loss_parallel", 96},
+  };
+  if (device->supportsFamily(MTL::GPUFamilyApple9)) {
+    for (const auto& entry : kCandidateLossKernels) {
+      auto& fused = pipelines.fused[static_cast<size_t>(entry.strategy)];
+      if (!fused.forward || !fused.reduces_loss) continue;
+      NS::SharedPtr<MTL::ComputePipelineState> pipeline;
+      status = CreatePipeline(device, library, entry.kernel, &pipeline);
+      if (status.ok() && pipeline->threadExecutionWidth() == 32 &&
+          pipeline->maxTotalThreadsPerThreadgroup() >= entry.threads &&
+          pipeline->staticThreadgroupMemoryLength() <=
+            device->maxThreadgroupMemoryLength()) {
+        fused.candidate_loss = std::move(pipeline);
+        fused.candidate_loss_threads_per_threadgroup = entry.threads;
+      }
+    }
+  }
+
+  // Group only the forward DCT. Keep the existing inverse widths and scratch
+  // handoff; optional kernels preserve fallback with older shader libraries.
+  constexpr struct {
+    AcStrategyType strategy;
+    const char* kernel;
+    NS::UInteger threads;
+  } kGroupedForwardKernels[] = {
+    {AcStrategyType::kDct32x32, "gjxl_ac_strategy_dct32_forward_grouped", 384},
+    {AcStrategyType::kDct32x16, "gjxl_ac_strategy_dct32x16_forward_grouped", 384},
+    {AcStrategyType::kDct16x32, "gjxl_ac_strategy_dct16x32_forward_grouped", 192},
+  };
+  if (device->supportsFamily(MTL::GPUFamilyApple9)) {
+    for (const auto& entry : kGroupedForwardKernels) {
+      auto& fused = pipelines.fused[static_cast<size_t>(entry.strategy)];
+      if (!fused.forward || !fused.reduces_loss || fused.candidate_loss) continue;
+      NS::SharedPtr<MTL::ComputePipelineState> pipeline;
+      status = CreatePipeline(device, library, entry.kernel, &pipeline);
+      if (status.ok() && pipeline->threadExecutionWidth() == 32 &&
+          pipeline->maxTotalThreadsPerThreadgroup() >= entry.threads &&
+          pipeline->staticThreadgroupMemoryLength() <=
+            device->maxThreadgroupMemoryLength()) {
+        fused.forward = std::move(pipeline);
+        fused.forward_threads_per_threadgroup = entry.threads;
+        fused.forward_channels_grouped = true;
       }
     }
   }
@@ -736,7 +783,26 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
   const AcStrategyPipelines::FusedStages& fused =
     ac_strategy_pipelines_.fused[
       static_cast<size_t>(validated.strategy)];
-  if (fused.forward) {
+  if (fused.candidate_loss) {
+    encoder->setComputePipelineState(fused.candidate_loss.get());
+    for (size_t channel = 0; channel < 3; ++channel) {
+      encoder->setBuffer(validated.opsin[channel]->handle(),
+                        validated.opsin_offset_bytes[channel], channel);
+    }
+    encoder->setBuffer(validated.candidates->handle(), 0, 3);
+    encoder->setBuffer(validated.quant_field->handle(),
+                      validated.quant_field_offset_bytes, 4);
+    encoder->setBuffer(validated.matrices->handle(), 0, 5);
+    encoder->setBuffer(validated.pixel_mask->handle(),
+                      validated.pixel_mask_offset_bytes, 6);
+    encoder->setBuffer(validated.costs->handle(), 0, 7);
+    encoder->setBuffer(validated.scratch_a->handle(), 0, 8);
+    encoder->setBuffer(validated.rate_scratch->handle(), 0, 9);
+    encoder->setBytes(&validated.params, sizeof(validated.params), 10);
+    DispatchMetalThreadgroups(encoder,
+      MTL::Size(validated.params.candidate_count, 1, 1),
+      MTL::Size(fused.candidate_loss_threads_per_threadgroup, 1, 1));
+  } else if (fused.forward) {
     encoder->setComputePipelineState(fused.forward.get());
     for (size_t channel = 0; channel < 3; ++channel) {
       encoder->setBuffer(validated.opsin[channel]->handle(),
@@ -751,7 +817,9 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
     DispatchMetalThreadgroups(
       encoder,
       MTL::Size(
-        static_cast<NS::UInteger>(validated.transform_count), 1, 1),
+        fused.forward_channels_grouped
+          ? static_cast<NS::UInteger>(validated.params.candidate_count)
+          : static_cast<NS::UInteger>(validated.transform_count), 1, 1),
       MTL::Size(fused.forward_threads_per_threadgroup, 1, 1));
   } else {
     encoder->setComputePipelineState(ac_strategy_pipelines_.gather.get());
@@ -778,7 +846,9 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
   const NS::UInteger reduction_bytes =
     validated.params.coefficient_count * sizeof(float);
   MetalBuffer* residual_pixels = nullptr;
-  if (fused.residual_inverse) {
+  if (fused.candidate_loss) {
+    residual_pixels = validated.scratch_a;
+  } else if (fused.residual_inverse) {
     encoder->setComputePipelineState(fused.residual_inverse.get());
     encoder->setBuffer(validated.scratch_b->handle(), 0, 0);
     encoder->setBuffer(validated.matrices->handle(), 0, 1);
@@ -789,6 +859,10 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
     encoder->setBuffer(validated.rate_scratch->handle(), 0, 5);
     encoder->setBytes(&validated.params, sizeof(validated.params), 6);
     encoder->setBuffer(validated.costs->handle(), 0, 7);
+    if (fused.reduces_loss) {
+      encoder->setBuffer(validated.pixel_mask->handle(),
+                         validated.pixel_mask_offset_bytes, 8);
+    }
     encoder->setThreadgroupMemoryLength(reduction_bytes, 0);
     encoder->setThreadgroupMemoryLength(reduction_bytes, 1);
     encoder->setThreadgroupMemoryLength(reduction_bytes, 2);
@@ -824,7 +898,9 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
     residual_pixels = validated.scratch_b;
   }
 
-  encoder->setComputePipelineState(ac_strategy_pipelines_.cost.get());
+  encoder->setComputePipelineState(fused.reduces_loss
+    ? ac_strategy_pipelines_.cost_from_loss.get()
+    : ac_strategy_pipelines_.cost.get());
   encoder->setBuffer(residual_pixels->handle(), 0, 0);
   encoder->setBuffer(validated.pixel_mask->handle(),
                      validated.pixel_mask_offset_bytes, 1);
@@ -834,6 +910,12 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
   encoder->setBuffer(validated.quant_field->handle(),
                      validated.quant_field_offset_bytes, 5);
   encoder->setBytes(&validated.params, sizeof(validated.params), 6);
+  if (fused.reduces_loss) {
+    DispatchMetalThreads(encoder,
+      MTL::Size(validated.params.candidate_count, 1, 1),
+      MTL::Size(64, 1, 1));
+    return;
+  }
   encoder->setThreadgroupMemoryLength(3 * reduction_bytes, 0);
   DispatchMetalThreadgroups(
     encoder,
@@ -853,9 +935,13 @@ Status MetalBackend::SubmitAcStrategyCandidatesImpl(
   }
   submission->reset();
 
-  std::vector<ValidatedAcStrategyBatch> validated_batches;
+  AcSubmissionStoragePlan storage;
+  Status planning = ComputeAcSubmissionStoragePlan(
+    {.batches = batches.size()}, &storage);
+  if (!planning.ok()) return planning;
+  ManagedVector<ValidatedAcStrategyBatch> validated_batches;
   try {
-    validated_batches.reserve(batches.size());
+    validated_batches.reserve(storage.batch_capacity);
     for (const AcStrategyCandidateBatch& batch : batches) {
       ValidatedAcStrategyBatch validated;
       Status status = ValidateAcStrategyCandidateBatch(batch, &validated);
@@ -866,6 +952,8 @@ Status MetalBackend::SubmitAcStrategyCandidatesImpl(
         validated_batches.push_back(validated);
       }
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to validate AC-strategy candidate batches");
@@ -886,11 +974,18 @@ Status MetalBackend::SubmitAcStrategyCandidatesImpl(
       &context,
       submission);
   }
-  std::vector<AcStrategyProfileContext> contexts;
-  std::vector<MetalProfiledComputeStage> stages;
+  ManagedVector<AcStrategyProfileContext> contexts;
+  ManagedVector<MetalProfiledComputeStage> stages;
+  planning = ComputeAcSubmissionStoragePlan(
+    {.batches = batches.size(),
+     .nonempty_batches = validated_batches.size(),
+     .profiling = true}, &storage);
+  if (!planning.ok()) return planning;
   try {
-    contexts.resize(validated_batches.size());
-    stages.resize(validated_batches.size());
+    contexts.resize(storage.stage_capacity);
+    stages.resize(storage.stage_capacity);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate AC-strategy GPU stage metadata");
@@ -902,7 +997,7 @@ Status MetalBackend::SubmitAcStrategyCandidatesImpl(
     contexts[index] = {&validated_batches[index]};
     stages[index] = {
       .stage_id = AcStrategyProfileStageId(validated_batches[index].strategy),
-      .group_id = "frontend.ac_strategy",
+      .group_id = kAcStrategyProfileGroupId,
       .encode = &MetalBackend::EncodeAcStrategyProfileStage,
       .context = &contexts[index],
     };

@@ -19,6 +19,7 @@
 
 #include "codec/chroma_from_luma.h"
 #include "codec/reconstruction.h"
+#include "codec/vardct_frame_view_internal.h"
 #include "codestream/block_context_map.h"
 #include "codestream/coefficient_order.h"
 #include "codestream/encoder.h"
@@ -277,8 +278,8 @@ bool CheckCoefficientOrderPermutationTokens() {
   }
   gjxl::SimpleCoefficientOrders orders;
   orders.used_order_mask = 1;
-  for (std::vector<uint32_t>& channel : orders.orders[0]) {
-    channel = natural;
+  for (auto& channel : orders.orders[0]) {
+    channel.assign(natural.begin(), natural.end());
     std::swap(channel[1], channel[2]);
   }
   const std::array<gjxl::EntropyToken, 6> expected = {{
@@ -365,8 +366,8 @@ bool CheckCustomOrderStrategyFamilies() {
 
     gjxl::SimpleCoefficientOrders orders;
     orders.used_order_mask = uint16_t{1} << fixture.family;
-    for (std::vector<uint32_t>& channel : orders.orders[fixture.family]) {
-      channel = natural;
+    for (auto& channel : orders.orders[fixture.family]) {
+      channel.assign(natural.begin(), natural.end());
       std::swap(channel[llf], channel[llf + 1]);
     }
     std::array<std::vector<int32_t>, 3> storage;
@@ -695,7 +696,7 @@ bool CheckFrameGroups(size_t width, size_t expected_group_count) {
         || groups[index].block_x != group.block_x
         || groups[index].block_y != group.block_y
         || groups[index].block_extent != group.block_extent
-        || groups[index].tokens != isolated) {
+        || !std::ranges::equal(groups[index].tokens, isolated)) {
       std::cerr << "Frame and isolated AC-group tokenization differ\n";
       return false;
     }
@@ -749,11 +750,11 @@ bool CheckFrameCoefficientOrderSelection() {
       !gjxl::ComputeSimpleCoefficientOrders(wide, &first).ok() ||
       !gjxl::ComputeSimpleCoefficientOrders(wide, &second).ok() ||
       !gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
-        wide,
+        gjxl::vardct_frame_internal::BorrowFrame(wide),
         gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled,
         &sampled_first).ok() ||
       !gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
-        wide,
+        gjxl::vardct_frame_internal::BorrowFrame(wide),
         gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled,
         &sampled_second).ok() ||
       small_orders.used_order_mask != 0 || first != second ||
@@ -818,10 +819,11 @@ bool CheckParallelCoefficientOrderSelection() {
   {
     gjxl::thread_budget_internal::EncodeScope scope(1);
     if (!gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
-          frame, gjxl::VarDctCoefficientOrderBehavior::kFull,
+          gjxl::vardct_frame_internal::BorrowFrame(frame),
+          gjxl::VarDctCoefficientOrderBehavior::kFull,
           &full_serial).ok() ||
         !gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
-          frame,
+          gjxl::vardct_frame_internal::BorrowFrame(frame),
           gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled,
           &sampled_serial).ok() ||
         !gjxl::EncodeVarDctCodestream(frame, {}, &full_serial_bytes).ok() ||
@@ -838,10 +840,11 @@ bool CheckParallelCoefficientOrderSelection() {
   {
     gjxl::thread_budget_internal::EncodeScope scope(8, &tracker);
     if (!gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
-          frame, gjxl::VarDctCoefficientOrderBehavior::kFull,
+          gjxl::vardct_frame_internal::BorrowFrame(frame),
+          gjxl::VarDctCoefficientOrderBehavior::kFull,
           &full_parallel).ok() ||
         !gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
-          frame,
+          gjxl::vardct_frame_internal::BorrowFrame(frame),
           gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled,
           &sampled_parallel).ok() ||
         !gjxl::EncodeVarDctCodestream(frame, {}, &full_parallel_bytes).ok() ||
@@ -934,7 +937,8 @@ bool CheckFrameTokenTemplateReuse() {
            ++group_index) {
         gjxl::codestream_internal::SimpleAcGroupTokenData one_pass;
         if (!gjxl::codestream_internal::TokenizeSimpleAcGroupForEncoder(
-              frame, order, natural_orders, map, group_index, true,
+              gjxl::vardct_frame_internal::BorrowFrame(frame), order,
+              natural_orders, map, group_index, true,
               &scratch, &one_pass).ok() ||
             one_pass.values.size() != direct[group_index].tokens.size() ||
             one_pass.contexts.size() != direct[group_index].tokens.size()) {

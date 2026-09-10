@@ -241,13 +241,16 @@ __attribute__((always_inline)) inline void GatherAcStrategyPixels(
 // These forward transforms consume the gathered threadgroup tile directly.
 // The standalone DCT kernels use the same matrix order but require a device
 // input buffer, which would restore the scratch round trip this path removes.
-template <uint N>
+// With StageBasis=false, the caller stages one immutable shared basis before
+// this helper. Its unconditional barrier publishes both the basis and pixels.
+template <uint N, bool LocalOutput = false, bool StageBasis = true,
+          typename CoefficientPointer>
 __attribute__((always_inline)) inline void AcStrategyForwardSquareDct(
   device const float* opsin_x,
   device const float* opsin_y,
   device const float* opsin_b,
   device const AcStrategyCandidate* candidates,
-  device float* coefficients,
+  CoefficientPointer coefficients,
   device const float* quant_field,
   device float* precomputed_quant_norm,
   constant AcStrategyBatchParams& params,
@@ -282,10 +285,12 @@ __attribute__((always_inline)) inline void AcStrategyForwardSquareDct(
     precomputed_quant_norm[candidate_index] = ComputeQuantNorm(
       quant_field, candidates[candidate_index], params);
   }
-  for (uint index = simdgroup_index * simd_width + lane;
-       index < N * N;
-       index += threadgroup_stride) {
-    shared_basis[index] = basis[index];
+  if (StageBasis) {
+    for (uint index = simdgroup_index * simd_width + lane;
+         index < N * N;
+         index += threadgroup_stride) {
+      shared_basis[index] = basis[index];
+    }
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
@@ -318,7 +323,7 @@ __attribute__((always_inline)) inline void AcStrategyForwardSquareDct(
   }
 
   const ulong output_base =
-    static_cast<ulong>(group_position.x) * N * N;
+    static_cast<ulong>(LocalOutput ? group_position.x % 3u : group_position.x) * N * N;
   for (uint column_tile = 0;
        column_tile < kTilesPerDimension;
        ++column_tile) {
@@ -352,13 +357,14 @@ __attribute__((always_inline)) inline void AcStrategyForwardSquareDct(
   }
 }
 
-template <uint Rows, uint Columns>
+template <uint Rows, uint Columns, bool LocalOutput = false,
+          bool StageBasis = true, typename CoefficientPointer>
 __attribute__((always_inline)) inline void AcStrategyForwardRectangularDct(
   device const float* opsin_x,
   device const float* opsin_y,
   device const float* opsin_b,
   device const AcStrategyCandidate* candidates,
-  device float* coefficients,
+  CoefficientPointer coefficients,
   device const float* quant_field,
   device float* precomputed_quant_norm,
   constant AcStrategyBatchParams& params,
@@ -395,15 +401,17 @@ __attribute__((always_inline)) inline void AcStrategyForwardRectangularDct(
     precomputed_quant_norm[candidate_index] = ComputeQuantNorm(
       quant_field, candidates[candidate_index], params);
   }
-  for (uint index = simdgroup_index * simd_width + lane;
-       index < Rows * Rows;
-       index += threadgroup_stride) {
-    shared_vertical_basis[index] = vertical_basis[index];
-  }
-  for (uint index = simdgroup_index * simd_width + lane;
-       index < Columns * Columns;
-       index += threadgroup_stride) {
-    shared_horizontal_basis[index] = horizontal_basis[index];
+  if (StageBasis) {
+    for (uint index = simdgroup_index * simd_width + lane;
+         index < Rows * Rows;
+         index += threadgroup_stride) {
+      shared_vertical_basis[index] = vertical_basis[index];
+    }
+    for (uint index = simdgroup_index * simd_width + lane;
+         index < Columns * Columns;
+         index += threadgroup_stride) {
+      shared_horizontal_basis[index] = horizontal_basis[index];
+    }
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
@@ -436,7 +444,8 @@ __attribute__((always_inline)) inline void AcStrategyForwardRectangularDct(
   }
 
   const ulong output_base =
-    static_cast<ulong>(group_position.x) * Rows * Columns;
+    static_cast<ulong>(LocalOutput ? group_position.x % 3u : group_position.x) *
+      Rows * Columns;
   for (uint column_tile = 0;
        column_tile < kColumnTiles;
        ++column_tile) {
@@ -574,6 +583,89 @@ GJXL_AC_RECTANGULAR_FORWARD_KERNEL(
 #undef GJXL_AC_SQUARE_FORWARD_KERNEL
 #undef GJXL_AC_RECTANGULAR_FORWARD_KERNEL
 
+// X/Y/B share one forward launch and one immutable DCT basis. Each basis
+// element has one writer; the helper's existing unconditional barrier publishes
+// both the basis and channel-local pixels. Device coefficient layout and the
+// separate residual/inverse/loss dispatch stay unchanged.
+#define GJXL_AC_GROUPED_SQUARE_FORWARD_KERNEL(name, size, basis, scale)     \
+kernel void name(                                                           \
+  device const float* opsin_x [[buffer(0)]],                                \
+  device const float* opsin_y [[buffer(1)]],                                \
+  device const float* opsin_b [[buffer(2)]],                                \
+  device const AcStrategyCandidate* candidates [[buffer(3)]],               \
+  device float* coefficients [[buffer(4)]],                                 \
+  device const float* quant_field [[buffer(5)]],                            \
+  device float* precomputed_quant_norm [[buffer(6)]],                       \
+  constant AcStrategyBatchParams& params [[buffer(7)]],                     \
+  uint tid [[thread_index_in_threadgroup]],                                 \
+  uint lane [[thread_index_in_simdgroup]],                                  \
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],                  \
+  uint candidate_index [[threadgroup_position_in_grid]]) {                  \
+  constexpr uint Workers = size / 8 * 32;                                   \
+  const uint channel = tid / Workers;                                       \
+  const uint local_simdgroup = simdgroup_index % (Workers / 32);            \
+  threadgroup float pixels[3 * size * size];                                \
+  threadgroup float staged_basis[size * size];                              \
+  for (uint i = tid; i < size * size; i += 3 * Workers) {                   \
+    staged_basis[i] = basis[i];                                             \
+  }                                                                         \
+  AcStrategyForwardSquareDct<size, false, false>(                           \
+    opsin_x, opsin_y, opsin_b, candidates, coefficients, quant_field,       \
+    precomputed_quant_norm, params, basis, scale,                           \
+    pixels + channel * size * size,                                         \
+    staged_basis,                                                           \
+    lane, 32, local_simdgroup, uint3(candidate_index * 3 + channel, 0, 0)); \
+}
+
+#define GJXL_AC_GROUPED_RECTANGULAR_FORWARD_KERNEL(                         \
+  name, rows, columns, vertical_basis, horizontal_basis, scale)             \
+kernel void name(                                                           \
+  device const float* opsin_x [[buffer(0)]],                                \
+  device const float* opsin_y [[buffer(1)]],                                \
+  device const float* opsin_b [[buffer(2)]],                                \
+  device const AcStrategyCandidate* candidates [[buffer(3)]],               \
+  device float* coefficients [[buffer(4)]],                                 \
+  device const float* quant_field [[buffer(5)]],                            \
+  device float* precomputed_quant_norm [[buffer(6)]],                       \
+  constant AcStrategyBatchParams& params [[buffer(7)]],                     \
+  uint tid [[thread_index_in_threadgroup]],                                 \
+  uint lane [[thread_index_in_simdgroup]],                                  \
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],                  \
+  uint candidate_index [[threadgroup_position_in_grid]]) {                  \
+  constexpr uint Workers = rows / 8 * 32;                                   \
+  const uint channel = tid / Workers;                                       \
+  const uint local_simdgroup = simdgroup_index % (Workers / 32);            \
+  threadgroup float pixels[3 * rows * columns];                             \
+  threadgroup float vertical[rows * rows];                                  \
+  threadgroup float horizontal[columns * columns];                          \
+  for (uint i = tid; i < rows * rows; i += 3 * Workers) {                   \
+    vertical[i] = vertical_basis[i];                                        \
+  }                                                                         \
+  for (uint i = tid; i < columns * columns; i += 3 * Workers) {             \
+    horizontal[i] = horizontal_basis[i];                                    \
+  }                                                                         \
+  AcStrategyForwardRectangularDct<rows, columns, false, false>(             \
+    opsin_x, opsin_y, opsin_b, candidates, coefficients, quant_field,       \
+    precomputed_quant_norm, params, vertical_basis, horizontal_basis,       \
+    scale, pixels + channel * rows * columns,                               \
+    vertical,                                                               \
+    horizontal,                                                             \
+    lane, 32, local_simdgroup, uint3(candidate_index * 3 + channel, 0, 0)); \
+}
+
+GJXL_AC_GROUPED_SQUARE_FORWARD_KERNEL(
+  gjxl_ac_strategy_dct32_forward_grouped,
+  32, kOrthonormalDct32, kForwardDct32Scale)
+GJXL_AC_GROUPED_RECTANGULAR_FORWARD_KERNEL(
+  gjxl_ac_strategy_dct32x16_forward_grouped,
+  32, 16, kOrthonormalDct32, kOrthonormalDct16, kForwardDct32x16Scale)
+GJXL_AC_GROUPED_RECTANGULAR_FORWARD_KERNEL(
+  gjxl_ac_strategy_dct16x32_forward_grouped,
+  16, 32, kOrthonormalDct16, kOrthonormalDct32, kForwardDct32x16Scale)
+
+#undef GJXL_AC_GROUPED_SQUARE_FORWARD_KERNEL
+#undef GJXL_AC_GROUPED_RECTANGULAR_FORWARD_KERNEL
+
 template <typename ResidualPointer>
 __attribute__((always_inline)) inline void ComputeAcStrategyResidual(
   device const float* coefficients,
@@ -636,9 +728,12 @@ __attribute__((always_inline)) inline void ComputeAcStrategyResidual(
   }
 }
 
-template <uint CoefficientCount, uint WorkerCount, typename ResidualPointer>
+// SimdTail callers require a 32-lane SIMD width and channel-local tid.
+template <uint CoefficientCount, uint WorkerCount, bool LocalInput = false,
+          bool SimdTail = false, typename CoefficientPointer,
+          typename ResidualPointer>
 __attribute__((always_inline)) inline void ComputeAcStrategyResidualCompact(
-  device const float* coefficients,
+  CoefficientPointer coefficients,
   device const float* matrices,
   device const AcStrategyCandidate* candidates,
   device const float* quant_field,
@@ -655,9 +750,9 @@ __attribute__((always_inline)) inline void ComputeAcStrategyResidualCompact(
   const uint transform_index = group_position.x;
   const uint candidate_index = transform_index / 3;
   const uint channel = transform_index % 3;
-  const uint base = transform_index * params.coefficient_count;
+  const uint base = (LocalInput ? channel : transform_index) * params.coefficient_count;
   const uint y_base =
-    (candidate_index * 3 + 1) * params.coefficient_count;
+    (LocalInput ? 1u : candidate_index * 3 + 1) * params.coefficient_count;
   const uint matrix_base = channel * params.coefficient_count;
   const uint inverse_matrix_base =
     (3 + channel) * params.coefficient_count;
@@ -684,7 +779,8 @@ __attribute__((always_inline)) inline void ComputeAcStrategyResidualCompact(
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  for (uint stride = CoefficientCount / 2; stride != 0; stride /= 2) {
+  for (uint stride = CoefficientCount / 2;
+       stride != 0 && (!SimdTail || stride >= 32); stride /= 2) {
     for (uint index = tid; index < stride; index += WorkerCount) {
       magnitude_reduction[index] += magnitude_reduction[index + stride];
       nonzero_reduction[index] += nonzero_reduction[index + stride];
@@ -692,7 +788,20 @@ __attribute__((always_inline)) inline void ComputeAcStrategyResidualCompact(
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
 
-  if (tid == 0) {
+  // Only the first SIMD group of each channel runs the tail. The shared
+  // stride-32 step above publishes its 32 inputs; explicit shuffles preserve
+  // the original 16/8/4/2/1 tree. Every source lane stays active.
+  if (SimdTail) {
+    if (tid < 32) {
+      float magnitude = magnitude_reduction[tid];
+      uint nonzero = nonzero_reduction[tid];
+      for (uint delta = 16; delta != 0; delta /= 2) {
+        magnitude += simd_shuffle_down(magnitude, delta);
+        nonzero += simd_shuffle_down(nonzero, delta);
+      }
+      if (tid == 0) channel_rates[transform_index] = {magnitude, nonzero};
+    }
+  } else if (tid == 0) {
     channel_rates[transform_index] = {
       magnitude_reduction[0],
       nonzero_reduction[0],
@@ -731,12 +840,15 @@ kernel void gjxl_ac_strategy_residual(
 }
 
 // The fused inverse consumes the residual coefficients before they leave
-// threadgroup memory. All coefficient threads participate in basis staging;
-// only the row-owning SIMD groups execute the matrix tiles afterward.
-template <uint N, uint ThreadgroupWidth>
+// threadgroup memory. StageBasis=false reuses an already published basis.
+// The unconditional barrier also completes residual/rate production before
+// inverse pixels may overwrite magnitude scratch. Only the row-owning SIMD
+// groups execute the matrix tiles afterward.
+template <uint N, uint ThreadgroupWidth, bool StageBasis = true,
+          typename PixelPointer>
 __attribute__((always_inline)) inline void AcStrategyInverseSquareDct(
   threadgroup const float* coefficients,
-  device float* pixels,
+  PixelPointer pixels,
   constant const float* basis,
   float scale,
   threadgroup float* shared_basis,
@@ -746,8 +858,10 @@ __attribute__((always_inline)) inline void AcStrategyInverseSquareDct(
 
   constexpr uint kTileSize = 8;
   constexpr uint kTilesPerDimension = N / kTileSize;
-  for (uint index = tid; index < N * N; index += ThreadgroupWidth) {
-    shared_basis[index] = basis[index];
+  if (StageBasis) {
+    for (uint index = tid; index < N * N; index += ThreadgroupWidth) {
+      shared_basis[index] = basis[index];
+    }
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
   if (simdgroup_index >= kTilesPerDimension) return;
@@ -815,10 +929,11 @@ __attribute__((always_inline)) inline void AcStrategyInverseSquareDct(
   }
 }
 
-template <uint Rows, uint Columns, uint ThreadgroupWidth>
+template <uint Rows, uint Columns, uint ThreadgroupWidth,
+          bool StageBasis = true, typename PixelPointer>
 __attribute__((always_inline)) inline void AcStrategyInverseRectangularDct(
   threadgroup const float* coefficients,
-  device float* pixels,
+  PixelPointer pixels,
   constant const float* vertical_basis,
   constant const float* horizontal_basis,
   float scale,
@@ -831,15 +946,17 @@ __attribute__((always_inline)) inline void AcStrategyInverseRectangularDct(
   constexpr uint kTileSize = 8;
   constexpr uint kRowTiles = Rows / kTileSize;
   constexpr uint kColumnTiles = Columns / kTileSize;
-  for (uint index = tid;
-       index < Rows * Rows;
-       index += ThreadgroupWidth) {
-    shared_vertical_basis[index] = vertical_basis[index];
-  }
-  for (uint index = tid;
-       index < Columns * Columns;
-       index += ThreadgroupWidth) {
-    shared_horizontal_basis[index] = horizontal_basis[index];
+  if (StageBasis) {
+    for (uint index = tid;
+         index < Rows * Rows;
+         index += ThreadgroupWidth) {
+      shared_vertical_basis[index] = vertical_basis[index];
+    }
+    for (uint index = tid;
+         index < Columns * Columns;
+         index += ThreadgroupWidth) {
+      shared_horizontal_basis[index] = horizontal_basis[index];
+    }
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
   if (simdgroup_index >= kRowTiles) return;
@@ -1238,4 +1355,318 @@ kernel void gjxl_ac_strategy_cost(
     costs[candidate_index] =
       isfinite(result) && result >= 0.0f ? result : NAN;
   }
+}
+
+// Reuse the completed magnitude reduction arena for inverse pixels and loss.
+// The inverse helper's unconditional barrier publishes the rate before this
+// arena is overwritten. Every lane rejoins here, including non-row SIMD groups.
+template <uint Count, uint Workers, bool SimdTail = false>
+inline void AcStrategyReduceInverseLoss(
+  threadgroup float* pixels,
+  device const float* pixel_mask,
+  device const AcStrategyCandidate* candidates,
+  device float* loss_sums,
+  constant AcStrategyBatchParams& params,
+  uint tid,
+  uint transform_index) {
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const uint candidate_index = transform_index / 3;
+  const uint channel = transform_index % 3;
+  const AcStrategyCandidate candidate = candidates[candidate_index];
+  const bool fits = candidate.block_x <=
+      (params.pixel_width - params.transform_width) / 8 &&
+    candidate.block_y <= (params.pixel_height - params.transform_height) / 8;
+  for (uint i = tid; i < Count; i += Workers) {
+    float mask = NAN;
+    if (fits) {
+      const uint x = candidate.block_x * 8 + i % params.transform_width;
+      const uint y = candidate.block_y * 8 + i / params.transform_width;
+      mask = pixel_mask[y * params.pixel_mask_row_stride + x];
+    }
+    float weighted = (mask + kMaskOffset[channel]) * pixels[i];
+    weighted *= weighted;
+    weighted *= weighted;
+    weighted *= weighted;
+    pixels[i] = isfinite(mask) && mask > 0.0f ? weighted : NAN;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  // Preserve the split cost kernel's binary tree, not a SIMD sum with a
+  // different association. Compact groups cover multiple indices per lane.
+  for (uint stride = Count / 2;
+       stride != 0 && (!SimdTail || stride >= 32); stride /= 2) {
+    for (uint i = tid; i < stride; i += Workers) pixels[i] += pixels[i + stride];
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  // As in the magnitude tail, keep all 32 source lanes active and preserve
+  // the original tree feeding lane zero. Callers require a 32-lane SIMD width.
+  if (SimdTail) {
+    if (tid < 32) {
+      float loss = pixels[tid];
+      for (uint delta = 16; delta != 0; delta /= 2) {
+        loss += simd_shuffle_down(loss, delta);
+      }
+      if (tid == 0) loss_sums[transform_index] = loss;
+    }
+  } else if (tid == 0) {
+    loss_sums[transform_index] = pixels[0];
+  }
+}
+#define GJXL_AC_SQUARE_LOSS_KERNEL(                                          \
+  name, size, basis, scale, worker_count, magnitude_tail, loss_tail)         \
+kernel void name(                                                           \
+  device const float* coefficients [[buffer(0)]],                           \
+  device const float* matrices [[buffer(1)]],                               \
+  device const AcStrategyCandidate* candidates [[buffer(2)]],               \
+  device const float* quant_field [[buffer(3)]],                            \
+  device float* pixels [[buffer(4)]],                                       \
+  device ChannelRate* channel_rates [[buffer(5)]],                          \
+  constant AcStrategyBatchParams& params [[buffer(6)]],                     \
+  device const float* precomputed_quant_norm [[buffer(7)]],                 \
+  device const float* pixel_mask [[buffer(8)]],                            \
+  threadgroup float* residual_coefficients [[threadgroup(0)]],              \
+  threadgroup float* magnitude_reduction [[threadgroup(1)]],                \
+  threadgroup uint* nonzero_reduction [[threadgroup(2)]],                   \
+  uint tid [[thread_index_in_threadgroup]],                                  \
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],                   \
+  uint3 group_position [[threadgroup_position_in_grid]]) {                   \
+  ComputeAcStrategyResidualCompact<                                          \
+    size * size, worker_count, false, magnitude_tail>(                       \
+    coefficients, matrices, candidates, quant_field,                       \
+    precomputed_quant_norm, residual_coefficients, channel_rates, params,   \
+    magnitude_reduction, nonzero_reduction, 0, tid, group_position);        \
+  threadgroup float shared_basis[size * size];                              \
+  AcStrategyInverseSquareDct<size, worker_count>(                           \
+    residual_coefficients, magnitude_reduction, basis, scale, shared_basis, tid,         \
+    simdgroup_index, uint3(0));                                             \
+  AcStrategyReduceInverseLoss<size * size, worker_count, loss_tail>(         \
+    magnitude_reduction, pixel_mask, candidates, pixels, params, tid,      \
+    group_position.x);                                                     \
+}
+
+#define GJXL_AC_RECTANGULAR_LOSS_KERNEL(                \
+  name, rows, columns, vertical_basis, horizontal_basis, scale,             \
+  worker_count, magnitude_tail, loss_tail)                                   \
+kernel void name(                                                           \
+  device const float* coefficients [[buffer(0)]],                           \
+  device const float* matrices [[buffer(1)]],                               \
+  device const AcStrategyCandidate* candidates [[buffer(2)]],               \
+  device const float* quant_field [[buffer(3)]],                            \
+  device float* pixels [[buffer(4)]],                                       \
+  device ChannelRate* channel_rates [[buffer(5)]],                          \
+  constant AcStrategyBatchParams& params [[buffer(6)]],                     \
+  device const float* precomputed_quant_norm [[buffer(7)]],                 \
+  device const float* pixel_mask [[buffer(8)]],                            \
+  threadgroup float* residual_coefficients [[threadgroup(0)]],              \
+  threadgroup float* magnitude_reduction [[threadgroup(1)]],                \
+  threadgroup uint* nonzero_reduction [[threadgroup(2)]],                   \
+  uint tid [[thread_index_in_threadgroup]],                                  \
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],                   \
+  uint3 group_position [[threadgroup_position_in_grid]]) {                   \
+  ComputeAcStrategyResidualCompact<                                          \
+    rows * columns, worker_count, false, magnitude_tail>(                    \
+    coefficients, matrices, candidates, quant_field,                       \
+    precomputed_quant_norm, residual_coefficients, channel_rates, params,   \
+    magnitude_reduction, nonzero_reduction, 0, tid, group_position);        \
+  threadgroup float shared_vertical_basis[rows * rows];                     \
+  threadgroup float shared_horizontal_basis[columns * columns];             \
+  AcStrategyInverseRectangularDct<rows, columns, worker_count>(             \
+    residual_coefficients, magnitude_reduction, vertical_basis, horizontal_basis, scale, \
+    shared_vertical_basis, shared_horizontal_basis, tid, simdgroup_index,   \
+    uint3(0));                                                              \
+  AcStrategyReduceInverseLoss<rows * columns, worker_count, loss_tail>(      \
+    magnitude_reduction, pixel_mask, candidates, pixels, params, tid,      \
+    group_position.x);                                                     \
+}
+
+GJXL_AC_SQUARE_LOSS_KERNEL(gjxl_ac_strategy_dct8_residual_inverse_compact_loss,
+  8, kOrthonormalDct8, kInverseDct8Scale, 32, true, true)
+GJXL_AC_SQUARE_LOSS_KERNEL(gjxl_ac_strategy_dct16_residual_inverse_compact_loss,
+  16, kOrthonormalDct16, kInverseDct16Scale, 64, false, false)
+GJXL_AC_SQUARE_LOSS_KERNEL(gjxl_ac_strategy_dct32_residual_inverse_tuned_loss,
+  32, kOrthonormalDct32, kInverseDct32Scale, 512, true, true)
+GJXL_AC_RECTANGULAR_LOSS_KERNEL(gjxl_ac_strategy_dct16x8_residual_inverse_compact_loss,
+  16, 8, kOrthonormalDct16, kOrthonormalDct8, kInverseDct16x8Scale, 64,
+  false, false)
+GJXL_AC_RECTANGULAR_LOSS_KERNEL(gjxl_ac_strategy_dct8x16_residual_inverse_compact_loss,
+  8, 16, kOrthonormalDct8, kOrthonormalDct16, kInverseDct16x8Scale, 32,
+  false, false)
+GJXL_AC_RECTANGULAR_LOSS_KERNEL(gjxl_ac_strategy_dct32x16_residual_inverse_compact_loss,
+  32, 16, kOrthonormalDct32, kOrthonormalDct16, kInverseDct32x16Scale, 128,
+  true, true)
+GJXL_AC_RECTANGULAR_LOSS_KERNEL(gjxl_ac_strategy_dct16x32_residual_inverse_tuned_loss,
+  16, 32, kOrthonormalDct16, kOrthonormalDct32, kInverseDct32x16Scale, 256,
+  true, true)
+
+#undef GJXL_AC_SQUARE_LOSS_KERNEL
+#undef GJXL_AC_RECTANGULAR_LOSS_KERNEL
+
+// Three groups of 64 threads keep X/Y/B coefficients local. Y is published
+// before X/B residuals consume it; the scalar candidate finalizer is unchanged.
+kernel void gjxl_ac_strategy_dct16_candidate_loss_parallel(
+  device const float* opsin_x [[buffer(0)]],
+  device const float* opsin_y [[buffer(1)]],
+  device const float* opsin_b [[buffer(2)]],
+  device const AcStrategyCandidate* candidates [[buffer(3)]],
+  device const float* quant_field [[buffer(4)]],
+  device const float* matrices [[buffer(5)]],
+  device const float* pixel_mask [[buffer(6)]],
+  device float* quant_norm [[buffer(7)]],
+  device float* loss_sums [[buffer(8)]],
+  device ChannelRate* channel_rates [[buffer(9)]],
+  constant AcStrategyBatchParams& params [[buffer(10)]],
+  uint tid [[thread_index_in_threadgroup]],
+  uint lane [[thread_index_in_simdgroup]],
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint candidate_index [[threadgroup_position_in_grid]]) {
+  constexpr uint N = 16;
+  constexpr uint Count = N * N;
+  constexpr uint Workers = 64;
+  const uint channel = tid / Workers;
+  const uint local_tid = tid % Workers;
+  const uint local_simdgroup = simdgroup_index % 2;
+  const uint transform_index = candidate_index * 3 + channel;
+  threadgroup float coefficients[3 * Count];
+  threadgroup float residual[3 * Count];
+  threadgroup float magnitude[3 * Count];
+  threadgroup uint nonzero[3 * Count];
+  threadgroup float basis[Count];
+  // Each element has one writer across X/Y/B. The forward helper's
+  // existing barrier publishes this immutable basis and gathered pixels.
+  // The same basis stays live and read-only through the inverse DCT.
+  for (uint index = tid; index < Count; index += 3 * Workers) {
+    basis[index] = kOrthonormalDct16[index];
+  }
+  AcStrategyForwardSquareDct<N, true, false>(
+    opsin_x, opsin_y, opsin_b, candidates, coefficients, quant_field,
+    quant_norm, params, kOrthonormalDct16, kForwardDct16Scale,
+    residual + channel * Count, basis, lane, 32,
+    local_simdgroup, uint3(transform_index, 0, 0));
+  // All channel groups publish before any X/B lane consumes Y coefficients.
+  threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
+  ComputeAcStrategyResidualCompact<Count, Workers, true, true>(
+    coefficients, matrices, candidates, quant_field, quant_norm,
+    residual + channel * Count, channel_rates, params,
+    magnitude + channel * Count, nonzero + channel * Count, 0, local_tid,
+    uint3(transform_index, 0, 0));
+  AcStrategyInverseSquareDct<N, Workers, false>(
+    residual + channel * Count, magnitude + channel * Count,
+    kOrthonormalDct16, kInverseDct16Scale, basis,
+    local_tid, local_simdgroup, uint3(0));
+  AcStrategyReduceInverseLoss<Count, Workers, true>(
+    magnitude + channel * Count, pixel_mask, candidates, loss_sums,
+    params, local_tid, transform_index);
+}
+
+// Each channel keeps the split path's worker count and reduction tree. The
+// shared barrier publishes Y before either chroma channel reads its coefficients.
+#define GJXL_AC_RECTANGULAR_CANDIDATE_LOSS_KERNEL(                          \
+  name, rows, columns, vertical_basis, horizontal_basis, workers)           \
+kernel void name(                                                           \
+  device const float* opsin_x [[buffer(0)]],                                \
+  device const float* opsin_y [[buffer(1)]],                                \
+  device const float* opsin_b [[buffer(2)]],                                \
+  device const AcStrategyCandidate* candidates [[buffer(3)]],               \
+  device const float* quant_field [[buffer(4)]],                            \
+  device const float* matrices [[buffer(5)]],                               \
+  device const float* pixel_mask [[buffer(6)]],                             \
+  device float* quant_norm [[buffer(7)]],                                   \
+  device float* loss_sums [[buffer(8)]],                                    \
+  device ChannelRate* channel_rates [[buffer(9)]],                          \
+  constant AcStrategyBatchParams& params [[buffer(10)]],                    \
+  uint tid [[thread_index_in_threadgroup]],                                 \
+  uint lane [[thread_index_in_simdgroup]],                                  \
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],                  \
+  uint candidate_index [[threadgroup_position_in_grid]]) {                  \
+  constexpr uint Count = rows * columns;                                    \
+  const uint channel = tid / workers;                                       \
+  const uint local_tid = tid % workers;                                     \
+  const uint local_simdgroup = simdgroup_index % (workers / 32);            \
+  const uint transform_index = candidate_index * 3 + channel;               \
+  threadgroup float coefficients[3 * Count];                                \
+  threadgroup float residual[3 * Count];                                    \
+  threadgroup float magnitude[3 * Count];                                   \
+  threadgroup uint nonzero[3 * Count];                                      \
+  threadgroup float vertical[rows * rows];                                  \
+  threadgroup float horizontal[columns * columns];                          \
+  /* One cooperative load; both bases remain immutable for X/Y/B. */        \
+  for (uint index = tid; index < rows * rows; index += 3 * workers) {       \
+    vertical[index] = vertical_basis[index];                                \
+  }                                                                         \
+  for (uint index = tid; index < columns * columns; index += 3 * workers) { \
+    horizontal[index] = horizontal_basis[index];                            \
+  }                                                                         \
+  AcStrategyForwardRectangularDct<rows, columns, true, false>(              \
+    opsin_x, opsin_y, opsin_b, candidates, coefficients, quant_field,       \
+    quant_norm, params, vertical_basis, horizontal_basis,                   \
+    kForwardDct16x8Scale, residual + channel * Count,                       \
+    vertical, horizontal, lane, 32, local_simdgroup,                        \
+    uint3(transform_index, 0, 0));                                          \
+  threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);  \
+  ComputeAcStrategyResidualCompact<Count, workers, true, true>(             \
+    coefficients, matrices, candidates, quant_field, quant_norm,            \
+    residual + channel * Count, channel_rates, params,                      \
+    magnitude + channel * Count, nonzero + channel * Count, 0, local_tid,   \
+    uint3(transform_index, 0, 0));                                          \
+  AcStrategyInverseRectangularDct<rows, columns, workers, false>(           \
+    residual + channel * Count, magnitude + channel * Count,                \
+    vertical_basis, horizontal_basis, kInverseDct16x8Scale,                 \
+    vertical, horizontal, local_tid, local_simdgroup,                       \
+    uint3(0));                                                              \
+  AcStrategyReduceInverseLoss<Count, workers, true>(                        \
+    magnitude + channel * Count, pixel_mask, candidates, loss_sums,         \
+    params, local_tid, transform_index);                                    \
+}
+
+GJXL_AC_RECTANGULAR_CANDIDATE_LOSS_KERNEL(
+  gjxl_ac_strategy_dct16x8_candidate_loss_parallel,
+  16, 8, kOrthonormalDct16, kOrthonormalDct8, 64)
+GJXL_AC_RECTANGULAR_CANDIDATE_LOSS_KERNEL(
+  gjxl_ac_strategy_dct8x16_candidate_loss_parallel,
+  8, 16, kOrthonormalDct8, kOrthonormalDct16, 32)
+
+#undef GJXL_AC_RECTANGULAR_CANDIDATE_LOSS_KERNEL
+
+kernel void gjxl_ac_strategy_cost_from_loss(
+  device const float* loss_sums [[buffer(0)]],
+  device const float* pixel_mask [[buffer(1)]],
+  device const AcStrategyCandidate* candidates [[buffer(2)]],
+  device const ChannelRate* channel_rates [[buffer(3)]],
+  device float* costs [[buffer(4)]],
+  device const float* quant_field [[buffer(5)]],
+  constant AcStrategyBatchParams& params [[buffer(6)]],
+  uint candidate_index [[thread_position_in_grid]]) {
+  if (candidate_index >= params.candidate_count) return;
+  const AcStrategyCandidate candidate = candidates[candidate_index];
+  float entropy = 0.0f;
+  float loss = 0.0f;
+    for (uint channel = 0; channel < 3; ++channel) {
+      const uint transform_index = candidate_index * 3 + channel;
+      const ChannelRate rate = channel_rates[transform_index];
+      entropy += params.cost_delta * rate.magnitude;
+      const uint nonzero_bits = CeilLog2Nonzero(rate.nonzero_count + 1) + 1;
+      entropy += params.zeros_multiplier * float(
+        CeilLog2Nonzero(nonzero_bits + 17) + nonzero_bits);
+      loss += loss_sums[transform_index] *
+        kChannelMultiplier[channel];
+
+      if (channel == 0 && params.covered_block_count >= 2) {
+        const float weight = 1.0f + min(
+          3.0f,
+          float(params.covered_block_count) / 8.0f);
+        entropy *= weight;
+        loss *= weight;
+      }
+    }
+
+    const float quant_norm = AcStrategyQuantNorm(
+      quant_field, costs, candidate, candidate_index, params);
+    const float normalized_loss = loss / float(params.coefficient_count);
+    const float loss_cost =
+      powr(normalized_loss, 0.125f) * float(params.coefficient_count) /
+      quant_norm;
+    const float result =
+      entropy * candidate.entropy_multiplier +
+      params.info_loss_multiplier * loss_cost;
+    costs[candidate_index] =
+      isfinite(result) && result >= 0.0f ? result : NAN;
 }

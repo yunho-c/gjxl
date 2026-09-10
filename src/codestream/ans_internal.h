@@ -9,11 +9,14 @@
 #include <span>
 #include <vector>
 
+#include "codestream/storage.h"
+
 #include "codestream/entropy_internal.h"
 
 namespace gjxl::codestream_internal {
 
 inline constexpr uint32_t kAnsReciprocalPrecision = 44;
+inline constexpr size_t kAnsAlphabetWidthCount = 4;
 
 /// Returns ceil(2^44 / frequency), or zero for an absent symbol.
 [[nodiscard]] constexpr uint64_t AnsFrequencyReciprocal(
@@ -45,7 +48,7 @@ struct PreparedAnsEntropyCandidate {
 
 /// ANS alphabet-width candidates whose exact ordered recurrence is deferred.
 struct PreparedAnsEntropyCode {
-  std::vector<PreparedAnsEntropyCandidate> candidates;
+  codestream_internal::Storage<PreparedAnsEntropyCandidate> candidates;
   size_t section_count = 0;
 };
 

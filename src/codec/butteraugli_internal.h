@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "core/image.h"
 #include "core/status.h"
 
@@ -38,7 +39,7 @@ public:
 
 private:
   Extent2D extent_;
-  std::vector<float> values_;
+  resource_budget_internal::ManagedVector<float> values_;
 };
 
 /// Contiguous planar float storage for three internal Butteraugli channels.
@@ -56,7 +57,7 @@ public:
 private:
   Extent2D extent_;
   size_t plane_size_ = 0;
-  std::vector<float> values_;
+  resource_budget_internal::ManagedVector<float> values_;
 };
 
 /// Reusable allocation state for scalar Gaussian blur calls.
@@ -74,7 +75,7 @@ private:
                                bool needs_transposed);
 
   OwnedPlaneF32 transposed_;
-  std::vector<float> kernel_;
+  resource_budget_internal::ManagedVector<float> kernel_;
 
   friend Status GaussianBlur(ConstPlaneF32View, float, BlurScratch *,
                              PlaneF32View);
@@ -123,7 +124,7 @@ private:
 
   Extent2D extent_;
   size_t plane_size_ = 0;
-  std::vector<float> values_;
+  resource_budget_internal::ManagedVector<float> values_;
 };
 
 /// Reusable storage for native opsin conversion.

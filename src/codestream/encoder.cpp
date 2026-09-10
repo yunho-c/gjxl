@@ -7,21 +7,20 @@
 
 #include <algorithm>
 #include <array>
-#include <atomic>
+#include <bit>
 #include <chrono>
 #include <cstddef>
 #include <limits>
 #include <new>
 #include <span>
 #include <stdexcept>
-#include <system_error>
 #include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "codec/codestream.h"
-#include "codec/vardct_frame.h"
+#include "codec/vardct_frame_view_internal.h"
 #include "codestream/ac_group.h"
 #include "codestream/ans_internal.h"
 #include "codestream/bit_writer.h"
@@ -33,13 +32,18 @@
 #include "codestream/entropy_internal.h"
 #include "codestream/headers.h"
 #include "codestream/sections.h"
+#include "codestream/serializer_storage_plan.h"
 #include "core/thread_budget.h"
+#include "core/parallel_work_internal.h"
 
 namespace gjxl {
+using codestream_internal::Storage;
+using vardct_frame_internal::VarDctFrameView;
 namespace {
 
 using ProfileClock = std::chrono::steady_clock;
-inline constexpr size_t kMaximumSectionWorkers = 8;
+inline constexpr size_t kMaximumSectionWorkers =
+  codestream_internal::kSerializerMaximumSectionWorkers;
 
 uint64_t ElapsedNanoseconds(ProfileClock::time_point begin) {
   return static_cast<uint64_t>(
@@ -127,12 +131,14 @@ Status RunParallelSections(size_t count, Function&& function) {
     thread_budget_internal::CpuThreadCount();
   auto* const participant_tracker =
     thread_budget_internal::ParticipantTracker();
-  const size_t participant_count = cpu_thread_count == 0
+  const auto resource_context = resource_budget_internal::CurrentResourceContext();
+  thread_budget_internal::CpuWorkerGroup cpu_workers(cpu_thread_count == 0
     ? automatic_worker_count
-    : std::min(automatic_worker_count, cpu_thread_count);
+    : std::min(automatic_worker_count, cpu_thread_count));
+  const size_t participant_count = cpu_workers.participants();
   if (participant_count == 1) {
     thread_budget_internal::ParallelScope scope(
-      cpu_thread_count, participant_tracker);
+      cpu_thread_count, participant_tracker, resource_context, &cpu_workers);
     for (size_t index = 0; index < count; ++index) {
       Status status = invoke(index, 0);
       if (!status.ok()) return status;
@@ -140,47 +146,22 @@ Status RunParallelSections(size_t count, Function&& function) {
     return Status::Ok();
   }
 
-  std::vector<Status> statuses(count);
-  std::atomic<size_t> next_index{0};
-  std::vector<std::thread> workers;
-  const size_t spawned_worker_count = cpu_thread_count == 0
+  const size_t spawned_worker_count = cpu_thread_count == 0 && !cpu_workers.enabled()
     ? participant_count
     : participant_count - 1;
-  workers.reserve(spawned_worker_count);
-  const auto run_worker = [&](size_t worker_index) {
-    thread_budget_internal::ParallelScope scope(
-      cpu_thread_count, participant_tracker);
-    while (true) {
-      const size_t index =
-        next_index.fetch_add(1, std::memory_order_relaxed);
-      if (index >= count) break;
-      try {
-        statuses[index] = invoke(index, worker_index);
-      } catch (const std::bad_alloc&) {
-        statuses[index] = AllocationFailure();
-      } catch (const std::length_error&) {
-        statuses[index] = AllocationFailure();
-      } catch (...) {
-        statuses[index] = Status::Internal(
-          "Codestream section worker failed unexpectedly");
-      }
-    }
+  constexpr thread_budget_internal::ParallelWorkErrors errors{
+    .allocation = "Codestream assembly allocation failed",
+    .unexpected = "Codestream section worker failed unexpectedly",
+    .length_code = StatusCode::kOutOfMemory,
+    .length = "Codestream assembly allocation failed",
+    .launch_allocation = "Codestream assembly allocation failed",
+    .launch_action = thread_budget_internal::LaunchFailureAction::kReturnError,
+    .launch = "Unable to start codestream section workers",
   };
-  try {
-    for (size_t worker = 0; worker < spawned_worker_count; ++worker) {
-      workers.emplace_back(run_worker, worker);
-    }
-  } catch (const std::system_error&) {
-    next_index.store(count, std::memory_order_relaxed);
-    for (std::thread& worker : workers) worker.join();
-    return Status::Internal("Unable to start codestream section workers");
-  }
-  if (cpu_thread_count != 0) run_worker(spawned_worker_count);
-  for (std::thread& worker : workers) worker.join();
-  for (const Status& status : statuses) {
-    if (!status.ok()) return status;
-  }
-  return Status::Ok();
+  return thread_budget_internal::RunParallelWork<Storage>(
+    count, cpu_workers, spawned_worker_count,
+    thread_budget_internal::WorkerLaunchSite::kSerializerSections, errors,
+    invoke);
 }
 
 Status WriteDcGroupSection(
@@ -248,31 +229,36 @@ struct AcEncodingCandidate {
   size_t block_context_candidate_index = 0;
   SimpleBlockContextMap block_context_map;
   bool custom_order = false;
-  std::vector<std::vector<uint16_t>> contexts;
-  std::vector<codestream_internal::SimpleAcGroupTokenData> direct_groups;
-  std::vector<codestream_internal::PreparedFixedAnsCluster>
+  Storage<Storage<uint16_t>> contexts;
+  Storage<codestream_internal::SimpleAcGroupTokenData> direct_groups;
+  Storage<codestream_internal::PreparedFixedAnsCluster>
     fixed_context_populations;
-  std::vector<EntropyTokenStreamView> streams;
+  Storage<EntropyTokenStreamView> streams;
   EntropyCode ac_code;
   EntropyCodeCost ac_cost;
   EntropyCode prefix_ac_code;
   EntropyCodeCost prefix_ac_cost;
   codestream_internal::PreparedAnsEntropyCode prepared_ans;
-  std::vector<uint64_t> ans_section_candidate_bits;
+  Storage<uint64_t> ans_section_candidate_bits;
   size_t complete_size = 0;
   bool all_prefix_entropy = false;
+};
+
+struct AnsSectionTask {
+  size_t candidate_index = 0;
+  size_t section_index = 0;
 };
 
 Status ReduceFixedAcPopulations(
   std::span<const codestream_internal::SimpleAcGroupTokenData> groups,
   size_t context_count,
-  std::vector<codestream_internal::PreparedFixedAnsCluster>* populations) {
+  Storage<codestream_internal::PreparedFixedAnsCluster>* populations) {
 
   if (populations == nullptr || context_count == 0) {
     return Status::InvalidArgument("AC population output is invalid");
   }
   try {
-    std::vector<codestream_internal::PreparedFixedAnsCluster> candidate(
+    Storage<codestream_internal::PreparedFixedAnsCluster> candidate(
       context_count);
     for (const auto& group : groups) {
       uint64_t group_token_count = 0;
@@ -325,6 +311,8 @@ Status ReduceFixedAcPopulations(
       }
     }
     *populations = std::move(candidate);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -417,7 +405,7 @@ Status OptimizeBestEntropyCode(
 }
 
 Status OptimizeBestEntropyCode(
-  std::span<const std::vector<EntropyToken>> streams,
+  std::span<const Storage<EntropyToken>> streams,
   const EntropyCodeOptions& options,
   EntropyCode* code,
   EntropyCodeCost* cost,
@@ -426,14 +414,16 @@ Status OptimizeBestEntropyCode(
   codestream_internal::EntropyWorkProfile* profile) {
 
   try {
-    std::vector<EntropyTokenStreamView> views;
+    Storage<EntropyTokenStreamView> views;
     views.reserve(streams.size());
-    for (const std::vector<EntropyToken>& stream : streams) {
+    for (const Storage<EntropyToken>& stream : streams) {
       views.push_back(EntropyTokenStreamView::Interleaved(stream));
     }
     return OptimizeBestEntropyCode(
       views, options, code, cost, prefix_fallback, prefix_fallback_cost,
       profile);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -501,7 +491,7 @@ Status OptimizeOrdinaryEntropyCode(
 }
 
 Status OptimizeOrdinaryEntropyCode(
-  std::span<const std::vector<EntropyToken>> streams,
+  std::span<const Storage<EntropyToken>> streams,
   const EntropyCodeOptions& options,
   VarDctEntropyBehavior behavior,
   bool defer_ans_token_cost,
@@ -510,14 +500,16 @@ Status OptimizeOrdinaryEntropyCode(
   codestream_internal::EntropyWorkProfile* profile) {
 
   try {
-    std::vector<EntropyTokenStreamView> views;
+    Storage<EntropyTokenStreamView> views;
     views.reserve(streams.size());
-    for (const std::vector<EntropyToken>& stream : streams) {
+    for (const Storage<EntropyToken>& stream : streams) {
       views.push_back(EntropyTokenStreamView::Interleaved(stream));
     }
     return OptimizeOrdinaryEntropyCode(
       views, options, behavior, {}, defer_ans_token_cost,
       code, cost, profile);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -563,13 +555,15 @@ Status PrepareAcCandidate(
     return AllocationFailure();
   }
   try {
-    std::vector<uint64_t> section_candidate_bits(
+    Storage<uint64_t> section_candidate_bits(
       candidate->streams.size() * prepared_ans.candidates.size());
     candidate->prefix_ac_code = std::move(prefix);
     candidate->prefix_ac_cost = std::move(prefix_cost);
     candidate->prepared_ans = std::move(prepared_ans);
     candidate->ans_section_candidate_bits =
       std::move(section_candidate_bits);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -615,12 +609,12 @@ Status FinalizeAcCandidate(
 }
 
 Status WriteCommonSections(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   std::span<const SimpleDcGroupTokenStreams> dc_groups,
-  std::span<const std::vector<EntropyToken>> dc_streams,
+  std::span<const Storage<EntropyToken>> dc_streams,
   const SimpleBlockContextMap& block_context_map,
   const EntropyCode& dc_code,
-  std::vector<BitWriter>* sections,
+  Storage<BitWriter>* sections,
   uint64_t* token_bits,
   codestream_internal::SectionWritingWorkProfile* profile) {
 
@@ -629,7 +623,7 @@ Status WriteCommonSections(
     return Status::InvalidArgument("Common codestream sections are invalid");
   }
   try {
-    std::vector<BitWriter> candidate(1 + dc_groups.size());
+    Storage<BitWriter> candidate(1 + dc_groups.size());
     const ProfileClock::time_point global_begin =
       WorkBegin(profile != nullptr);
     Status status = WriteSimpleDcGlobal(
@@ -641,9 +635,9 @@ Status WriteCommonSections(
     WorkEnd(
       profile != nullptr, global_begin,
       profile == nullptr ? nullptr : &profile->model_and_header_nanoseconds);
-    std::vector<codestream_internal::SectionWritingWorkProfile>
+    Storage<codestream_internal::SectionWritingWorkProfile>
       group_profiles(profile == nullptr ? 0 : dc_groups.size());
-    std::vector<uint64_t> group_token_bits(
+    Storage<uint64_t> group_token_bits(
       token_bits == nullptr ? 0 : dc_groups.size());
     status = RunParallelSections(
       dc_groups.size(),
@@ -671,6 +665,8 @@ Status WriteCommonSections(
     }
     *sections = std::move(candidate);
     if (token_bits != nullptr) *token_bits = candidate_token_bits;
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -685,7 +681,7 @@ Status WriteAcSections(
   const SimpleCoefficientOrders& custom_orders,
   std::span<const EntropyToken> order_tokens,
   const EntropyCode* order_code,
-  std::vector<BitWriter>* sections,
+  Storage<BitWriter>* sections,
   uint64_t* token_bits,
   codestream_internal::SectionWritingWorkProfile* profile) {
 
@@ -693,7 +689,7 @@ Status WriteAcSections(
     return Status::InvalidArgument("AC codestream sections are invalid");
   }
   try {
-    std::vector<BitWriter> candidate(1 + ac.streams.size());
+    Storage<BitWriter> candidate(1 + ac.streams.size());
     const uint16_t used_order_mask =
       ac.custom_order ? custom_orders.used_order_mask : 0;
     const ProfileClock::time_point global_begin =
@@ -709,7 +705,7 @@ Status WriteAcSections(
     WorkEnd(
       profile != nullptr, global_begin,
       profile == nullptr ? nullptr : &profile->model_and_header_nanoseconds);
-    std::vector<codestream_internal::SectionWritingWorkProfile>
+    Storage<codestream_internal::SectionWritingWorkProfile>
       group_profiles(profile == nullptr ? 0 : ac.streams.size());
     status = RunParallelSections(
       ac.streams.size(),
@@ -746,6 +742,8 @@ Status WriteAcSections(
     }
     *sections = std::move(candidate);
     if (token_bits != nullptr) *token_bits = candidate_token_bits;
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -766,7 +764,7 @@ bool AddMeasuredBits(uint64_t value, uint64_t* total) {
 Status MeasureDcGroupSections(
   std::span<const SimpleDcGroupTokenStreams> dc_groups,
   const EntropyCodeCost& dc_cost,
-  std::vector<uint64_t>* section_bits,
+  Storage<uint64_t>* section_bits,
   uint64_t* measurement_work) {
 
   if (section_bits == nullptr || dc_groups.empty() ||
@@ -774,8 +772,8 @@ Status MeasureDcGroupSections(
     return Status::InvalidArgument("Common section measurement is invalid");
   }
   try {
-    std::vector<uint64_t> candidate(dc_groups.size());
-    std::vector<uint64_t> group_work(
+    Storage<uint64_t> candidate(dc_groups.size());
+    Storage<uint64_t> group_work(
       measurement_work == nullptr ? 0 : dc_groups.size());
     Status status = RunParallelSections(
       dc_groups.size(),
@@ -820,6 +818,8 @@ Status MeasureDcGroupSections(
     if (measurement_work != nullptr) {
       *measurement_work = work;
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -829,12 +829,12 @@ Status MeasureDcGroupSections(
 }
 
 Status MeasureCommonSections(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   size_t dc_group_count,
   const SimpleBlockContextMap& block_context_map,
   const EntropyCode& dc_code,
   std::span<const uint64_t> dc_group_section_bits,
-  std::vector<uint64_t>* section_bits) {
+  Storage<uint64_t>* section_bits) {
 
   if (section_bits == nullptr || dc_group_count == 0 ||
       dc_group_section_bits.size() != dc_group_count) {
@@ -848,13 +848,15 @@ Status MeasureCommonSections(
         !status.ok()) {
       return status;
     }
-    std::vector<uint64_t> candidate;
+    Storage<uint64_t> candidate;
     candidate.reserve(1 + dc_group_section_bits.size());
     candidate.push_back(global.bits_written());
     candidate.insert(
       candidate.end(), dc_group_section_bits.begin(),
       dc_group_section_bits.end());
     *section_bits = std::move(candidate);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -905,7 +907,7 @@ Status MeasureAcSections(
   const EntropyCodeCost& ac_cost,
   const SimpleCoefficientOrders& custom_orders,
   const EntropyCodeCost* order_cost,
-  std::vector<uint64_t>* section_bits,
+  Storage<uint64_t>* section_bits,
   uint64_t* measurement_work) {
 
   if (section_bits == nullptr || ac.streams.empty() ||
@@ -914,7 +916,7 @@ Status MeasureAcSections(
     return Status::InvalidArgument("AC section measurement is invalid");
   }
   try {
-    std::vector<uint64_t> candidate(1 + ac.streams.size());
+    Storage<uint64_t> candidate(1 + ac.streams.size());
     const uint16_t used_order_mask =
       ac.custom_order ? custom_orders.used_order_mask : 0;
     const ProfileClock::time_point measurement_begin =
@@ -931,6 +933,8 @@ Status MeasureAcSections(
     *section_bits = std::move(candidate);
     WorkEnd(
       measurement_work != nullptr, measurement_begin, measurement_work);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -943,7 +947,7 @@ Status PhysicalSectionSizes(
   std::span<const BitWriter> common_sections,
   std::span<const BitWriter> ac_sections,
   size_t ac_group_count,
-  std::vector<size_t>* sizes) {
+  Storage<size_t>* sizes) {
 
   if (sizes == nullptr || common_sections.empty() || ac_sections.empty() ||
       ac_group_count == std::numeric_limits<size_t>::max() ||
@@ -989,6 +993,8 @@ Status PhysicalSectionSizes(
     for (const BitWriter& section : ac_sections) {
       sizes->push_back(section.padded_size());
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -998,7 +1004,7 @@ Status PhysicalSectionSizes(
 }
 
 Status WriteFramePrefix(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   BitWriter* writer) {
 
   Status status = WriteSimpleCodestreamHeader(
@@ -1010,7 +1016,7 @@ Status WriteFramePrefix(
 }
 
 Status MeasureCandidateSize(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   std::span<const uint64_t> common_section_bits,
   std::span<const uint64_t> ac_section_bits,
   size_t ac_group_count,
@@ -1019,7 +1025,7 @@ Status MeasureCandidateSize(
   if (size == nullptr) {
     return Status::InvalidArgument("Codestream candidate size output is null");
   }
-  std::vector<size_t> section_sizes;
+  Storage<size_t> section_sizes;
   Status status = codestream_internal::PhysicalSectionSizesFromBitCounts(
     common_section_bits, ac_section_bits, ac_group_count, &section_sizes);
   if (!status.ok()) {
@@ -1046,18 +1052,18 @@ Status MeasureCandidateSize(
 }
 
 Status AssembleCandidate(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   std::span<const BitWriter> common_sections,
   std::span<const BitWriter> ac_sections,
   size_t ac_group_count,
-  std::vector<uint8_t>* output,
+  codestream_internal::CodestreamBuffer* output,
   codestream_internal::AssemblyProfile* profile) {
 
   if (output == nullptr) {
     return Status::InvalidArgument("Codestream candidate output is null");
   }
   try {
-    std::vector<size_t> section_sizes;
+    Storage<size_t> section_sizes;
     const ProfileClock::time_point section_size_begin =
       WorkBegin(profile != nullptr);
     Status status = PhysicalSectionSizes(
@@ -1115,11 +1121,13 @@ Status AssembleCandidate(
     const ProfileClock::time_point output_copy_begin =
       WorkBegin(profile != nullptr);
     const std::span<const uint8_t> bytes = writer.padded_bytes();
-    std::vector<uint8_t> candidate(bytes.begin(), bytes.end());
-    *output = std::move(candidate);
+    status = codestream_internal::CodestreamBuffer::CopyFrom(bytes, output);
+    if (!status.ok()) return status;
     WorkEnd(
       profile != nullptr, output_copy_begin,
       profile == nullptr ? nullptr : &profile->output_copy_nanoseconds);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -1129,10 +1137,10 @@ Status AssembleCandidate(
 }
 
 Status EncodeVarDctCodestreamWithRepresentationPolicy(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   VarDctCodestreamOptions options,
   bool exhaustive_representation_search,
-  std::vector<uint8_t>* output,
+  codestream_internal::CodestreamBuffer* output,
   codestream_internal::VarDctCodestreamProfile* profile) {
 
   if (output == nullptr) {
@@ -1175,7 +1183,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
 
   try {
     const ProfileClock::time_point dc_tokenization_begin = ProfileBegin(profile);
-    std::vector<SimpleDcGroupTokenStreams> dc_groups;
+    Storage<SimpleDcGroupTokenStreams> dc_groups;
     Status status = codestream_internal::TokenizeSimpleDcGroupsForEncoder(
       frame, &dc_groups);
     ProfileEnd(
@@ -1189,7 +1197,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
       return Status::Internal("Validated frame produced no codestream groups");
     }
 
-    std::vector<std::vector<EntropyToken>> dc_streams;
+    Storage<Storage<EntropyToken>> dc_streams;
     if (dc_groups.size() > dc_streams.max_size() / 2) {
       return AllocationFailure();
     }
@@ -1200,7 +1208,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
     }
 
     const ProfileClock::time_point ac_tokenization_begin = ProfileBegin(profile);
-    std::vector<SimpleBlockContextMap> block_context_maps;
+    Storage<SimpleBlockContextMap> block_context_maps;
     SimpleCoefficientOrders custom_orders;
     const ProfileClock::time_point block_context_begin =
       WorkBegin(profile != nullptr);
@@ -1238,7 +1246,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
         "Validated frame produced no block-context candidates");
     }
 
-    std::vector<EntropyToken> order_tokens;
+    Storage<EntropyToken> order_tokens;
     if (custom_orders.used_order_mask != 0) {
       const ProfileClock::time_point order_tokenization_begin =
         WorkBegin(profile != nullptr);
@@ -1257,7 +1265,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
         std::numeric_limits<size_t>::max() / candidates_per_map) {
       return AllocationFailure();
     }
-    std::vector<AcEncodingCandidate> candidates;
+    Storage<AcEncodingCandidate> candidates;
     candidates.reserve(block_context_maps.size() * candidates_per_map);
     for (size_t map_index = 0; map_index < block_context_maps.size();
          ++map_index) {
@@ -1276,7 +1284,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
       }
     }
     const SimpleCoefficientOrders natural_orders;
-    std::array<std::vector<SimpleAcGroupTokenTemplate>, 2> order_templates;
+    std::array<Storage<SimpleAcGroupTokenTemplate>, 2> order_templates;
     const size_t ac_group_count = frame.ac_group_count();
     if (ac_group_count == 0) {
       return AllocationFailure();
@@ -1295,7 +1303,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
         options.entropy_behavior == VarDctEntropyBehavior::kBalanced;
       std::array<codestream_internal::SimpleAcTokenizationScratch,
                  kMaximumSectionWorkers> tokenization_scratch;
-      std::vector<uint64_t> coefficient_tokenization_work(
+      Storage<uint64_t> coefficient_tokenization_work(
         profile == nullptr ? 0 : ac_group_count);
       status = RunParallelSections(
         ac_group_count,
@@ -1343,9 +1351,9 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
           &candidate.fixed_context_populations);
         if (!status.ok()) return status;
         for (auto& group : candidate.direct_groups) {
-          std::vector<codestream_internal::SimpleAcContextPopulation>().swap(
+          Storage<codestream_internal::SimpleAcContextPopulation>().swap(
             group.context_populations);
-          std::vector<codestream_internal::SimpleAcSymbolPopulation>().swap(
+          Storage<codestream_internal::SimpleAcSymbolPopulation>().swap(
             group.symbol_populations);
         }
       }
@@ -1366,7 +1374,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
       }
       const size_t coefficient_tokenization_task_count =
         order_template_count * ac_group_count;
-      std::vector<uint64_t> coefficient_tokenization_work(
+      Storage<uint64_t> coefficient_tokenization_work(
         profile == nullptr ? 0 : coefficient_tokenization_task_count);
       status = RunParallelSections(
         coefficient_tokenization_task_count,
@@ -1416,7 +1424,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
       }
       const size_t context_materialization_task_count =
         candidates.size() * ac_group_count;
-      std::vector<uint64_t> context_materialization_work(
+      Storage<uint64_t> context_materialization_work(
         profile == nullptr ? 0 : context_materialization_task_count);
       status = RunParallelSections(
         context_materialization_task_count,
@@ -1479,9 +1487,9 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
       // needs descriptors after all context-map candidates are materialized.
       for (auto& templates : order_templates) {
         for (SimpleAcGroupTokenTemplate& group : templates) {
-          std::vector<SimpleAcBlockContextKey>().swap(
+          Storage<SimpleAcBlockContextKey>().swap(
             group.block_context_keys);
-          std::vector<SimpleAcTokenTemplate>().swap(group.tokens);
+          Storage<SimpleAcTokenTemplate>().swap(group.tokens);
         }
       }
     }
@@ -1503,7 +1511,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
     EntropyCodeCost prefix_order_cost;
     const size_t order_task_count = has_custom_orders ? 1 : 0;
     const size_t entropy_task_count = 1 + order_task_count + candidates.size();
-    std::vector<codestream_internal::EntropyWorkProfile> entropy_profiles(
+    Storage<codestream_internal::EntropyWorkProfile> entropy_profiles(
       profile == nullptr ? 0 : entropy_task_count);
     status = RunParallelSections(
       entropy_task_count,
@@ -1522,7 +1530,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
             &dc_code, &dc_cost, entropy_profile);
         }
         if (has_custom_orders && index == 1) {
-          const std::span<const std::vector<EntropyToken>> order_streams(
+          const std::span<const Storage<EntropyToken>> order_streams(
             &order_tokens, 1);
           const EntropyCodeOptions order_options{
             .context_count = kSimplePermutationContextCount,
@@ -1556,10 +1564,6 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
     }
 
     if (exhaustive_representation_search) {
-      struct AnsSectionTask {
-        size_t candidate_index = 0;
-        size_t section_index = 0;
-      };
       size_t ans_task_count = 0;
       for (const AcEncodingCandidate& candidate : candidates) {
         const size_t candidate_count = candidate.prepared_ans.candidates.size();
@@ -1577,7 +1581,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
         }
         ans_task_count += candidate.streams.size();
       }
-      std::vector<AnsSectionTask> ans_tasks;
+      Storage<AnsSectionTask> ans_tasks;
       ans_tasks.reserve(ans_task_count);
       for (size_t candidate_index = 0; candidate_index < candidates.size();
            ++candidate_index) {
@@ -1587,7 +1591,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
           ans_tasks.push_back({candidate_index, section_index});
         }
       }
-      std::vector<uint64_t> ans_task_work(
+      Storage<uint64_t> ans_task_work(
         profile == nullptr ? 0 : ans_tasks.size());
       status = RunParallelSections(
         ans_tasks.size(),
@@ -1650,7 +1654,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
       &dc_code, &prefix_dc_code};
     const std::array<const EntropyCodeCost*, 2> dc_costs = {
       &dc_cost, &prefix_dc_cost};
-    std::array<std::vector<uint64_t>, 2> dc_group_section_bits;
+    std::array<Storage<uint64_t>, 2> dc_group_section_bits;
     std::array<uint64_t, 2> dc_group_measurement_work{};
     status = RunParallelSections(
       entropy_mode_count,
@@ -1665,7 +1669,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
       return status;
     }
 
-    std::vector<std::array<std::vector<uint64_t>, 2>> common_section_bits(
+    Storage<std::array<Storage<uint64_t>, 2>> common_section_bits(
       block_context_maps.size());
     if (block_context_maps.size() >
         std::numeric_limits<size_t>::max() / entropy_mode_count) {
@@ -1673,7 +1677,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
     }
     const size_t common_measurement_count =
       block_context_maps.size() * entropy_mode_count;
-    std::vector<uint64_t> common_measurement_work(common_measurement_count);
+    Storage<uint64_t> common_measurement_work(common_measurement_count);
     status = RunParallelSections(
       common_measurement_count,
       [&](size_t index) {
@@ -1694,7 +1698,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
       return status;
     }
 
-    std::vector<uint64_t> candidate_measurement_work(candidates.size());
+    Storage<uint64_t> candidate_measurement_work(candidates.size());
     status = RunParallelSections(
       candidates.size(),
       [&](size_t index) {
@@ -1708,7 +1712,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
           const EntropyCodeCost* selected_order_cost = candidate.custom_order
             ? (all_prefix ? &prefix_order_cost : &order_cost)
             : nullptr;
-          std::vector<uint64_t> ac_section_bits;
+          Storage<uint64_t> ac_section_bits;
           Status measure_status = MeasureAcSections(
             candidate, ac_cost, custom_orders,
             selected_order_cost, &ac_section_bits, measurement_work);
@@ -1819,7 +1823,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
       ? (selected.all_prefix_entropy ? &prefix_order_code : &order_code)
       : nullptr;
     const ProfileClock::time_point selected_write_begin = ProfileBegin(profile);
-    std::vector<BitWriter> common_sections;
+    Storage<BitWriter> common_sections;
     uint64_t written_dc_token_bits = 0;
     codestream_internal::SectionWritingWorkProfile selected_write_profile;
     status = WriteCommonSections(
@@ -1830,7 +1834,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
     if (!status.ok()) {
       return status;
     }
-    std::vector<BitWriter> ac_sections;
+    Storage<BitWriter> ac_sections;
     uint64_t written_ac_token_bits = 0;
     status = WriteAcSections(
       selected, selected_ac_code, custom_orders, order_tokens,
@@ -1856,7 +1860,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
     }
 
     const ProfileClock::time_point assembly_begin = ProfileBegin(profile);
-    std::vector<uint8_t> candidate_output;
+    codestream_internal::CodestreamBuffer candidate_output;
     status = AssembleCandidate(
       frame, common_sections, ac_sections,
       selected.streams.size(), &candidate_output,
@@ -1960,6 +1964,8 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
       *profile = candidate_profile;
     }
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -1968,9 +1974,9 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
 }
 
 Status EncodeVarDctCodestreamMaximumCompression(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   VarDctCodestreamOptions options,
-  std::vector<uint8_t>* output,
+  codestream_internal::CodestreamBuffer* output,
   codestream_internal::VarDctCodestreamProfile* profile) {
 
   return EncodeVarDctCodestreamWithRepresentationPolicy(
@@ -1978,9 +1984,9 @@ Status EncodeVarDctCodestreamMaximumCompression(
 }
 
 Status EncodeVarDctCodestreamSingleRepresentation(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   VarDctCodestreamOptions options,
-  std::vector<uint8_t>* output,
+  codestream_internal::CodestreamBuffer* output,
   codestream_internal::VarDctCodestreamProfile* profile) {
 
   return EncodeVarDctCodestreamWithRepresentationPolicy(
@@ -1988,11 +1994,13 @@ Status EncodeVarDctCodestreamSingleRepresentation(
 }
 
 Status EncodeVarDctCodestreamImpl(
-  const VarDctEncoderFrame& frame,
+  const VarDctFrameView& frame,
   VarDctCodestreamOptions options,
-  std::vector<uint8_t>* output,
+  codestream_internal::CodestreamBuffer* output,
   codestream_internal::VarDctCodestreamProfile* profile) {
 
+  const resource_budget_internal::ManagedHostScope managed_host(
+    resource_budget_internal::ResourceClass::kSerializer);
   return options.entropy_behavior ==
       VarDctEntropyBehavior::kMaximumCompression
     ? EncodeVarDctCodestreamMaximumCompression(
@@ -2002,6 +2010,87 @@ Status EncodeVarDctCodestreamImpl(
 }
 
 }  // namespace
+
+Status codestream_internal::ComputeSerializerControlStorageBound(
+  const SerializerStoragePlan& c, const SerializerStorageOptions& options,
+  size_t maximum_maps, bool has_orders, HostStorageBound* out) {
+  using enum resource_budget_internal::VectorCapacityPolicy;
+  const size_t g = c.ac_group_count, d = c.dc_group_count;
+  const size_t candidates = c.maximum_ac_candidates;
+  const size_t orders = c.maximum_order_variants;
+  constexpr size_t max = std::numeric_limits<size_t>::max();
+  if (out == nullptr || g == 0 || d == 0 || maximum_maps == 0 ||
+      maximum_maps > 6 || orders == 0 || orders > 2 ||
+      candidates != maximum_maps * orders || d > (max - 2) / 2 ||
+      g > max - d - 2 || g > max / candidates ||
+      g > max / (candidates * kAnsAlphabetWidthCount)) {
+    return Status::InvalidArgument("Serializer control storage counts are invalid");
+  }
+  const bool exhaustive = options.coding.entropy_behavior ==
+    VarDctEntropyBehavior::kMaximumCompression;
+  const size_t workers = options.cpu_thread_count == 0
+    ? kMaximumSectionWorkers : std::min(options.cpu_thread_count, kMaximumSectionWorkers);
+  const size_t sections = g == 1 ? 1 : g + d + 2;
+  const size_t entropy_tasks = 1 + static_cast<size_t>(has_orders) + candidates;
+  const size_t group_tasks = candidates * g;
+  const size_t maximum_tasks = std::max({group_tasks, entropy_tasks, d,
+                                        2 * maximum_maps});
+  const size_t measuring_workers = std::min(workers, candidates);
+  HostStorageBound work;
+  if (!work.AddVector<AcEncodingCandidate>(candidates, kFreshExact) ||
+      !work.AddVector<Storage<EntropyToken>>(2 * d, kFreshExact) ||
+      !work.AddVector<EntropyTokenStreamView>(2 * d, kFreshExact) ||
+      (has_orders && !work.AddVector<EntropyTokenStreamView>(1, kFreshExact)) ||
+      !work.AddVector<EntropyTokenStreamView>(g, kFreshExact, candidates) ||
+      (!exhaustive && !work.AddVector<SimpleBlockContextMap>(1, kGrowing)) ||
+      !work.AddVector<BitWriter>(d + g + 2, kFreshExact) ||
+      !work.AddVector<size_t>(sections, kFreshExact) ||
+      (g == 1 && !work.AddVector<size_t>(1, kFreshExact)) ||
+      !work.AddVector<uint8_t>(kSimpleBlockContextMap.size(), kFreshExact) ||
+      (!exhaustive && !work.AddVector<uint64_t>(d, kFreshExact))) {
+    return Status::OutOfMemory("Serializer control backing overflows");
+  }
+  // One top-level dispatcher exists at a time; maximum count covers every
+  // tokenization/entropy/measurement/write phase. Auto spawns all participants.
+  if (workers > 1 &&
+      (!work.AddVector<Status>(maximum_tasks, kFreshExact) ||
+       !work.AddVector<std::thread>(std::min(workers, maximum_tasks), kFreshExact))) {
+    return Status::OutOfMemory("Serializer dispatch backing overflows");
+  }
+  if (options.collect_profile &&
+      (!work.AddVector<uint64_t>(orders * g, kFreshExact) ||
+       (exhaustive && !work.AddVector<uint64_t>(group_tasks, kFreshExact)) ||
+       !work.AddVector<EntropyWorkProfile>(entropy_tasks, kFreshExact) ||
+       !work.AddVector<SectionWritingWorkProfile>(d + g, kFreshExact))) {
+    return Status::OutOfMemory("Serializer profiling backing overflows");
+  }
+  if (exhaustive) {
+    if (!work.AddVector<AnsSectionTask>(group_tasks, kFreshExact) ||
+        // clear() after finalization does not free these per-candidate arrays.
+        !work.AddVector<uint64_t>(g * kAnsAlphabetWidthCount, kFreshExact, candidates) ||
+        (options.collect_profile &&
+         (!work.AddVector<uint64_t>(group_tasks, kFreshExact) ||
+          !work.AddVector<uint64_t>(d, kFreshExact, 2))) ||
+        !work.AddVector<uint64_t>(d, kFreshExact, 2) ||
+        !work.AddVector<std::array<Storage<uint64_t>, 2>>(maximum_maps, kFreshExact) ||
+        !work.AddVector<uint64_t>(d + 1, kFreshExact, 2 * maximum_maps) ||
+        !work.AddVector<uint64_t>(2 * maximum_maps, kFreshExact) ||
+        !work.AddVector<uint64_t>(candidates, kFreshExact) ||
+        !work.AddVector<uint64_t>(g + 1, kFreshExact, measuring_workers) ||
+        !work.AddVector<size_t>(sections, kFreshExact, measuring_workers)) {
+      return Status::OutOfMemory("Serializer measurement backing overflows");
+    }
+    // InExplicitParallelScope only suppresses nesting for a nonzero CPU limit.
+    // The two auto-mode DC-cost tasks can each spawn a group dispatcher.
+    if (options.cpu_thread_count == 0 && d > 1 &&
+        (!work.AddVector<Status>(d, kFreshExact, 2) ||
+         !work.AddVector<std::thread>(std::min(workers, d), kFreshExact, 2))) {
+      return Status::OutOfMemory("Nested serializer dispatch backing overflows");
+    }
+  }
+  *out = work;
+  return Status::Ok();
+}
 
 Status codestream_internal::SelectOrdinaryEntropyCodingMode(
   std::span<const EntropyTokenStreamView> streams,
@@ -2013,7 +2102,7 @@ Status codestream_internal::SelectOrdinaryEntropyCodingMode(
   }
   size_t token_count = 0;
   bool all_singleton = true;
-  std::vector<uint32_t> first_symbols(
+  Storage<uint32_t> first_symbols(
     options.context_count, std::numeric_limits<uint32_t>::max());
   for (const EntropyTokenStreamView stream : streams) {
     if (!stream.valid() ||
@@ -2049,7 +2138,7 @@ Status codestream_internal::PhysicalSectionSizesFromBitCounts(
   std::span<const uint64_t> common_section_bits,
   std::span<const uint64_t> ac_section_bits,
   size_t ac_group_count,
-  std::vector<size_t>* sizes) {
+  Storage<size_t>* sizes) {
 
   if (sizes == nullptr || common_section_bits.empty() ||
       ac_section_bits.empty() ||
@@ -2068,7 +2157,7 @@ Status codestream_internal::PhysicalSectionSizesFromBitCounts(
   };
 
   try {
-    std::vector<size_t> candidate;
+    Storage<size_t> candidate;
     if (ac_group_count == 1) {
       if (common_section_bits.size() != 2 || ac_section_bits.size() != 2) {
         return Status::Internal(
@@ -2114,6 +2203,8 @@ Status codestream_internal::PhysicalSectionSizesFromBitCounts(
       candidate.push_back(bytes);
     }
     *sizes = std::move(candidate);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
@@ -2133,7 +2224,8 @@ Status EncodeVarDctCodestream(
   VarDctCodestreamOptions options,
   std::vector<uint8_t>* output) {
 
-  return EncodeVarDctCodestreamImpl(frame, options, output, nullptr);
+  return codestream_internal::EncodeVarDctCodestreamFromView(
+    vardct_frame_internal::BorrowFrame(frame), options, output);
 }
 
 Status codestream_internal::EncodeVarDctCodestreamProfiled(
@@ -2153,6 +2245,27 @@ Status codestream_internal::EncodeVarDctCodestreamProfiled(
   if (profile == nullptr) {
     return Status::InvalidArgument("Codestream profile output is null");
   }
+  return EncodeVarDctCodestreamFromView(
+    vardct_frame_internal::BorrowFrame(frame), options, output, profile);
+}
+
+Status codestream_internal::EncodeVarDctCodestreamFromView(
+  const VarDctFrameView& frame,
+  VarDctCodestreamOptions options,
+  std::vector<uint8_t>* output,
+  VarDctCodestreamProfile* profile) {
+  if (output == nullptr) return Status::InvalidArgument("Codestream output is null");
+  CodestreamBuffer candidate;
+  const Status status = EncodeVarDctCodestreamImpl(frame, options, &candidate, profile);
+  if (status.ok()) candidate.PublishTo(output);
+  return status;
+}
+
+Status codestream_internal::EncodeVarDctCodestreamToBuffer(
+  const VarDctFrameView& frame,
+  VarDctCodestreamOptions options,
+  CodestreamBuffer* output,
+  VarDctCodestreamProfile* profile) {
   return EncodeVarDctCodestreamImpl(frame, options, output, profile);
 }
 

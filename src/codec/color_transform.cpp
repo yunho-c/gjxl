@@ -2,19 +2,19 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include "codec/color_transform.h"
+#include "codec/frontend_storage_plan.h"
+#include "codec/frontend_dispatch_internal.h"
 
 #include "codec/color_transform_internal.h"
 
 #include <algorithm>
 #include <array>
-#include <atomic>
 #include <bit>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <new>
 #include <stdexcept>
-#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -25,8 +25,11 @@
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
 #include "core/thread_budget.h"
+#include "core/parallel_work_internal.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 constexpr float kOpsinBias = 0.0037930732552754493f;
@@ -120,22 +123,17 @@ Status RunParallelRows(
   Extent2D extent,
   Function&& function) {
 
-  constexpr size_t kMinimumParallelPixels = 256 * 256;
-  constexpr size_t kMaximumWorkers = 12;
   size_t pixel_count = 0;
   if (!extent.try_area(&pixel_count)) {
     return Status::InvalidArgument(
       "Color-transform image dimensions are too large");
   }
-  const size_t hardware_workers = std::max<size_t>(
-    std::thread::hardware_concurrency(), 1);
-  const size_t automatic_worker_count = pixel_count < kMinimumParallelPixels
-    ? 1
-    : std::min(extent.height, std::min(kMaximumWorkers, hardware_workers));
-  const size_t cpu_thread_count =
-    thread_budget_internal::CpuThreadCount();
+  const size_t cpu_thread_count = thread_budget_internal::CpuThreadCount();
+  const size_t desired_participants = frontend_dispatch_internal::kColor.Participants(
+      extent.height, pixel_count, cpu_thread_count, std::thread::hardware_concurrency());
   auto* const participant_tracker =
     thread_budget_internal::ParticipantTracker();
+  const auto resource_context = resource_budget_internal::CurrentResourceContext();
   if (thread_budget_internal::InExplicitParallelScope()) {
     for (size_t y = 0; y < extent.height; ++y) {
       Status status = function(y);
@@ -143,12 +141,11 @@ Status RunParallelRows(
     }
     return Status::Ok();
   }
-  const size_t participant_count = cpu_thread_count == 0
-    ? automatic_worker_count
-    : std::min(automatic_worker_count, cpu_thread_count);
+  thread_budget_internal::CpuWorkerGroup cpu_workers(desired_participants);
+  const size_t participant_count = cpu_workers.participants();
   if (participant_count == 1) {
     thread_budget_internal::ParallelScope scope(
-      cpu_thread_count, participant_tracker);
+      cpu_thread_count, participant_tracker, resource_context, &cpu_workers);
     for (size_t y = 0; y < extent.height; ++y) {
       Status status = function(y);
       if (!status.ok()) return status;
@@ -156,46 +153,20 @@ Status RunParallelRows(
     return Status::Ok();
   }
 
-  std::vector<Status> statuses(extent.height);
-  std::atomic<size_t> next_row{0};
-  std::vector<std::thread> workers;
-  const size_t spawned_worker_count = cpu_thread_count == 0
-    ? participant_count
-    : participant_count - 1;
-  workers.reserve(spawned_worker_count);
-  const auto run_worker = [&] {
-    thread_budget_internal::ParallelScope scope(
-      cpu_thread_count, participant_tracker);
-    while (true) {
-      const size_t y = next_row.fetch_add(1, std::memory_order_relaxed);
-      if (y >= extent.height) break;
-      try {
-        statuses[y] = function(y);
-      } catch (...) {
-        statuses[y] = Status::Internal(
-          "Color-transform worker failed unexpectedly");
-      }
-    }
+  const size_t spawned_worker_count = frontend_dispatch_internal::SpawnedWorkers(
+    participant_count, cpu_thread_count != 0 || cpu_workers.enabled());
+  constexpr thread_budget_internal::ParallelWorkErrors errors{
+    .allocation = "Unable to allocate color-transform worker storage",
+    .unexpected = "Color-transform worker failed unexpectedly",
+    .length_code = StatusCode::kInternal,
+    .length = "Color-transform worker failed unexpectedly",
+    .launch_allocation = "Unable to allocate CPU worker state",
+    .launch_action = thread_budget_internal::LaunchFailureAction::kRetrySerial,
   };
-  try {
-    for (size_t worker = 0; worker < spawned_worker_count; ++worker) {
-      workers.emplace_back(run_worker);
-    }
-  } catch (const std::system_error&) {
-    next_row.store(extent.height, std::memory_order_relaxed);
-    for (std::thread& worker : workers) worker.join();
-    for (size_t y = 0; y < extent.height; ++y) {
-      Status status = function(y);
-      if (!status.ok()) return status;
-    }
-    return Status::Ok();
-  }
-  if (cpu_thread_count != 0) run_worker();
-  for (std::thread& worker : workers) worker.join();
-  for (const Status& status : statuses) {
-    if (!status.ok()) return status;
-  }
-  return Status::Ok();
+  return thread_budget_internal::RunParallelWork<ManagedVector>(
+    extent.height, cpu_workers, spawned_worker_count,
+    thread_budget_internal::WorkerLaunchSite::kColorRows, errors,
+    [&](size_t index, size_t) { return function(index); });
 }
 
 template <typename Convert>
@@ -247,6 +218,8 @@ Status ConvertImage(
     });
     if (!status.ok()) return status;
     CopyImage(result.const_view(), output);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate color-transform scratch storage");
@@ -407,6 +380,8 @@ Status LinearRgbToOpsin(
       linear_rgb, intensity_target, result.view());
     if (!status.ok()) return status;
     CopyImage(result.const_view(), opsin);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate color-transform scratch storage");
@@ -443,6 +418,8 @@ Status color_transform_internal::LinearRgbToPaddedOpsin(
           padded_opsin.plane[channel].Row(y));
       }
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate color-transform scratch storage");

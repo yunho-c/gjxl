@@ -35,6 +35,7 @@ struct AqReconstructionParams {
   float epf_quant_multiplier;
   float epf_sharpness_lut[8];
   uint use_resident_quantizer;
+  uint group_major_output;
 };
 
 struct AqResetParams {
@@ -1496,26 +1497,28 @@ kernel void gjxl_aq_select_adjusted_quantization(
   }
 }
 
-kernel void gjxl_aq_encode_reconstruction_coefficients(
-  device const uint2* anchors [[buffer(0)]],
-  device const float* quant_tables [[buffer(1)]],
-  device int* raw_quant [[buffer(2)]],
-  device const char* y_to_x [[buffer(3)]],
-  device const char* y_to_b [[buffer(4)]],
-  device const float* forward_coefficients [[buffer(5)]],
-  device int* quantized_coefficients [[buffer(6)]],
-  device float* reconstruction_coefficients [[buffer(7)]],
-  device float* dc [[buffer(8)]],
-  device int* quantized_dc [[buffer(9)]],
-  device atomic_uint* error [[buffer(10)]],
-  constant AqReconstructionParams& params [[buffer(11)]],
-  device float* inverse_sigma [[buffer(12)]],
-  device const uchar* epf_sharpness [[buffer(13)]],
-  device const uint* resident_quantizer [[buffer(14)]],
-  device const float* adjustment_thresholds [[buffer(15)]],
-  uint anchor_index [[threadgroup_position_in_grid]],
-  uint thread_index [[thread_index_in_threadgroup]],
-  uint group_size [[threads_per_threadgroup]]) {
+template <bool WriteQuantized, bool Reconstruct>
+__attribute__((always_inline)) inline void AqEncodeCoefficients(
+  device const uint2* anchors,
+  device const float* quant_tables,
+  device int* raw_quant,
+  device const char* y_to_x,
+  device const char* y_to_b,
+  device const float* forward_coefficients,
+  device int* quantized_coefficients,
+  device float* reconstruction_coefficients,
+  device float* dc,
+  device int* quantized_dc,
+  device atomic_uint* error,
+  constant AqReconstructionParams& params,
+  device float* inverse_sigma,
+  device const uchar* epf_sharpness,
+  device const uint* resident_quantizer,
+  device const float* adjustment_thresholds,
+  device const uint* group_destinations,
+  uint anchor_index,
+  uint thread_index,
+  uint group_size) {
 
   if (anchor_index >= params.anchor_count) return;
   const uint thread_count = group_size;
@@ -1578,7 +1581,6 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
         (anchor.y + y) * params.inverse_sigma_stride + anchor.x + x] = value;
     }
   }
-  threadgroup_barrier(mem_flags::mem_device);
 
   // DC is extracted from the preserved forward coefficients. The LLF portion
   // of dequantized Y is exactly zero, so this also equals post-CfL X/B DC.
@@ -1641,9 +1643,12 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
     dc[2u * block_count + block_index] =
       float(quantized_b) / inverse_b + reconstructed_y;
   }
-  threadgroup_barrier(mem_flags::mem_device);
 
-  // Quantize/dequantize Y first because X/B prediction consumes rounded Y.
+  // One thread owns the same coefficient in all three channels. Keep rounded
+  // Y local for X/B prediction and restore color before each final store.
+  // DC is independent of this work; its publication is covered by the barrier
+  // before LLF reconstruction below. This shader is compiled with contraction
+  // disabled, preserving the separate dequantization and restoration rounding.
   for (uint coefficient = thread_index;
        coefficient < params.coefficient_count;
        coefficient += thread_count) {
@@ -1667,8 +1672,12 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
       1.0f,
       threshold,
       error);
-    quantized_coefficients[offset] = quantized;
-    reconstruction_coefficients[offset] = aq_dequantize_coefficient(
+    const uint output_offset = params.group_major_output != 0u
+      ? group_destinations[params.anchor_offset + anchor_index] +
+          channel * 65536u + coefficient
+      : offset;
+    if (WriteQuantized) quantized_coefficients[output_offset] = quantized;
+    const float reconstructed_y = aq_dequantize_coefficient(
       quantized,
       quant_tables[table_offsets.x + table],
       global_scale,
@@ -1676,14 +1685,8 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
       1.0f,
       channel,
       error);
-  }
-  threadgroup_barrier(mem_flags::mem_device);
+    if (Reconstruct) reconstruction_coefficients[offset] = reconstructed_y;
 
-  for (uint coefficient = thread_index;
-       coefficient < params.coefficient_count;
-       coefficient += thread_count) {
-    const float reconstructed_y = reconstruction_coefficients[
-      transform_offset + group_channel_stride + coefficient];
     for (uint channel : {0u, 2u}) {
       const uint offset = transform_offset + channel * group_channel_stride + coefficient;
       const float factor = channel == 0u ? cfl_x : cfl_b;
@@ -1702,8 +1705,12 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
         multiplier,
         threshold,
         error);
-      quantized_coefficients[offset] = quantized;
-      reconstruction_coefficients[offset] = aq_dequantize_coefficient(
+      const uint output_offset = params.group_major_output != 0u
+        ? group_destinations[params.anchor_offset + anchor_index] +
+            channel * 65536u + coefficient
+        : offset;
+      if (WriteQuantized) quantized_coefficients[output_offset] = quantized;
+      const float reconstructed = aq_dequantize_coefficient(
         quantized,
         quant_tables[table_offsets.x + table],
         global_scale,
@@ -1711,20 +1718,18 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
         multiplier,
         channel,
         error);
+      if (Reconstruct) {
+        reconstruction_coefficients[offset] =
+          reconstructed + factor * reconstructed_y;
+      }
     }
   }
-  threadgroup_barrier(mem_flags::mem_device);
 
-  for (uint coefficient = thread_index;
-       coefficient < params.coefficient_count;
-       coefficient += thread_count) {
-    const float reconstructed_y = reconstruction_coefficients[
-      transform_offset + group_channel_stride + coefficient];
-    reconstruction_coefficients[transform_offset + coefficient] += cfl_x * reconstructed_y;
-    reconstruction_coefficients[
-      transform_offset + 2u * group_channel_stride + coefficient] +=
-        cfl_b * reconstructed_y;
-  }
+  // Dequantization above still validates discarded X/B floating results.
+  // Final encoding does not consume reconstructed coefficients or LLF.
+  if (!Reconstruct) return;
+
+  // LLF tasks may overwrite coefficients owned by a different AC thread.
   threadgroup_barrier(mem_flags::mem_device);
 
   for (uint llf_task = thread_index;
@@ -1750,6 +1755,41 @@ kernel void gjxl_aq_encode_reconstruction_coefficients(
       aq_coefficient_index(params, v, u)] = value;
   }
 }
+
+#define GJXL_AQ_COEFFICIENT_KERNEL(name, write_quantized, reconstruct) \
+kernel void name( \
+  device const uint2* anchors [[buffer(0)]], \
+  device const float* quant_tables [[buffer(1)]], \
+  device int* raw_quant [[buffer(2)]], \
+  device const char* y_to_x [[buffer(3)]], \
+  device const char* y_to_b [[buffer(4)]], \
+  device const float* forward_coefficients [[buffer(5)]], \
+  device int* quantized_coefficients [[buffer(6)]], \
+  device float* reconstruction_coefficients [[buffer(7)]], \
+  device float* dc [[buffer(8)]], \
+  device int* quantized_dc [[buffer(9)]], \
+  device atomic_uint* error [[buffer(10)]], \
+  constant AqReconstructionParams& params [[buffer(11)]], \
+  device float* inverse_sigma [[buffer(12)]], \
+  device const uchar* epf_sharpness [[buffer(13)]], \
+  device const uint* resident_quantizer [[buffer(14)]], \
+  device const float* adjustment_thresholds [[buffer(15)]], \
+  device const uint* group_destinations [[buffer(16)]], \
+  uint anchor_index [[threadgroup_position_in_grid]], \
+  uint thread_index [[thread_index_in_threadgroup]], \
+  uint group_size [[threads_per_threadgroup]]) { \
+  AqEncodeCoefficients<write_quantized, reconstruct>( \
+    anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients, \
+    quantized_coefficients, reconstruction_coefficients, dc, quantized_dc, \
+    error, params, inverse_sigma, epf_sharpness, resident_quantizer, \
+    adjustment_thresholds, group_destinations, anchor_index, thread_index, \
+    group_size); \
+}
+
+GJXL_AQ_COEFFICIENT_KERNEL(gjxl_aq_encode_reconstruction_coefficients, true, true)
+GJXL_AQ_COEFFICIENT_KERNEL(gjxl_aq_encode_scored_coefficients, false, true)
+GJXL_AQ_COEFFICIENT_KERNEL(gjxl_aq_encode_final_coefficients, true, false)
+#undef GJXL_AQ_COEFFICIENT_KERNEL
 
 kernel void gjxl_aq_encode_frame_coefficients(
   device const uint2* anchors [[buffer(0)]],
@@ -2015,5 +2055,60 @@ kernel void gjxl_aq_adjustment_probe(
       coefficients[params.coefficient_count + coefficient],
       quant_tables[table_offsets.y + table], params.global_scale,
       decision.raw_quant, 1.0f, decision.y_thresholds[quadrant], error);
+  }
+}
+
+// Preserve the host scan's numeric check when the full mask stays on device.
+kernel void
+gjxl_aq_validate_initial_mask(device const float *mask [[buffer(0)]],
+                              device atomic_uint *error [[buffer(1)]],
+                              constant uint &count [[buffer(2)]],
+                              uint index [[thread_position_in_grid]]) {
+  if (index < count && (!isfinite(mask[index]) || mask[index] <= 0.0f))
+    atomic_fetch_or_explicit(error, 4096u, memory_order_relaxed);
+}
+
+// Exact zero populations over the final group-major AC. Each group covers 32
+// coefficient positions and 64 anchors, reducing 8 rows before global atomics.
+// Counts and sources occupy disjoint slices of the completed output lease.
+// Host ABI: anchor offset, anchor count, family population offset, sample DCT8.
+kernel void gjxl_aq_count_coefficient_zeros(
+    device const int* coefficients [[buffer(0)]],
+    device const uint* destinations [[buffer(1)]],
+    device const uchar* samples [[buffer(2)]],
+    device atomic_uint* populations [[buffer(3)]],
+    constant uint4& params [[buffer(4)]],
+    uint2 group [[threadgroup_position_in_grid]],
+    uint2 tid [[thread_position_in_threadgroup]]) {
+  constexpr uint kChannelCapacity = 65536;
+  constexpr uint kPopulationStride = 1984;
+  constexpr uint kFullCount = 3 * kPopulationStride;
+  threadgroup uint partial[6][256];
+  uint counts[6] = {};
+  const uint coefficient = group.x * 32 + tid.x;
+  for (uint row = tid.y; row < 64; row += 8) {
+    const uint anchor = group.y * 64 + row;
+    if (anchor >= params.y) continue;
+    const uint index = params.x + anchor;
+    const uint offset = destinations[index] + coefficient;
+    const bool selected = params.w != 0 && samples[index] != 0;
+    for (uint c = 0; c < 3; ++c) {
+      const uint zero = coefficients[offset + c * kChannelCapacity] == 0;
+      counts[c] += zero;
+      if (selected) counts[3 + c] += zero;
+    }
+  }
+  const uint lane = tid.y * 32 + tid.x;
+  for (uint c = 0; c < (params.w != 0 ? 6u : 3u); ++c) partial[c][lane] = counts[c];
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (tid.y == 0) {
+    for (uint c = 0; c < (params.w != 0 ? 6u : 3u); ++c) {
+      uint sum = 0;
+      for (uint row = 0; row < 8; ++row) sum += partial[c][row * 32 + tid.x];
+      const uint destination = c < 3
+        ? c * kPopulationStride + params.z + coefficient
+        : kFullCount + (c - 3) * 64 + coefficient;
+      if (sum != 0) atomic_fetch_add_explicit(populations + destination, sum, memory_order_relaxed);
+    }
   }
 }

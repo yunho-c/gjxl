@@ -108,6 +108,17 @@ class ImageBatchBenchmarkTest(unittest.TestCase):
                 statistics.median(ratios),
                 delta=0.00051,
             )
+            # Scheduling spans and raw durations use the same measured calls.
+            batch_max_ms = max(int(row["batch_ns"]) for row in samples) / 1e6
+            ready_max_ms = float(summary["image_ready_max_ms"])
+            self.assertLessEqual(ready_max_ms, batch_max_ms + 0.00051)
+            for phase in ("queue", "service", "ready"):
+                median_ms = float(summary[f"image_{phase}_median_ms"])
+                maximum_ms = float(summary[f"image_{phase}_max_ms"])
+                self.assertGreaterEqual(median_ms, 0)
+                self.assertLessEqual(median_ms, maximum_ms)
+                self.assertLessEqual(maximum_ms, ready_max_ms)
+            self.assertGreater(float(summary["image_service_median_ms"]), 0)
 
     def test_directory_sort_dedup_dimensions_and_csv_escaping(self):
         second = self.image('b,"line\n2.pfm')

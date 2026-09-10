@@ -15,6 +15,7 @@
 #include "codestream/workflow.h"
 #include "codestream/workflow_internal.h"
 #include "core/image.h"
+#include "gpu/metal/metal_butteraugli_test.h"
 
 namespace {
 
@@ -1200,6 +1201,31 @@ bool CheckTargetSizeControl() {
   return true;
 }
 
+bool CheckPreparationCacheTrim() {
+  if (!gjxl::TrimVarDctPreparationCache().ok() ||
+      gjxl::MetalButteraugliProcessCacheBytesForTesting() != 0) return false;
+  const auto available =
+    gjxl::codestream_internal::EnsureProductionMetalBackendAvailable();
+  if (!available.ok()) return available.code() == gjxl::StatusCode::kUnavailable;
+  ArbitraryImageStorage image({32, 32});
+  for (size_t c = 0; c < 3; ++c)
+    for (size_t i = 0; i < image.plane[c].size(); ++i)
+      image.plane[c][i] = 0.03f + 0.001f * ((i * 13 + c * 7) % 127);
+  const gjxl::VarDctEncodingOptions options{
+    .butteraugli_target = 1.2f,
+    .effort = 7,
+    .backend = gjxl::VarDctBackendPreference::kMetal};
+  std::vector<uint8_t> before, after;
+  if (!gjxl::EncodeLinearRgbVarDctCodestream(image.View(), options, &before).ok() ||
+      gjxl::MetalButteraugliProcessCacheBytesForTesting() == 0 ||
+      !gjxl::TrimVarDctPreparationCache().ok() ||
+      gjxl::MetalButteraugliProcessCacheBytesForTesting() != 0 ||
+      !gjxl::EncodeLinearRgbVarDctCodestream(image.View(), options, &after).ok() ||
+      before != after ||
+      gjxl::MetalButteraugliProcessCacheBytesForTesting() == 0) return false;
+  return gjxl::TrimVarDctPreparationCache().ok();
+}
+
 bool CheckSingleAttemptTiming() {
   ImageStorage image;
   FillImage(&image);
@@ -1242,7 +1268,8 @@ bool CheckSingleAttemptTiming() {
 }  // namespace
 
 int main() {
-  if (!CheckQuantizationMatrixScaleStats() ||
+  if (!CheckPreparationCacheTrim() ||
+      !CheckQuantizationMatrixScaleStats() ||
       !CheckQuantizationMatrixScaleSelection() ||
       !CheckQuantizationMatrixScaleStatsPolicy() ||
       !CheckDeterministicWorkflow() ||

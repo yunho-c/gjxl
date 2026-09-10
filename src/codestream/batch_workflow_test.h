@@ -1,0 +1,40 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Yunho Cho
+
+#pragma once
+
+#include "codestream/batch_workflow.h"
+#include "codestream/storage.h"
+#include "codestream/encoding_result_internal.h"
+
+namespace gjxl::codestream_internal {
+
+// Synchronous observation at the all-workers-complete, not-yet-published
+// boundary. The caller owns the hook/context until Encode returns. This does
+// not alter scheduling and is deliberately absent from the public batch API.
+struct BatchPublicationObserverForTesting {
+  void* context = nullptr;
+  void (*observe)(void*, std::span<const VarDctBatchEncodingResult>,
+                  std::span<const OwnedEncodingResult>) noexcept = nullptr;
+};
+inline thread_local BatchPublicationObserverForTesting batch_publication_observer_for_testing;
+
+// Exact driver work-slot boundaries, propagated to joined workers. The hook
+// must not throw or mutate encoder state; its context outlives Encode.
+struct BatchExecutionObserverForTesting {
+  void *context = nullptr;
+  void (*observe)(void *, size_t request, bool entering) noexcept = nullptr;
+};
+inline thread_local BatchExecutionObserverForTesting batch_execution_observer_for_testing;
+
+enum class BatchLifecycleEventForTesting { kWaitingForDriver, kActive, kClosing, kStopped };
+// Calling-thread boundaries for deterministic queue/drain tests. Like the
+// worker hook, this must not throw or reenter/mutate the driver; context must
+// outlive the observed call. It is deliberately not a public lifecycle API.
+struct BatchLifecycleObserverForTesting {
+  void* context = nullptr;
+  void (*observe)(void*, BatchLifecycleEventForTesting) noexcept = nullptr;
+};
+inline thread_local BatchLifecycleObserverForTesting batch_lifecycle_observer_for_testing;
+
+}  // namespace gjxl::codestream_internal

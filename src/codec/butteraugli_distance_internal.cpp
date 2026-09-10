@@ -18,8 +18,11 @@
 #include <ranges>
 #include <stdexcept>
 #include <utility>
+#include "core/managed_allocator.h"
 
 namespace gjxl::butteraugli_internal {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 constexpr std::array<double, 6> kMaltaWeights = {
@@ -374,7 +377,7 @@ Status OwnedDifferenceStages::Resize(Extent2D extent) {
     return Status::Ok();
   }
   try {
-    std::vector<float> replacement(value_count);
+    ManagedVector<float> replacement(value_count);
     values_.swap(replacement);
     extent_ = extent;
     plane_size_ = area;
@@ -382,7 +385,9 @@ Status OwnedDifferenceStages::Resize(Extent2D extent) {
   } catch (const std::length_error &) {
     return Status::InvalidArgument(
         "Butteraugli difference-stage extent exceeds the container limit");
-  } catch (const std::bad_alloc &) {
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
+  } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
         "Unable to allocate Butteraugli difference-stage storage");
   }

@@ -14,6 +14,9 @@
 #include <utility>
 #include <vector>
 
+#include "core/managed_allocator.h"
+#include "codec/vardct_frame_view_internal.h"
+
 #include "codec/adaptive_quantization_internal.h"
 #include "codec/chroma_from_luma.h"
 #include "codec/chroma_from_luma_internal.h"
@@ -26,6 +29,8 @@
 #include "gpu/ops/adaptive_quantization_profile_internal.h"
 
 namespace gjxl {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 namespace aqi = adaptive_quantization_internal;
@@ -47,7 +52,7 @@ template <typename T>
 }
 
 void CopyContiguousPlane(
-  const std::vector<float>& source,
+  const ManagedVector<float>& source,
   PlaneF32View destination) {
 
   for (size_t y = 0; y < destination.extent.height; ++y) {
@@ -211,8 +216,8 @@ public:
         return Status::Ok();
       }
 
-      std::vector<int32_t> raw_quant(block_count);
-      std::vector<float> inverse_sigma(block_count);
+      ManagedVector<int32_t> raw_quant(block_count);
+      ManagedVector<float> inverse_sigma(block_count);
       Quantizer quantizer;
       Status status = CreateQuantizerFromField(
         quant_dc,
@@ -313,6 +318,8 @@ public:
       candidate.quantizer = quantizer;
       *evaluation = std::move(candidate);
       return Status::Ok();
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      return failure.status();
     } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
         "Unable to allocate GPU adaptive-quantization host staging");
@@ -523,7 +530,7 @@ Status RunGpuAdaptiveQuantizationImpl(
   }
 
   try {
-    std::vector<float> adjusted_initial;
+    ManagedVector<float> adjusted_initial;
     ConstPlaneF32View policy_initial = initial_quant_field;
     const float adjustment_target =
       options.control_mode == AdaptiveQuantizationControlMode::kMaximumError
@@ -614,6 +621,8 @@ Status RunGpuAdaptiveQuantizationImpl(
       }
       Image3FBuffer fused_reconstruction;
       VarDctEncoderFrame fused_frame;
+      std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame>
+        completed_frame;
       AqResidentButteraugliPolicyOutput fused_output{
         .score_history = &fused_result.score_history,
       };
@@ -633,7 +642,11 @@ Status RunGpuAdaptiveQuantizationImpl(
           fused_output.reconstructed_linear_rgb =
             fused_reconstruction.view();
         }
-        fused_output.frame = &fused_frame;
+        if (materialization.completed_frame != nullptr) {
+          fused_output.completed_frame = &completed_frame;
+        } else {
+          fused_output.frame = &fused_frame;
+        }
       }
       const AqResidentButteraugliPolicyInput resident_input{
           .adjusted_initial_quant_field = policy_initial,
@@ -672,8 +685,7 @@ Status RunGpuAdaptiveQuantizationImpl(
           CopyContiguousPlane(
             fused_result.block_distance,
             bounded_output->block_distance_map);
-          *bounded_output->score_history =
-            std::move(fused_result.score_history);
+          bounded_output->score_history.Publish(std::move(fused_result.score_history));
         } else {
           if (materialization.quant_field) {
             CopyContiguousPlane(
@@ -690,8 +702,10 @@ Status RunGpuAdaptiveQuantizationImpl(
               full_output->reconstructed_linear_rgb);
           }
           *full_output->frame = std::move(fused_frame);
-          *full_output->score_history =
-            std::move(fused_result.score_history);
+          if (materialization.completed_frame != nullptr) {
+            *materialization.completed_frame = std::move(completed_frame);
+          }
+          full_output->score_history.Publish(std::move(fused_result.score_history));
         }
         return Status::Ok();
       }
@@ -727,7 +741,7 @@ Status RunGpuAdaptiveQuantizationImpl(
       CopyContiguousPlane(result.quant_field, bounded_output->quant_field);
       CopyContiguousPlane(
         result.block_distance, bounded_output->block_distance_map);
-      *bounded_output->score_history = std::move(result.score_history);
+      bounded_output->score_history.Publish(std::move(result.score_history));
     } else {
       Image3FBuffer reconstructed = evaluator.TakeFinalReconstruction();
       VarDctEncoderFrame frame = evaluator.TakeFinalFrame();
@@ -743,12 +757,14 @@ Status RunGpuAdaptiveQuantizationImpl(
           reconstructed.const_view(), full_output->reconstructed_linear_rgb);
       }
       *full_output->frame = std::move(frame);
-      *full_output->score_history = std::move(result.score_history);
+      full_output->score_history.Publish(std::move(result.score_history));
       if (full_output->maximum_error_result != nullptr) {
         *full_output->maximum_error_result = result.maximum_error;
       }
     }
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate GPU adaptive-quantization final storage");
@@ -777,7 +793,7 @@ Status FinishGpuFrameOnlyQuantization(
       "GPU frame-only block grid is too large");
   }
   try {
-    std::vector<float> adjusted_quant(block_count);
+    ManagedVector<float> adjusted_quant(block_count);
     Status status = AdjustQuantField(
       strategies, options.butteraugli_target, initial_quant_field,
       {adjusted_quant.data(), strategies.extent(), strategies.extent().width});
@@ -785,7 +801,7 @@ Status FinishGpuFrameOnlyQuantization(
     float quant_dc = 0.0f;
     status = ComputeInitialQuantDc(options.butteraugli_target, &quant_dc);
     if (!status.ok()) return status;
-    std::vector<int32_t> raw_quant(block_count);
+    ManagedVector<int32_t> raw_quant(block_count);
     Quantizer quantizer;
     status = CreateQuantizerFromField(
       quant_dc,
@@ -793,7 +809,7 @@ Status FinishGpuFrameOnlyQuantization(
       {raw_quant.data(), strategies.extent(), strategies.extent().width},
       &quantizer);
     if (!status.ok()) return status;
-    std::vector<float> inverse_sigma(block_count);
+    ManagedVector<float> inverse_sigma(block_count);
     status = ComputeEpfInverseSigma(
       strategies,
       {raw_quant.data(), strategies.extent(), strategies.extent().width},
@@ -821,6 +837,8 @@ Status FinishGpuFrameOnlyQuantization(
     CopyContiguousPlane(adjusted_quant, output.quant_field);
     *output.frame = std::move(candidate);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate GPU frame-only quantization storage");
@@ -875,6 +893,8 @@ Status RunGpuFrameOnlyQuantizationImpl(
     return FinishGpuFrameOnlyQuantization(
       *prepared, strategies, initial_quant_field, epf_sharpness,
       color_correlation, options, output);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate GPU frame-only quantization storage");
@@ -1006,6 +1026,8 @@ Status RunGpuFrameOnlyQuantizationResidentFrontend(
     }
     *output.frame = std::move(candidate);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate resident frame-only frontend storage");

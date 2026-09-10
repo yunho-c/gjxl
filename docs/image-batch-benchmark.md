@@ -43,9 +43,12 @@ just image-batch-benchmark all 1,2,4 3 1 metal fully-resident \
 
 Each image is measured separately. For batch size N, both paths encode **N
 copies of that image**: one persistent worker versus N persistent workers using
-`VarDctBatchEncoder`. Automatic per-image CPU threading is identical in both
-paths; increasing batch size does not divide a fixed host thread budget. Every
-output and deterministic summary must match the single-image reference.
+`VarDctBatchEncoder`. Both paths request the same automatic per-image CPU policy
+and share the default execution domain, which caps aggregate CPU participation
+at hardware concurrency (between 1 and 256). Increasing batch concurrency can
+reduce the CPU workers available to each image. See
+[Resident execution](resident-execution.md) for the shared admission policy.
+Every output and deterministic summary must match the single-image reference.
 
 Timing starts with preloaded planar linear RGB and ends with in-memory
 codestreams. It includes batch scheduling and the complete encoding workflow,
@@ -58,6 +61,13 @@ N copies, `batch_ms_per_image` divides that median by N, and
 `batch_images_per_second` is N times 1000 divided by that median. Speedups are
 paired serial/batch ratios. Their minimum and maximum describe samples within
 **one process**, not independent-process medians or confidence bounds.
+
+The `image_queue_*`, `image_service_*`, and `image_ready_*` columns summarize
+per-image wall spans pooled across measured batched calls, excluding warmups.
+Queue ends at initial CPU admission; service runs from admission through internal
+result retention, and ready is their sum. Results become publicly available when
+the whole batch returns. These spans are separate from the throughput-derived
+`batch_ms_per_image` value.
 
 `--raw-samples NEW.csv` writes a standalone CSV with one row per validated pair:
 `codec`, `workload`, `source`, `width`, `height`, `batch_size`, `sample`, `order`,

@@ -8,10 +8,15 @@
 #include <cstdint>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "codec/adaptive_quantization.h"
 #include "codec/maximum_error.h"
 
 namespace gjxl::adaptive_quantization_internal {
+
+// Pinned maximum-error policy, shared with storage planning. Independent of
+// the Butteraugli effort/iteration setting.
+inline constexpr size_t kMaximumErrorUpdateCount = 5;
 
 /// Stages measured inside one encode/reconstruct/measure evaluation.
 enum class EvaluationStage : size_t {
@@ -36,12 +41,15 @@ struct EvaluationProfile {
   [[nodiscard]] bool operator==(const EvaluationProfile&) const = default;
 };
 
-/// Timings for one complete invocation of the iterative AQ policy.
+/// Timings for one complete invocation of the iterative AQ policy. This is an
+/// internal owner, not the public workflow timing record; evaluation backing
+/// retains its charge through moves until this internal profile is destroyed.
 struct AdaptiveQuantizationProfile {
   uint64_t loop_setup_nanoseconds = 0;
   uint64_t quant_field_update_nanoseconds = 0;
   uint64_t output_commit_nanoseconds = 0;
-  std::vector<EvaluationProfile> evaluations;
+  resource_budget_internal::ManagedVector<
+    EvaluationProfile, resource_budget_internal::ResourceClass::kDiagnostics> evaluations;
 
   [[nodiscard]] bool
   operator==(const AdaptiveQuantizationProfile&) const = default;
@@ -49,7 +57,7 @@ struct AdaptiveQuantizationProfile {
 
 /// Bounded result returned by one adaptive-quantization evaluator.
 struct AdaptiveQuantizationEvaluation {
-  std::vector<float> block_distance;
+  resource_budget_internal::ManagedVector<float> block_distance;
   Quantizer quantizer;
   double score = 0.0;
   MaximumErrorReduction maximum_error;
@@ -78,9 +86,9 @@ protected:
 
 /// Atomic scratch result of the shared bounded AQ policy.
 struct AdaptiveQuantizationPolicyResult {
-  std::vector<float> quant_field;
-  std::vector<float> block_distance;
-  std::vector<double> score_history;
+  resource_budget_internal::ManagedVector<float> quant_field;
+  resource_budget_internal::ManagedVector<float> block_distance;
+  resource_budget_internal::PublicationVector<double> score_history;
   MaximumErrorResult maximum_error;
 };
 

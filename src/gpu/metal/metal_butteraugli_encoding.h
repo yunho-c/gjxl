@@ -5,6 +5,7 @@
 
 #include <Metal/Metal.hpp>
 
+#include <array>
 #include <cstdint>
 #include <span>
 
@@ -14,6 +15,47 @@
 namespace gjxl::metal_internal {
 
 class MetalBackend;
+
+/// Nine disjoint mutable planes borrowed from the enclosing AQ operation.
+/// They must be F32, large enough for the unpadded reference, and remain owned
+/// until this prepared Butteraugli object is destroyed. AQ orders reference
+/// preparation before reconstruction and each comparison after filtering and
+/// gathering, so no other consumer may use these planes during either phase.
+/// Immutable reference data and final outputs are never stored here.
+struct MetalButteraugliScratch {
+  std::array<DevicePlaneView, 9> planes;
+};
+
+enum class MetalButteraugliPsychoStage : uint8_t {
+  kAll, kOpsin, kLowMedium, kHighX, kHighY, kMediumB, kSuppressX, kUltraX, kUltraY,
+};
+
+// In dependency order. Opsin includes any required expansion or subsampling;
+// ultra Y includes the fused raw mask producer. The remaining mask blur and
+// reference erosion have a separate reference stage.
+struct MetalButteraugliPsychoProfile {
+  MetalButteraugliPsychoStage stage;
+  const char* main_id;
+  const char* sub_id;
+  const char* reference_main_id;
+  const char* reference_sub_id;
+};
+
+inline constexpr std::array kMetalButteraugliPsychoProfiles = {
+#define GJXL_PSYCHO_PROFILE(stage, suffix) MetalButteraugliPsychoProfile{ \
+  MetalButteraugliPsychoStage::stage, "butteraugli.psycho.main." suffix, \
+  "butteraugli.psycho.sub." suffix, "frontend.prepare_aq.reference.main." suffix, \
+  "frontend.prepare_aq.reference.sub." suffix}
+  GJXL_PSYCHO_PROFILE(kOpsin, "opsin"),
+  GJXL_PSYCHO_PROFILE(kLowMedium, "low_medium"),
+  GJXL_PSYCHO_PROFILE(kHighX, "high_x"),
+  GJXL_PSYCHO_PROFILE(kHighY, "high_y"),
+  GJXL_PSYCHO_PROFILE(kMediumB, "medium_b"),
+  GJXL_PSYCHO_PROFILE(kSuppressX, "suppress_x"),
+  GJXL_PSYCHO_PROFILE(kUltraX, "ultra_x"),
+  GJXL_PSYCHO_PROFILE(kUltraY, "ultra_y"),
+#undef GJXL_PSYCHO_PROFILE
+};
 
 enum class MetalButteraugliProfileStage : uint8_t {
   kDistortedPsychoMain,
@@ -50,6 +92,11 @@ struct MetalButteraugliResidentComparisonDescriptor {
   std::span<const MetalButteraugliResidentBatch> batches;
 };
 
+/// Prevents pooling after failure in an enclosing AQ submission/readback.
+/// The owner still must wait for its submission before destroying the borrower.
+void DiscardPreparedMetalButteraugliLease(
+  PreparedDeviceButteraugli& prepared) noexcept;
+
 /// Validates an AQ-owned comparison before its enclosing command buffer is
 /// created. This is intentionally Metal-only and is not a generic GPU command
 /// interface.
@@ -81,7 +128,8 @@ void EncodePreparedMetalButteraugliResidentProfileStage(
   PreparedDeviceButteraugli& prepared,
   MTL::ComputeCommandEncoder* encoder,
   const MetalButteraugliResidentComparisonDescriptor& descriptor,
-  MetalButteraugliProfileStage stage);
+  MetalButteraugliProfileStage stage,
+  MetalButteraugliPsychoStage psycho = MetalButteraugliPsychoStage::kAll);
 
 /// Appends one dependency-ordered diagnostic comparison stage. The descriptor
 /// must have been validated before the command buffer was created.
@@ -89,6 +137,7 @@ void EncodePreparedMetalButteraugliProfileStage(
   PreparedDeviceButteraugli& prepared,
   MTL::ComputeCommandEncoder* encoder,
   const DeviceButteraugliComparisonDescriptor& descriptor,
-  MetalButteraugliProfileStage stage);
+  MetalButteraugliProfileStage stage,
+  MetalButteraugliPsychoStage psycho = MetalButteraugliPsychoStage::kAll);
 
 }  // namespace gjxl::metal_internal

@@ -26,6 +26,7 @@ static_assert(noexcept(gjxl_context_options_init(nullptr, 0)));
 static_assert(noexcept(gjxl_encoder_options_init(nullptr, 0)));
 static_assert(noexcept(gjxl_context_create(nullptr, nullptr)));
 static_assert(noexcept(gjxl_context_destroy(nullptr)));
+static_assert(noexcept(gjxl_trim_preparation_cache()));
 static_assert(noexcept(gjxl_encode(nullptr, nullptr, nullptr, nullptr)));
 static_assert(noexcept(gjxl_buffer_free(nullptr)));
 static_assert(noexcept(gjxl_get_last_error()));
@@ -41,6 +42,7 @@ static_assert(std::is_same_v<decltype(&gjxl_context_options_init),
 static_assert(std::is_same_v<decltype(&gjxl_encode), EncodeFunction>);
 
 int main() {
+  if (gjxl_trim_preparation_cache() != GJXL_OK) return 1;
   GJXLContextOptions options;
   if (gjxl_context_options_init(&options, sizeof(options)) != GJXL_OK) {
     return 1;

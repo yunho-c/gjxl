@@ -29,7 +29,8 @@ struct CandidateCostTableView {
   AcStrategyGrid* out);
 
 /// Resident variant whose CPU merge needs only coding geometry because all
-/// leaf costs have already been evaluated from device images.
+/// leaf costs have already been evaluated from device images. pixel_mask may
+/// be entirely empty; the CPU merge does not read it.
 [[nodiscard]] Status FindAcStrategyGridFromResidentCandidateCosts(
   Extent2D opsin_extent,
   ConstPlaneF32View quant_field,

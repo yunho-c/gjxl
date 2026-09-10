@@ -12,10 +12,12 @@
 #include <mutex>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "core/ac_strategy.h"
 #include "codec/vardct_frame_internal.h"
 #include "gpu/metal/metal_aq_butteraugli_test.h"
 #include "gpu/metal/metal_aq_evaluation_profile.h"
+#include "gpu/metal/metal_aq_profile_storage_plan.h"
 #include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_aq_postprocess_test.h"
 #include "gpu/metal/metal_aq_reconstruction_test.h"
@@ -24,6 +26,8 @@
 #include "gpu/scratch.h"
 
 namespace gjxl::metal_internal {
+
+class MetalCompletedVarDctFrame;
 
 struct AqReconstructionParams {
   uint32_t coding_width;
@@ -53,6 +57,14 @@ struct AqReconstructionParams {
   float epf_quant_multiplier;
   std::array<float, 8> epf_sharpness_lut;
   uint32_t use_resident_quantizer;
+  uint32_t group_major_output;
+};
+
+struct AqDctImageParams {
+  uint32_t anchor_offset;
+  uint32_t anchor_count;
+  uint32_t coefficient_offset;
+  uint32_t image_stride;
 };
 
 struct AqResetParams {
@@ -263,6 +275,7 @@ public:
   Status Prepare(const ResidentInputPreparation& preparation);
   [[nodiscard]] ConstDeviceImage3View original_linear_rgb() const
     noexcept override;
+  [[nodiscard]] ConstImage3FView original_linear_rgb_host() const noexcept override;
   [[nodiscard]] ConstDeviceImage3View coding_opsin() const noexcept override;
   [[nodiscard]] ResidentInputStatistics statistics() const noexcept override;
 
@@ -394,6 +407,9 @@ public:
                             bool fail_readback);
 
 private:
+  friend Status ComputeResidentAqProfileInputStoragePlan(
+      const ResidentAqProfileInputOptions&,
+      ResidentAqProfileInputStoragePlan*);
   enum class ResidentProfileStage : uint8_t {
     kReconstruction,
     kPolicyInitialize,
@@ -427,6 +443,7 @@ private:
     size_t reconstruction_batch_index = 0;
     MetalButteraugliProfileStage butteraugli_stage =
       MetalButteraugliProfileStage::kDistortedPsychoMain;
+    MetalButteraugliPsychoStage psycho_stage = MetalButteraugliPsychoStage::kAll;
   };
 
   struct BlockReductionSubmissionContext {
@@ -478,6 +495,9 @@ private:
       std::span<const int32_t> quantized_ac,
       VarDctEncoderFrame* frame) const;
   Status AssembleFrameFromReadback(VarDctEncoderFrame *frame) const;
+  Status PrepareCompletedFrame(
+      std::unique_ptr<MetalCompletedVarDctFrame>* frame);
+  Status FinishCompletedFrame(MetalCompletedVarDctFrame& frame) const;
   Status AssembleFrameFromCompletedDeviceBuffers(
       bool raw_quant_is_device_resident,
       VarDctEncoderFrame* frame,
@@ -514,7 +534,7 @@ private:
       size_t batch_index) const;
   void EncodeReconstructionCoefficientBatch(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
-      size_t batch_index) const;
+      size_t batch_index, bool reconstruct = true) const;
   void EncodeAdjustedQuantizationBatch(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
       size_t batch_index) const;
@@ -551,12 +571,15 @@ private:
       const void *context);
 
   void EncodePostprocess(MetalBackend &backend,
-                         MTL::ComputeCommandEncoder *encoder) const;
+                         MTL::ComputeCommandEncoder *encoder,
+                         bool linear_only = false) const;
+  bool CanFuseFinalEpf() const noexcept;
+  bool IsFinalEpfPass(uint32_t pass) const noexcept;
   void EncodeGaborish(MetalBackend& backend,
                       MTL::ComputeCommandEncoder* encoder) const;
   void EncodeEpfPass(MetalBackend& backend,
                      MTL::ComputeCommandEncoder* encoder,
-                     uint32_t pass) const;
+                     uint32_t pass, bool linear_output = false) const;
   void EncodeOpsinToLinear(MetalBackend& backend,
                            MTL::ComputeCommandEncoder* encoder) const;
   void EncodeResidentPolicyInitialize(
@@ -629,6 +652,14 @@ private:
   DevicePlaneView gathered_pixels_;
   DevicePlaneView forward_coefficients_;
   DevicePlaneView quantized_coefficients_;
+  // Borrowed only while an operation is busy. The candidate/output owns these
+  // allocations independently of both AQ arenas and the backend's reuse pool.
+  DevicePlaneView completed_coefficients_;
+  DevicePlaneView completed_destinations_;
+  DevicePlaneView completed_order_population_;
+  DevicePlaneView completed_order_samples_;
+  bool completed_sample_dct8_ = false;
+  bool write_completed_coefficients_ = false;
   DevicePlaneView reconstruction_coefficients_;
   DevicePlaneView dc_;
   DevicePlaneView quantized_dc_;
@@ -650,13 +681,13 @@ private:
   int final_filter_scratch_index_ = -1;
   AqEvaluationOptions options_;
   AcStrategyGrid strategies_host_;
-  std::vector<uint8_t> epf_sharpness_host_;
-  std::vector<int32_t> last_raw_quant_;
-  std::vector<int8_t> last_y_to_x_;
-  std::vector<int8_t> last_y_to_b_;
-  std::vector<float> last_initial_quant_field_;
-  std::vector<float> last_initial_strategy_mask_;
-  std::vector<float> last_initial_pixel_mask_;
+  resource_budget_internal::ManagedVector<uint8_t> epf_sharpness_host_;
+  resource_budget_internal::ManagedVector<int32_t> last_raw_quant_;
+  resource_budget_internal::ManagedVector<int8_t> last_y_to_x_;
+  resource_budget_internal::ManagedVector<int8_t> last_y_to_b_;
+  resource_budget_internal::ManagedVector<float> last_initial_quant_field_;
+  resource_budget_internal::ManagedVector<float> last_initial_strategy_mask_;
+  resource_budget_internal::ManagedVector<float> last_initial_pixel_mask_;
   Quantizer last_quantizer_;
   AqEvaluationMemoryStats memory_stats_;
   AqResetParams reset_params_{};
@@ -678,27 +709,33 @@ private:
   AqAdjustmentProbeParams adjustment_probe_params_{};
   AqGaborishParams gaborish_params_{};
   std::array<AqEpfParams, 3> epf_params_{};
+  struct EpfDispatch {
+    MTL::ComputePipelineState* pipeline = nullptr;
+    bool tiled = false;
+    MTL::ComputePipelineState* linear_pipeline = nullptr;
+  };
+  std::array<EpfDispatch, 3> epf_dispatch_{};
   AqOpsinToLinearParams opsin_to_linear_params_{};
   std::array<AqStrategyBatch, 7> batches_{};
   std::array<AqReconstructionParams, 7> reconstruction_params_{};
-  std::vector<AqAnchor> row_major_anchors_;
-  std::vector<vardct_frame_internal::QuantizedAcTransformLayout>
+  resource_budget_internal::ManagedVector<AqAnchor> row_major_anchors_;
+  resource_budget_internal::ManagedVector<vardct_frame_internal::QuantizedAcTransformLayout>
     final_transform_layouts_;
-  std::vector<float> readback_;
-  std::vector<float> resident_policy_quant_readback_;
+  resource_budget_internal::ManagedVector<float> readback_;
+  resource_budget_internal::ManagedVector<float> resident_policy_quant_readback_;
   std::array<float, 5> resident_policy_score_readback_{};
-  std::vector<float> transform_maximum_error_readback_;
-  std::vector<float> forward_readback_;
-  std::vector<float> exact_reconstruction_coefficients_;
-  std::vector<int32_t> quantized_readback_;
-  std::vector<float> dc_readback_;
-  std::vector<int32_t> quantized_dc_readback_;
-  std::array<std::vector<float>, 3> reconstructed_readback_;
-  std::array<std::vector<float>, 3> filtered_readback_;
-  std::array<std::vector<float>, 3> linear_readback_;
+  resource_budget_internal::ManagedVector<float> transform_maximum_error_readback_;
+  resource_budget_internal::ManagedVector<float> forward_readback_;
+  resource_budget_internal::ManagedVector<float> exact_reconstruction_coefficients_;
+  resource_budget_internal::ManagedVector<int32_t> quantized_readback_;
+  resource_budget_internal::ManagedVector<float> dc_readback_;
+  resource_budget_internal::ManagedVector<int32_t> quantized_dc_readback_;
+  std::array<resource_budget_internal::ManagedVector<float>, 3> reconstructed_readback_;
+  std::array<resource_budget_internal::ManagedVector<float>, 3> filtered_readback_;
+  std::array<resource_budget_internal::ManagedVector<float>, 3> linear_readback_;
   std::unique_ptr<PreparedDeviceButteraugli> butteraugli_;
-  std::vector<int32_t> quant_probe_quantized_readback_;
-  std::vector<float> quant_probe_dequantized_readback_;
+  resource_budget_internal::ManagedVector<int32_t> quant_probe_quantized_readback_;
+  resource_budget_internal::ManagedVector<float> quant_probe_dequantized_readback_;
   mutable std::mutex mutex_;
   State state_ = State::kReady;
   std::unique_ptr<GpuSubmission> submission_;
@@ -719,6 +756,7 @@ private:
   AcCoefficientDecisionMode coefficient_decision_mode_ =
     AcCoefficientDecisionMode::kFixedRawQuant;
   bool frame_only_ = false;
+  bool final_transform_metadata_pending_ = false;
   bool frame_only_inverse_gaborish_ = false;
   bool resident_initial_cfl_ = false;
   bool frame_only_resident_initial_quant_ = false;

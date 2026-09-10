@@ -16,7 +16,9 @@
 #include <utility>
 #include <vector>
 
+#include "core/managed_allocator.h"
 #include "codec/chroma_from_luma_internal.h"
+#include "codec/coefficient_order_population_internal.h"
 #include "codec/gaborish_internal.h"
 #include "core/image_ops.h"
 #include "core/quantizer.h"
@@ -27,6 +29,8 @@
   ::gjxl::metal_internal::RecordMetalComputePipelineState(state)
 
 namespace gjxl::metal_internal {
+using resource_budget_internal::ManagedVector;
+
 namespace {
 
 inline constexpr NS::UInteger kAqThreadCount = 256;
@@ -119,13 +123,29 @@ void MetalPreparedAqEvaluation::EncodeForwardCoefficientBatch(
       3 * batch.anchor_count * batch.coefficient_count;
   const size_t coefficient_offset_bytes =
       batch.coefficient_offset * sizeof(float);
-  encoder->setComputePipelineState(
-      backend.aq_pipelines_.gather_transform_pixels.get());
   const std::array<DevicePlaneView, 3>& coding_source =
     resident_ac_strategy_inputs_ &&
         options_.profile.loop_filter.gaborish
       ? reconstructed_
       : coding_;
+  const TransformPipeline& image_pipeline = backend.transform_pipelines_[
+    static_cast<size_t>(batch.strategy)].forward_image;
+  if (image_pipeline.state) {
+    const AqDctImageParams image_params{params.anchor_offset, params.anchor_count,
+      params.coefficient_offset, static_cast<uint32_t>(coding_source[0].row_stride)};
+    encoder->setComputePipelineState(image_pipeline.state.get());
+    for (size_t channel = 0; channel < 3; ++channel) {
+      BindPlane(encoder, coding_source[channel], channel);
+    }
+    BindPlane(encoder, anchors_, 3);
+    BindPlane(encoder, forward_coefficients_, 4);
+    encoder->setBytes(&image_params, sizeof(image_params), 5);
+    DispatchMetalThreadgroups(encoder, MTL::Size(3 * batch.anchor_count, 1, 1),
+      MTL::Size(image_pipeline.threads_per_threadgroup, 1, 1));
+    return;
+  }
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.gather_transform_pixels.get());
   for (size_t channel = 0; channel < 3; ++channel) {
     BindPlane(encoder, coding_source[channel], channel);
   }
@@ -258,7 +278,7 @@ void MetalPreparedAqEvaluation::EncodeReconstructionProfileStage(
 
 void MetalPreparedAqEvaluation::EncodeReconstructionCoefficientBatch(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
-    size_t batch_index) const {
+    size_t batch_index, bool reconstruct) const {
 
   if (exact_linear_reconstruction_ || batch_index >= batches_.size()) return;
   const AqStrategyBatch& batch = batches_[batch_index];
@@ -267,20 +287,30 @@ void MetalPreparedAqEvaluation::EncodeReconstructionCoefficientBatch(
 
   if (!exact_coefficient_reconstruction_) {
     EncodeAdjustedQuantizationBatch(backend, encoder, batch_index);
+    AqReconstructionParams output_params = params;
+    output_params.group_major_output = write_completed_coefficients_ ? 1u : 0u;
+    // Intermediate resident scoring has no consumer for integer AC when a
+    // completed-output destination is prepared. Diagnostic/owned-frame paths
+    // keep their materialization contract. Final output always writes integers.
+    const bool write_integers = !reconstruct ||
+      completed_coefficients_.buffer == nullptr || write_completed_coefficients_;
     encoder->setComputePipelineState(
-        backend.aq_pipelines_.encode_reconstruction_coefficients.get());
+      !reconstruct ? backend.aq_pipelines_.encode_final_coefficients.get() :
+      write_integers ? backend.aq_pipelines_.encode_reconstruction_coefficients.get() :
+                      backend.aq_pipelines_.encode_scored_coefficients.get());
     BindPlane(encoder, anchors_, 0);
     BindPlane(encoder, quant_tables_, 1);
     BindPlane(encoder, raw_quant_, 2);
     BindPlane(encoder, y_to_x_, 3);
     BindPlane(encoder, y_to_b_, 4);
     BindPlane(encoder, forward_coefficients_, 5);
-    BindPlane(encoder, quantized_coefficients_, 6);
+    BindPlane(encoder, write_completed_coefficients_
+        ? completed_coefficients_ : quantized_coefficients_, 6);
     BindPlane(encoder, reconstruction_coefficients_, 7);
     BindPlane(encoder, dc_, 8);
     BindPlane(encoder, quantized_dc_, 9);
     BindPlane(encoder, reconstruction_error_, 10);
-    encoder->setBytes(&params, sizeof(params), 11);
+    encoder->setBytes(&output_params, sizeof(output_params), 11);
     BindPlane(encoder, inverse_sigma_, 12);
     BindPlane(encoder, epf_sharpness_, 13);
     BindPlane(encoder,
@@ -289,12 +319,34 @@ void MetalPreparedAqEvaluation::EncodeReconstructionCoefficientBatch(
                 : raw_quant_,
               14);
     BindPlane(encoder, gathered_pixels_, 15);
+    BindPlane(encoder, write_completed_coefficients_
+        ? completed_destinations_ : anchors_, 16);
     DispatchMetalThreadgroups(
         encoder,
         MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
         MTL::Size(std::min<NS::UInteger>(
                       kAqThreadCount, batch.coefficient_count),
                   1, 1));
+    if (write_completed_coefficients_) {
+      // Serial dispatch dependency: consume this batch only after its final
+      // integer stores. Profiled and ordinary execution take this same path.
+      const size_t family = vardct_frame_internal::OrderPopulationFamily(batch.coefficient_count);
+      const std::array<uint32_t, 4> count_params = {
+        static_cast<uint32_t>(batch.anchor_offset),
+        static_cast<uint32_t>(batch.anchor_count),
+        static_cast<uint32_t>(vardct_frame_internal::kOrderPopulationOffsets[family]),
+        completed_sample_dct8_ ? 1u : 0u,
+      };
+      encoder->setComputePipelineState(backend.aq_pipelines_.count_coefficient_zeros.get());
+      BindPlane(encoder, completed_coefficients_, 0);
+      BindPlane(encoder, completed_destinations_, 1);
+      BindPlane(encoder, completed_order_samples_, 2);
+      BindPlane(encoder, completed_order_population_, 3);
+      encoder->setBytes(count_params.data(), sizeof(count_params), 4);
+      DispatchMetalThreadgroups(encoder,
+        MTL::Size(batch.coefficient_count / 32, (batch.anchor_count + 63) / 64, 1),
+        MTL::Size(32, 8, 1));
+    }
   }
 }
 
@@ -343,6 +395,23 @@ void MetalPreparedAqEvaluation::EncodeReconstructionInverseBatch(
   if (exact_linear_reconstruction_ || batch_index >= batches_.size()) return;
   const AqStrategyBatch& batch = batches_[batch_index];
   if (batch.anchor_count == 0) return;
+  const TransformPipeline& image_pipeline = backend.transform_pipelines_[
+    static_cast<size_t>(batch.strategy)].inverse_image;
+  if (image_pipeline.state) {
+    const AqReconstructionParams& params = reconstruction_params_[batch_index];
+    const AqDctImageParams image_params{params.anchor_offset, params.anchor_count,
+      params.coefficient_offset, static_cast<uint32_t>(reconstructed_[0].row_stride)};
+    encoder->setComputePipelineState(image_pipeline.state.get());
+    for (size_t channel = 0; channel < 3; ++channel) {
+      BindPlane(encoder, reconstructed_[channel], channel);
+    }
+    BindPlane(encoder, anchors_, 3);
+    BindPlane(encoder, reconstruction_coefficients_, 4);
+    encoder->setBytes(&image_params, sizeof(image_params), 5);
+    DispatchMetalThreadgroups(encoder, MTL::Size(3 * batch.anchor_count, 1, 1),
+      MTL::Size(image_pipeline.threads_per_threadgroup, 1, 1));
+    return;
+  }
   const size_t coefficient_offset_bytes =
       batch.coefficient_offset * sizeof(float);
 
@@ -365,6 +434,9 @@ void MetalPreparedAqEvaluation::EncodeReconstructionScatterBatch(
   if (exact_linear_reconstruction_ || batch_index >= batches_.size()) return;
   const AqStrategyBatch& batch = batches_[batch_index];
   if (batch.anchor_count == 0) return;
+  if (backend.transform_pipelines_[static_cast<size_t>(batch.strategy)].inverse_image.state) {
+    return;
+  }
   const AqReconstructionParams& params = reconstruction_params_[batch_index];
   const size_t batch_value_count =
       3 * batch.anchor_count * batch.coefficient_count;
@@ -713,6 +785,15 @@ void MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission(
           },
       });
 
+  if (self.resident_ac_strategy_inputs_) {
+    encoder->setComputePipelineState(
+      backend.aq_pipelines_.validate_initial_mask.get());
+    BindPlane(encoder, self.initial_quant_pixel_mask_, 0);
+    BindPlane(encoder, self.reconstruction_error_, 1);
+    const uint32_t count = static_cast<uint32_t>(self.pixel_count_);
+    encoder->setBytes(&count, sizeof(count), 2);
+    DispatchThreads1d(encoder, self.pixel_count_);
+  }
   if (!self.frame_only_resident_quantizer_) return;
   encoder->setComputePipelineState(
       backend.aq_pipelines_.initial_quant_sort_prepare.get());
@@ -930,7 +1011,7 @@ Status MetalPreparedAqEvaluation::AdjustQuantFieldResidentImpl(
       : status;
   }
   try {
-    std::vector<float> adjusted(block_count_);
+    ManagedVector<float> adjusted(block_count_);
     const size_t row_bytes = block_extent_.width * sizeof(float);
     for (size_t y = 0; status.ok() && y < block_extent_.height; ++y) {
       status = backend_->CopyDeviceToHost(
@@ -954,6 +1035,9 @@ Status MetalPreparedAqEvaluation::AdjustQuantFieldResidentImpl(
         submission_profile.submission_id = "frontend.quant_adjustment";
         candidate_profile.submissions.push_back(
           std::move(submission_profile));
+      } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+        Invalidate();
+        return failure.status();
       } catch (const std::bad_alloc&) {
         Invalidate();
         return Status::OutOfMemory(
@@ -965,6 +1049,9 @@ Status MetalPreparedAqEvaluation::AdjustQuantFieldResidentImpl(
       }
     }
     CopyContiguousPlane(adjusted, output);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    Invalidate();
+    return failure.status();
   } catch (const std::bad_alloc&) {
     Invalidate();
     return Status::OutOfMemory(
@@ -1032,8 +1119,11 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
       output.quant_field.extent != block_extent_ ||
       !output.strategy_mask.valid() ||
       output.strategy_mask.extent != block_extent_ ||
-      !output.pixel_mask.valid() ||
-      output.pixel_mask.extent != coding_extent_) {
+      (!(resident_ac_strategy_inputs_ && output.pixel_mask.data == nullptr &&
+         output.pixel_mask.extent == Extent2D{} &&
+         output.pixel_mask.stride == 0) &&
+       (!output.pixel_mask.valid() ||
+        output.pixel_mask.extent != coding_extent_))) {
     return Status::InvalidArgument(
         "Resident initial quantization inputs or outputs are invalid");
   }
@@ -1151,7 +1241,23 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
         last_initial_strategy_mask_.data(),
         last_initial_strategy_mask_.size() * sizeof(float));
   }
-  if (status.ok()) {
+  const bool materialize_pixel_mask = output.pixel_mask.valid();
+  if (status.ok() && materialize_pixel_mask &&
+      last_initial_pixel_mask_.empty()) {
+    try {
+      last_initial_pixel_mask_.resize(pixel_count_);
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      Invalidate();
+      return failure.status();
+    } catch (const std::bad_alloc&) {
+      Invalidate();
+      return Status::OutOfMemory("Unable to allocate initial mask readback");
+    } catch (const std::length_error &) {
+      Invalidate();
+      return Status::InvalidArgument("Initial mask readback is too large");
+    }
+  }
+  if (status.ok() && materialize_pixel_mask) {
     status = CopyReadback(
         *backend_, initial_quant_pixel_mask_, last_initial_pixel_mask_.data(),
         last_initial_pixel_mask_.size() * sizeof(float));
@@ -1174,7 +1280,7 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
         &device_color_correlation);
     }
   }
-  const auto valid_values = [](const std::vector<float>& values) {
+  const auto valid_values = [](const ManagedVector<float>& values) {
     return std::ranges::all_of(values, [](float value) {
       return std::isfinite(value) && value > 0.0f;
     });
@@ -1182,7 +1288,7 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
   if (status.ok() &&
       (!valid_values(last_initial_quant_field_) ||
        !valid_values(last_initial_strategy_mask_) ||
-       !valid_values(last_initial_pixel_mask_))) {
+       (materialize_pixel_mask && !valid_values(last_initial_pixel_mask_)))) {
     status = Status::DeviceError(
         "Metal initial quantization readback is invalid");
   }
@@ -1194,6 +1300,9 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
     try {
       submission_profile.submission_id = "frontend.initial_quantization";
       candidate_profile.submissions.push_back(std::move(submission_profile));
+    } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+      Invalidate();
+      return failure.status();
     } catch (const std::bad_alloc&) {
       Invalidate();
       return Status::OutOfMemory(
@@ -1206,7 +1315,8 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
   }
   CopyContiguousPlane(last_initial_quant_field_, output.quant_field);
   CopyContiguousPlane(last_initial_strategy_mask_, output.strategy_mask);
-  CopyContiguousPlane(last_initial_pixel_mask_, output.pixel_mask);
+  if (materialize_pixel_mask)
+    CopyContiguousPlane(last_initial_pixel_mask_, output.pixel_mask);
   resident_initial_quant_ready_ = true;
   if (frame_only_resident_quantizer_) {
     resident_quantizer_ready_ = true;
@@ -1450,8 +1560,8 @@ Status MetalPreparedAqEvaluation::RunReconstruction(
     MetalAqReconstructionSnapshotForTesting result;
     result.block_extent = block_extent_;
     result.pixel_extent = coding_extent_;
-    result.raw_quant = last_raw_quant_;
-    result.epf_inverse_sigma = readback_;
+    result.raw_quant.assign(last_raw_quant_.begin(), last_raw_quant_.end());
+    result.epf_inverse_sigma.assign(readback_.begin(), readback_.end());
     result.transforms.reserve(row_major_anchors_.size());
     for (const AqAnchor &anchor : row_major_anchors_) {
       const AqStrategyBatch &batch = batches_[anchor.batch_index];
@@ -1483,10 +1593,13 @@ Status MetalPreparedAqEvaluation::RunReconstruction(
               static_cast<std::ptrdiff_t>(channel * block_count_),
           dc_readback_.begin() +
               static_cast<std::ptrdiff_t>((channel + 1) * block_count_));
-      result.reconstructed_opsin[channel] = reconstructed_readback_[channel];
+      result.reconstructed_opsin[channel].assign(reconstructed_readback_[channel].begin(), reconstructed_readback_[channel].end());
     }
     *snapshot = std::move(result);
-  } catch (const std::bad_alloc &) {
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    CompleteOperation();
+    return failure.status();
+  } catch (const std::bad_alloc&) {
     CompleteOperation();
     return Status::OutOfMemory(
         "Unable to allocate AQ reconstruction diagnostic snapshot");
@@ -1505,11 +1618,13 @@ Status MetalPreparedAqEvaluation::PrepareReconstructionDiagnosticReadback() {
     quantized_readback_.resize(coefficient_value_count_);
     forward_readback_.resize(coefficient_value_count_);
     dc_readback_.resize(3 * block_count_);
-    for (std::vector<float> &plane : reconstructed_readback_) {
+    for (ManagedVector<float> &plane : reconstructed_readback_) {
       plane.resize(pixel_count_);
     }
     return Status::Ok();
-  } catch (const std::bad_alloc &) {
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
+  } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
         "Unable to allocate AQ reconstruction diagnostic readback");
   } catch (const std::length_error &) {
@@ -1644,7 +1759,10 @@ Status MetalPreparedAqEvaluation::RunQuantizationProbe(
             static_cast<std::ptrdiff_t>(count));
     *quantized = std::move(quantized_result);
     *dequantized = std::move(dequantized_result);
-  } catch (const std::bad_alloc &) {
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    CompleteOperation();
+    return failure.status();
+  } catch (const std::bad_alloc&) {
     CompleteOperation();
     return Status::OutOfMemory(
         "Unable to allocate AQ quantization probe output");
@@ -1704,13 +1822,15 @@ Status MetalPreparedAqEvaluation::RunAdjustmentProbe(
   Status status = Quantizer::Create(probe.quantizer, &quantizer);
   if (!status.ok()) return status;
 
-  std::vector<float> packed_coefficients;
+  ManagedVector<float> packed_coefficients;
   try {
     packed_coefficients.reserve(3 * info->coefficient_count());
     for (std::span<const float> channel : probe.coefficients) {
       packed_coefficients.insert(
           packed_coefficients.end(), channel.begin(), channel.end());
     }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
         "Unable to allocate AQ adjustment probe input");
@@ -1722,6 +1842,9 @@ Status MetalPreparedAqEvaluation::RunAdjustmentProbe(
   if (!status.ok()) return status;
   try {
     quantized_readback_.resize(info->coefficient_count());
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    CompleteOperation();
+    return failure.status();
   } catch (const std::bad_alloc&) {
     CompleteOperation();
     return Status::OutOfMemory(
@@ -1819,6 +1942,9 @@ Status MetalPreparedAqEvaluation::RunAdjustmentProbe(
                 static_cast<std::ptrdiff_t>(coefficient_count)),
     };
     *result = std::move(candidate);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    CompleteOperation();
+    return failure.status();
   } catch (const std::bad_alloc&) {
     CompleteOperation();
     return Status::OutOfMemory(
@@ -1836,6 +1962,8 @@ Status MetalPreparedAqEvaluation::PrepareQuantizationProbeReadback() {
     quant_probe_quantized_readback_.resize(maximum_coefficient_count_);
     quant_probe_dequantized_readback_.resize(maximum_coefficient_count_);
     return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
   } catch (const std::bad_alloc&) {
     return Status::OutOfMemory(
       "Unable to allocate AQ quantization-probe readback");

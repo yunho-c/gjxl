@@ -18,6 +18,7 @@ namespace gjxl::quantization_pipeline_internal {
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
     prepared_aq,
   gpu_profile_internal::GpuProfilingMode profiling_mode,
-  gpu_profile_internal::GpuExecutionProfile* profile);
+  gpu_profile_internal::GpuExecutionProfile* profile,
+  bool retain_ac_search_storage = true);
 
 }  // namespace gjxl::quantization_pipeline_internal
