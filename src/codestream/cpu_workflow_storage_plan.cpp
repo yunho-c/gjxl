@@ -93,11 +93,12 @@ Status ComputeCpuWorkflowStoragePlan(Extent2D source,
            .ok() ||
       !(status = ComputeInitialQuantStoragePlan(p.coding_extent,
                                                 e.cpu_thread_count, &initial))
-           .ok() ||
-      !(status = ac_strategy_internal::ComputeSearchStoragePlan(p.coding_extent,
-                                                                &ac))
            .ok())
     return status;
+  if (!UseFixedDct8Strategy(e)) {
+    status = ac_strategy_internal::ComputeSearchStoragePlan(p.coding_extent, &ac);
+    if (!status.ok()) return status;
+  }
   // Workflow Opsin + prepared preprocessed Opsin; PipelineStorage owns a
   // separate source-sized RGB destination. No caller input is counted here.
   if (!p.frontend.Add(coding_image, 2) || !p.frontend.Add(source_image) ||
@@ -106,7 +107,10 @@ Status ComputeCpuWorkflowStoragePlan(Extent2D source,
       // Prepared and compatibility pixel masks.
       !p.frontend.AddVector<float>(pixels, kFreshExact, 2) ||
       // Prepared sharpness and the prior strategy grid during replacement.
-      !p.frontend.AddVector<uint8_t>(blocks, kFreshExact, 2))
+      // Fixed-grid replacement has no AC-search working plan to cover its
+      // new grid while the previous attempt's grid is still alive.
+      !p.frontend.AddVector<uint8_t>(blocks, kFreshExact,
+                                     UseFixedDct8Strategy(e) ? 3 : 2))
     return Overflow();
   for (auto part :
        {color.working, inverse, cfl.working, initial.working, ac.working})

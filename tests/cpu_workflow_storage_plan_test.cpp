@@ -688,6 +688,8 @@ bool CheckFailure() {
 } // namespace
 
 int main(int argc, char **argv) {
+  if (argc == 2 && std::string_view(argv[1]) == "--plans-only")
+    return CheckPlans() && CheckPolicy() ? EXIT_SUCCESS : EXIT_FAILURE;
   if (argc == 2 && std::string_view(argv[1]) == "--large") {
     Image image({3839, 2159});
     CpuWorkflowStorageOptions o;

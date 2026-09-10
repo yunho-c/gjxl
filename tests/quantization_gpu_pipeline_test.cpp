@@ -841,6 +841,48 @@ bool CheckDefaultUpdatePipelineParity() {
     }
   }
 
+  // Switching to fixed DCT8 must drop search work, reset every grid cell,
+  // and preserve scored/unscored bytes. Switching back must restore search.
+  std::vector<uint8_t> fixed_reference;
+  for (const bool fixed : {true, true, false, true}) {
+    zero_options.fixed_dct8 = fixed;
+    const bool score = fixed && fixed_reference.empty();
+    gjxl::AcStrategyGpuSearchStats strategy_stats;
+    strategy_stats.total_candidate_count = 999;
+    encoding_status = gjxl::quantization_pipeline_internal::
+      RunPreparedGpuQuantizationPipelineForEncoding(
+        *gpu, original.ConstView(), encoding_prepared, zero_options,
+        gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+        {.frame = &encoding_frame, .score_history = &encoding_scores,
+         .collect_final_butteraugli_score = score},
+        &strategy_stats, &encoding_aq);
+    std::vector<uint8_t> bytes;
+    if (encoding_status.ok()) {
+      encoding_status = gjxl::EncodeVarDctCodestream(encoding_frame, &bytes);
+    }
+    if (fixed && fixed_reference.empty()) fixed_reference = bytes;
+    if (!encoding_status.ok() || encoding_scores.size() != size_t(score) ||
+        (strategy_stats.total_candidate_count == 0) != fixed ||
+        bytes != (fixed ? fixed_reference : zero_reference)) {
+      std::cerr << "Reused pipeline lost its AC policy or changed output: "
+                << encoding_status.message() << '\n';
+      return false;
+    }
+    if (fixed) {
+      const auto extent = encoding_prepared.strategies.extent();
+      for (size_t y = 0; y < extent.height; ++y) {
+        for (size_t x = 0; x < extent.width; ++x) {
+          gjxl::AcStrategyCell cell;
+          if (!encoding_prepared.strategies.Get(x, y, &cell).ok() ||
+              cell.strategy != gjxl::AcStrategyType::kDct8 || !cell.is_anchor) {
+            std::cerr << "Fixed pipeline retained a mixed-transform grid\n";
+            return false;
+          }
+        }
+      }
+    }
+  }
+
   ImageStorage mismatched_original = original;
   mismatched_original.plane[0][7] =
     std::numeric_limits<float>::quiet_NaN();

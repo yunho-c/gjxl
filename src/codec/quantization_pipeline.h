@@ -15,6 +15,9 @@ struct CpuQuantizationPipelineOptions {
   float butteraugli_target = 1.0f;
   float initial_quant_rescale = 1.0f;
   AdaptiveQuantizationOptions adaptive_quantization;
+  /// Bypasses AC-strategy search and selects DCT8 for every base block.
+  /// Keeps initial quantization, CfL, and adaptive quantization unchanged.
+  bool fixed_dct8 = false;
 };
 
 struct CpuQuantizationPipelineOutput {
@@ -42,8 +45,9 @@ protected:
 
 /// Runs the complete pipeline using an injected AC-strategy implementation.
 ///
-/// The provider is invoked exactly once after initial AQ, Gaborish, and
-/// first-pass CfL. All caller-visible outputs remain atomic across later AQ.
+/// Unless fixed_dct8 is selected, the provider is invoked exactly once after
+/// initial AQ, Gaborish, and first-pass CfL. All caller-visible outputs remain
+/// atomic across later AQ.
 [[nodiscard]] Status RunQuantizationPipeline(
   ConstImage3FView original_linear_rgb,
   ConstImage3FView opsin,

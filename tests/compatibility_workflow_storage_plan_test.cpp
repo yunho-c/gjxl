@@ -85,7 +85,9 @@ bool CheckPlans() {
           DisarmManagedHostAllocationFailureForTest();
           if (!Ok(s) ||
               !Check(pending && p.working.peak_bytes >= p.output.peak_bytes &&
-                         (p.score_count == 0) == (mode == 4),
+                         (p.score_count == 0) == (mode == 4) &&
+                         (p.ac_search.peak_bytes == 0) ==
+                             (mode == 4 || UseFixedDct8Strategy(o.encoding)),
                      "Compatibility plan was not pure or consistent"))
             return false;
           ++cases;
@@ -449,6 +451,8 @@ int main(int argc, char **argv) {
   const bool large = argc == 2 && std::string_view(argv[1]) == "--large";
   if (!CheckPlans())
     return EXIT_FAILURE;
+  if (argc == 2 && std::string_view(argv[1]) == "--plans-only")
+    return EXIT_SUCCESS;
   std::unique_ptr<GpuBackend> gpu;
   if (!Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &gpu)) ||
       !Ok(EnsureProductionMetalBackendAvailable()) ||

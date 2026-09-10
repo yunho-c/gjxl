@@ -1964,6 +1964,11 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_quantization_pipeline_test
   )
 
+  add_executable(gjxl_low_effort_strategy_policy_test
+    tests/low_effort_strategy_policy_test.cpp)
+  target_link_libraries(gjxl_low_effort_strategy_policy_test PRIVATE gjxl_codestream)
+  add_test(NAME low_effort_strategy_policy COMMAND gjxl_low_effort_strategy_policy_test)
+
   add_executable(
     gjxl_gaborish_test
     tests/gaborish_test.cpp

@@ -28,6 +28,15 @@ namespace gjxl::codestream_internal {
   return 4;
 }
 
+/// Shared transform policy for execution and CPU/Metal storage admission.
+/// Explicit high-density and maximum-error modes preserve their search policy.
+[[nodiscard]] constexpr bool UseFixedDct8Strategy(
+  const VarDctEncodingOptions& options) noexcept {
+  return options.effort <= 4 &&
+    options.density_mode == VarDctDensityMode::kDefault &&
+    options.rate_control_mode != VarDctRateControlMode::kMaximumError;
+}
+
 /// Internal complete-encode result. Candidate bytes stay charged until the
 /// outer C/C++ or batch adapter explicitly publishes them.
 [[nodiscard]] Status EncodeLinearRgbVarDctCodestreamOwned(
