@@ -1382,6 +1382,10 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_ans_bit_emission_test PRIVATE gjxl_codestream)
   add_test(NAME ans_bit_emission COMMAND gjxl_ans_bit_emission_test)
 
+  add_executable(gjxl_ans_reverse_bits_test tests/ans_reverse_bits_test.cpp)
+  target_link_libraries(gjxl_ans_reverse_bits_test PRIVATE gjxl_codestream)
+  add_test(NAME ans_reverse_bits COMMAND gjxl_ans_reverse_bits_test)
+
   add_executable(
     gjxl_sections_test
     tests/sections_test.cpp

@@ -699,11 +699,18 @@ Status WriteAcSections(
         // groups can share that validation instead of rescanning every reverse
         // map per group. The internal writer still checks each token and ANS
         // state transition. Public/mutable-code callers retain full validation.
+        // Keep frequently updated writer metadata on this worker's stack.
+        // Publish ownership only after successful emission; the caller's output
+        // remains untouched until the entire ordered section batch succeeds.
+        BitWriter local_output;
         Status token_status = ac_code.mode == EntropyCodingMode::kAns
           ? codestream_internal::WriteAnsTokenStream(
-              ac.streams[index], ac_code, &candidate[1 + index])
+              ac.streams[index], ac_code, &local_output)
           : WriteTokenStream(
-              ac.streams[index], ac_code, &candidate[1 + index]);
+              ac.streams[index], ac_code, &local_output);
+        if (token_status.ok()) {
+          candidate[1 + index] = std::move(local_output);
+        }
         WorkEnd(
           group_profile != nullptr, tokens_begin,
           group_profile == nullptr

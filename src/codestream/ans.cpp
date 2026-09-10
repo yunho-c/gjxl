@@ -4,6 +4,7 @@
 // Adapted for GJXL from libjxl's enc_ans.cc and ans_common.cc.
 
 #include "codestream/ans_internal.h"
+#include "codestream/ans_reverse_bits_internal.h"
 
 #include <algorithm>
 #include <array>
@@ -106,11 +107,6 @@ struct AliasEntry {
   uint16_t offsets1 = 0;
   uint16_t frequency0 = 0;
   uint16_t frequency1 = 0;
-};
-
-struct ReverseBitChunk {
-  uint32_t bits = 0;
-  uint8_t bit_count = 0;
 };
 
 Status AllocationFailure() {
@@ -2100,11 +2096,18 @@ Status codestream_internal::WriteAnsTokenStream(
     return Status::InvalidArgument("ANS token-stream output is null");
   }
   try {
-    std::vector<ReverseBitChunk> reverse_chunks;
-    reverse_chunks.reserve(2 * tokens.size());
-    const auto append_chunk = [&reverse_chunks](
+    // At most 31 extra bits plus one 16-bit renormalization chunk per token.
+    // This guard also bounds the packer's size_t payload accounting.
+    constexpr size_t kMaximumPayloadBitsPerToken = 47;
+    if (tokens.size() > std::numeric_limits<size_t>::max() /
+                          kMaximumPayloadBitsPerToken) {
+      return AllocationFailure();
+    }
+    codestream_internal::AnsReverseBits reverse_bits;
+    reverse_bits.ReserveBits(kMaximumPayloadBitsPerToken * tokens.size());
+    const auto append_chunk = [&reverse_bits](
                                 uint32_t bits, uint8_t bit_count) {
-      reverse_chunks.push_back({bits, bit_count});
+      reverse_bits.PushValidated(bits, bit_count);
     };
     uint32_t state = 0;
     if (Status status = ProcessAnsTokenStream(
@@ -2112,31 +2115,7 @@ Status codestream_internal::WriteAnsTokenStream(
         !status.ok()) {
       return status;
     }
-    BitWriter temporary;
-    // Coalesce adjacent chunks into the writer's supported width. Chunks are
-    // at most 31 extra bits or 16 renormalization bits; flush before shifting
-    // so no intermediate value exceeds 56 bits. Keep the temporary writer to
-    // preserve atomic publication and the exact unpadded stream length.
-    uint64_t pending = state;
-    size_t pending_bits = 32;
-    for (auto chunk = reverse_chunks.rbegin(); chunk != reverse_chunks.rend();
-         ++chunk) {
-      if (pending_bits + chunk->bit_count > BitWriter::kMaxBitsPerWrite) {
-        if (Status status = temporary.WriteBits(pending_bits, pending);
-            !status.ok()) {
-          return status;
-        }
-        pending = 0;
-        pending_bits = 0;
-      }
-      pending |= static_cast<uint64_t>(chunk->bits) << pending_bits;
-      pending_bits += chunk->bit_count;
-    }
-    if (Status status = temporary.WriteBits(pending_bits, pending);
-        !status.ok()) {
-      return status;
-    }
-    return writer->Append(temporary);
+    return reverse_bits.Append(state, writer);
   } catch (const std::bad_alloc&) {
     return AllocationFailure();
   } catch (const std::length_error&) {
