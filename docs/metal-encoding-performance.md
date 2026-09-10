@@ -1347,6 +1347,11 @@ deterministic-byte tests cover the parallel path.
 
 ## Image-level throughput driver
 
+For PFM inputs and raw per-pair CSV output, see
+[Image batch benchmark](image-batch-benchmark.md). The existing
+`image-batch-benchmark` command defaults to fully resident Metal; the historical
+maximum-throughput measurements below retain their explicit mode selection.
+
 `VarDctBatchEncoder` is a persistent bounded worker pool for independent public
 workflow calls. A batch retains input order and returns one status, codestream,
 summary, and timing record per image. Each worker owns its prepared image state
