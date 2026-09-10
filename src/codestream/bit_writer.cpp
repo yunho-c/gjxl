@@ -114,6 +114,16 @@ Status BitWriter::Append(const BitWriter& other) {
   }
 
   const std::span<const uint8_t> bytes = other.padded_bytes();
+  if (byte_aligned()) {
+    // Preserve the exact logical length, including a partial final byte.
+    // Its unused high bits are zero; PrepareWrite has already checked the
+    // allotment/size and allocated every destination byte before publication.
+    if (!bytes.empty()) {
+      std::memcpy(storage_.data() + bits_written_ / 8, bytes.data(), bytes.size());
+    }
+    bits_written_ += other.bits_written_;
+    return Status::Ok();
+  }
   const size_t full_bytes = other.bits_written_ / 8;
   for (size_t index = 0; index < full_bytes; ++index) {
     WriteBitsUnchecked(8, bytes[index]);

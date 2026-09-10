@@ -1358,6 +1358,10 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_bit_writer_test
   )
 
+  add_executable(gjxl_bit_writer_append_test tests/bit_writer_append_test.cpp)
+  target_link_libraries(gjxl_bit_writer_append_test PRIVATE gjxl_codestream)
+  add_test(NAME bit_writer_append COMMAND gjxl_bit_writer_append_test)
+
   add_executable(
     gjxl_entropy_test
     tests/entropy_test.cpp
