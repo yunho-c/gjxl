@@ -2515,10 +2515,23 @@ if(GJXL_BUILD_BENCHMARKS)
     benchmarks/image_batch_benchmark.cpp
   )
 
+  if(GJXL_BUILD_TESTS)
+    add_test(
+      NAME image_batch_benchmark_cli
+      COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/image_batch_benchmark_cli_test.py"
+        --benchmark $<TARGET_FILE:gjxl_image_batch_benchmark>
+    )
+    set_tests_properties(
+      image_batch_benchmark_cli PROPERTIES LABELS "benchmark;cli;metal"
+    )
+  endif()
+
   target_link_libraries(
     gjxl_image_batch_benchmark
     PRIVATE
       gjxl_codestream
+      gjxl_pfm_io
   )
 
   add_dependencies(

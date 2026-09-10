@@ -7,10 +7,14 @@
 #include <algorithm>
 #include <array>
 #include <cerrno>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -24,13 +28,17 @@
 #include "codestream/batch_workflow.h"
 #include "codestream/workflow.h"
 #include "core/image.h"
+#include "io/pfm.h"
 
 namespace {
 
 using Clock = std::chrono::steady_clock;
+constexpr int32_t kEffort = 7;
 
 struct CommandLineOptions {
   std::string workload = "all";
+  std::vector<std::filesystem::path> inputs;
+  std::filesystem::path raw_samples;
   std::vector<size_t> batch_sizes = {1, 2, 4, 8};
   size_t samples = 3;
   size_t warmups = 1;
@@ -38,16 +46,17 @@ struct CommandLineOptions {
   gjxl::VarDctBackendPreference backend =
     gjxl::VarDctBackendPreference::kMetal;
   gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
-    gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput;
+    gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
   bool metal_aq_explicit = false;
 };
 
 struct WorkloadSpec {
-  std::string_view name;
+  std::string name;
   gjxl::Extent2D extent;
+  std::filesystem::path source = {};
 };
 
-constexpr std::array<WorkloadSpec, 5> kWorkloads = {{
+const std::array<WorkloadSpec, 5> kWorkloads = {{
   {"thumbnail_64x64", {64, 64}},
   {"small_256x192", {256, 192}},
   {"medium_512x384", {512, 384}},
@@ -228,7 +237,12 @@ void PrintUsage(std::string_view executable) {
        " [--batch-sizes 1,2,4,8] [--samples N] [--warmups N]"
        " [--distance VALUE] [--backend auto|cpu|metal]"
        " [--metal-aq exact-coefficients|fully-resident|throughput|"
-       "maximum-throughput]\n";
+       "maximum-throughput] [--input FILE.pfm|DIRECTORY]..."
+       " [--raw-samples NEW.csv]\n"
+       "Inputs replace synthetic workloads; directories select sorted PFMs "
+       "without recursion. Input dimensions are preserved.\n"
+       "Defaults: Metal, fully-resident, effort 7, automatic per-image CPU "
+       "threads.\n";
 }
 
 [[nodiscard]] CommandLineOptions ParseCommandLine(int argc, char** argv) {
@@ -244,6 +258,10 @@ void PrintUsage(std::string_view executable) {
     };
     if (argument == "--workload") {
       options.workload = value(argument);
+    } else if (argument == "--input") {
+      options.inputs.emplace_back(value(argument));
+    } else if (argument == "--raw-samples") {
+      options.raw_samples = value(argument);
     } else if (argument == "--batch-sizes") {
       options.batch_sizes = ParseBatchSizes(value(argument));
     } else if (argument == "--samples") {
@@ -275,7 +293,7 @@ void PrintUsage(std::string_view executable) {
         "Experimental Metal AQ modes require --backend metal");
     }
   }
-  if (options.workload != "all" &&
+  if (options.inputs.empty() && options.workload != "all" &&
       std::ranges::none_of(kWorkloads, [&](const WorkloadSpec& workload) {
         return workload.name == options.workload;
       })) {
@@ -283,6 +301,69 @@ void PrintUsage(std::string_view executable) {
       "Unknown workload: " + options.workload);
   }
   return options;
+}
+
+[[nodiscard]] std::vector<std::filesystem::path> ResolveInputs(
+  const std::vector<std::filesystem::path>& inputs) {
+  std::vector<std::filesystem::path> paths;
+  for (const auto& input : inputs) {
+    if (std::filesystem::is_directory(input)) {
+      for (const auto& entry : std::filesystem::directory_iterator(input)) {
+        std::string extension = entry.path().extension().string();
+        std::ranges::transform(extension, extension.begin(), [](unsigned char c) {
+          return static_cast<char>(std::tolower(c));
+        });
+        if (entry.is_regular_file() && extension == ".pfm") {
+          paths.push_back(std::filesystem::canonical(entry.path()));
+        }
+      }
+    } else if (std::filesystem::is_regular_file(input)) {
+      paths.push_back(std::filesystem::canonical(input));
+    } else {
+      throw std::runtime_error(
+        "Input is not a file or directory: " + input.string());
+    }
+  }
+  std::ranges::sort(paths);
+  paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
+  if (!inputs.empty() && paths.empty()) {
+    throw std::runtime_error("No PFM inputs found");
+  }
+  return paths;
+}
+
+[[nodiscard]] ImageStorage LoadImage(const std::filesystem::path& path) {
+  gjxl::Image3FBuffer decoded;
+  const gjxl::Status status = gjxl::io::ReadPfm(path, &decoded);
+  if (!status.ok()) {
+    throw std::runtime_error("Unable to read " + path.string() + ": " +
+                             std::string(status.message()));
+  }
+  ImageStorage image(decoded.extent());
+  for (size_t channel = 0; channel < 3; ++channel) {
+    const auto plane = decoded.plane(channel);
+    if (std::ranges::any_of(plane, [](float value) {
+          return !std::isfinite(value);
+        })) {
+      throw std::runtime_error("Non-finite PFM input: " + path.string());
+    }
+    std::copy(plane.begin(), plane.end(), image.plane[channel].begin());
+  }
+  return image;
+}
+
+[[nodiscard]] std::string CsvField(std::string_view value) {
+  if (value.find_first_of(",\"\r\n") == std::string_view::npos) {
+    return std::string(value);
+  }
+  std::string escaped = "\"";
+  for (char c : value) {
+    if (c == '"') {
+      escaped += '"';
+    }
+    escaped += c;
+  }
+  return escaped + '"';
 }
 
 void FillImage(ImageStorage* image) {
@@ -319,7 +400,7 @@ void FillImage(ImageStorage* image) {
   return {values.front(), median, values.back()};
 }
 
-[[nodiscard]] double RunBatch(
+[[nodiscard]] int64_t RunBatch(
   gjxl::VarDctBatchEncoder& encoder,
   std::span<const gjxl::VarDctBatchEncodingRequest> requests,
   const std::vector<uint8_t>& expected_codestream,
@@ -328,8 +409,9 @@ void FillImage(ImageStorage* image) {
   std::vector<gjxl::VarDctBatchEncodingResult> results;
   const Clock::time_point begin = Clock::now();
   const gjxl::Status status = encoder.Encode(requests, &results);
-  const double elapsed_ms =
-    std::chrono::duration<double, std::milli>(Clock::now() - begin).count();
+  const int64_t elapsed_ns =
+    std::chrono::duration_cast<std::chrono::nanoseconds>(
+      Clock::now() - begin).count();
   if (!status.ok()) {
     throw std::runtime_error(
       "Batch scheduler failed: " + std::string(status.message()));
@@ -351,7 +433,7 @@ void FillImage(ImageStorage* image) {
         " did not match the single-image reference");
     }
   }
-  return elapsed_ms;
+  return elapsed_ns;
 }
 
 [[nodiscard]] BenchmarkRow BenchmarkBatchSize(
@@ -360,7 +442,8 @@ void FillImage(ImageStorage* image) {
   gjxl::ConstImage3FView image,
   const std::vector<uint8_t>& expected_codestream,
   const gjxl::VarDctEncodingSummary& expected_summary,
-  size_t batch_size) {
+  size_t batch_size,
+  std::ostream* raw_samples) {
 
   std::vector<gjxl::VarDctBatchEncodingRequest> requests(
     batch_size,
@@ -368,6 +451,7 @@ void FillImage(ImageStorage* image) {
       .linear_rgb = image,
       .options = {
         .butteraugli_target = options.butteraugli_target,
+        .effort = kEffort,
         .backend = options.backend,
         .metal_aq_mode = options.metal_aq_mode,
       },
@@ -406,20 +490,22 @@ void FillImage(ImageStorage* image) {
   batched_samples.reserve(options.samples);
   paired_speedups.reserve(options.samples);
   for (size_t sample = 0; sample < options.samples; ++sample) {
-    double sequential_ms = 0.0;
-    double batched_ms = 0.0;
+    int64_t sequential_ns = 0;
+    int64_t batched_ns = 0;
     const bool batch_first = sample % 2 != 0;
     if (batch_first) {
-      batched_ms = RunBatch(
+      batched_ns = RunBatch(
         *batched, requests, expected_codestream, expected_summary);
-      sequential_ms = RunBatch(
+      sequential_ns = RunBatch(
         *sequential, requests, expected_codestream, expected_summary);
     } else {
-      sequential_ms = RunBatch(
+      sequential_ns = RunBatch(
         *sequential, requests, expected_codestream, expected_summary);
-      batched_ms = RunBatch(
+      batched_ns = RunBatch(
         *batched, requests, expected_codestream, expected_summary);
     }
+    const double sequential_ms = static_cast<double>(sequential_ns) / 1e6;
+    const double batched_ms = static_cast<double>(batched_ns) / 1e6;
     sequential_samples.push_back(sequential_ms);
     batched_samples.push_back(batched_ms);
     paired_speedups.push_back(sequential_ms / batched_ms);
@@ -430,6 +516,23 @@ void FillImage(ImageStorage* image) {
               << sequential_ms << " batch_ms=" << batched_ms
               << " speedup=" << std::setprecision(3)
               << sequential_ms / batched_ms << "x\n";
+    if (raw_samples != nullptr) {
+      const bool metal = expected_summary.execution_backend ==
+        gjxl::VarDctExecutionBackend::kMetal;
+      *raw_samples << "gjxl," << CsvField(workload.name) << ','
+                   << CsvField(workload.source.string()) << ','
+                   << workload.extent.width << ',' << workload.extent.height << ','
+                   << batch_size << ',' << sample << ','
+                   << (batch_first ? "batch-first" : "serial-first") << ','
+                   << BackendName(options.backend) << ','
+                   << (metal ? "metal" : "cpu") << ','
+                   << (metal ? MetalAqModeName(options.metal_aq_mode) : "n/a") << ','
+                   << std::setprecision(std::numeric_limits<float>::max_digits10)
+                   << options.butteraugli_target << ',' << kEffort
+                   << ",automatic_per_image,linear_rgb_to_in_memory_codestream,"
+                   << sequential_ns << ',' << batched_ns << ','
+                   << expected_codestream.size() << '\n' << std::flush;
+    }
   }
 
   return {
@@ -452,7 +555,7 @@ void PrintRows(const std::vector<BenchmarkRow>& rows) {
     const double images_per_second =
       1000.0 * static_cast<double>(row.batch_size) /
       row.batched_ms.median;
-    std::cout << row.workload.name << ','
+    std::cout << CsvField(row.workload.name) << ','
               << row.workload.extent.width << ','
               << row.workload.extent.height << ','
               << row.batch_size << ','
@@ -472,6 +575,29 @@ void PrintRows(const std::vector<BenchmarkRow>& rows) {
 int main(int argc, char** argv) {
   try {
     const CommandLineOptions options = ParseCommandLine(argc, argv);
+    std::vector<WorkloadSpec> workloads;
+    for (const auto& path : ResolveInputs(options.inputs)) {
+      workloads.push_back({path.string(), {}, path});
+    }
+    if (options.inputs.empty()) {
+      for (const auto& workload : kWorkloads) {
+        if (options.workload == "all" || options.workload == workload.name) {
+          workloads.push_back(workload);
+        }
+      }
+    }
+    std::ofstream raw_samples;
+    if (!options.raw_samples.empty()) {
+      if (std::filesystem::exists(options.raw_samples)) {
+        throw std::runtime_error(
+          "Raw sample output already exists: " + options.raw_samples.string());
+      }
+      raw_samples.exceptions(std::ios::failbit | std::ios::badbit);
+      raw_samples.open(options.raw_samples);
+      raw_samples << "codec,workload,source,width,height,batch_size,sample,order,"
+                     "requested_backend,backend,aq_mode,distance,effort,thread_policy,"
+                     "timing_boundary,serial_ns,batch_ns,encoded_bytes_per_image\n";
+    }
     std::cout << "image batch benchmark backend="
               << BackendName(options.backend)
               << " metal_aq=" << MetalAqModeName(options.metal_aq_mode)
@@ -483,14 +609,16 @@ int main(int argc, char** argv) {
                  "excluded.\n";
 
     std::vector<BenchmarkRow> rows;
-    for (const WorkloadSpec& workload : kWorkloads) {
-      if (options.workload != "all" && options.workload != workload.name) {
-        continue;
+    for (WorkloadSpec& workload : workloads) {
+      ImageStorage image = workload.source.empty()
+        ? ImageStorage(workload.extent) : LoadImage(workload.source);
+      if (workload.source.empty()) {
+        FillImage(&image);
       }
-      ImageStorage image(workload.extent);
-      FillImage(&image);
+      workload.extent = image.extent;
       const gjxl::VarDctEncodingOptions encode_options = {
         .butteraugli_target = options.butteraugli_target,
+        .effort = kEffort,
         .backend = options.backend,
         .metal_aq_mode = options.metal_aq_mode,
       };
@@ -510,10 +638,14 @@ int main(int argc, char** argv) {
       for (size_t batch_size : options.batch_sizes) {
         rows.push_back(BenchmarkBatchSize(
           workload, options, image.View(), reference_codestream,
-          reference_summary, batch_size));
+          reference_summary, batch_size,
+          raw_samples.is_open() ? &raw_samples : nullptr));
       }
     }
     PrintRows(rows);
+    if (raw_samples.is_open()) {
+      raw_samples.close();
+    }
     return EXIT_SUCCESS;
   } catch (const std::exception& error) {
     std::cerr << "Benchmark error: " << error.what() << '\n';
