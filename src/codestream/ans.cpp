@@ -1115,11 +1115,27 @@ const char* DirectHistogramDistance(
   // Counts come from checked token accumulation or validated fixed populations;
   // AddHistogram preserves their totals. Each bin is bounded by its total, so
   // the checked combined total above also proves that every bin sum fits.
-  for (size_t symbol = 0; symbol < alphabet_size; ++symbol) {
-    const uint64_t count = left.counts[symbol] + right.counts[symbol];
-    if (count != 0) {
-      combined_bits -= static_cast<double>(count) *
-        ExactCountLog2(count, log2_table);
+#if defined(__aarch64__) && defined(__clang__)
+  if (total_count <= kExactLog2TableSize) {
+    // Every bin sum fits the table when the combined total does. The zero
+    // entry is +0.0, so zero bins can participate in the ordered accumulation
+    // without changing its result. Explicit fma preserves the scalar ARM64
+    // loop's fused rounding for both owned and borrowed histograms.
+#pragma clang loop unroll_count(4)
+    for (size_t symbol = 0; symbol < alphabet_size; ++symbol) {
+      const uint64_t count = left.counts[symbol] + right.counts[symbol];
+      combined_bits = std::fma(
+        -static_cast<double>(count), log2_table[count], combined_bits);
+    }
+  } else
+#endif
+  {
+    for (size_t symbol = 0; symbol < alphabet_size; ++symbol) {
+      const uint64_t count = left.counts[symbol] + right.counts[symbol];
+      if (count != 0) {
+        combined_bits -= static_cast<double>(count) *
+          ExactCountLog2(count, log2_table);
+      }
     }
   }
   *distance = combined_bits - left.shannon_bits - right.shannon_bits;
