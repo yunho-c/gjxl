@@ -282,7 +282,8 @@ bool ModelAndEmission(const EntropyCode &model, EntropyTokenStreamView tokens) {
 
 bool OptimizationCase(size_t contexts, size_t n, size_t sections,
                       size_t pattern, bool initial_map,
-                      bool failure_sweep = false) {
+                      bool failure_sweep = false,
+                      size_t maximum_ans_clusters = kDefaultDirectAnsClusters) {
   std::vector<uint32_t> values(n);
   std::vector<uint16_t> token_contexts(n);
   uint32_t random = 13;
@@ -293,6 +294,12 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
         : pattern == 1
             ? Random(random)
             : static_cast<uint32_t>((i / contexts) % (3 + i % contexts));
+  }
+  if (pattern == 4) {
+    for (size_t i = 0; i < n; ++i) {
+      const size_t c = i % contexts;
+      values[i] = c < 16 ? c : (4u + (c - 16) % 4) << (2 + (c - 16) / 4);
+    }
   }
   if (pattern == 3) {
     random = 13;
@@ -319,6 +326,7 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
       .context_count = static_cast<uint32_t>(contexts),
       .initial_context_map = map,
       .initial_histogram_count = initial_map ? 17u : 0u,
+      .maximum_ans_clusters = maximum_ans_clusters,
   };
   EntropyCode prefix;
   EntropyCodeCost prefix_cost;
@@ -353,6 +361,7 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
         .return_cost = pattern != 0 || variant == 2,
         .retain_prepared_clusters = variant == 2,
         .borrow_prepared_clusters = variant == 6 || variant == 7,
+        .maximum_ans_clusters = maximum_ans_clusters,
     };
     const auto run = [&](Result *out) {
       // Exercise the borrowed, unmapped source as well as the owning merge
@@ -371,6 +380,10 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
     if (pattern == 3 && (variant == 3 || variant == 4 || variant == 8) &&
         !Check(oracle.code.ans_histograms.size() == (variant == 4 ? 8 : 9),
                "Queue fixture no longer exercises a beneficial merge"))
+      return false;
+    if (pattern == 4 && (variant == 3 || variant == 8) &&
+        !Check(oracle.code.ans_histograms.size() == maximum_ans_clusters,
+               "Wide direct-ANS fixture did not reach the requested cap"))
       return false;
     ResourceBudget budget;
     ResourceReservation job;
@@ -600,16 +613,17 @@ bool WriterFailures(const EntropyCode &model, EntropyTokenStreamView tokens) {
 }
 
 bool FullAlphabetModels() {
-  // Synthetic valid freshly sized models stress all 32 clusters, every reverse
+  // Synthetic valid freshly sized models stress the maximum clusters for each mode, every reverse
   // table slot, a long context map, and a deep nondegenerate Prefix tree.
   for (auto mode : {EntropyCodingMode::kPrefix, EntropyCodingMode::kAns}) {
+    const size_t clusters = mode == EntropyCodingMode::kAns ? 64 : 32;
     EntropyCode code;
     code.mode = mode;
     code.context_count = 7425;
     code.context_map.resize(code.context_count);
     for (size_t c = 0; c < code.context_map.size(); ++c)
-      code.context_map[c] = c % 32;
-    code.uint_configs.resize(32, mode == EntropyCodingMode::kPrefix
+      code.context_map[c] = c % clusters;
+    code.uint_configs.resize(clusters, mode == EntropyCodingMode::kPrefix
                                      ? kDefaultHybridUintConfig
                                      : HybridUintConfig{8, 0, 0});
     if (mode == EntropyCodingMode::kPrefix) {
@@ -620,10 +634,10 @@ bool FullAlphabetModels() {
       if (!Ok(CreateHuffmanTree(counts, 15, prefix.depths)) ||
           !Ok(ConvertBitDepthsToSymbols(prefix.depths, prefix.bits)))
         return false;
-      code.prefix_codes.resize(32, prefix);
+      code.prefix_codes.resize(clusters, prefix);
     } else {
       code.ans_log_alpha_size = 8;
-      code.ans_histograms.resize(32);
+      code.ans_histograms.resize(clusters);
       for (auto &h : code.ans_histograms) {
         h.method = 12;
         h.frequencies.assign(256, 16);
@@ -663,6 +677,8 @@ bool InvalidAndLarge() {
         {.policy = kBalancedAns,
          .contexts = 1,
          .borrow_prepared_clusters = true},
+        {.policy = kBalancedAns, .contexts = 1, .maximum_ans_clusters = 0},
+        {.policy = kHighDensityAns, .contexts = 1, .maximum_ans_clusters = 65},
         {.policy = kDeferredAnsFromPrefix, .contexts = 1},
         {.policy = static_cast<EntropyStoragePolicy>(255), .contexts = 1},
         {.tokens = maximum, .contexts = 1},
@@ -718,6 +734,7 @@ bool InvalidAndLarge() {
 int main() {
   if (!Empty(DefaultResourceBudget()) || !InvalidAndLarge() || !Aggregation() ||
       !FullAlphabetModels() || !RefinementQueue() ||
+      !OptimizationCase(96, 96 * 256, 3, 4, false, false, 64) ||
       !OptimizationCase(2, 96, 3, 2, false, true) ||
       !OptimizationCase(7, 0, 3, 0, false))
     return EXIT_FAILURE;

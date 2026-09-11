@@ -85,6 +85,7 @@ struct EntropyOptimizationStorageOptions {
   bool retain_prepared_clusters =
       false; // Non-fast Prefix; requires return_cost.
   bool borrow_prepared_clusters = false; // ANS-from-Prefix input only.
+  size_t maximum_ans_clusters = kDefaultDirectAnsClusters; // Direct ANS only.
 };
 
 struct EntropyOptimizationStoragePlan {

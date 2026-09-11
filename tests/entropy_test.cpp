@@ -1098,6 +1098,37 @@ bool CheckAnsSmallHistograms() {
   return true;
 }
 
+bool CheckAnsClusterLimits() {
+  using namespace gjxl;
+  using namespace gjxl::codestream_internal;
+  static_assert(AcAnsClusterLimit({3840, 2160}) == 64);
+  static_assert(AcAnsClusterLimit({2160, 3840}) == 64);
+  static_assert(AcAnsClusterLimit({3840, 2159}) == 32);
+  static_assert(AcAnsClusterLimit({8294399, 1}) == 32);
+  static_assert(AcAnsClusterLimit({8294400, 1}) == 64);
+  static_assert(AcAnsClusterLimit({1920, 1080}) == 32);
+  static_assert(AcAnsClusterLimit({0, SIZE_MAX}) == 32);
+  static_assert(AcAnsClusterLimit({SIZE_MAX, SIZE_MAX}) == 64);
+  std::vector<EntropyToken> tokens{{0, 1}};
+  const std::array views{EntropyTokenStreamView::Interleaved(tokens)};
+  EntropyCode sentinel;
+  sentinel.context_count = 17;
+  for (size_t limit : {size_t{0}, size_t{65}, SIZE_MAX}) {
+    auto code = sentinel;
+    EntropyCodeCost cost;
+    cost.model_bits = 19;
+    const auto before = cost;
+    const auto status = OptimizeDirectAnsEntropyCode(
+      views, {.context_count = 1, .maximum_ans_clusters = limit},
+      DirectAnsEntropyMode::kBalanced, &code, &cost);
+    if (status.ok() || code != sentinel || cost != before) {
+      std::cerr << "Invalid ANS cap changed output\n";
+      return false;
+    }
+  }
+  return true;
+}
+
 bool CheckDirectAnsOptimization() {
   std::array<std::vector<gjxl::EntropyToken>, 3> sections;
   for (size_t section = 0; section < sections.size(); ++section) {
@@ -2041,6 +2072,7 @@ int main() {
       !CheckSparseDirectAnsPopulations() ||
       !CheckBorrowedDirectAnsValidation() ||
       !CheckScannedDirectAnsLateSectionFailures() ||
+      !CheckAnsClusterLimits() ||
       !CheckDirectAnsOptimization() ||
       !CheckSplitTokenStreamParity() ||
       !CheckExactTokenBitCounting()) {

@@ -78,7 +78,9 @@ Status ComputeEntropyModelStoragePlan(EntropyCodingMode mode, size_t contexts,
                                       size_t clusters,
                                       EntropyModelStoragePlan *out) {
   if (out == nullptr || contexts == 0 || contexts > UINT32_MAX ||
-      clusters == 0 || clusters > kMaximumPrefixClusters ||
+      clusters == 0 ||
+      clusters > (mode == EntropyCodingMode::kAns ? kMaximumAnsClusters
+                                                 : kMaximumPrefixClusters) ||
       (mode != EntropyCodingMode::kPrefix && mode != EntropyCodingMode::kAns))
     return Status::InvalidArgument("Entropy model plan arguments are invalid");
   EntropyModelStoragePlan plan;

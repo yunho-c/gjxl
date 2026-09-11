@@ -24,6 +24,8 @@ struct EntropyWorkProfile;
 
 inline constexpr size_t kPrefixAlphabetSize = 128;
 inline constexpr size_t kMaximumPrefixClusters = 32;
+inline constexpr size_t kMaximumAnsClusters = 64;
+inline constexpr size_t kDefaultDirectAnsClusters = 32;
 inline constexpr size_t kAnsTableSize = 4096;
 inline constexpr size_t kMaximumAnsAlphabetSize = 256;
 
@@ -158,6 +160,8 @@ struct EntropyCodeOptions {
   std::span<const uint8_t> initial_context_map;
   uint32_t initial_histogram_count = 0;
   HybridUintConfig uint_config = kDefaultHybridUintConfig;
+  /// Direct ANS only; Prefix partitions keep their own fixed limit.
+  size_t maximum_ans_clusters = kDefaultDirectAnsClusters;
 };
 
 struct EntropyCodeCost {

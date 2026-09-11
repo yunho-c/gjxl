@@ -1197,12 +1197,13 @@ template <typename Histogram>
 Status FastClusterDirectAnsHistograms(
   Storage<Histogram>& source,
   Storage<DirectAnsHistogram>* clustered,
-  Storage<uint32_t>* symbols) {
+  Storage<uint32_t>* symbols,
+  size_t maximum_clusters) {
 
   if (source.empty() || clustered == nullptr || symbols == nullptr) {
     return Status::InvalidArgument("Direct ANS clustering input is invalid");
   }
-  constexpr size_t kMaximumClusters = kMaximumPrefixClusters;
+  const size_t kMaximumClusters = maximum_clusters;
   constexpr double kMinimumDistinctDistance = 48.0;
   // This is the partition builder's private working set. Cache Shannon costs
   // in place instead of copying every 256-bin histogram, including empty ones.
@@ -1430,7 +1431,9 @@ Status PrepareDirectAnsPartition(
   EntropyWorkProfile* profile) {
 
   if (partition == nullptr || prepared == nullptr ||
-      options.context_count == 0 || !options.uint_config.valid()) {
+      options.context_count == 0 || !options.uint_config.valid() ||
+      options.maximum_ans_clusters == 0 ||
+      options.maximum_ans_clusters > kMaximumAnsClusters) {
     return Status::InvalidArgument("Direct ANS partition output is invalid");
   }
   size_t histogram_count = options.context_count;
@@ -1545,9 +1548,11 @@ Status PrepareDirectAnsPartition(
     Storage<uint32_t> histogram_symbols;
     Status status = borrow_populations
       ? FastClusterDirectAnsHistograms(
-          borrowed_histograms, &clustered, &histogram_symbols)
+          borrowed_histograms, &clustered, &histogram_symbols,
+          options.maximum_ans_clusters)
       : FastClusterDirectAnsHistograms(
-          histograms, &clustered, &histogram_symbols);
+          histograms, &clustered, &histogram_symbols,
+          options.maximum_ans_clusters);
     if (status.ok() &&
         mode == codestream_internal::DirectAnsEntropyMode::kHighDensity) {
       status = RefineBestDirectAnsClusters(
@@ -1991,7 +1996,7 @@ Status codestream_internal::ValidateAnsEntropyCode(const EntropyCode& code) {
       code.context_map.size() != code.context_count ||
       !code.prefix_codes.empty() || code.ans_log_alpha_size < 5 ||
       code.ans_log_alpha_size > 8 || code.ans_histograms.empty() ||
-      code.ans_histograms.size() > kMaximumPrefixClusters ||
+      code.ans_histograms.size() > kMaximumAnsClusters ||
       code.uint_configs.size() != code.ans_histograms.size()) {
     return Status::InvalidArgument("ANS entropy-code dimensions are invalid");
   }
@@ -3106,7 +3111,8 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
   if (out == nullptr || o.contexts == 0 || o.contexts > UINT32_MAX ||
       o.initial_histograms > 256 || o.retain_prepared_clusters ||
       (!direct && o.policy != kAnsFromPrefix && o.policy != kDeferredAnsFromPrefix) ||
-      (direct && o.borrow_prepared_clusters) ||
+      (direct && (o.borrow_prepared_clusters || o.maximum_ans_clusters == 0 ||
+                  o.maximum_ans_clusters > kMaximumAnsClusters)) ||
       (o.policy == kDeferredAnsFromPrefix && !o.borrow_prepared_clusters))
     return Status::InvalidArgument("ANS optimization plan is invalid");
   const bool balanced = o.policy == kBalancedAns;
@@ -3114,7 +3120,8 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
   const size_t histograms = o.initial_histograms == 0
     ? o.contexts : o.initial_histograms;
   EntropyOptimizationStoragePlan plan;
-  const size_t k = plan.clusters = std::min(kMaximumPrefixClusters, histograms);
+  const size_t k = plan.clusters = std::min(
+    direct ? o.maximum_ans_clusters : kMaximumPrefixClusters, histograms);
   const size_t configs = balanced ? 1 : (direct
     ? kHighDensityAnsUintConfigs.size() : kAnsUintConfigs.size());
   const size_t widths = direct ? 1 : kAnsAlphabetWidthCount;
@@ -3199,7 +3206,7 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
     } else {
       // Initial K*(K-1)/2 pairs plus (K-1)*(K-2)/2 after successful merges.
       // Stale queue entries retain capacity: bound ALL enqueues, (K-1)^2,
-      // not merely the current active-cluster pairs. K is in [1,32].
+      // not merely the current active-cluster pairs. K is in [1,64].
       if (!work.AddVector<double>(k, kFreshExact) ||
           !work.AddVector<uint32_t>(k, kFreshExact, 3) ||
           !work.AddVector<DirectAnsClusterPair>((k - 1) * (k - 1), kGrowing) ||

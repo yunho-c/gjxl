@@ -1,0 +1,110 @@
+{
+  "asan_ubsan_passed": 4,
+  "asan_ubsan_total": 4,
+  "large_cases": 16,
+  "large_models_over_32": 16,
+  "prior_savings_equal": 16,
+  "qualification_cases": 112,
+  "release_known_failure": "quantization_pipeline",
+  "release_passed": 128,
+  "release_total": 129,
+  "size_savings": [
+    {
+      "case": "imazen26-1029-planter-4k-metal-0.6",
+      "current_saved_bytes": 7907,
+      "equal": true,
+      "previous_saved_bytes": 7907
+    },
+    {
+      "case": "imazen26-1029-planter-4k-metal-1",
+      "current_saved_bytes": 4842,
+      "equal": true,
+      "previous_saved_bytes": 4842
+    },
+    {
+      "case": "imazen26-1029-planter-4k-metal-2",
+      "current_saved_bytes": 3362,
+      "equal": true,
+      "previous_saved_bytes": 3362
+    },
+    {
+      "case": "imazen26-1039-sun-forest-4k-metal-0.6",
+      "current_saved_bytes": 3376,
+      "equal": true,
+      "previous_saved_bytes": 3376
+    },
+    {
+      "case": "imazen26-1039-sun-forest-4k-metal-1",
+      "current_saved_bytes": 1557,
+      "equal": true,
+      "previous_saved_bytes": 1557
+    },
+    {
+      "case": "imazen26-1039-sun-forest-4k-metal-2",
+      "current_saved_bytes": 753,
+      "equal": true,
+      "previous_saved_bytes": 753
+    },
+    {
+      "case": "imazen26-1049-river-city-4k-metal-0.6",
+      "current_saved_bytes": 3551,
+      "equal": true,
+      "previous_saved_bytes": 3551
+    },
+    {
+      "case": "imazen26-1049-river-city-4k-metal-1",
+      "current_saved_bytes": 2435,
+      "equal": true,
+      "previous_saved_bytes": 2435
+    },
+    {
+      "case": "imazen26-1049-river-city-4k-metal-2",
+      "current_saved_bytes": 1150,
+      "equal": true,
+      "previous_saved_bytes": 1150
+    },
+    {
+      "case": "imazen26-1207-bedroom-noise-4k-metal-0.6",
+      "current_saved_bytes": 7212,
+      "equal": true,
+      "previous_saved_bytes": 7212
+    },
+    {
+      "case": "imazen26-1207-bedroom-noise-4k-metal-1",
+      "current_saved_bytes": 3072,
+      "equal": true,
+      "previous_saved_bytes": 3072
+    },
+    {
+      "case": "imazen26-1207-bedroom-noise-4k-metal-2",
+      "current_saved_bytes": 954,
+      "equal": true,
+      "previous_saved_bytes": 954
+    },
+    {
+      "case": "imazen26-1409-rainbow-4k-metal-0.6",
+      "current_saved_bytes": 4077,
+      "equal": true,
+      "previous_saved_bytes": 4077
+    },
+    {
+      "case": "imazen26-1409-rainbow-4k-cpu-0.6",
+      "current_saved_bytes": 4173,
+      "equal": true,
+      "previous_saved_bytes": 4173
+    },
+    {
+      "case": "imazen26-1609-food-detail-4k-metal-0.6",
+      "current_saved_bytes": 3322,
+      "equal": true,
+      "previous_saved_bytes": 3322
+    },
+    {
+      "case": "imazen26-1609-food-detail-4k-cpu-0.6",
+      "current_saved_bytes": 2854,
+      "equal": true,
+      "previous_saved_bytes": 2854
+    }
+  ],
+  "small_cases": 96
+}

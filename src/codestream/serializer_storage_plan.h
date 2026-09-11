@@ -63,7 +63,8 @@ struct SerializerHeaderStoragePlan {
 
 [[nodiscard]] Status ComputeSerializerHeaderStoragePlan(
     size_t ac_groups, size_t dc_groups, const BlockContextMapStoragePlan &maps,
-    size_t order_tokens, SerializerHeaderStoragePlan *out);
+    size_t order_tokens, SerializerHeaderStoragePlan *out,
+    size_t maximum_ac_ans_clusters = kDefaultDirectAnsClusters);
 
 [[nodiscard]] Status
 ComputeSerializerControlStorageBound(const SerializerStoragePlan &counts,

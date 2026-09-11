@@ -10,10 +10,19 @@
 #include <vector>
 
 #include "codestream/storage.h"
+#include "core/geometry.h"
 
 #include "codestream/entropy_internal.h"
 
 namespace gjxl::codestream_internal {
+
+/// Use the qualified larger AC model budget for 4K-area frames and above.
+/// Pixel area makes the policy independent of orientation and padded blocks.
+[[nodiscard]] constexpr size_t AcAnsClusterLimit(Extent2D frame) noexcept {
+  constexpr size_t minimum_pixels = 3840 * 2160;
+  return !frame.empty() && frame.width >= 1 + (minimum_pixels - 1) / frame.height
+    ? kMaximumAnsClusters : kDefaultDirectAnsClusters;
+}
 
 inline constexpr uint32_t kAnsReciprocalPrecision = 44;
 inline constexpr size_t kAnsAlphabetWidthCount = 4;

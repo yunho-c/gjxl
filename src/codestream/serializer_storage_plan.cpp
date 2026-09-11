@@ -55,7 +55,8 @@ struct TaskStoragePlan {
 Status ComputeTaskStoragePlan(size_t tokens, size_t contexts, size_t sections,
                               VarDctEntropyBehavior behavior, bool deferred,
                               const EntropyModelStoragePlan &either_model,
-                              TaskStoragePlan *out) {
+                              TaskStoragePlan *out,
+                              size_t maximum_ans_clusters = kDefaultDirectAnsClusters) {
   const bool exhaustive =
       behavior == VarDctEntropyBehavior::kMaximumCompression;
   EntropyOptimizationStoragePlan prefix, ans;
@@ -79,7 +80,8 @@ Status ComputeTaskStoragePlan(size_t tokens, size_t contexts, size_t sections,
        .tokens = tokens,
        .contexts = contexts,
        .sections = sections,
-       .borrow_prepared_clusters = exhaustive},
+       .borrow_prepared_clusters = exhaustive,
+       .maximum_ans_clusters = maximum_ans_clusters},
       &ans);
   if (!status.ok())
     return status;
@@ -192,9 +194,11 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
   const size_t g = plan.ac_group_count, d = plan.dc_group_count;
   if (d > std::numeric_limits<size_t>::max() / 2)
     return Overflow();
+  const size_t maximum_ac_ans_clusters = exhaustive
+    ? kDefaultDirectAnsClusters : AcAnsClusterLimit(frame_extent);
   SerializerHeaderStoragePlan headers;
   status = ComputeSerializerHeaderStoragePlan(g, d, maps, orders.maximum_tokens,
-                                              &headers);
+                                              &headers, maximum_ac_ans_clusters);
   if (!status.ok())
     return status;
   HostStorageBound control;
@@ -224,7 +228,8 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
   }
   status = ComputeTaskStoragePlan(plan.maximum_ac_tokens,
                                   maps.maximum_ac_contexts, g, behavior,
-                                  exhaustive, headers.ac_model, &ac_task);
+                                  exhaustive, headers.ac_model, &ac_task,
+                                  maximum_ac_ans_clusters);
   if (!status.ok())
     return status;
   if (!work.Add(dc_task.retained) || !work.Add(order_task.retained) ||

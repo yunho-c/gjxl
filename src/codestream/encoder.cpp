@@ -1578,6 +1578,8 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
           {
             .context_count = static_cast<uint32_t>(
               candidate.block_context_map.ac_context_count()),
+            .maximum_ans_clusters = codestream_internal::AcAnsClusterLimit(
+              frame.geometry().frame()),
           },
           options.entropy_behavior, candidate.fixed_context_populations, true,
           &candidate.ac_code, &candidate.ac_cost, entropy_profile);
