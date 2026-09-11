@@ -102,6 +102,11 @@ struct MetalBackendOptions {
   // capped at 1 GiB. Active encodes and the existing AQ pools are not counted.
   size_t butteraugli_cache_bytes = size_t{1024} * 1024 * 1024;
 
+  // One completed-frame allocation, returned only after its final owner dies.
+  // Idle storage is volatile. Zero disables reuse; the process-wide sum is
+  // additionally capped at 256 MiB. Live/retained frames are never cached.
+  size_t completed_frame_cache_bytes = size_t{128} * 1024 * 1024;
+
   // Deterministic failure injection used by real-device backend tests.
   bool test_fail_submission = false;
   bool test_fail_completion = false;
@@ -146,7 +151,7 @@ Status CreateEmbeddedMetalBackend(
 /// Fails the next backing allocation after its resource ticket is prepared.
 [[nodiscard]] Status ArmNextMetalAllocationFailureForTest(GpuBackend& backend);
 
-/// Sum of idle AQ/resident-input and Butteraugli backing capacities.
+/// Sum of idle AQ/resident-input, Butteraugli, and completed-frame capacities.
 [[nodiscard]] size_t MetalPreparationCacheBytesForTesting(GpuBackend& backend);
 
 }  // namespace gjxl

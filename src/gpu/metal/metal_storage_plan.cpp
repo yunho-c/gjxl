@@ -555,7 +555,12 @@ Status ComputeCompletedFrameStoragePlan(Extent2D source, Extent2D coding,
   status = layout.AddPlane(DeviceElementType::kU8, {anchor_count, 1}, anchor_count,
                            1, &candidate.order_samples);
   if (!status.ok()) return status;
-  candidate.capacity_bytes = layout.capacity_bytes();
+  constexpr size_t granularity = kCompletedFrameCapacityGranularity;
+  if (layout.capacity_bytes() > std::numeric_limits<size_t>::max() -
+                                  (granularity - 1))
+    return Status::InvalidArgument("Completed-frame capacity overflows");
+  candidate.capacity_bytes =
+      (layout.capacity_bytes() + granularity - 1) & ~(granularity - 1);
   *plan = candidate;
   return Status::Ok();
 }

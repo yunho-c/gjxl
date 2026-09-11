@@ -122,7 +122,9 @@ struct CompletedFrameStoragePlan {
 /// The final group-major coefficients, destination table, zero populations, and
 /// sample flags share one independent allocation. Block count bounds anchor
 /// capacity; actual output generation supplies its authoritative final anchor
-/// count.
+/// count. Capacity rounds to 1 MiB so changing anchor counts can reuse a cache
+/// entry while admission still charges the complete allocation capacity.
+inline constexpr size_t kCompletedFrameCapacityGranularity = size_t{1} << 20;
 [[nodiscard]] Status
 ComputeCompletedFrameStoragePlan(Extent2D source_extent, Extent2D coding_extent,
                                  size_t anchor_count,

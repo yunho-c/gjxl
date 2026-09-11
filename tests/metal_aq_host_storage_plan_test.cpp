@@ -669,6 +669,9 @@ bool CheckProfileInputs(GpuBackend &gpu) {
             completed.reset();
             measured.reset();
             result = {};
+            // Successful completed outputs may retain idle device capacity.
+            // Release it before checking that this admission domain is empty.
+            if (!Ok(gpu.TrimPreparationCache())) return false;
             job.Reset();
             if (!Empty(budget)) return false;
             // Ordinary execution with the cached forward coefficients must

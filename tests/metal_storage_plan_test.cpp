@@ -283,9 +283,11 @@ bool CheckCompletedFrames() {
         const Extent2D groups{(width + 255) / 256, (height + 255) / 256};
         const size_t count = groups.width * groups.height;
         const size_t coefficients = count * 3 * 65536;
+        const size_t used = (coefficients + anchors + 6144) * 4 + anchors;
+        constexpr size_t bucket = 1024 * 1024;
         if (!Check(plan.group_extent == groups && plan.group_count == count &&
                        plan.coefficient_count == coefficients &&
-                       plan.capacity_bytes == (coefficients + anchors + 6144) * 4 + anchors &&
+                       plan.capacity_bytes == (used + bucket - 1) / bucket * bucket &&
                        plan.order_population.offset_bytes == (coefficients + anchors) * 4 &&
                        plan.order_samples.offset_bytes == (coefficients + anchors + 6144) * 4 &&
                        plan.destinations.offset_bytes == coefficients * 4 &&
@@ -294,7 +296,7 @@ bool CheckCompletedFrames() {
                    "Completed frame layout differs from frozen group-major "
                    "recipe") ||
             !CheckSlices({plan.coefficients, plan.destinations, plan.order_population, plan.order_samples}, 1,
-                         plan.capacity_bytes))
+                         used))
           return false;
         ++cases;
       }
