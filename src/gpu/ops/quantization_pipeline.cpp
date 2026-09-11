@@ -190,7 +190,7 @@ bool HasValidatedHostImages(
        prepared.validated_coding_opsin, prepared.coding_opsin));
 }
 
-Status PrepareResidentAcStrategyInputs(
+Status PrepareResidentFrontend(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,
   quantization_pipeline_internal::PreparedQuantizationPipeline& prepared,
@@ -631,7 +631,12 @@ Status RunPreparedGpuQuantizationPipelineImpl(
       }
     }
     if (aq_state == nullptr) aq_state = &local_prepared_aq;
-    Status status = PrepareResidentAcStrategyInputs(
+    if (options.fixed_dct8) {
+      // A caller may switch an existing preparation from search to fixed
+      // DCT8. Drop candidate storage before entering the cheaper policy.
+      aq_state->ac_strategy_search.Reset();
+    }
+    Status status = PrepareResidentFrontend(
         gpu, original_linear_rgb, prepared, options,
         options.adaptive_quantization.iterations == 0 &&
           !materialization.final_perceptual_evaluation &&

@@ -109,6 +109,8 @@ enum {
 typedef struct {
   uint32_t struct_size;
   float distance;
+  /// Speed/refinement intent in [1, 10]. Efforts 1-4 use DCT8 only;
+  /// efforts 5-10 enable mixed-transform AC-strategy search.
   int32_t effort;
   /// Selects the entropy/codestream search policy independently of effort.
   /// Callers using the previous struct size implicitly select AUTOMATIC.

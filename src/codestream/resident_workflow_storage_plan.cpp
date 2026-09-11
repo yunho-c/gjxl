@@ -33,6 +33,7 @@ HostStorageBound Either(HostStorageBound a, HostStorageBound b) {
 
 Status ProfilePlan(Extent2D source, Extent2D coding,
                    const ResidentAqProfileInputOptions &policy,
+                   bool fixed_dct8,
                    const AcSubmissionStoragePlan &ac,
                    ResidentWorkflowStoragePlan *p, HostStorageBound *output) {
   AqAuxiliaryProfileStoragePlan aux;
@@ -62,8 +63,8 @@ Status ProfilePlan(Extent2D source, Extent2D coding,
   // The input preparer does not emit a profile graph.
   // Max label includes registered kernel IDs and generated fallback IDs.
   p->profile_shape = {
-      .wall_stages = 6 + 4 + 3,
-      .submissions = evaluation_free ? 4u : 5u,
+      .wall_stages = 6 + (fixed_dct8 ? 0u : 4u) + 3,
+      .submissions = (evaluation_free ? 4u : 5u) - size_t(fixed_dct8),
       .stages = (evaluation_free ? 2u : 3u) + ac.stage_capacity +
                 aq.metadata.stage_capacity,
       .dispatches = aux.reference_dispatches + aux.initial_dispatches +
@@ -105,6 +106,7 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
                                    const ResidentWorkflowStorageOptions &o,
                                    ResidentWorkflowStoragePlan *out) {
   const auto &e = o.encoding;
+  const bool fixed_dct8 = UseFixedDct8Strategy(e);
   const bool search =
       e.rate_control_mode == VarDctRateControlMode::kTargetBytes ||
       e.rate_control_mode == VarDctRateControlMode::kTargetBitsPerPixel;
@@ -205,14 +207,15 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
            .ok() ||
       !(status = ComputeCompletedFrameHostStoragePlan(source, coding, p.blocks,
                                                       &completed_host))
-           .ok() ||
-      !(status =
-            ac_strategy_search_internal::ComputeStoragePlan(coding, true, &ac))
-           .ok() ||
-      !(status = ac_strategy_search_internal::ComputeHostStoragePlan(
-            coding, true, search, &ac_host))
            .ok())
     return status;
+  if (!fixed_dct8) {
+    status = ac_strategy_search_internal::ComputeStoragePlan(coding, true, &ac);
+    if (!status.ok()) return status;
+    status = ac_strategy_search_internal::ComputeHostStoragePlan(
+      coding, true, search, &ac_host);
+    if (!status.ok()) return status;
+  }
   HostStorageBound common_device;
   for (size_t bytes : {input.capacity_bytes, aq.persistent_bytes,
                        aq.staging_bytes, butter.capacity_bytes})
@@ -237,7 +240,10 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
   // and adjusted policy input. Count both CfL generations over retry
   // replacement. AC merge separately bounds its new output and export
   // temporary.
-  if (!common_frontend.AddVector<uint8_t>(p.blocks, kFreshExact, 3) ||
+  // Without the AC merge plan, account directly for a new fixed grid while
+  // the previous attempt's selected grid is still alive.
+  if (!common_frontend.AddVector<uint8_t>(p.blocks, kFreshExact,
+                                         fixed_dct8 ? 4 : 3) ||
       !common_frontend.AddVector<float>(p.blocks, kFreshExact, 3) ||
       !common_frontend.Add(cfl.working, search ? 2 : 1))
     return Overflow();
@@ -250,18 +256,19 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
       std::count_if(ac.stages.begin(), ac.stages.end(), [](const auto &stage) {
         return stage.candidate_count != 0;
       });
-  status = ComputeAcSubmissionStoragePlan({.batches = ac.stages.size(),
-                                           .nonempty_batches = nonempty,
-                                           .profiling = o.collect_gpu_profile},
-                                          &submission);
-  if (!status.ok())
-    return status;
+  if (!fixed_dct8) {
+    status = ComputeAcSubmissionStoragePlan(
+      {.batches = ac.stages.size(), .nonempty_batches = nonempty,
+       .profiling = o.collect_gpu_profile},
+      &submission);
+    if (!status.ok()) return status;
+  }
   HostStorageBound profile_output;
   if (o.collect_gpu_profile) {
     status = ProfilePlan(source, coding,
                          {iterations, final_score, sinks, filters.gaborish,
                           filters.epf_options.iterations},
-                         submission, &p, &profile_output);
+                         fixed_dct8, submission, &p, &profile_output);
     if (!status.ok())
       return status;
   } else if (!p.frontend.Add(submission.working))

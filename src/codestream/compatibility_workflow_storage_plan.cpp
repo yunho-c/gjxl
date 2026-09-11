@@ -4,6 +4,7 @@
 #include "codestream/compatibility_workflow_storage_plan.h"
 
 #include "codestream/workflow_publication_storage_plan.h"
+#include "codestream/workflow_internal.h"
 
 #include <algorithm>
 
@@ -204,26 +205,28 @@ Status ComputeMetalCompatibilityWorkflowStoragePlan(
           !p.evaluator.AddVector<float>(block_count, kFreshExact))
         return Overflow();
     }
-    ac_strategy_search_internal::StoragePlan ac;
-    ac_strategy_search_internal::HostStoragePlan ac_host;
-    AcSubmissionStoragePlan submission;
-    if (!(status = ac_strategy_search_internal::ComputeStoragePlan(
-              coding, resident, &ac))
-             .ok() ||
-        !(status = ac_strategy_search_internal::ComputeHostStoragePlan(
-              coding, resident, resident && IsSearch(e.rate_control_mode),
-              &ac_host))
-             .ok() ||
-        !(status = ComputeAcSubmissionStoragePlan(
-              {.batches = ac.stages.size(),
-               .nonempty_batches = ac.stages.size()},
-              &submission))
-             .ok())
-      return status;
-    p.ac_search = ac_host.working;
-    if (!p.ac_search.Add({ac.device_bytes, ac.device_bytes}) ||
-        !p.ac_search.Add(submission.working))
-      return Overflow();
+    if (!UseFixedDct8Strategy(e)) {
+      ac_strategy_search_internal::StoragePlan ac;
+      ac_strategy_search_internal::HostStoragePlan ac_host;
+      AcSubmissionStoragePlan submission;
+      if (!(status = ac_strategy_search_internal::ComputeStoragePlan(
+                coding, resident, &ac))
+               .ok() ||
+          !(status = ac_strategy_search_internal::ComputeHostStoragePlan(
+                coding, resident, resident && IsSearch(e.rate_control_mode),
+                &ac_host))
+               .ok() ||
+          !(status = ComputeAcSubmissionStoragePlan(
+                {.batches = ac.stages.size(),
+                 .nonempty_batches = ac.stages.size()},
+                &submission))
+               .ok())
+        return status;
+      p.ac_search = ac_host.working;
+      if (!p.ac_search.Add({ac.device_bytes, ac.device_bytes}) ||
+          !p.ac_search.Add(submission.working))
+        return Overflow();
+    }
   }
   WorkflowPublicationStoragePlan publication;
   status = ComputeWorkflowPublicationStoragePlan(

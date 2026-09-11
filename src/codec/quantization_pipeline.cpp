@@ -438,15 +438,25 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
     }
   }
 
-  status = strategy_search.Find(
-    pipeline_opsin,
-    {prepared.initial_quant.data(), block_extent, block_extent.width},
-    prepared.pixel_mask.empty()
-      ? ConstPlaneF32View{}
-      : ConstPlaneF32View{prepared.pixel_mask.data(), prepared.padded_extent,
-                          prepared.padded_extent.width},
-    prepared.initial_color_correlation, {.butteraugli_target = control_target},
-    &prepared.strategies);
+  if (options.fixed_dct8) {
+    // The selected grid is still owned by this preparation. Build the new
+    // grid before replacing it so allocation failure preserves the old grid.
+    AcStrategyGrid fixed;
+    status = AcStrategyGrid::Create(block_extent, &fixed);
+    if (!status.ok()) return status;
+    fixed.fill_dct8();
+    prepared.strategies = std::move(fixed);
+  } else {
+    status = strategy_search.Find(
+      pipeline_opsin,
+      {prepared.initial_quant.data(), block_extent, block_extent.width},
+      prepared.pixel_mask.empty()
+        ? ConstPlaneF32View{}
+        : ConstPlaneF32View{prepared.pixel_mask.data(), prepared.padded_extent,
+                            prepared.padded_extent.width},
+      prepared.initial_color_correlation, {.butteraugli_target = control_target},
+      &prepared.strategies);
+  }
   if (!status.ok()) {
     return status;
   }

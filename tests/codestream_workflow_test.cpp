@@ -597,6 +597,14 @@ bool CheckEffortPolicy() {
                 << summary.score_history.size() << '\n';
       return false;
     }
+    if (test.effort <= 4 &&
+        (summary.strategy_counts[0] == 0 ||
+         std::any_of(summary.strategy_counts.begin() + 1,
+                     summary.strategy_counts.end(),
+                     [](size_t count) { return count != 0; }))) {
+      std::cerr << "Low CPU effort selected a non-DCT8 strategy\n";
+      return false;
+    }
     if (test.effort == 7 &&
         (bytes != default_bytes || summary != default_summary)) {
       std::cerr << "Explicit effort 7 changed the default workflow\n";
@@ -604,7 +612,7 @@ bool CheckEffortPolicy() {
     }
   }
 
-  for (const int32_t effort : {1, 2, 3, 4, 7, 10}) {
+  for (const int32_t effort : {1, 2, 3, 4, 5, 7, 10}) {
     const size_t index = static_cast<size_t>(effort - 1);
     const size_t expected_score_count = effort <= 3
       ? 0
@@ -626,6 +634,14 @@ bool CheckEffortPolicy() {
       std::cerr << "Metal effort " << effort << " workflow failed: "
                 << status.message() << " history="
                 << summary.score_history.size() << '\n';
+      return false;
+    }
+    if (effort <= 4 &&
+        (summary.strategy_counts[0] == 0 ||
+         std::any_of(summary.strategy_counts.begin() + 1,
+                     summary.strategy_counts.end(),
+                     [](size_t count) { return count != 0; }))) {
+      std::cerr << "Low Metal effort selected a non-DCT8 strategy\n";
       return false;
     }
     if (effort <= 3) {

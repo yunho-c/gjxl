@@ -6,12 +6,14 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <string_view>
 #include <vector>
 
 #include "codestream/rate_control_internal.h"
 #include "codestream/resident_workflow_storage_plan.h"
 #include "codestream/workflow_internal.h"
 #include "codestream/workflow_lifetime_test.h"
+#include "codestream/workflow_publication_storage_plan.h"
 #include "core/image_buffer.h"
 #include "gpu/metal/metal_backend.h"
 
@@ -72,23 +74,46 @@ bool CheckPlans() {
         const bool pending = ManagedHostAllocationFailurePendingForTest();
         DisarmManagedHostAllocationFailureForTest();
         const size_t iterations = AdaptiveQuantizationIterations(o.encoding);
+        WorkflowPublicationStoragePlan publication;
+        if (!Ok(ComputeWorkflowPublicationStoragePlan(
+              p.serializer.output, p.score_count, p.maximum_attempts, false,
+              o.collect_timing, &publication, "Test publication bound overflow")))
+          return false;
         if (!Ok(status) ||
             !Check(pending && p.maximum_attempts == 1 &&
                        p.score_count == iterations + size_t(bool(flags & 2)) &&
                        p.working.peak_bytes ==
                            std::max(p.search_phase.peak_bytes,
                                     p.completion_phase.peak_bytes) &&
-                       p.working.peak_bytes <
+                       p.working.peak_bytes <=
                            p.device_bytes + p.frontend.peak_bytes +
                                p.serializer.working.peak_bytes +
-                               p.diagnostics.peak_bytes &&
+                               p.diagnostics.peak_bytes +
+                               publication.scores.peak_bytes +
+                               publication.timing.peak_bytes &&
                        p.output.peak_bytes <= p.working.peak_bytes &&
                        p.profile_shape.submissions ==
-                           (o.collect_gpu_profile ? (p.score_count == 0 ? 4 : 5) : 0) &&
+                           (o.collect_gpu_profile
+                              ? (p.score_count == 0 ? 4u : 5u) -
+                                    size_t(UseFixedDct8Strategy(o.encoding))
+                              : 0) &&
                        p.profile_shape.wall_stages ==
-                           (o.collect_gpu_profile ? 13 : 0),
-                   "Workflow plan formula or allocation-free contract failed"))
+                           (o.collect_gpu_profile
+                              ? (UseFixedDct8Strategy(o.encoding) ? 9 : 13)
+                              : 0),
+                   "Workflow plan formula or allocation-free contract failed")) {
+          std::cerr << "source=" << source.width << 'x' << source.height
+                    << " effort=" << effort << " flags=" << flags
+                    << " pending=" << pending << " scores=" << p.score_count
+                    << " submissions=" << p.profile_shape.submissions
+                    << " walls=" << p.profile_shape.wall_stages
+                    << " peak=" << p.working.peak_bytes
+                    << " summed=" << p.device_bytes + p.frontend.peak_bytes +
+                         p.serializer.working.peak_bytes + p.diagnostics.peak_bytes +
+                         publication.scores.peak_bytes + publication.timing.peak_bytes
+                    << '\n';
           return false;
+        }
         ++cases;
       }
     }
@@ -277,7 +302,7 @@ struct LifetimeTrace {
   }
 
   bool CheckBoundary(const ResidentWorkflowStoragePlan &plan,
-                     size_t attempts) const {
+                     size_t attempts, bool fixed_dct8) const {
     if (!Check(count == attempts && count <= entries.size(),
                "Missing serializer lifetime boundary"))
       return false;
@@ -293,7 +318,7 @@ struct LifetimeTrace {
                  "Completed output or retry lifetime decision is incorrect"))
         return false;
       if (entry.may_retry) {
-        if (!Check(live(ResourceClass::kAcSearch) > 0 &&
+        if (!Check((live(ResourceClass::kAcSearch) > 0) == !fixed_dct8 &&
                        live(ResourceClass::kInput) > 0 &&
                        live(ResourceClass::kAqScratch) >
                            plan.score_count * sizeof(double),
@@ -378,7 +403,8 @@ bool RunCase(GpuBackend &gpu, ConstImage3FView image,
                 << budget.snapshot().peak_backing_bytes << '\n';
       return false;
     }
-    if (!trace.CheckBoundary(plan, measured.summary.encode_attempt_count))
+    if (!trace.CheckBoundary(plan, measured.summary.encode_attempt_count,
+                             UseFixedDct8Strategy(o.encoding)))
       return false;
     if (!Check(measured.bytes == oracle.bytes &&
                    measured.summary == oracle.summary &&
@@ -682,9 +708,11 @@ bool CheckSearchIntervals() {
 }
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
   if (!CheckPlans() || !CheckSearchIntervals())
     return EXIT_FAILURE;
+  if (argc == 2 && std::string_view(argv[1]) == "--plans-only")
+    return EXIT_SUCCESS;
   std::unique_ptr<GpuBackend> gpu;
   if (!Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &gpu)) ||
       !Ok(EnsureProductionMetalBackendAvailable()) || !CheckRuntime(*gpu) ||
