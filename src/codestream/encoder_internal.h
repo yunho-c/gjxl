@@ -37,6 +37,15 @@ struct CandidateSelectionKey {
   const EntropyCodeOptions& options,
   EntropyCodingMode* mode);
 
+struct PreparedFixedAnsCluster;
+
+/// Collects per-context default-HybridUint populations for ordinary coder
+/// selection and balanced ANS construction. The output is unchanged on failure.
+[[nodiscard]] Status CollectDefaultEntropyPopulations(
+  std::span<const EntropyTokenStreamView> streams,
+  uint32_t context_count,
+  Storage<PreparedFixedAnsCluster>* populations);
+
 /// Prefix fallback intentionally wins an equal complete-codestream size.
 [[nodiscard]] constexpr bool PreferAllPrefixCandidate(
   size_t mixed_size, size_t prefix_size) noexcept {

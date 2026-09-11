@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <new>
 #include <numeric>
@@ -110,10 +111,7 @@ struct AliasEntry {
   uint16_t frequency1 = 0;
 };
 
-struct ReverseBitChunk {
-  uint32_t bits = 0;
-  uint8_t bit_count = 0;
-};
+
 
 struct Remainder {
   size_t symbol = 0;
@@ -1088,43 +1086,60 @@ double DirectHistogramShannonBits(const Histogram& histogram) {
   return bits;
 }
 
+// This private hot loop returns static error text; callers construct Status
+// only on failure. Keep the ordered floating-point cost evaluation unchanged.
 template <typename Histogram>
-Status DirectHistogramDistance(
+const char* DirectHistogramDistance(
   const Histogram& left,
   const DirectAnsHistogram& right,
   const std::array<double, kExactLog2TableSize + 1>& log2_table,
   double* distance) {
 
   if (distance == nullptr) {
-    return Status::InvalidArgument("Direct ANS distance output is null");
+    return "Direct ANS distance output is null";
   }
   if (left.total_count >
       std::numeric_limits<uint64_t>::max() - right.total_count) {
-    return Status::InvalidArgument("Direct ANS histogram count overflow");
+    return "Direct ANS histogram count overflow";
   }
   const uint64_t total_count = left.total_count + right.total_count;
   if (total_count == 0) {
     *distance = 0.0;
-    return Status::Ok();
+    return nullptr;
   }
   double combined_bits = static_cast<double>(total_count) *
     ExactCountLog2(total_count, log2_table);
   const size_t alphabet_size = std::max(
     left.total_count == 0 ? 0 : left.maximum_symbol + 1,
     right.total_count == 0 ? 0 : right.maximum_symbol + 1);
-  for (size_t symbol = 0; symbol < alphabet_size; ++symbol) {
-    if (left.counts[symbol] >
-        std::numeric_limits<uint64_t>::max() - right.counts[symbol]) {
-      return Status::InvalidArgument("Direct ANS histogram count overflow");
+  // Counts come from checked token accumulation or validated fixed populations;
+  // AddHistogram preserves their totals. Each bin is bounded by its total, so
+  // the checked combined total above also proves that every bin sum fits.
+#if defined(__aarch64__) && defined(__clang__)
+  if (total_count <= kExactLog2TableSize) {
+    // Every bin sum fits the table when the combined total does. The zero
+    // entry is +0.0, so zero bins can participate in the ordered accumulation
+    // without changing its result. Explicit fma preserves the scalar ARM64
+    // loop's fused rounding for both owned and borrowed histograms.
+#pragma clang loop unroll_count(4)
+    for (size_t symbol = 0; symbol < alphabet_size; ++symbol) {
+      const uint64_t count = left.counts[symbol] + right.counts[symbol];
+      combined_bits = std::fma(
+        -static_cast<double>(count), log2_table[count], combined_bits);
     }
-    const uint64_t count = left.counts[symbol] + right.counts[symbol];
-    if (count != 0) {
-      combined_bits -= static_cast<double>(count) *
-        ExactCountLog2(count, log2_table);
+  } else
+#endif
+  {
+    for (size_t symbol = 0; symbol < alphabet_size; ++symbol) {
+      const uint64_t count = left.counts[symbol] + right.counts[symbol];
+      if (count != 0) {
+        combined_bits -= static_cast<double>(count) *
+          ExactCountLog2(count, log2_table);
+      }
     }
   }
   *distance = combined_bits - left.shannon_bits - right.shannon_bits;
-  return Status::Ok();
+  return nullptr;
 }
 
 template <typename Histogram>
@@ -1182,12 +1197,13 @@ template <typename Histogram>
 Status FastClusterDirectAnsHistograms(
   Storage<Histogram>& source,
   Storage<DirectAnsHistogram>* clustered,
-  Storage<uint32_t>* symbols) {
+  Storage<uint32_t>* symbols,
+  size_t maximum_clusters) {
 
   if (source.empty() || clustered == nullptr || symbols == nullptr) {
     return Status::InvalidArgument("Direct ANS clustering input is invalid");
   }
-  constexpr size_t kMaximumClusters = kMaximumPrefixClusters;
+  const size_t kMaximumClusters = maximum_clusters;
   constexpr double kMinimumDistinctDistance = 48.0;
   // This is the partition builder's private working set. Cache Shannon costs
   // in place instead of copying every 256-bin histogram, including empty ones.
@@ -1222,10 +1238,10 @@ Status FastClusterDirectAnsHistograms(
         continue;
       }
       double distance = 0.0;
-      if (Status status = DirectHistogramDistance(
+      if (const char* error = DirectHistogramDistance(
             source[index], clustered->back(), log2_table, &distance);
-          !status.ok()) {
-        return status;
+          error != nullptr) {
+        return Status::InvalidArgument(error);
       }
       distances[index] = std::min(distances[index], distance);
       if (distances[index] > distances[largest_index]) {
@@ -1244,10 +1260,10 @@ Status FastClusterDirectAnsHistograms(
     double best_distance = std::numeric_limits<double>::infinity();
     for (size_t cluster = 0; cluster < clustered->size(); ++cluster) {
       double distance = 0.0;
-      if (Status status = DirectHistogramDistance(
+      if (const char* error = DirectHistogramDistance(
             source[index], (*clustered)[cluster], log2_table, &distance);
-          !status.ok()) {
-        return status;
+          error != nullptr) {
+        return Status::InvalidArgument(error);
       }
       if (distance < best_distance) {
         best = cluster;
@@ -1415,7 +1431,9 @@ Status PrepareDirectAnsPartition(
   EntropyWorkProfile* profile) {
 
   if (partition == nullptr || prepared == nullptr ||
-      options.context_count == 0 || !options.uint_config.valid()) {
+      options.context_count == 0 || !options.uint_config.valid() ||
+      options.maximum_ans_clusters == 0 ||
+      options.maximum_ans_clusters > kMaximumAnsClusters) {
     return Status::InvalidArgument("Direct ANS partition output is invalid");
   }
   size_t histogram_count = options.context_count;
@@ -1530,9 +1548,11 @@ Status PrepareDirectAnsPartition(
     Storage<uint32_t> histogram_symbols;
     Status status = borrow_populations
       ? FastClusterDirectAnsHistograms(
-          borrowed_histograms, &clustered, &histogram_symbols)
+          borrowed_histograms, &clustered, &histogram_symbols,
+          options.maximum_ans_clusters)
       : FastClusterDirectAnsHistograms(
-          histograms, &clustered, &histogram_symbols);
+          histograms, &clustered, &histogram_symbols,
+          options.maximum_ans_clusters);
     if (status.ok() &&
         mode == codestream_internal::DirectAnsEntropyMode::kHighDensity) {
       status = RefineBestDirectAnsClusters(
@@ -1976,7 +1996,7 @@ Status codestream_internal::ValidateAnsEntropyCode(const EntropyCode& code) {
       code.context_map.size() != code.context_count ||
       !code.prefix_codes.empty() || code.ans_log_alpha_size < 5 ||
       code.ans_log_alpha_size > 8 || code.ans_histograms.empty() ||
-      code.ans_histograms.size() > kMaximumPrefixClusters ||
+      code.ans_histograms.size() > kMaximumAnsClusters ||
       code.uint_configs.size() != code.ans_histograms.size()) {
     return Status::InvalidArgument("ANS entropy-code dimensions are invalid");
   }
@@ -2116,11 +2136,23 @@ Status codestream_internal::WriteAnsTokenStream(
         !status.ok()) {
       return status;
     }
-    Storage<ReverseBitChunk> reverse_chunks;
-    reverse_chunks.reserve(chunk_count);
-    const auto append_chunk = [&reverse_chunks](
-                                uint32_t bits, uint8_t bit_count) {
-      reverse_chunks.push_back({bits, bit_count});
+    // Pack during reverse token processing. Every stored word contains 56
+    // bits; only the final pending word needs a separate logical width.
+    Storage<uint64_t> reverse_words;
+    reverse_words.reserve(chunk_count);
+    uint64_t pending = 0;
+    size_t pending_bits = 0;
+    const auto append_chunk = [&](uint32_t bits, uint8_t bit_count) {
+      if (pending_bits + bit_count >= BitWriter::kMaxBitsPerWrite) {
+        const size_t take = BitWriter::kMaxBitsPerWrite - pending_bits;
+        const size_t remaining = bit_count - take;
+        reverse_words.push_back((pending << take) | (uint64_t{bits} >> remaining));
+        pending = bits & ((uint64_t{1} << remaining) - 1);
+        pending_bits = remaining;
+      } else {
+        pending = (pending << bit_count) | bits;
+        pending_bits += bit_count;
+      }
     };
     uint32_t state = 0;
     if (Status status = ProcessAnsTokenStream(
@@ -2128,18 +2160,23 @@ Status codestream_internal::WriteAnsTokenStream(
         !status.ok()) {
       return status;
     }
+    // The checked token bound above also bounds this exact size calculation.
+    const size_t total_bits = 32 + pending_bits +
+      BitWriter::kMaxBitsPerWrite * reverse_words.size();
     BitWriter temporary;
-    if (Status status = temporary.WriteBits(32, state); !status.ok()) {
-      return status;
-    }
-    for (auto chunk = reverse_chunks.rbegin(); chunk != reverse_chunks.rend();
-         ++chunk) {
-      if (Status status = temporary.WriteBits(
-            chunk->bit_count, chunk->bits);
-          !status.ok()) {
-        return status;
+    const auto write_words = [&]() -> Status {
+      if (Status write = temporary.WriteBits(32, state); !write.ok()) return write;
+      if (Status write = temporary.WriteBits(pending_bits, pending); !write.ok())
+        return write;
+      for (auto word = reverse_words.rbegin(); word != reverse_words.rend(); ++word) {
+        if (Status write = temporary.WriteBits(BitWriter::kMaxBitsPerWrite, *word);
+            !write.ok()) return write;
       }
-    }
+      return Status::Ok();
+    };
+    // reference_wrapper keeps the synchronous callback allocation-free.
+    Status status = temporary.WithMaxBits(total_bits, std::cref(write_words));
+    if (!status.ok()) return status;
     return writer->Append(temporary);
   } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
     return error.status();
@@ -3025,9 +3062,16 @@ Status codestream_internal::ComputeAnsReverseChunkCount(size_t tokens,
                                                        size_t* out) {
   if (out == nullptr)
     return Status::InvalidArgument("ANS chunk count output is null");
-  if (tokens > Storage<ReverseBitChunk>{}.max_size() / 2)
+  // Every token emits at most 31 extra bits and 16 renormalization bits.
+  // Full packed words are 56 bits. Include the final state in the overflow
+  // proof used by emission's exact output reservation.
+  if (tokens > (std::numeric_limits<size_t>::max() - kAnsStreamStateBits) /
+                 kAnsMaximumTokenBits)
     return Status::OutOfMemory("ANS reverse chunk count overflows");
-  *out = 2 * tokens;
+  const size_t words = tokens * kAnsMaximumTokenBits / BitWriter::kMaxBitsPerWrite;
+  if (words > Storage<uint64_t>{}.max_size())
+    return Status::OutOfMemory("ANS reverse word count overflows");
+  *out = words;
   return Status::Ok();
 }
 
@@ -3050,7 +3094,7 @@ Status codestream_internal::ComputeEntropyTokenEmissionStoragePlan(
   if (mode == EntropyCodingMode::kAns) {
     status = ComputeAnsReverseChunkCount(tokens, &plan.reverse_chunks);
     if (!status.ok()) return status;
-    if (!plan.scratch.AddVector<ReverseBitChunk>(plan.reverse_chunks,
+    if (!plan.scratch.AddVector<uint64_t>(plan.reverse_chunks,
           resource_budget_internal::VectorCapacityPolicy::kFreshExact))
       return Status::OutOfMemory("Entropy emission storage overflows");
   }
@@ -3067,7 +3111,8 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
   if (out == nullptr || o.contexts == 0 || o.contexts > UINT32_MAX ||
       o.initial_histograms > 256 || o.retain_prepared_clusters ||
       (!direct && o.policy != kAnsFromPrefix && o.policy != kDeferredAnsFromPrefix) ||
-      (direct && o.borrow_prepared_clusters) ||
+      (direct && (o.borrow_prepared_clusters || o.maximum_ans_clusters == 0 ||
+                  o.maximum_ans_clusters > kMaximumAnsClusters)) ||
       (o.policy == kDeferredAnsFromPrefix && !o.borrow_prepared_clusters))
     return Status::InvalidArgument("ANS optimization plan is invalid");
   const bool balanced = o.policy == kBalancedAns;
@@ -3075,7 +3120,8 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
   const size_t histograms = o.initial_histograms == 0
     ? o.contexts : o.initial_histograms;
   EntropyOptimizationStoragePlan plan;
-  const size_t k = plan.clusters = std::min(kMaximumPrefixClusters, histograms);
+  const size_t k = plan.clusters = std::min(
+    direct ? o.maximum_ans_clusters : kMaximumPrefixClusters, histograms);
   const size_t configs = balanced ? 1 : (direct
     ? kHighDensityAnsUintConfigs.size() : kAnsUintConfigs.size());
   const size_t widths = direct ? 1 : kAnsAlphabetWidthCount;
@@ -3160,7 +3206,7 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
     } else {
       // Initial K*(K-1)/2 pairs plus (K-1)*(K-2)/2 after successful merges.
       // Stale queue entries retain capacity: bound ALL enqueues, (K-1)^2,
-      // not merely the current active-cluster pairs. K is in [1,32].
+      // not merely the current active-cluster pairs. K is in [1,64].
       if (!work.AddVector<double>(k, kFreshExact) ||
           !work.AddVector<uint32_t>(k, kFreshExact, 3) ||
           !work.AddVector<DirectAnsClusterPair>((k - 1) * (k - 1), kGrowing) ||

@@ -216,9 +216,12 @@ bool CheckWorkersAndRetainedStorage() {
 }
 
 bool CheckBitWriterAtomicity() {
-  ResourceBudget budget(16);
+  // The writer now keeps seven writable padding bytes. Its first two writes
+  // grow from 8 to 16 backing bytes (24 transiently); the next growth needs
+  // 16 + 32 and must fail before publication under this 32-byte reservation.
+  ResourceBudget budget(32);
   ResourceReservation job;
-  if (!Ok(budget.Reserve(16, &job))) return false;
+  if (!Ok(budget.Reserve(32, &job))) return false;
   BitWriter writer;
   {
     ResourceContextScope context({&job, ResourceClass::kPreparation});

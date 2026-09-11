@@ -1524,6 +1524,29 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
               dc_streams, {.context_count = kSimpleDcContextCount}, &dc_code,
               &dc_cost, &prefix_dc_code, &prefix_dc_cost, entropy_profile);
           }
+          if (options.entropy_behavior == VarDctEntropyBehavior::kBalanced) {
+            // Keep this work in the parallel entropy phase. Selection and ANS
+            // construction share populations instead of traversing DC twice.
+            Storage<EntropyTokenStreamView> dc_views;
+            dc_views.reserve(dc_streams.size());
+            for (const auto& stream : dc_streams) {
+              dc_views.push_back(EntropyTokenStreamView::Interleaved(stream));
+            }
+            Storage<codestream_internal::PreparedFixedAnsCluster> populations;
+            const auto population_begin = WorkBegin(entropy_profile != nullptr);
+            Status population_status =
+              codestream_internal::CollectDefaultEntropyPopulations(
+                dc_views, kSimpleDcContextCount, &populations);
+            WorkEnd(
+              entropy_profile != nullptr, population_begin,
+              entropy_profile == nullptr ? nullptr :
+                &entropy_profile->ans_histogram_build_nanoseconds);
+            if (!population_status.ok()) return population_status;
+            return OptimizeOrdinaryEntropyCode(
+              dc_views, {.context_count = kSimpleDcContextCount},
+              options.entropy_behavior, populations, true,
+              &dc_code, &dc_cost, entropy_profile);
+          }
           return OptimizeOrdinaryEntropyCode(
             dc_streams, {.context_count = kSimpleDcContextCount},
             options.entropy_behavior, true,
@@ -1555,6 +1578,8 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
           {
             .context_count = static_cast<uint32_t>(
               candidate.block_context_map.ac_context_count()),
+            .maximum_ans_clusters = codestream_internal::AcAnsClusterLimit(
+              frame.geometry().frame()),
           },
           options.entropy_behavior, candidate.fixed_context_populations, true,
           &candidate.ac_code, &candidate.ac_cost, entropy_profile);
@@ -2047,7 +2072,10 @@ Status codestream_internal::ComputeSerializerControlStorageBound(
       !work.AddVector<size_t>(sections, kFreshExact) ||
       (g == 1 && !work.AddVector<size_t>(1, kFreshExact)) ||
       !work.AddVector<uint8_t>(kSimpleBlockContextMap.size(), kFreshExact) ||
-      (!exhaustive && !work.AddVector<uint64_t>(d, kFreshExact))) {
+      (!exhaustive && !work.AddVector<uint64_t>(d, kFreshExact)) ||
+      (options.coding.entropy_behavior == VarDctEntropyBehavior::kBalanced &&
+       !work.AddVector<PreparedFixedAnsCluster>(
+         kSimpleDcContextCount, kFreshExact))) {
     return Status::OutOfMemory("Serializer control backing overflows");
   }
   // One top-level dispatcher exists at a time; maximum count covers every
@@ -2089,6 +2117,55 @@ Status codestream_internal::ComputeSerializerControlStorageBound(
     }
   }
   *out = work;
+  return Status::Ok();
+}
+
+Status codestream_internal::CollectDefaultEntropyPopulations(
+  std::span<const EntropyTokenStreamView> streams,
+  uint32_t context_count,
+  Storage<PreparedFixedAnsCluster>* populations) {
+
+  if (populations == nullptr || context_count == 0) {
+    return Status::InvalidArgument("Ordinary entropy populations are invalid");
+  }
+  try {
+    Storage<PreparedFixedAnsCluster> candidate(context_count);
+    size_t token_count = 0;
+    for (const EntropyTokenStreamView stream : streams) {
+      if (!stream.valid() ||
+          stream.size() > std::numeric_limits<size_t>::max() - token_count) {
+        return Status::InvalidArgument("Entropy token stream is invalid");
+      }
+      token_count += stream.size();
+      for (size_t index = 0; index < stream.size(); ++index) {
+        const EntropyToken token = stream[index];
+        if (token.context >= context_count) {
+          return Status::InvalidArgument("Entropy token context is out of range");
+        }
+        const HybridUintToken encoded = EncodeHybridUintValidated(
+          token.value, kDefaultHybridUintConfig);
+        auto& population = candidate[token.context];
+        // Global token_count bounds every bin and per-context count. Default
+        // HybridUint maps every uint32_t into the fixed ANS alphabet.
+        if (population.extra_bits > std::numeric_limits<uint64_t>::max() -
+              encoded.extra_bit_count) {
+          return Status::InvalidArgument("ANS histogram count overflow");
+        }
+        ++population.counts[encoded.symbol];
+        ++population.token_count;
+        population.extra_bits += encoded.extra_bit_count;
+        population.maximum_symbol = std::max(
+          population.maximum_symbol, encoded.symbol);
+      }
+    }
+    *populations = std::move(candidate);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
+  }
   return Status::Ok();
 }
 

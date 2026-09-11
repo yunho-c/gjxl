@@ -45,6 +45,7 @@ ComputeEntropyModelStoragePlan(EntropyCodingMode mode, size_t contexts,
 
 struct EntropyTokenEmissionStoragePlan {
   size_t maximum_bits = 0;
+  // Full 56-bit reverse words; the partial word stays on the stack.
   size_t reverse_chunks = 0;
   HostStorageBound scratch;
   bool operator==(const EntropyTokenEmissionStoragePlan &) const = default;
@@ -84,6 +85,7 @@ struct EntropyOptimizationStorageOptions {
   bool retain_prepared_clusters =
       false; // Non-fast Prefix; requires return_cost.
   bool borrow_prepared_clusters = false; // ANS-from-Prefix input only.
+  size_t maximum_ans_clusters = kDefaultDirectAnsClusters; // Direct ANS only.
 };
 
 struct EntropyOptimizationStoragePlan {

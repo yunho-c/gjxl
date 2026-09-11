@@ -280,8 +280,10 @@ Status AllocationFailure(const char* operation) {
 
 Status codestream_internal::ComputeSerializerHeaderStoragePlan(
   size_t ac_groups, size_t dc_groups, const BlockContextMapStoragePlan& maps,
-  size_t order_tokens, SerializerHeaderStoragePlan* out) {
+  size_t order_tokens, SerializerHeaderStoragePlan* out,
+  size_t maximum_ac_ans_clusters) {
   if (out == nullptr || ac_groups == 0 || dc_groups == 0 ||
+      maximum_ac_ans_clusters == 0 || maximum_ac_ans_clusters > kMaximumAnsClusters ||
       dc_groups >= static_cast<size_t>(std::numeric_limits<int32_t>::max()) ||
       maps.maximum_map_entries == 0 || maps.maximum_block_contexts == 0 ||
       maps.maximum_block_contexts > 16 || maps.maximum_thresholds > 1) {
@@ -300,14 +302,15 @@ Status codestream_internal::ComputeSerializerHeaderStoragePlan(
     const Status status = ComputeEntropyWriterStorageBound(bits, &scratch);
     return status.ok() && bound->Add(scratch);
   };
-  const auto either_model = [](size_t contexts, EntropyModelStoragePlan* model) {
+  const auto either_model = [](size_t contexts, EntropyModelStoragePlan* model,
+                               size_t maximum_ans_clusters = kDefaultDirectAnsClusters) {
     EntropyModelStoragePlan prefix, ans;
     const size_t clusters = std::min(contexts, kMaximumPrefixClusters);
     Status status = ComputeEntropyModelStoragePlan(
       EntropyCodingMode::kPrefix, contexts, clusters, &prefix);
     if (!status.ok()) return status;
     status = ComputeEntropyModelStoragePlan(
-      EntropyCodingMode::kAns, contexts, clusters, &ans);
+      EntropyCodingMode::kAns, contexts, std::min(contexts, maximum_ans_clusters), &ans);
     if (!status.ok()) return status;
     *model = {
       .maximum_bits = std::max(prefix.maximum_bits, ans.maximum_bits),
@@ -327,7 +330,7 @@ Status codestream_internal::ComputeSerializerHeaderStoragePlan(
       !writer(33, &plan.frame_scratch)) return overflow();
   Status status = either_model(kSimpleDcContextCount, &plan.dc_model);
   if (!status.ok()) return status;
-  status = either_model(maps.maximum_ac_contexts, &plan.ac_model);
+  status = either_model(maps.maximum_ac_contexts, &plan.ac_model, maximum_ac_ans_clusters);
   if (!status.ok()) return status;
   status = either_model(kSimplePermutationContextCount, &plan.order_model);
   if (!status.ok()) return status;

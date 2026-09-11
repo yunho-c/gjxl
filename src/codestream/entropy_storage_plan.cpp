@@ -32,10 +32,13 @@ Status ComputeEntropyWriterStorageBound(size_t maximum_bits,
                                         HostStorageBound *out) {
   if (out == nullptr)
     return Status::InvalidArgument("Entropy writer bound output is null");
-  // Match BitWriter's checked padded-byte extent, including its +7 limit.
+  // Match BitWriter's logical extent plus writable word-store padding.
   HostStorageBound bound;
-  if (maximum_bits > std::numeric_limits<size_t>::max() - 7 ||
-      !bound.AddVector<uint8_t>((maximum_bits + 7) / 8, kGrowing))
+  if (maximum_bits > std::numeric_limits<size_t>::max() - 7)
+    return Overflow();
+  const size_t bytes = maximum_bits == 0 ? 0 :
+    (maximum_bits + 7) / 8 + BitWriter::kStoragePadding;
+  if (!bound.AddVector<uint8_t>(bytes, kGrowing))
     return Overflow();
   *out = bound;
   return Status::Ok();
@@ -75,7 +78,9 @@ Status ComputeEntropyModelStoragePlan(EntropyCodingMode mode, size_t contexts,
                                       size_t clusters,
                                       EntropyModelStoragePlan *out) {
   if (out == nullptr || contexts == 0 || contexts > UINT32_MAX ||
-      clusters == 0 || clusters > kMaximumPrefixClusters ||
+      clusters == 0 ||
+      clusters > (mode == EntropyCodingMode::kAns ? kMaximumAnsClusters
+                                                 : kMaximumPrefixClusters) ||
       (mode != EntropyCodingMode::kPrefix && mode != EntropyCodingMode::kAns))
     return Status::InvalidArgument("Entropy model plan arguments are invalid");
   EntropyModelStoragePlan plan;

@@ -1227,6 +1227,18 @@ if(GJXL_BUILD_TESTS)
       "System djxl/jxlinfo not found; codestream-smoke target is unavailable")
   endif()
 
+  add_executable(gjxl_bit_writer_append_test tests/bit_writer_append_test.cpp)
+  target_link_libraries(gjxl_bit_writer_append_test PRIVATE gjxl_codestream)
+  add_test(NAME bit_writer_append COMMAND gjxl_bit_writer_append_test)
+
+  add_executable(gjxl_bit_writer_word_test tests/bit_writer_word_test.cpp)
+  target_link_libraries(gjxl_bit_writer_word_test PRIVATE gjxl_codestream)
+  add_test(NAME bit_writer_word COMMAND gjxl_bit_writer_word_test)
+
+  add_executable(gjxl_ans_bit_emission_test tests/ans_bit_emission_test.cpp)
+  target_link_libraries(gjxl_ans_bit_emission_test PRIVATE gjxl_codestream)
+  add_test(NAME ans_bit_emission COMMAND gjxl_ans_bit_emission_test)
+
   add_executable(
     gjxl_bit_writer_test
     tests/bit_writer_test.cpp

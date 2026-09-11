@@ -23,7 +23,9 @@ The converted owners include:
 - Prefix/ANS model owners, reverse lookup maps, reciprocal tables, aggregated
   values, normalization/search scratch, prepared clusters and deferred candidates.
 - Section/model arrays, candidate-size measurements, worker bookkeeping, section
-  lengths and reverse ANS bit chunks. Bit-writer backing was already attached.
+  lengths and reverse ANS storage. The current [bit-writing implementation](entropy-bit-writing.md)
+  uses packed 56-bit reverse words and charges writable word-store padding.
+  Bit-writer backing was already attached at this checkpoint.
 - Sparse aggregation's hash-map nodes and allocator-rebound bucket arrays, as well
   as its dense counts and sorted result. Uncommon uint32 values remain sparse.
 
