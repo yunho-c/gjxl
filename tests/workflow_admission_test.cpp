@@ -413,6 +413,100 @@ bool CheckBatch() {
                "Mixed-domain batch silently escaped an allowance");
 }
 
+struct CompletedCacheBatchObservation {
+  const ExecutionDomain *domain = nullptr;
+  size_t idle_bytes = 0;
+  bool published = false;
+  static void Publish(void *opaque, std::span<const VarDctBatchEncodingResult>,
+                      std::span<const OwnedEncodingResult>) noexcept {
+    auto &s = *static_cast<CompletedCacheBatchObservation *>(opaque);
+    s.idle_bytes = s.domain->snapshot().idle_capacity_bytes;
+    s.published = true;
+  }
+};
+
+bool CheckBatchCompletedCache() {
+  const std::array<Image3FBuffer, 3> images{
+      Image({17, 9}), Image({257, 257}), Image({512, 512})};
+  size_t batches = 0;
+  for (size_t scenario = 0; scenario < 3; ++scenario) {
+    std::array<VarDctBatchEncodingRequest, 4> requests;
+    std::array<std::vector<uint8_t>, 4> expected;
+    std::array<VarDctEncodingSummary, 4> summaries;
+    BatchWorkflowStorageAccumulator accumulator;
+    for (size_t i = 0; i < requests.size(); ++i) {
+      // Same-size resident outputs, changing sizes, and mixed CPU/resident/
+      // compatibility routes all share one batch reservation and backend.
+      const bool cpu = scenario == 2 && i == 1;
+      const bool compatibility = scenario == 2 && i == 2;
+      const size_t image = cpu ? 2 : scenario == 1 && i % 2 == 0 ? 0 : 1;
+      auto options = Options(cpu ? 0 : compatibility ? 2 : 1);
+      options.effort = 7;
+      requests[i] = {images[image].const_view(), options};
+      WorkflowStoragePlan plan;
+      if (!Plan(images[image], options, &plan) ||
+          !Ok(accumulator.AddRequest(&plan)) ||
+          !Ok(EncodeLinearRgbVarDctCodestream(requests[i].linear_rgb, options,
+                                             &expected[i], &summaries[i])))
+        return false;
+    }
+    if (!Ok(TrimVarDctPreparationCache())) return false;
+    for (size_t workers : {size_t{1}, size_t{3}}) {
+      BatchWorkflowStoragePlan full;
+      if (!Ok(accumulator.Finish(workers, 0, &full))) return false;
+      // Keep all pools, fall just below the cache-retention threshold, then
+      // admit exactly one work slot and the retained results with no idle pool.
+      for (size_t limit : {full.working.peak_bytes,
+                           full.minimum_required_bytes + full.idle_pools.peak_bytes - 1,
+                           full.minimum_required_bytes}) {
+        BatchWorkflowStoragePlan plan;
+        if (!Ok(accumulator.Finish(workers, limit, &plan))) return false;
+        const bool keep = limit == full.working.peak_bytes;
+        if (!Check(plan.trim_after_each_image == !keep &&
+                       plan.in_flight == (keep ? workers : 1),
+                   "Completed-cache fixture chose unexpected retirement"))
+          return false;
+        std::shared_ptr<const ExecutionDomain> domain;
+        if (!Ok(ExecutionDomain::Create({limit, 3}, &domain))) return false;
+        for (auto &request : requests) request.options.execution_domain = domain;
+        std::unique_ptr<VarDctBatchEncoder> driver;
+        if (!Ok(VarDctBatchEncoder::Create(workers, &driver))) return false;
+        std::vector<VarDctBatchEncodingResult> results;
+        for (size_t repeat = 0; repeat < 2; ++repeat) {
+          CompletedCacheBatchObservation observation{domain.get()};
+          batch_publication_observer_for_testing = {
+              &observation, CompletedCacheBatchObservation::Publish};
+          const auto status = driver->Encode(requests, &results);
+          batch_publication_observer_for_testing = {};
+          const auto snapshot = domain->snapshot();
+          if (!Ok(status) ||
+              !Check(observation.published && results.size() == requests.size() &&
+                         observation.idle_bytes <= plan.idle_pools.peak_bytes &&
+                         snapshot.peak_committed_bytes <= limit &&
+                         snapshot.active_reservations == 0 && snapshot.waiting_requests == 0,
+                     "Completed-frame cache exceeded its batch idle bound or admission")) {
+            std::cerr << "scenario=" << scenario << " workers=" << workers
+                      << " limit=" << limit << " planned_idle=" << plan.idle_pools.peak_bytes
+                      << " actual_idle=" << observation.idle_bytes << '\n';
+            return false;
+          }
+          for (size_t i = 0; i < requests.size(); ++i) {
+            if (!Ok(results[i].status) ||
+                !Check(results[i].codestream == expected[i] && results[i].summary == summaries[i],
+                       "Cached batch changed a single-image result"))
+              return false;
+          }
+          ++batches;
+        }
+        if (!Ok(WorkflowAdmission::TrimIdle(*domain)) || !Empty(*domain)) return false;
+      }
+    }
+  }
+  std::cout << "Completed-frame batch cache: " << batches
+            << " batches with mixed sizes/routes, cache retention and tight retirement\n";
+  return true;
+}
+
 bool CheckCHandles() {
   GJXLExecutionDomainOptions d{};
   if (!Check(gjxl_execution_domain_options_init(&d, sizeof(d)) == GJXL_OK,
@@ -571,7 +665,7 @@ int main(int argc, char** argv) {
       CheckSharedFifo() && CheckCHandles() ? EXIT_SUCCESS : EXIT_FAILURE;
   if (argc != 1) return EXIT_FAILURE;
   return CheckMixedApiDomain() && CheckSearchReachability() && CheckSingle() && CheckSharedFifo() && CheckBatch() &&
-                 CheckCHandles()
+                 CheckBatchCompletedCache() && CheckCHandles()
              ? EXIT_SUCCESS
              : EXIT_FAILURE;
 }

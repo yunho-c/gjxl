@@ -45,10 +45,10 @@ struct ResidentWorkflowStoragePlan {
   HostStorageBound completion_phase;
   HostStorageBound working;
   // Maximum capacity this workflow can leave in each production Metal pool:
-  // resident input, AQ persistent, AQ staging, Butteraugli. Active work already
-  // includes these bytes. A batch must also bound idle pools left by earlier
-  // images while different images consume its active-work slots.
-  std::array<size_t, 4> idle_pool_capacity{};
+  // resident input, AQ persistent, AQ staging, Butteraugli, completed frame.
+  // Active work already includes these bytes. A batch must also bound idle
+  // pools left by earlier images while different images consume its work slots.
+  std::array<size_t, 5> idle_pool_capacity{};
   bool operator==(const ResidentWorkflowStoragePlan &) const = default;
 };
 

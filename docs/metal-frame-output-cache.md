@@ -64,6 +64,57 @@ outputs that exceed the cache limit. Retained capacity is an accounting measure,
 not a resident-memory measurement. OS memory-pressure reclamation remains
 possible. There are no shader, AC-search cache, or asynchronous-residency changes.
 
+## Batch admission correction
+
+The initial cache commit, `53a5712`, omitted completed-frame capacity from the
+batch planner's idle-pool inventory. The individual allocation remained charged,
+but a batch could retain more idle capacity than its declared bound. A new
+native regression test failed before the correction: four 257×257 resident
+images left 19,637,213 B idle against a 15,442,909 B idle allowance, a **4 MiB
+shortfall**. The encodes themselves succeeded; no actual allocation failure was
+reproduced.
+
+The resident and unified workflow plans now carry a fifth idle-pool contribution
+through the batch accumulator. A batch reserves one maximum completed-frame
+cache across its requests, independent of worker count. This adds 102 MiB to the
+idle allowance for the qualified 4K geometry. CPU and compatibility routes do
+not create completed-frame cache entries and contribute zero to this slot.
+
+The bound uses the production backend's default 128 MiB limit. Variable
+strategies can produce a cacheable output even when the maximum-anchor plan is
+too large: at 4352×2560, dense anchors need 129 MiB but a smaller anchor table can
+fit a 128 MiB bucket. That case retains a 128 MiB allowance; fixed-DCT8 output at
+the same geometry has no allowance because it cannot fit. Geometries whose
+minimum buffer already exceeds the limit also contribute zero.
+
+The existing batch policy now sees the complete idle allowance when deciding
+whether to preserve caches, reduce concurrency, or trim before reusing a work
+slot. This corrects planning; it does not change cache ownership, shader work,
+or the repeated-trim performance regression above. Batch throughput remains a
+separate measurement question.
+
+Permanent qualification includes 36 native batches and 144 byte/summary
+comparisons against single-image oracles: repeated calls, one and three workers,
+same-size and changing-size resident images, mixed CPU/resident/compatibility
+routes, exact cache allowances, the byte below the cache-retention threshold,
+and minimum one-slot budgets. At all-workers-complete publication, observed idle
+capacity must fit the plan; all calls also check the shared hard limit and
+reservation cleanup. Static planning checks cover the 4K allowance, 128 MiB
+boundary, oversized outputs, and one-cache aggregation across requests.
+
+The original small native probes now match their idle bounds exactly. A separate
+4K check produces eight byte-identical outputs against the frozen baseline, with
+Metal API/shader validation enabled: four images with two work slots and caches
+retained, then four with a minimum one-slot budget and per-image trimming.
+Observed idle capacity is exactly the planned 1,988,174,140 B in the first case
+and zero in the second. The follow-up passes 8/8 focused tests, 5/5 Metal
+validation tests, and 3/3 AddressSanitizer tests with leak detection disabled.
+The full Release suite remains 126/127, with the same inherited CPU golden
+mismatch documented below.
+
+Follow-up evidence and the pre-fix failing test are retained under
+`build/frame-output-cache/batch-fix/`.
+
 ## Warm timing
 
 All performance runs use Release code, effort 7, distance 1.2, fully resident

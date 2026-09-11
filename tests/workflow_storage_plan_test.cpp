@@ -99,7 +99,7 @@ bool CheckComposition() {
               !Check(pending, "Unified planning allocated backing"))
             return false;
           HostStorageBound working, output;
-          std::array<size_t, 4> pools{};
+          decltype(WorkflowStoragePlan::idle_pool_capacity) pools{};
           const CpuWorkflowStorageOptions plain{o.encoding, o.collect_timing,
                                                 o.collect_profile};
           if (mode == 0) {
@@ -209,7 +209,7 @@ bool CheckBatchBounds() {
   std::array<WorkflowStoragePlan, 6> plans;
   BatchWorkflowStorageAccumulator batch;
   HostStorageBound retained, metadata;
-  std::array<size_t, 4> pools{};
+  decltype(WorkflowStoragePlan::idle_pool_capacity) pools{};
   size_t largest = 0;
   for (size_t i = 0; i < plans.size(); ++i) {
     auto o = Options(i);
@@ -221,7 +221,7 @@ bool CheckBatchBounds() {
     if (!retained.Add({p.output.retained_bytes, p.output.retained_bytes}))
       return false;
     largest = std::max(largest, p.working.peak_bytes);
-    for (size_t j = 0; j < 4; ++j)
+    for (size_t j = 0; j < pools.size(); ++j)
       pools[j] = std::max(pools[j], p.idle_pool_capacity[j]);
   }
   if (!Ok(batch.AddRequest(nullptr)))
@@ -293,6 +293,69 @@ bool CheckBatchBounds() {
   return Check(!batch.Finish(0, 0, &after).ok() &&
                    !batch.Finish(1, 0, nullptr).ok(),
                "Invalid batch output or concurrency was accepted");
+}
+
+bool CheckCompletedCacheBounds() {
+  constexpr size_t mib = size_t{1} << 20;
+  struct Case { Extent2D source; size_t fixed_bytes, variable_bytes; };
+  for (const Case test : {
+           Case{{17, 9}, mib, mib},
+           Case{{257, 257}, 4 * mib, 4 * mib},
+           Case{{3840, 2160}, 102 * mib, 102 * mib},
+           // 170 AC groups: dense anchors need 129 MiB, but a variable grid
+           // can produce a cacheable 128 MiB output. The bound must include it.
+           Case{{4352, 2560}, 0, 128 * mib},
+           Case{{4096, 2816}, 0, 0},
+           Case{{7680, 4320}, 0, 0}}) {
+    for (int effort : {1, 7}) {
+      for (auto mode : {GpuAdaptiveQuantizationMode::kFullyResident,
+                         GpuAdaptiveQuantizationMode::kThroughput}) {
+        auto options = Options(1);
+        options.encoding.effort = effort;
+        options.encoding.metal_aq_mode = mode;
+        WorkflowStoragePlan plan;
+        if (!Ok(ComputeWorkflowStoragePlan(test.source, options, &plan)) ||
+            !Check(plan.idle_pool_capacity.back() ==
+                       (effort == 1 ? test.fixed_bytes : test.variable_bytes),
+                   "Completed-frame cache bound missed a bucket or retention limit"))
+          return false;
+      }
+    }
+  }
+  for (size_t mode : {size_t{0}, size_t{2}, size_t{3}, size_t{4}, size_t{5}}) {
+    WorkflowStoragePlan plan;
+    if (!Ok(ComputeWorkflowStoragePlan({257, 257}, Options(mode), &plan)) ||
+        !Check(plan.idle_pool_capacity.back() == 0,
+               "A route without completed output reserved its cache"))
+      return false;
+  }
+  BatchWorkflowStorageAccumulator batch;
+  decltype(WorkflowStoragePlan::idle_pool_capacity) maxima{};
+  for (const Extent2D source : {Extent2D{3840, 2160}, {257, 257}, {3840, 2160}}) {
+    auto options = Options(1);
+    options.collect_timing = true;
+    options.encoding.effort = 7;
+    WorkflowStoragePlan plan;
+    if (!Ok(ComputeWorkflowStoragePlan(source, options, &plan)) ||
+        !Ok(batch.AddRequest(&plan))) return false;
+    for (size_t i = 0; i < maxima.size(); ++i)
+      maxima[i] = std::max(maxima[i], plan.idle_pool_capacity[i]);
+  }
+  size_t four_pools = 0;
+  for (size_t i = 0; i < 4; ++i) four_pools += maxima[i];
+  BatchWorkflowStoragePlan full, limited;
+  if (!Ok(batch.Finish(3, 0, &full)) ||
+      !Check(full.idle_pools.peak_bytes == four_pools + 102 * mib,
+             "Batch did not reserve exactly one maximum completed-frame cache") ||
+      !Ok(batch.Finish(3, full.minimum_required_bytes + four_pools, &limited)) ||
+      !Check(limited.trim_after_each_image && limited.idle_pools.peak_bytes == 0,
+             "A budget for only four pools incorrectly kept the completed cache") ||
+      !Ok(batch.Finish(3, full.minimum_required_bytes + full.idle_pools.peak_bytes, &limited)) ||
+      !Check(!limited.trim_after_each_image && limited.in_flight == 1 &&
+                 limited.idle_pools == full.idle_pools,
+             "The complete cache allowance did not preserve a work slot"))
+    return false;
+  return true;
 }
 
 bool CheckCAdapter() {
@@ -515,7 +578,7 @@ bool CheckRealBatch() {
 } // namespace
 
 int main() {
-  return CheckComposition() && CheckBatchBounds() && CheckCAdapter() &&
+  return CheckComposition() && CheckBatchBounds() && CheckCompletedCacheBounds() && CheckCAdapter() &&
                  CheckRealBatch()
              ? EXIT_SUCCESS
              : EXIT_FAILURE;
