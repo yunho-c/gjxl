@@ -1626,6 +1626,261 @@ GJXL_AC_RECTANGULAR_CANDIDATE_LOSS_KERNEL(
 
 #undef GJXL_AC_RECTANGULAR_CANDIDATE_LOSS_KERNEL
 
+
+// Candidate-local residuals preserve the original FP32 halving tree. Each lane
+// first reads its own and Y coefficients into registers. The first barrier
+// publishes magnitudes and completes ALL Y reads before in-place stores.
+// The second tile is dead forward-pixel storage, then magnitude reduction, then
+// inverse pixels. Integer counts reuse dead magnitude cells; Y is not copied.
+template <uint Count, uint Workers>
+__attribute__((always_inline)) inline void AcStrategyLocalResidual(
+  threadgroup float* coefficients, threadgroup float* temporary,
+  device const float* matrices, device const AcStrategyCandidate* candidates,
+  device const float* quant_field, device const float* quant_norms,
+  device ChannelRate* rates, constant AcStrategyBatchParams& params,
+  uint tid, uint transform_index) {
+  constexpr uint Values = Count / Workers;
+  static_assert(Values >= 2, "Residual reductions need at least two values per lane");
+  const uint channel = transform_index % 3;
+  const uint candidate_index = transform_index / 3;
+  const AcStrategyCandidate candidate = candidates[candidate_index];
+  const float quant_norm = AcStrategyQuantNorm(
+    quant_field, quant_norms, candidate, candidate_index, params);
+  const float cfl_factor = channel == 0 ? candidate.cfl_x :
+                           channel == 2 ? candidate.cfl_b : 0.0f;
+  float residual[Values];
+  threadgroup float* magnitude = temporary + channel * Count;
+  uint nonzero = 0;
+#pragma unroll
+  for (uint value = 0; value < Values; ++value) {
+    const uint coefficient = tid + value * Workers;
+    const float decorrelated = coefficients[channel * Count + coefficient] -
+      coefficients[Count + coefficient] * cfl_factor;
+    const float scaled = decorrelated *
+      matrices[(3 + channel) * Count + coefficient] * quant_norm;
+    const float rounded = RoundAwayFromZero(scaled);
+    residual[value] = matrices[channel * Count + coefficient] * (scaled - rounded);
+    magnitude[coefficient] = sqrt(abs(rounded));
+    nonzero += rounded != 0.0f ? 1u : 0u;
+  }
+  // Preserve the original shared-memory magnitude reduction, including the
+  // first rounded store. A register-only variant changed a large-input rate.
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (uint delta = 16; delta != 0; delta /= 2) {
+    nonzero += simd_shuffle_down(nonzero, delta);
+  }
+  threadgroup uint* counts = reinterpret_cast<threadgroup uint*>(magnitude + Count / 2);
+  for (uint stride = Count / 2; stride >= 32; stride /= 2) {
+    for (uint i = tid; i < stride; i += Workers) {
+      magnitude[i] += magnitude[i + stride];
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    if (stride == Count / 2) {
+      // The upper half of the magnitude array is now dead. Reuse a few cells
+      // for integer warp totals; later magnitude levels touch only the lower half.
+      if (tid % 32 == 0) counts[tid / 32] = nonzero;
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+  }
+  if (tid < 32) {
+    float sum = magnitude[tid];
+    for (uint delta = 16; delta != 0; delta /= 2) {
+      sum += simd_shuffle_down(sum, delta);
+    }
+    if (tid == 0) {
+      uint count = 0;
+      for (uint warp = 0; warp < Workers / 32; ++warp) count += counts[warp];
+      rates[transform_index] = {sum, count};
+    }
+  }
+#pragma unroll
+  for (uint value = 0; value < Values; ++value) {
+    coefficients[channel * Count + tid + value * Workers] = residual[value];
+  }
+  // The inverse helper's unconditional barrier publishes the residuals and
+  // finishes all reads of the temporary reduction tile before pixel writes.
+}
+
+kernel void gjxl_ac_strategy_dct8_candidate_loss_local(
+  device const float* opsin_x [[buffer(0)]],
+  device const float* opsin_y [[buffer(1)]],
+  device const float* opsin_b [[buffer(2)]],
+  device const AcStrategyCandidate* candidates [[buffer(3)]],
+  device const float* quant_field [[buffer(4)]],
+  device const float* matrices [[buffer(5)]],
+  device const float* pixel_mask [[buffer(6)]],
+  device float* quant_norm [[buffer(7)]],
+  device float* loss_sums [[buffer(8)]],
+  device ChannelRate* channel_rates [[buffer(9)]],
+  constant AcStrategyBatchParams& params [[buffer(10)]],
+  uint tid [[thread_index_in_threadgroup]],
+  uint lane [[thread_index_in_simdgroup]],
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint candidate_index [[threadgroup_position_in_grid]]) {
+  constexpr uint Count = 8 * 8;
+  constexpr uint Workers = 8 / 8 * 32;
+  const uint channel = tid / Workers;
+  const uint local_tid = tid % Workers;
+  const uint local_simdgroup = simdgroup_index % (Workers / 32);
+  const uint transform_index = candidate_index * 3 + channel;
+  threadgroup float coefficients[3 * Count];
+  threadgroup float temporary[3 * Count];
+  threadgroup float basis[Count];
+  for (uint i = tid; i < Count; i += 3 * Workers) basis[i] = kOrthonormalDct8[i];
+  AcStrategyForwardSquareDct<8, true, false>(
+    opsin_x, opsin_y, opsin_b, candidates, coefficients, quant_field,
+    quant_norm, params, kOrthonormalDct8, kForwardDct8Scale,
+    temporary + channel * Count, basis, lane, 32, local_simdgroup,
+    uint3(transform_index, 0, 0));
+  threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
+  AcStrategyLocalResidual<Count, Workers>(
+    coefficients, temporary, matrices, candidates, quant_field, quant_norm,
+    channel_rates, params, local_tid, transform_index);
+  AcStrategyInverseSquareDct<8, Workers, false>(
+    coefficients + channel * Count, temporary + channel * Count,
+    kOrthonormalDct8, kInverseDct8Scale, basis,
+    local_tid, local_simdgroup, uint3(0));
+  AcStrategyReduceInverseLoss<Count, Workers, true>(
+    temporary + channel * Count, pixel_mask, candidates, loss_sums,
+    params, local_tid, transform_index);
+}
+
+kernel void gjxl_ac_strategy_dct32x16_candidate_loss_local(
+  device const float* opsin_x [[buffer(0)]],
+  device const float* opsin_y [[buffer(1)]],
+  device const float* opsin_b [[buffer(2)]],
+  device const AcStrategyCandidate* candidates [[buffer(3)]],
+  device const float* quant_field [[buffer(4)]],
+  device const float* matrices [[buffer(5)]],
+  device const float* pixel_mask [[buffer(6)]],
+  device float* quant_norm [[buffer(7)]],
+  device float* loss_sums [[buffer(8)]],
+  device ChannelRate* channel_rates [[buffer(9)]],
+  constant AcStrategyBatchParams& params [[buffer(10)]],
+  uint tid [[thread_index_in_threadgroup]],
+  uint lane [[thread_index_in_simdgroup]],
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint candidate_index [[threadgroup_position_in_grid]]) {
+  constexpr uint Count = 32 * 16;
+  constexpr uint Workers = 32 / 8 * 32;
+  const uint channel = tid / Workers;
+  const uint local_tid = tid % Workers;
+  const uint local_simdgroup = simdgroup_index % (Workers / 32);
+  const uint transform_index = candidate_index * 3 + channel;
+  threadgroup float coefficients[3 * Count];
+  threadgroup float temporary[3 * Count];
+  threadgroup float vertical[1024];
+  threadgroup float horizontal[256];
+  for (uint i = tid; i < 1024; i += 3 * Workers) vertical[i] = kOrthonormalDct32[i];
+  for (uint i = tid; i < 256; i += 3 * Workers) horizontal[i] = kOrthonormalDct16[i];
+  AcStrategyForwardRectangularDct<32, 16, true, false>(
+    opsin_x, opsin_y, opsin_b, candidates, coefficients, quant_field,
+    quant_norm, params, kOrthonormalDct32, kOrthonormalDct16,
+    kForwardDct32x16Scale, temporary + channel * Count, vertical, horizontal,
+    lane, 32, local_simdgroup, uint3(transform_index, 0, 0));
+  threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
+  AcStrategyLocalResidual<Count, Workers>(
+    coefficients, temporary, matrices, candidates, quant_field, quant_norm,
+    channel_rates, params, local_tid, transform_index);
+  AcStrategyInverseRectangularDct<32, 16, Workers, false>(
+    coefficients + channel * Count, temporary + channel * Count,
+    kOrthonormalDct32, kOrthonormalDct16, kInverseDct32x16Scale,
+    vertical, horizontal, local_tid, local_simdgroup, uint3(0));
+  AcStrategyReduceInverseLoss<Count, Workers, true>(
+    temporary + channel * Count, pixel_mask, candidates, loss_sums,
+    params, local_tid, transform_index);
+}
+
+kernel void gjxl_ac_strategy_dct16x32_candidate_loss_local(
+  device const float* opsin_x [[buffer(0)]],
+  device const float* opsin_y [[buffer(1)]],
+  device const float* opsin_b [[buffer(2)]],
+  device const AcStrategyCandidate* candidates [[buffer(3)]],
+  device const float* quant_field [[buffer(4)]],
+  device const float* matrices [[buffer(5)]],
+  device const float* pixel_mask [[buffer(6)]],
+  device float* quant_norm [[buffer(7)]],
+  device float* loss_sums [[buffer(8)]],
+  device ChannelRate* channel_rates [[buffer(9)]],
+  constant AcStrategyBatchParams& params [[buffer(10)]],
+  uint tid [[thread_index_in_threadgroup]],
+  uint lane [[thread_index_in_simdgroup]],
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint candidate_index [[threadgroup_position_in_grid]]) {
+  constexpr uint Count = 16 * 32;
+  constexpr uint Workers = 16 / 8 * 32;
+  const uint channel = tid / Workers;
+  const uint local_tid = tid % Workers;
+  const uint local_simdgroup = simdgroup_index % (Workers / 32);
+  const uint transform_index = candidate_index * 3 + channel;
+  threadgroup float coefficients[3 * Count];
+  threadgroup float temporary[3 * Count];
+  threadgroup float vertical[256];
+  threadgroup float horizontal[1024];
+  for (uint i = tid; i < 256; i += 3 * Workers) vertical[i] = kOrthonormalDct16[i];
+  for (uint i = tid; i < 1024; i += 3 * Workers) horizontal[i] = kOrthonormalDct32[i];
+  AcStrategyForwardRectangularDct<16, 32, true, false>(
+    opsin_x, opsin_y, opsin_b, candidates, coefficients, quant_field,
+    quant_norm, params, kOrthonormalDct16, kOrthonormalDct32,
+    kForwardDct32x16Scale, temporary + channel * Count, vertical, horizontal,
+    lane, 32, local_simdgroup, uint3(transform_index, 0, 0));
+  threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
+  AcStrategyLocalResidual<Count, Workers>(
+    coefficients, temporary, matrices, candidates, quant_field, quant_norm,
+    channel_rates, params, local_tid, transform_index);
+  AcStrategyInverseRectangularDct<16, 32, Workers, false>(
+    coefficients + channel * Count, temporary + channel * Count,
+    kOrthonormalDct16, kOrthonormalDct32, kInverseDct32x16Scale,
+    vertical, horizontal, local_tid, local_simdgroup, uint3(0));
+  AcStrategyReduceInverseLoss<Count, Workers, true>(
+    temporary + channel * Count, pixel_mask, candidates, loss_sums,
+    params, local_tid, transform_index);
+}
+
+kernel void gjxl_ac_strategy_dct32_candidate_loss_local(
+  device const float* opsin_x [[buffer(0)]],
+  device const float* opsin_y [[buffer(1)]],
+  device const float* opsin_b [[buffer(2)]],
+  device const AcStrategyCandidate* candidates [[buffer(3)]],
+  device const float* quant_field [[buffer(4)]],
+  device const float* matrices [[buffer(5)]],
+  device const float* pixel_mask [[buffer(6)]],
+  device float* quant_norm [[buffer(7)]],
+  device float* loss_sums [[buffer(8)]],
+  device ChannelRate* channel_rates [[buffer(9)]],
+  constant AcStrategyBatchParams& params [[buffer(10)]],
+  uint tid [[thread_index_in_threadgroup]],
+  uint lane [[thread_index_in_simdgroup]],
+  uint simdgroup_index [[simdgroup_index_in_threadgroup]],
+  uint candidate_index [[threadgroup_position_in_grid]]) {
+  constexpr uint Count = 32 * 32;
+  constexpr uint Workers = 32 / 8 * 32;
+  const uint channel = tid / Workers;
+  const uint local_tid = tid % Workers;
+  const uint local_simdgroup = simdgroup_index % (Workers / 32);
+  const uint transform_index = candidate_index * 3 + channel;
+  threadgroup float coefficients[3 * Count];
+  threadgroup float temporary[3 * Count];
+  threadgroup float basis[Count];
+  for (uint i = tid; i < Count; i += 3 * Workers) basis[i] = kOrthonormalDct32[i];
+  AcStrategyForwardSquareDct<32, true, false>(
+    opsin_x, opsin_y, opsin_b, candidates, coefficients, quant_field,
+    quant_norm, params, kOrthonormalDct32, kForwardDct32Scale,
+    temporary + channel * Count, basis, lane, 32, local_simdgroup,
+    uint3(transform_index, 0, 0));
+  threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
+  AcStrategyLocalResidual<Count, Workers>(
+    coefficients, temporary, matrices, candidates, quant_field, quant_norm,
+    channel_rates, params, local_tid, transform_index);
+  AcStrategyInverseSquareDct<32, Workers, false>(
+    coefficients + channel * Count, temporary + channel * Count,
+    kOrthonormalDct32, kInverseDct32Scale, basis,
+    local_tid, local_simdgroup, uint3(0));
+  AcStrategyReduceInverseLoss<Count, Workers, true>(
+    temporary + channel * Count, pixel_mask, candidates, loss_sums,
+    params, local_tid, transform_index);
+}
+
 kernel void gjxl_ac_strategy_cost_from_loss(
   device const float* loss_sums [[buffer(0)]],
   device const float* pixel_mask [[buffer(1)]],

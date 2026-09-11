@@ -38,6 +38,7 @@ constexpr size_t kColorTileBlockDimension =
 static_assert(kColorTileBlockDimension == 8);
 
 Status ValidateSearchInputs(
+  GpuBackend& gpu,
   ConstImage3FView opsin,
   const ResidentAcStrategySearchInputs* resident,
   ConstPlaneF32View quant_field,
@@ -53,7 +54,7 @@ Status ValidateSearchInputs(
     ? opsin.extent()
     : resident == nullptr ? Extent2D{} : resident->opsin.plane[0].extent;
   const Status status = ac_strategy_search_internal::ComputeStoragePlan(
-    opsin_extent, resident != nullptr, storage_plan);
+    opsin_extent, resident != nullptr, storage_plan, &gpu);
   if (!status.ok()) return status;
   if (!quant_field.valid() || quant_field.extent != storage_plan->block_extent ||
       (!(resident != nullptr && pixel_mask.data == nullptr &&
@@ -185,9 +186,13 @@ Status EnsureAllocation(
   size_t size_bytes,
   std::unique_ptr<DeviceBuffer>* buffer) {
 
-  if (buffer == nullptr || size_bytes == 0) {
+  if (buffer == nullptr) {
     return Status::InvalidArgument(
       "GPU AC-strategy allocation request is invalid");
+  }
+  if (size_bytes == 0) {
+    buffer->reset();
+    return Status::Ok();
   }
   if (*buffer != nullptr && (*buffer)->size_bytes() >= size_bytes &&
       gpu.owns(**buffer)) {
@@ -259,7 +264,7 @@ static Status FindAcStrategyGridGpuImpl(
   const resource_budget_internal::ResourceClassScope resource_class(
     resource_budget_internal::ResourceClass::kAcSearch);
   ac_strategy_search_internal::StoragePlan storage_plan;
-  Status status = ValidateSearchInputs(opsin, resident,
+  Status status = ValidateSearchInputs(gpu, opsin, resident,
     quant_field,
     pixel_mask,
     color_correlation,
@@ -407,11 +412,11 @@ static Status FindAcStrategyGridGpuImpl(
       }
     }
 
-    status = EnsureAllocation(gpu, storage_plan.maximum_packed_bytes, &state.scratch_a);
+    status = EnsureAllocation(gpu, storage_plan.maximum_scratch_a_bytes, &state.scratch_a);
     if (!status.ok()) {
       return status;
     }
-    status = EnsureAllocation(gpu, storage_plan.maximum_packed_bytes, &state.scratch_b);
+    status = EnsureAllocation(gpu, storage_plan.maximum_scratch_b_bytes, &state.scratch_b);
     if (!status.ok()) {
       return status;
     }

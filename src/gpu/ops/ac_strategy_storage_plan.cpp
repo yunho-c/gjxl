@@ -38,7 +38,8 @@ bool Add(size_t value, size_t *total) {
 }
 } // namespace
 
-Status ComputeStoragePlan(Extent2D coding, bool resident, StoragePlan *out) {
+Status ComputeStoragePlan(Extent2D coding, bool resident, StoragePlan *out,
+                          GpuBackend *backend) {
   if (out == nullptr || coding.empty() ||
       coding.width % kJxlBlockDimension != 0 ||
       coding.height % kJxlBlockDimension != 0) {
@@ -95,7 +96,23 @@ Status ComputeStoragePlan(Extent2D coding, bool resident, StoragePlan *out) {
     }
     plan.maximum_packed_bytes =
         std::max(plan.maximum_packed_bytes, packed_bytes);
-    plan.maximum_rate_bytes = std::max(plan.maximum_rate_bytes, rate_bytes);
+    AcStrategyScratchRequirements scratch{packed_bytes, packed_bytes, rate_bytes};
+    if (backend != nullptr && family.candidate_count != 0) {
+      Status status = GetAcStrategyScratchRequirements(
+        *backend, stage.strategy, family.candidate_count, &scratch);
+      if (!status.ok()) return status;
+      if (scratch.scratch_a_bytes > packed_bytes ||
+          scratch.scratch_b_bytes > packed_bytes ||
+          scratch.rate_scratch_bytes > rate_bytes) {
+        return Status::Internal("AC scratch exceeds conservative storage bounds");
+      }
+    }
+    plan.maximum_scratch_a_bytes =
+      std::max(plan.maximum_scratch_a_bytes, scratch.scratch_a_bytes);
+    plan.maximum_scratch_b_bytes =
+      std::max(plan.maximum_scratch_b_bytes, scratch.scratch_b_bytes);
+    plan.maximum_rate_bytes =
+      std::max(plan.maximum_rate_bytes, scratch.rate_scratch_bytes);
     if (family.candidate_count != 0 &&
         (!Add(family.candidate_bytes, &plan.device_bytes) ||
          !Add(family.matrix_bytes, &plan.device_bytes) ||
@@ -106,8 +123,8 @@ Status ComputeStoragePlan(Extent2D coding, bool resident, StoragePlan *out) {
   }
   if (!Add(plan.opsin_bytes, &plan.device_bytes) ||
       !Add(plan.mask_bytes, &plan.device_bytes) ||
-      !Add(plan.maximum_packed_bytes, &plan.device_bytes) ||
-      !Add(plan.maximum_packed_bytes, &plan.device_bytes) ||
+      !Add(plan.maximum_scratch_a_bytes, &plan.device_bytes) ||
+      !Add(plan.maximum_scratch_b_bytes, &plan.device_bytes) ||
       !Add(plan.maximum_rate_bytes, &plan.device_bytes)) {
     return Status::InvalidArgument(
         "GPU AC-strategy device storage sum overflows");

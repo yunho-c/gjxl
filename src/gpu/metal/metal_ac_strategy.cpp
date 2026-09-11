@@ -272,13 +272,17 @@ Status CreateAcStrategyPipelines(
     }
   }
 
-  // Small candidates keep X/Y/B local. Select each optional pipeline
+  // Fused candidates keep X/Y/B local. Select each optional pipeline
   // independently so unsupported shapes retain the split implementation.
   constexpr struct {
     AcStrategyType strategy;
     const char* kernel;
     NS::UInteger threads;
   } kCandidateLossKernels[] = {
+    {AcStrategyType::kDct8, "gjxl_ac_strategy_dct8_candidate_loss_local", 96},
+    {AcStrategyType::kDct32x16, "gjxl_ac_strategy_dct32x16_candidate_loss_local", 384},
+    {AcStrategyType::kDct16x32, "gjxl_ac_strategy_dct16x32_candidate_loss_local", 192},
+    {AcStrategyType::kDct32x32, "gjxl_ac_strategy_dct32_candidate_loss_local", 384},
     {AcStrategyType::kDct16x16,
      "gjxl_ac_strategy_dct16_candidate_loss_parallel", 192},
     {AcStrategyType::kDct16x8,
@@ -427,6 +431,30 @@ Status MetalBackend::RequireMetalBuffer(
     return status;
   }
   *out = const_cast<MetalBuffer*>(validated);
+  return Status::Ok();
+}
+
+Status MetalBackend::GetAcStrategyScratchRequirements(
+  AcStrategyType strategy, size_t candidate_count,
+  AcStrategyScratchRequirements* requirements) const {
+  AcStrategyScratchRequirements sizes;
+  Status status = GpuAcStrategyEvaluation::GetAcStrategyScratchRequirements(
+    strategy, candidate_count, &sizes);
+  if (!status.ok()) return status;
+  if (requirements == nullptr) {
+    return Status::InvalidArgument("AC-strategy scratch output is null");
+  }
+  const size_t index = static_cast<size_t>(strategy);
+  const auto& transform = transform_pipelines_[index];
+  if (!transform.forward.state || !transform.inverse.state) {
+    return Status::Unavailable("Metal candidate strategy is unsupported");
+  }
+  const auto& fused = ac_strategy_pipelines_.fused[index];
+  if (fused.forward && fused.reduces_loss) {
+    sizes.scratch_a_bytes = candidate_count * 3 * sizeof(float);
+  }
+  if (fused.candidate_loss) sizes.scratch_b_bytes = 0;
+  *requirements = sizes;
   return Status::Ok();
 }
 
@@ -595,6 +623,11 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
       "AC-strategy batch buffer size overflows");
   }
 
+  AcStrategyScratchRequirements scratch;
+  Status scratch_status = GetAcStrategyScratchRequirements(
+    batch.strategy, batch.candidate_count, &scratch);
+  if (!scratch_status.ok()) return scratch_status;
+
   const std::array<const DeviceBuffer*, 7> inputs = {
     opsin_views[0].buffer,
     opsin_views[1].buffer,
@@ -606,11 +639,12 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
   };
   const std::array<DeviceBuffer*, 4> outputs = {
     batch.scratch_a,
-    batch.scratch_b,
+    scratch.scratch_b_bytes == 0 ? nullptr : batch.scratch_b,
     batch.rate_scratch,
     batch.costs,
   };
   for (size_t index = 0; index < outputs.size(); ++index) {
+    if (index == 1 && scratch.scratch_b_bytes == 0) continue;
     if (outputs[index] == nullptr) {
       return Status::InvalidArgument(
         "AC-strategy batch output buffer is null");
@@ -669,14 +703,14 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
     validated.quant_field = validated.candidates;
   }
   status = RequireMetalBuffer(
-    batch.scratch_a, packed_bytes, "Scratch A", &validated.scratch_a);
+    batch.scratch_a, scratch.scratch_a_bytes, "Scratch A", &validated.scratch_a);
   if (!status.ok()) {
     return status;
   }
-  status = RequireMetalBuffer(
-    batch.scratch_b, packed_bytes, "Scratch B", &validated.scratch_b);
-  if (!status.ok()) {
-    return status;
+  if (scratch.scratch_b_bytes != 0) {
+    status = RequireMetalBuffer(
+      batch.scratch_b, scratch.scratch_b_bytes, "Scratch B", &validated.scratch_b);
+    if (!status.ok()) return status;
   }
   status = RequireMetalBuffer(
     batch.rate_scratch,

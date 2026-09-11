@@ -165,8 +165,17 @@ struct Fixture {
                 "Fused candidate wrote coefficient scratch");
         continue;
       }
-      Check(std::memcmp(b[i].data(), other.b[i].data(), b[i].size) == 0,
-            "AC candidate bitwise mismatch in buffer " + std::to_string(i));
+      if (std::memcmp(b[i].data(), other.b[i].data(), b[i].size) != 0) {
+        for (size_t j = 0; j < b[i].size / 4; ++j) {
+          if (b[i].as<uint32_t>()[j] != other.b[i].as<uint32_t>()[j]) {
+            std::cerr << "First mismatch buffer=" << i << " word=" << j
+                      << " baseline=" << std::hex << b[i].as<uint32_t>()[j]
+                      << " candidate=" << other.b[i].as<uint32_t>()[j] << std::dec << '\n';
+            break;
+          }
+        }
+        Check(false, "AC candidate bitwise mismatch in buffer " + std::to_string(i));
+      }
     }
   }
 };
@@ -272,9 +281,11 @@ int main(int argc, char **argv) try {
   Check(argc == 3 ||
             (argc == 4 && (std::string_view(argv[3]) == "--fused-baseline" ||
                            std::string_view(argv[3]) == "--staged-reductions" ||
-                           std::string_view(argv[3]) == "--grouped-forward")),
+                           std::string_view(argv[3]) == "--grouped-forward" ||
+                           std::string_view(argv[3]) == "--local-candidates")),
         "usage: gjxl_metal_ac_candidate_probe BASELINE.metallib "
-        "CANDIDATE.metallib [--fused-baseline|--staged-reductions|--grouped-forward]");
+        "CANDIDATE.metallib [--fused-baseline|--staged-reductions|--grouped-forward|--local-candidates]");
+  const bool local_candidates = argc == 4 && std::string_view(argv[3]) == "--local-candidates";
   const bool fused_baseline = argc == 4 &&
                               std::string_view(argv[3]) == "--fused-baseline";
   auto pool = NS::TransferPtr(NS::AutoreleasePool::alloc()->init());
@@ -286,14 +297,20 @@ int main(int argc, char **argv) try {
   if (argc == 4 && std::string_view(argv[3]) == "--staged-reductions")
     return RunStagedReductions(device.get(), queue.get(), argv[1], argv[2]);
   unsigned cases = 0;
-  for (const auto shape :
-       std::array<std::array<unsigned, 2>, 3>{{{16, 16}, {16, 8}, {8, 16}}}) {
+  const std::vector<std::array<unsigned, 2>> shapes = local_candidates
+    ? std::vector<std::array<unsigned, 2>>{{8, 8}, {32, 16}, {16, 32}, {32, 32}}
+    : std::vector<std::array<unsigned, 2>>{{16, 16}, {16, 8}, {8, 16}};
+  for (const auto shape : shapes) {
     const unsigned rows = shape[0], cols = shape[1];
     const std::string prefix = "gjxl_ac_strategy_dct" + std::to_string(rows) +
                               (rows == cols ? "" : "x" + std::to_string(cols));
     Kernel forward(device.get(), argv[1], (prefix + "_forward_fused").c_str());
-    Kernel inverse(device.get(), argv[1],
-                   (prefix + "_residual_inverse_compact_loss").c_str());
+    const unsigned inverse_workers = rows == 32 && cols == 32 ? 512 :
+                                    rows == 16 && cols == 32 ? 256 : rows / 8 * 32;
+    const std::string inverse_name = prefix +
+      (inverse_workers > rows / 8 * 32 ? "_residual_inverse_tuned_loss"
+                                       : "_residual_inverse_compact_loss");
+    Kernel inverse(device.get(), argv[1], inverse_name.c_str());
     // Keep the split oracle as the default. The optional mode compares two
     // fused implementations directly, including their untouched scratch.
     std::optional<Kernel> previous;
@@ -301,7 +318,12 @@ int main(int argc, char **argv) try {
       previous.emplace(device.get(), argv[1],
                        (prefix + "_candidate_loss_parallel").c_str());
     Kernel fused(device.get(), argv[2],
-                 (prefix + "_candidate_loss_parallel").c_str());
+                 (prefix + (local_candidates ? "_candidate_loss_local" :
+                            "_candidate_loss_parallel")).c_str());
+    Check(fused.pipeline->threadExecutionWidth() == 32 &&
+          fused.pipeline->maxTotalThreadsPerThreadgroup() >= rows / 8 * 96 &&
+          fused.pipeline->staticThreadgroupMemoryLength() <= device->maxThreadgroupMemoryLength(),
+          "Fused candidate launch exceeds device/pipeline limits");
     Kernel finish_base(device.get(), argv[1],
                        "gjxl_ac_strategy_cost_from_loss");
     Kernel finish_new(device.get(), argv[2], "gjxl_ac_strategy_cost_from_loss");
@@ -321,7 +343,7 @@ int main(int argc, char **argv) try {
             Fixture b(device.get(), rows, cols, count, pattern, source,
                       padding);
             a.run(queue.get(), previous ? *previous : forward,
-                  previous ? nullptr : &inverse, nullptr);
+                  previous ? nullptr : &inverse, nullptr, inverse_workers);
             b.run(queue.get(), fused, nullptr, nullptr);
             // Also compare quant norm, per-channel rate and loss.
             a.compare(b, fused_baseline);
