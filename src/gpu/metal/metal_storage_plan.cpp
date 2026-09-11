@@ -453,8 +453,8 @@ Status ComputeButteraugliStoragePlan(Extent2D requested, bool borrowing,
                           kButteraugliStorageAlignment, plane);
   };
   for (size_t index = 0; index < candidate.planes.size(); ++index) {
-    if (borrowing && index >= kButteraugliBorrowedFirstPlane &&
-        index < kButteraugliBorrowedFirstPlane + kButteraugliBorrowedPlaneCount)
+    if (borrowing && ButteraugliBorrowedPlaneIndex(index) <
+                         kButteraugliBorrowedPlaneCount)
       continue;
     const Extent2D extent =
         candidate.multiscale && index == kButteraugliFinalStagingPlane

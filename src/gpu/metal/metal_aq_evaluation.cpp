@@ -1561,6 +1561,18 @@ Status MetalPreparedAqEvaluation::Prepare(
       plane.row_stride = coding_extent_.width;
       borrowed_butteraugli_scratch.planes[index++] = plane;
     }
+    // All inverse transforms finish before comparison. Residual coefficients
+    // are dead until the next reconstruction, except for the first plane:
+    // CompleteDistanceMapScratch uses it for complete-map diagnostics.
+    // Keep reconstructed_ independent: deferred frontend reconfiguration can
+    // read it again when regenerating cached forward coefficients.
+    for (size_t channel = 1; channel < 3; ++channel) {
+      DevicePlaneView plane = reconstruction_coefficients_;
+      plane.offset_bytes += channel * pixel_count_ * sizeof(float);
+      plane.extent = coding_extent_;
+      plane.row_stride = coding_extent_.width;
+      borrowed_butteraugli_scratch.planes[index++] = plane;
+    }
     borrowed_butteraugli = &borrowed_butteraugli_scratch;
   }
   DeviceButteraugliMemoryStats butteraugli_memory;

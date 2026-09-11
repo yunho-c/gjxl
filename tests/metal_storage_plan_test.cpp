@@ -228,7 +228,7 @@ bool CheckButteraugliMatrix() {
         expected = (expected + 63) / 64 * 64 + bytes;
       };
       for (size_t i = 0; i < 33; ++i) {
-        if (borrowing && i >= 21 && i < 30)
+        if (borrowing && ((i >= 21 && i < 30) || (i >= 10 && i < 12)))
           continue;
         add(multiscale && i == 32 ? sub : full);
       }
@@ -251,13 +251,14 @@ bool CheckButteraugliMatrix() {
                      plan.cached_reference_bytes == 12 * (full + sub) &&
                      plan.gaussian_kernel_bytes == 292 &&
                      plan.peak_comparison_scratch_bytes ==
-                         (21 - (borrowing ? 9 : 0)) * full + 8 * partials -
+                         (21 - (borrowing ? 11 : 0)) * full + 8 * partials -
                              (multiscale ? full - sub : 0),
                  "Butteraugli capacity/metrics differ from frozen recipe") ||
           !CheckSlices(std::move(planes), 64, expected))
         return false;
       for (size_t i = 0; i < 33; ++i) {
-        const bool absent = borrowing && i >= 21 && i < 30;
+        const bool absent = borrowing &&
+            ((i >= 21 && i < 30) || (i >= 10 && i < 12));
         if (!Check(plan.planes[i].extent.empty() == absent,
                    "Borrowed BA plane was allocated"))
           return false;
