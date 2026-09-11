@@ -231,8 +231,9 @@ ComputeResidentAqProfileStoragePlan(Extent2D source, Extent2D coding,
 Status
 ComputeAqAuxiliaryProfileStoragePlan(const AqAuxiliaryProfileOptions &o,
                                      AqAuxiliaryProfileStoragePlan *out) {
-  if (out == nullptr)
-    return Status::InvalidArgument("Auxiliary AQ profile output is null");
+  if (out == nullptr || (o.omit_initial_search_data &&
+                         !o.resident_ac_strategy_inputs))
+    return Status::InvalidArgument("Auxiliary AQ profile options are invalid");
   size_t blocks = 0;
   Status status = Geometry(o.source, o.coding, &blocks);
   if (!status.ok())
@@ -246,7 +247,8 @@ ComputeAqAuxiliaryProfileStoragePlan(const AqAuxiliaryProfileOptions &o,
   p.initial_dispatches =
       5 + size_t(o.resident_ac_strategy_inputs) +
       3 * size_t(o.resident_ac_strategy_inputs && o.gaborish) +
-      size_t(o.resident_initial_cfl);
+      size_t(o.resident_initial_cfl) -
+      (o.omit_initial_search_data ? 2u : 0u);
   if (o.frame_only_resident_quantizer) {
     status = ComputeInitialQuantSortPlan(blocks, &p.sort);
     if (!status.ok())

@@ -34,6 +34,24 @@ its AQ update, so its speed cannot be inferred directly from a zero-update
 DCT8 experiment. Low-effort output bytes and rate-quality behavior change;
 this change does not establish speed parity or a new matched-quality result.
 
+## Resident search-data omission
+
+Encoding with fixed DCT8 now prepares the Metal frontend without its initial
+AC-search masks. The gradient and erosion kernels omit mask-only arithmetic
+and stores; the pixel-mask convolution and validation dispatches are skipped.
+The three mask planes use separate minimal argument bindings instead of
+full-sized backing. Initial strategy-mask and CfL host readbacks are also
+omitted. Initial quantization, device CfL, and inverse Gaborish still feed
+final coefficient coding.
+
+This applies to both zero-update efforts 1–3 and effort 4's AQ update. Full
+initial-quantization diagnostics retain all masks and initial CfL outputs;
+efforts using mixed-transform search retain their existing preparation. The
+cached evaluator includes this choice in its compatibility check, so changing
+between encoding, diagnostics, and mixed-transform search rebuilds the
+appropriate preparation. Device and profile storage plans follow the same
+policy. Shared host preparation bounds remain conservative.
+
 ## Validation
 
 `low_effort_strategy_policy` checks the effort/override matrix, unchanged AQ
@@ -62,3 +80,10 @@ for fixed DCT8 and retained search storage for mixed-transform preparations.
 The three previously calibrated DCT8 probes also match the production e1
 output bytes exactly. These checks do not establish corpus-wide rate-quality
 behavior or speed parity.
+
+The search-data omission tests compare initial quantization, final CfL, and
+encoded bytes against the full preparation. They exercise diagnostic/encoding
+cache transitions with zero and one AQ update, forbidden mask/CfL outputs,
+and atomic numeric/readback failures. Metal API and shader validation also
+pass on the affected workflows. This establishes output parity and less
+search-only backing; measured complete-encode timings remain mixed.

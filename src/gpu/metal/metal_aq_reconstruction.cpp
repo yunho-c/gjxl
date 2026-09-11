@@ -776,36 +776,38 @@ void MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission(
                     sizeof(self.initial_quant_modulation_params_), 5);
   DispatchThreads2d(encoder, self.block_extent_);
 
-  constexpr std::array<float, 5> kFilter = {
-      0.364911248f, 0.05f, 0.1688888021f, 0.221069183f, 0.306563504f};
-  constexpr double kWeightSum =
-      1.0 + 4.0 * (kFilter[0] + kFilter[1] + kFilter[2] + kFilter[4] +
-                   2.0 * kFilter[3]);
-  constexpr float kNormalize = static_cast<float>(1.0 / kWeightSum);
-  backend.EncodePrimitive(
-      encoder,
-      Symmetric5ConvolutionCommand{
-          .input = self.initial_quant_unblurred_pixel_mask_,
-          .output = self.initial_quant_pixel_mask_,
-          .weights = {
-              kNormalize,
-              kNormalize * kFilter[0],
-              kNormalize * kFilter[2],
-              kNormalize * kFilter[1],
-              kNormalize * kFilter[4],
-              kNormalize * kFilter[3],
-          },
-      });
+  if (!self.omit_initial_search_data_) {
+    constexpr std::array<float, 5> kFilter = {
+        0.364911248f, 0.05f, 0.1688888021f, 0.221069183f, 0.306563504f};
+    constexpr double kWeightSum =
+        1.0 + 4.0 * (kFilter[0] + kFilter[1] + kFilter[2] + kFilter[4] +
+                     2.0 * kFilter[3]);
+    constexpr float kNormalize = static_cast<float>(1.0 / kWeightSum);
+    backend.EncodePrimitive(
+        encoder,
+        Symmetric5ConvolutionCommand{
+            .input = self.initial_quant_unblurred_pixel_mask_,
+            .output = self.initial_quant_pixel_mask_,
+            .weights = {
+                kNormalize,
+                kNormalize * kFilter[0],
+                kNormalize * kFilter[2],
+                kNormalize * kFilter[1],
+                kNormalize * kFilter[4],
+                kNormalize * kFilter[3],
+            },
+        });
 
-  if (self.resident_ac_strategy_inputs_) {
-    encoder->setComputePipelineState(
-      backend.aq_pipelines_.validate_initial_mask.get());
-    BindPlane(encoder, self.initial_quant_pixel_mask_, 0);
-    BindPlane(encoder, self.reconstruction_error_, 1);
-    const uint32_t count = static_cast<uint32_t>(self.pixel_count_);
-    encoder->setBytes(&count, sizeof(count), 2);
-    DispatchThreads1d(encoder, self.pixel_count_);
-  }
+    if (self.resident_ac_strategy_inputs_) {
+      encoder->setComputePipelineState(
+        backend.aq_pipelines_.validate_initial_mask.get());
+      BindPlane(encoder, self.initial_quant_pixel_mask_, 0);
+      BindPlane(encoder, self.reconstruction_error_, 1);
+      const uint32_t count = static_cast<uint32_t>(self.pixel_count_);
+      encoder->setBytes(&count, sizeof(count), 2);
+      DispatchThreads1d(encoder, self.pixel_count_);
+    }
+  }  // Search masks are not consumed by fixed-DCT8 encoding.
   if (!self.frame_only_resident_quantizer_) return;
   encoder->setComputePipelineState(
       backend.aq_pipelines_.initial_quant_sort_prepare.get());
@@ -1129,8 +1131,17 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
       options.butteraugli_target <= 0.0f || !std::isfinite(options.rescale) ||
       options.rescale <= 0.0f || !output.quant_field.valid() ||
       output.quant_field.extent != block_extent_ ||
-      !output.strategy_mask.valid() ||
-      output.strategy_mask.extent != block_extent_ ||
+      (!omit_initial_search_data_ &&
+       (!output.strategy_mask.valid() ||
+        output.strategy_mask.extent != block_extent_)) ||
+      (omit_initial_search_data_ &&
+       (output.strategy_mask.data != nullptr ||
+        output.strategy_mask.extent != Extent2D{} ||
+        output.strategy_mask.stride != 0 ||
+        output.pixel_mask.data != nullptr ||
+        output.pixel_mask.extent != Extent2D{} ||
+        output.pixel_mask.stride != 0 ||
+        initial_color_correlation != nullptr)) ||
       (!(resident_ac_strategy_inputs_ && output.pixel_mask.data == nullptr &&
          output.pixel_mask.extent == Extent2D{} &&
          output.pixel_mask.stride == 0) &&
@@ -1247,7 +1258,7 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
         *backend_, initial_quant_field_, last_initial_quant_field_.data(),
         last_initial_quant_field_.size() * sizeof(float));
   }
-  if (status.ok()) {
+  if (status.ok() && !omit_initial_search_data_) {
     status = CopyReadback(
         *backend_, initial_quant_strategy_mask_,
         last_initial_strategy_mask_.data(),
@@ -1326,7 +1337,8 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
     }
   }
   CopyContiguousPlane(last_initial_quant_field_, output.quant_field);
-  CopyContiguousPlane(last_initial_strategy_mask_, output.strategy_mask);
+  if (!omit_initial_search_data_)
+    CopyContiguousPlane(last_initial_strategy_mask_, output.strategy_mask);
   if (materialize_pixel_mask)
     CopyContiguousPlane(last_initial_pixel_mask_, output.pixel_mask);
   resident_initial_quant_ready_ = true;
@@ -1370,7 +1382,8 @@ Status MetalPreparedAqEvaluation::GetResidentAcStrategyInputs(
   *inputs = {
       .opsin = {{{search_opsin[0], search_opsin[1], search_opsin[2]}}},
       .quant_field = initial_quant_field_,
-      .pixel_mask = initial_quant_pixel_mask_,
+      .pixel_mask = omit_initial_search_data_
+        ? ConstDevicePlaneView{} : initial_quant_pixel_mask_,
   };
   return Status::Ok();
 }

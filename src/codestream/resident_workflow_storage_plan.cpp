@@ -42,7 +42,8 @@ Status ProfilePlan(Extent2D source, Extent2D coding,
                                             .coding = coding,
                                             .resident_ac_strategy_inputs = true,
                                             .resident_initial_cfl = true,
-                                            .gaborish = policy.gaborish},
+                                            .gaborish = policy.gaborish,
+                                            .omit_initial_search_data = fixed_dct8},
                                            &aux);
   if (!status.ok())
     return status;
@@ -195,6 +196,7 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
                                   .borrowed_coding_opsin = true,
                                   .needs_reconstructed = !evaluation_free || filters.gaborish,
                                   .frame_only_resident_initial_quant = true,
+                                  .omit_initial_search_data = fixed_dct8,
                                   .resident_quantization = true,
                                   .uses_butteraugli_sinks = sinks},
                                  &aq))

@@ -60,6 +60,9 @@ Status ComputeAqStoragePlan(const AqStoragePlanOptions &options,
       (!options.frame_only && options.maximum_coefficient_count == 0) ||
       options.maximum_coefficient_count >
           std::numeric_limits<uint32_t>::max() ||
+      (options.omit_initial_search_data &&
+       (!options.frame_only_resident_initial_quant || options.frame_only ||
+        !options.resident_quantization)) ||
       (options.evaluation_free &&
        (options.frame_only || !options.resident_quantization ||
         options.metric != AqEvaluationMetric::kButteraugli ||
@@ -166,6 +169,12 @@ Status ComputeAqStoragePlan(const AqStoragePlanOptions &options,
       return status;
   }
   if (options.frame_only_resident_initial_quant) {
+    // Unused kernel arguments retain separate valid bindings. Zero output
+    // strides suppress their stores; no full-sized search mask is allocated.
+    const Extent2D pixel_mask_extent = options.omit_initial_search_data
+      ? Extent2D{1, 1} : options.coding_extent;
+    const Extent2D strategy_mask_extent = options.omit_initial_search_data
+      ? Extent2D{1, 1} : block_extent;
     const Extent2D pre_erosion_extent{options.coding_extent.width / 4,
                                       options.coding_extent.height / 4};
     status = staging.AddPlane(DeviceElementType::kF32, pre_erosion_extent,
@@ -173,8 +182,8 @@ Status ComputeAqStoragePlan(const AqStoragePlanOptions &options,
                               &candidate.initial_quant_pre_erosion);
     if (!status.ok())
       return status;
-    status = staging.AddPlane(DeviceElementType::kF32, options.coding_extent,
-                              options.coding_extent.width, kAqStorageAlignment,
+    status = staging.AddPlane(DeviceElementType::kF32, pixel_mask_extent,
+                              pixel_mask_extent.width, kAqStorageAlignment,
                               &candidate.initial_quant_unblurred_pixel_mask);
     if (!status.ok())
       return status;
@@ -183,13 +192,13 @@ Status ComputeAqStoragePlan(const AqStoragePlanOptions &options,
                               &candidate.initial_quant_field);
     if (!status.ok())
       return status;
-    status = staging.AddPlane(DeviceElementType::kF32, block_extent,
-                              block_extent.width, kAqStorageAlignment,
+    status = staging.AddPlane(DeviceElementType::kF32, strategy_mask_extent,
+                              strategy_mask_extent.width, kAqStorageAlignment,
                               &candidate.initial_quant_strategy_mask);
     if (!status.ok())
       return status;
-    status = staging.AddPlane(DeviceElementType::kF32, options.coding_extent,
-                              options.coding_extent.width, kAqStorageAlignment,
+    status = staging.AddPlane(DeviceElementType::kF32, pixel_mask_extent,
+                              pixel_mask_extent.width, kAqStorageAlignment,
                               &candidate.initial_quant_pixel_mask);
     if (!status.ok())
       return status;

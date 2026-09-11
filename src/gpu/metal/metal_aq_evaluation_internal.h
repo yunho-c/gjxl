@@ -120,7 +120,7 @@ struct AqInitialQuantGradientParams {
   uint32_t width;
   uint32_t height;
   uint32_t coding_stride;
-  uint32_t pixel_mask_stride;
+  uint32_t pixel_mask_stride;  // Zero omits search-mask generation.
   uint32_t pre_erosion_width;
   uint32_t pre_erosion_stride;
   uint32_t test_error_mask;
@@ -133,7 +133,7 @@ struct AqInitialQuantErosionParams {
   uint32_t block_width;
   uint32_t block_height;
   uint32_t quant_stride;
-  uint32_t strategy_mask_stride;
+  uint32_t strategy_mask_stride;  // Zero omits the search-mask output.
   std::array<float, 4> weights;
 };
 
@@ -761,6 +761,7 @@ private:
   bool resident_initial_cfl_ = false;
   bool frame_only_resident_initial_quant_ = false;
   bool resident_ac_strategy_inputs_ = false;
+  bool omit_initial_search_data_ = false;
   bool frame_only_resident_quantizer_ = false;
   bool resident_quantization_ = false;
   bool borrowed_original_linear_rgb_ = false;

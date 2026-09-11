@@ -181,6 +181,7 @@ struct PreparedAdaptiveQuantization {
   ConstImage3FView coding_opsin;
   AqEvaluationOptions evaluation_options;
   bool resident_quantization = false;
+  bool omit_initial_search_data = false;
   std::unique_ptr<PreparedAqEvaluation> evaluation;
 };
 

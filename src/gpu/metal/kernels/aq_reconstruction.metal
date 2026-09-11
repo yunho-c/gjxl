@@ -231,7 +231,7 @@ struct AqInitialQuantGradientParams {
   uint width;
   uint height;
   uint coding_stride;
-  uint pixel_mask_stride;
+  uint pixel_mask_stride;  // Zero omits search-mask generation.
   uint pre_erosion_width;
   uint pre_erosion_stride;
   uint test_error_mask;
@@ -244,7 +244,7 @@ struct AqInitialQuantErosionParams {
   uint block_width;
   uint block_height;
   uint quant_stride;
-  uint strategy_mask_stride;
+  uint strategy_mask_stride;  // Zero omits the search-mask output.
   float weights[4];
 };
 
@@ -776,14 +776,19 @@ kernel void gjxl_aq_initial_quant_gradient(
       const float gamma =
         aq_initial_quant_gamma_ratio<false>(center + kMatchGammaOffset);
       const float delta = gamma * (center - base);
-      const float mask =
-        1.0f / (aq_initial_quant_log1p(abs(delta)) + 0.01f);
-      pixel_mask[y * params.pixel_mask_stride + x] = mask;
+      // A zero stride selects encoding without AC-search mask outputs.
+      if (params.pixel_mask_stride != 0u) {
+        const float mask =
+          1.0f / (aq_initial_quant_log1p(abs(delta)) + 0.01f);
+        pixel_mask[y * params.pixel_mask_stride + x] = mask;
+        if (!isfinite(mask) || mask <= 0.0f) {
+          atomic_fetch_or_explicit(error, 2048u, memory_order_relaxed);
+        }
+      }
       float block_difference = min(delta * delta, kDifferenceLimit);
       block_difference = aq_initial_quant_masking_sqrt(block_difference);
       row_differences[column] += block_difference;
-      if (!isfinite(mask) || mask <= 0.0f ||
-          !isfinite(block_difference)) {
+      if (!isfinite(delta) || !isfinite(block_difference)) {
         atomic_fetch_or_explicit(error, 2048u, memory_order_relaxed);
       }
     }
@@ -905,11 +910,15 @@ kernel void gjxl_aq_initial_quant_fuzzy_erosion(
   value += aq_initial_quant_eroded_value(
     pre_erosion, source_x + 1u, source_y + 1u, params);
   const uint quant_index = block.y * params.quant_stride + block.x;
-  const float strategy = 1.0f / (value + 0.001f);
   quant_field[quant_index] = value;
-  strategy_mask[block.y * params.strategy_mask_stride + block.x] = strategy;
-  if (!isfinite(value) || value <= 0.0f ||
-      !isfinite(strategy) || strategy <= 0.0f) {
+  if (params.strategy_mask_stride != 0u) {
+    const float strategy = 1.0f / (value + 0.001f);
+    strategy_mask[block.y * params.strategy_mask_stride + block.x] = strategy;
+    if (!isfinite(strategy) || strategy <= 0.0f) {
+      atomic_fetch_or_explicit(error, 4096u, memory_order_relaxed);
+    }
+  }
+  if (!isfinite(value) || value <= 0.0f) {
     atomic_fetch_or_explicit(error, 4096u, memory_order_relaxed);
   }
 }

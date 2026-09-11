@@ -510,6 +510,7 @@ Status RunGpuAdaptiveQuantizationImpl(
         reusable->coding_opsin = opsin;
         reusable->evaluation_options = evaluation_options;
         reusable->resident_quantization = resident_quantization;
+        reusable->omit_initial_search_data = false;
       }
     }
     prepared = reusable->evaluation.get();
