@@ -76,6 +76,11 @@ struct AqEvaluationPreparation {
   /// device views for AC-strategy candidate evaluation. Requires resident
   /// initial quantization, but is valid for a complete AQ preparation.
   bool resident_ac_strategy_inputs = false;
+  /// Keeps resident coding opsin and initial quantization, but omits masks
+  /// used only by AC search. Requires complete resident initial quantization
+  /// with resident_ac_strategy_inputs. Initial mask/CfL host outputs are not
+  /// available; device CfL remains available for final coefficient coding.
+  bool omit_initial_search_data = false;
   /// Consumes device-generated raw quantization and permits the raw-quant and
   /// EPF input views to be omitted. Requires resident initial quantization.
   bool frame_only_resident_quantizer = false;
@@ -98,6 +103,7 @@ struct AqEvaluationPreparation {
 struct ResidentAcStrategyInputs {
   ConstDeviceImage3View opsin;
   ConstDevicePlaneView quant_field;
+  /// Empty when omit_initial_search_data was selected at preparation.
   ConstDevicePlaneView pixel_mask;
 };
 
@@ -270,6 +276,8 @@ public:
   /// With resident_ac_strategy_inputs, an entirely empty pixel_mask output
   /// retains the validated mask on device. A later call may request a host
   /// mask normally; quant_field and strategy_mask remain required outputs.
+  /// With omit_initial_search_data, only quant_field is required: both mask
+  /// outputs must be entirely empty and initial_color_correlation must be null.
   [[nodiscard]] virtual Status ComputeInitialQuantization(
     InitialQuantizationOptions options,
     InitialQuantFieldOutput output,

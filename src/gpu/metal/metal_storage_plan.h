@@ -33,6 +33,7 @@ struct AqStoragePlanOptions {
   bool borrowed_coding_opsin = false;
   bool needs_reconstructed = false;
   bool frame_only_resident_initial_quant = false;
+  bool omit_initial_search_data = false;
   bool frame_only_resident_quantizer = false;
   bool resident_quantization = false;
   bool uses_butteraugli_sinks = false;

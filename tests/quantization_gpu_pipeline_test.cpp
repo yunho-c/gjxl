@@ -883,6 +883,47 @@ bool CheckDefaultUpdatePipelineParity() {
     }
   }
 
+  // Diagnostic callers still receive masks. Reusing the same owner must
+  // rebuild its preparation in both directions even when score policy matches.
+  for (size_t updates : {0u, 1u}) {
+    zero_options.fixed_dct8 = true;
+    zero_options.adaptive_quantization.iterations = updates;
+    PipelineStorage diagnostic(kExtent, kExtent);
+    encoding_status = gjxl::quantization_pipeline_internal::
+      RunPreparedGpuQuantizationPipeline(
+        *gpu, original.ConstView(), encoding_prepared, zero_options,
+        gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+        diagnostic.Output(), nullptr, &encoding_aq);
+    std::vector<uint8_t> diagnostic_bytes;
+    if (encoding_status.ok()) encoding_status = gjxl::EncodeVarDctCodestream(
+      diagnostic.frame, &diagnostic_bytes);
+    if (!encoding_status.ok() || encoding_aq.omit_initial_search_data ||
+        !std::ranges::all_of(diagnostic.strategy_mask,
+          [](float v) { return std::isfinite(v) && v > 0; }) ||
+        !std::ranges::all_of(diagnostic.pixel_mask,
+          [](float v) { return std::isfinite(v) && v > 0; })) {
+      std::cerr << "Fixed-DCT8 diagnostic mask preparation failed\n";
+      return false;
+    }
+    for (bool final_score : {true, false}) {
+      encoding_status = gjxl::quantization_pipeline_internal::
+        RunPreparedGpuQuantizationPipelineForEncoding(
+          *gpu, original.ConstView(), encoding_prepared, zero_options,
+          gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+          {.frame = &encoding_frame, .score_history = &encoding_scores,
+           .collect_final_butteraugli_score = final_score}, nullptr, &encoding_aq);
+      std::vector<uint8_t> bytes;
+      if (encoding_status.ok()) encoding_status = gjxl::EncodeVarDctCodestream(
+        encoding_frame, &bytes);
+      if (!encoding_status.ok() || !encoding_aq.omit_initial_search_data ||
+          bytes != diagnostic_bytes) {
+        std::cerr << "Omitting search data changed fixed-DCT8 output: "
+                  << encoding_status.message() << '\n';
+        return false;
+      }
+    }
+  }
+
   ImageStorage mismatched_original = original;
   mismatched_original.plane[0][7] =
     std::numeric_limits<float>::quiet_NaN();

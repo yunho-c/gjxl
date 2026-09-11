@@ -846,6 +846,7 @@ Status MetalPreparedAqEvaluation::Prepare(
       preparation.frame_only_resident_initial_quant;
   resident_ac_strategy_inputs_ =
       preparation.resident_ac_strategy_inputs;
+  omit_initial_search_data_ = preparation.omit_initial_search_data;
   frame_only_resident_quantizer_ =
       preparation.frame_only_resident_quantizer;
   resident_quantization_ = preparation.resident_quantization;
@@ -912,7 +913,8 @@ Status MetalPreparedAqEvaluation::Prepare(
     last_y_to_b_.resize(tile_count);
     if (frame_only_resident_initial_quant_) {
       last_initial_quant_field_.resize(block_count_);
-      last_initial_strategy_mask_.resize(block_count_);
+      if (!omit_initial_search_data_)
+        last_initial_strategy_mask_.resize(block_count_);
       if (!resident_ac_strategy_inputs_)
         last_initial_pixel_mask_.resize(pixel_count_);
     }
@@ -1052,6 +1054,7 @@ Status MetalPreparedAqEvaluation::Prepare(
     .borrowed_coding_opsin = borrowed_coding_opsin_,
     .needs_reconstructed = needs_reconstructed,
     .frame_only_resident_initial_quant = frame_only_resident_initial_quant_,
+    .omit_initial_search_data = omit_initial_search_data_,
     .frame_only_resident_quantizer = frame_only_resident_quantizer_,
     .resident_quantization = resident_quantization_,
     .uses_butteraugli_sinks = uses_butteraugli_sinks_,
@@ -1402,7 +1405,8 @@ Status MetalPreparedAqEvaluation::Prepare(
         static_cast<uint32_t>(coding_extent_.width),
         static_cast<uint32_t>(coding_extent_.height),
         static_cast<uint32_t>(coding_[0].row_stride),
-        static_cast<uint32_t>(initial_quant_unblurred_pixel_mask_.row_stride),
+        omit_initial_search_data_ ? 0u :
+          static_cast<uint32_t>(initial_quant_unblurred_pixel_mask_.row_stride),
         static_cast<uint32_t>(initial_quant_pre_erosion_.extent.width),
         static_cast<uint32_t>(initial_quant_pre_erosion_.row_stride),
         0,
@@ -1414,7 +1418,8 @@ Status MetalPreparedAqEvaluation::Prepare(
         static_cast<uint32_t>(block_extent_.width),
         static_cast<uint32_t>(block_extent_.height),
         static_cast<uint32_t>(initial_quant_field_.row_stride),
-        static_cast<uint32_t>(initial_quant_strategy_mask_.row_stride),
+        omit_initial_search_data_ ? 0u :
+          static_cast<uint32_t>(initial_quant_strategy_mask_.row_stride),
         {},
     };
     initial_quant_modulation_params_ = {
@@ -3751,6 +3756,13 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
        preparation.options.metric != AqEvaluationMetric::kButteraugli)) {
     return Status::InvalidArgument(
       "Evaluation-free preparation requires resident Butteraugli encoding");
+  }
+  if (preparation.omit_initial_search_data &&
+      (!preparation.resident_ac_strategy_inputs ||
+       !preparation.frame_only_resident_initial_quant ||
+       !preparation.resident_quantization || preparation.frame_only)) {
+    return Status::InvalidArgument(
+      "Omitting initial search data requires complete resident quantization");
   }
   if (preparation.defer_final_transform_metadata &&
       (!preparation.resident_ac_strategy_inputs ||

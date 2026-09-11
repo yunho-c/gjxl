@@ -2827,7 +2827,7 @@ bool CheckPublicPreparationRejectsNonFiniteImages(gjxl::GpuBackend& gpu) {
 
 // Exercise the frontend state transition and optional mask independently of
 // the public workflow, including lazy materialization and atomic failure.
-bool CheckDeferredFrontend(gjxl::GpuBackend &gpu) {
+bool CheckDeferredFrontend(gjxl::GpuBackend &gpu, bool omit_search = false) {
   Fixture fixture;
   if (!fixture.Initialize())
     return false;
@@ -2854,9 +2854,15 @@ bool CheckDeferredFrontend(gjxl::GpuBackend &gpu) {
                    "eager frontend"))
     return false;
   descriptor.defer_final_transform_metadata = true;
+  descriptor.omit_initial_search_data = omit_search;
   if (!CheckStatus(gjxl::PrepareAqEvaluation(gpu, descriptor, &deferred),
                    "deferred frontend"))
     return false;
+  if (omit_search && deferred->memory_stats().staging_bytes >=
+                       eager->memory_stats().staging_bytes) {
+    std::cerr << "Search-mask backing was not removed\n";
+    return false;
+  }
   std::vector<float> eager_quant(count), eager_strategy(count);
   std::vector<float> quant(count), strategy(count);
   std::vector<float> expected_mask(mask_stride * pixels.height, kPoison);
@@ -2865,6 +2871,7 @@ bool CheckDeferredFrontend(gjxl::GpuBackend &gpu) {
   gjxl::InitialQuantFieldOutput output{{quant.data(), blocks, blocks.width},
                                        {strategy.data(), blocks, blocks.width},
                                        {}};
+  if (omit_search) output.strategy_mask = {};
   if (!CheckStatus(eager->ComputeInitialQuantization(
                      options, {{eager_quant.data(), blocks, blocks.width},
                                {eager_strategy.data(), blocks, blocks.width},
@@ -2872,12 +2879,16 @@ bool CheckDeferredFrontend(gjxl::GpuBackend &gpu) {
                    "eager initial mask") ||
       !CheckStatus(deferred->ComputeInitialQuantization(options, output),
                    "resident-only initial mask") ||
-      quant != eager_quant || strategy != eager_strategy)
+      quant != eager_quant || (!omit_search && strategy != eager_strategy))
     return false;
   gjxl::ResidentAcStrategyInputs resident;
   if (!CheckStatus(deferred->GetResidentAcStrategyInputs(&resident),
                    "resident mask after omitted host output"))
     return false;
+  if ((resident.pixel_mask.buffer == nullptr) != omit_search) {
+    std::cerr << "Resident search-mask availability is incorrect\n";
+    return false;
+  }
   gjxl::AqEvaluationInput input{
     .quant_field = {quant.data(), blocks, blocks.width}, .quant_dc = 1.0f};
   EvaluationOutputStorage blocked(blocks);
@@ -2909,15 +2920,35 @@ bool CheckDeferredFrontend(gjxl::GpuBackend &gpu) {
                   "malformed omitted mask") ||
       before != gpu.stats().committed_submissions)
     return false;
-  output.pixel_mask = {mask.data(), pixels, mask_stride};
-  if (!CheckStatus(deferred->ComputeInitialQuantization(options, output),
-                   "lazy host mask") ||
-      quant != eager_quant || strategy != eager_strategy)
-    return false;
-  for (size_t i = 0; i < mask.size(); ++i) {
-    if (std::bit_cast<uint32_t>(mask[i]) !=
-        std::bit_cast<uint32_t>(expected_mask[i]))
+  if (omit_search) {
+    output.pixel_mask = {};
+    output.strategy_mask = {strategy.data(), blocks, blocks.width};
+    if (!ExpectCode(deferred->ComputeInitialQuantization(options, output),
+                    gjxl::StatusCode::kInvalidArgument,
+                    "unprepared strategy-mask output")) return false;
+    output.strategy_mask = {};
+    output.pixel_mask = {mask.data(), pixels, mask_stride};
+    if (!ExpectCode(deferred->ComputeInitialQuantization(options, output),
+                    gjxl::StatusCode::kInvalidArgument,
+                    "unprepared pixel-mask output")) return false;
+    output.pixel_mask = {};
+    gjxl::ColorCorrelationMap initial_cfl;
+    if (!ExpectCode(deferred->ComputeInitialQuantization(
+                      options, output, nullptr, 0.0f, &initial_cfl),
+                    gjxl::StatusCode::kInvalidArgument,
+                    "unprepared initial CfL output") ||
+        before != gpu.stats().committed_submissions) return false;
+  } else {
+    output.pixel_mask = {mask.data(), pixels, mask_stride};
+    if (!CheckStatus(deferred->ComputeInitialQuantization(options, output),
+                     "lazy host mask") ||
+        quant != eager_quant || strategy != eager_strategy)
       return false;
+    for (size_t i = 0; i < mask.size(); ++i) {
+      if (std::bit_cast<uint32_t>(mask[i]) !=
+          std::bit_cast<uint32_t>(expected_mask[i]))
+        return false;
+    }
   }
   for (auto *prepared : {eager.get(), deferred.get()}) {
     if (!CheckStatus(
@@ -3166,6 +3197,7 @@ int main() {
       !CheckInvalidCoefficientDecisionMode(*gpu) ||
       !CheckPublicPreparationRejectsNonFiniteImages(*gpu) ||
       !CheckResidentInputPreparation(*gpu) || !CheckDeferredFrontend(*gpu) ||
+      !CheckDeferredFrontend(*gpu, true) ||
       !CheckReductionCorpus(*gpu) || !CheckMaximumErrorReduction(*gpu) ||
       !CheckSmallButteraugliFallback(*gpu) ||
       !CheckProductionEvaluation(*gpu) ||

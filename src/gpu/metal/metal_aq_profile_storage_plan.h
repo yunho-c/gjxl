@@ -191,6 +191,7 @@ struct AqAuxiliaryProfileOptions {
   bool resident_initial_cfl = false;
   bool frame_only_resident_quantizer = false;
   bool gaborish = false;
+  bool omit_initial_search_data = false;
 };
 
 struct AqAuxiliaryProfileStoragePlan {

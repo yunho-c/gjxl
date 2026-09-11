@@ -196,6 +196,7 @@ Status PrepareResidentFrontend(
   quantization_pipeline_internal::PreparedQuantizationPipeline& prepared,
   CpuQuantizationPipelineOptions options,
   bool evaluation_free,
+  bool omit_initial_search_data,
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization& state,
   ResidentAcStrategySearchInputs* resident,
   gpu_profile_internal::GpuProfilingSession* profiling_session) {
@@ -220,6 +221,7 @@ Status PrepareResidentFrontend(
     SameImageIdentity(state.original_linear_rgb, original_linear_rgb) &&
     SameImageIdentity(state.coding_opsin, prepared.coding_opsin) &&
     state.evaluation_options == evaluation_options &&
+    state.omit_initial_search_data == omit_initial_search_data &&
     state.resident_quantization;
   if (!compatible) {
     const auto preparation_begin = profiling_session == nullptr
@@ -245,6 +247,7 @@ Status PrepareResidentFrontend(
       .resident_initial_cfl = true,
       .frame_only_resident_initial_quant = true,
       .resident_ac_strategy_inputs = true,
+      .omit_initial_search_data = omit_initial_search_data,
       .resident_quantization = true,
       .coefficient_decision_mode =
         AcCoefficientDecisionMode::kAdjustedSharedQuant,
@@ -302,6 +305,7 @@ Status PrepareResidentFrontend(
     state.resident_coding_opsin = prepared.resident_coding_opsin;
     state.evaluation_options = evaluation_options;
     state.resident_quantization = true;
+    state.omit_initial_search_data = omit_initial_search_data;
   }
 
   constexpr float kMaximumErrorInitializationTarget = 1.0f;
@@ -320,10 +324,11 @@ Status PrepareResidentFrontend(
   const InitialQuantFieldOutput initial_output{
     .quant_field = {prepared.initial_quant.data(), prepared.block_extent,
                     prepared.block_extent.width},
-    .strategy_mask = {prepared.strategy_mask.data(), prepared.block_extent,
-                      prepared.block_extent.width},
+    .strategy_mask = omit_initial_search_data ? PlaneF32View{} :
+      PlaneF32View{prepared.strategy_mask.data(), prepared.block_extent,
+                   prepared.block_extent.width},
     .pixel_mask =
-      prepared.pixel_mask.empty()
+      (omit_initial_search_data || prepared.pixel_mask.empty())
         ? PlaneF32View{}
         : PlaneF32View{prepared.pixel_mask.data(), prepared.padded_extent,
                        prepared.padded_extent.width},
@@ -335,7 +340,7 @@ Status PrepareResidentFrontend(
   if (profiling_session == nullptr) {
     status = state.evaluation->ComputeInitialQuantization(
       initial_options, initial_output, nullptr, 0.0f,
-      &prepared.initial_color_correlation);
+      omit_initial_search_data ? nullptr : &prepared.initial_color_correlation);
   } else {
     auto* profiler = dynamic_cast<
       gpu_profile_internal::PreparedAqEvaluationProfiler*>(
@@ -347,7 +352,8 @@ Status PrepareResidentFrontend(
     gpu_profile_internal::GpuExecutionProfile child_profile;
     status = profiler->ComputeInitialQuantizationProfiled(
       initial_options, initial_output, nullptr, 0.0f,
-      &prepared.initial_color_correlation, profiling_session->mode(),
+      omit_initial_search_data ? nullptr : &prepared.initial_color_correlation,
+      profiling_session->mode(),
       &child_profile);
     if (status.ok()) {
       status = profiling_session->Append(std::move(child_profile));
@@ -642,6 +648,7 @@ Status RunPreparedGpuQuantizationPipelineImpl(
           !materialization.final_perceptual_evaluation &&
           options.adaptive_quantization.control_mode ==
             AdaptiveQuantizationControlMode::kButteraugli,
+        options.fixed_dct8 && !materialization.initial_quantization,
         *aq_state,
         &resident_inputs, profiling_session);
     if (!status.ok()) return status;
