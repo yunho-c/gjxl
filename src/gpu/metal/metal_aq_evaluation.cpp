@@ -854,17 +854,20 @@ Status MetalPreparedAqEvaluation::Prepare(
   borrowed_coding_opsin_ =
     preparation.resident_coding_opsin.plane[0].buffer != nullptr;
   uses_butteraugli_sinks_ =
-    !frame_only_ && options_.metric == AqEvaluationMetric::kButteraugli &&
+    !frame_only_ && !options_.evaluation_free &&
+    options_.metric == AqEvaluationMetric::kButteraugli &&
     source_extent_.width >= 15 && source_extent_.height >= 15;
   const size_t filter_stage_count =
     (options_.profile.loop_filter.gaborish ? size_t{1} : size_t{0}) +
     options_.profile.loop_filter.epf_options.iterations;
   filter_scratch_image_count_ =
-      frame_only_ ? 0 : std::min<size_t>(2, filter_stage_count);
-  final_filter_scratch_index_ = frame_only_ || filter_stage_count == 0
+      frame_only_ || options_.evaluation_free
+        ? 0 : std::min<size_t>(2, filter_stage_count);
+  final_filter_scratch_index_ =
+      frame_only_ || options_.evaluation_free || filter_stage_count == 0
       ? -1
       : static_cast<int>((filter_stage_count - 1) % 2);
-  const bool needs_reconstructed = !frame_only_ ||
+  const bool needs_reconstructed = (!frame_only_ && !options_.evaluation_free) ||
       frame_only_inverse_gaborish_ ||
       (resident_ac_strategy_inputs_ &&
        options_.profile.loop_filter.gaborish);
@@ -1044,6 +1047,7 @@ Status MetalPreparedAqEvaluation::Prepare(
     .initial_quant_sort_count = initial_quant_sort_count_,
     .filter_scratch_image_count = filter_scratch_image_count_,
     .frame_only = frame_only_,
+    .evaluation_free = options_.evaluation_free,
     .borrowed_original_linear_rgb = borrowed_original_linear_rgb_,
     .borrowed_coding_opsin = borrowed_coding_opsin_,
     .needs_reconstructed = needs_reconstructed,
@@ -1061,7 +1065,7 @@ Status MetalPreparedAqEvaluation::Prepare(
     MetalAqScratchArena::kStaging, storage_plan.staging_bytes, &staging_);
   if (!status.ok()) return status;
 
-  if (!frame_only_) {
+  if (!frame_only_ && !options_.evaluation_free) {
     for (size_t channel = 0; channel < 3; ++channel) {
       if (borrowed_original_linear_rgb_) {
         const ConstDevicePlaneView plane =
@@ -1095,12 +1099,14 @@ Status MetalPreparedAqEvaluation::Prepare(
         return status;
     }
   }
-  if (!frame_only_) {
+  if (!frame_only_ && !options_.evaluation_free) {
     for (size_t channel = 0; channel < 3; ++channel) {
       status = persistent_.BindPlane(storage_plan.reconstructed_linear[channel], &reconstructed_linear_[channel]);
       if (!status.ok())
         return status;
     }
+  }
+  if (!frame_only_) {
     status = persistent_.BindPlane(storage_plan.strategies, &strategies_);
     if (!status.ok())
       return status;
@@ -1210,10 +1216,12 @@ Status MetalPreparedAqEvaluation::Prepare(
   status = staging_.BindPlane(storage_plan.quantized_coefficients, &quantized_coefficients_);
   if (!status.ok())
     return status;
-  if (!frame_only_) {
+  if (!frame_only_ && !options_.evaluation_free) {
     status = staging_.BindPlane(storage_plan.reconstruction_coefficients, &reconstruction_coefficients_);
     if (!status.ok())
       return status;
+  }
+  if (!frame_only_) {
     status = staging_.BindPlane(storage_plan.dc, &dc_);
     if (!status.ok())
       return status;
@@ -1241,7 +1249,8 @@ Status MetalPreparedAqEvaluation::Prepare(
   }
 
   for (size_t channel = 0; channel < 3; ++channel) {
-    if (!frame_only_ && !borrowed_original_linear_rgb_) {
+    if (!frame_only_ && !options_.evaluation_free &&
+        !borrowed_original_linear_rgb_) {
       status = UploadPlane(
           *backend_, preparation.original_linear_rgb.plane[channel],
           original_[channel]);
@@ -1461,7 +1470,7 @@ Status MetalPreparedAqEvaluation::Prepare(
     };
   }
 
-  if (!frame_only_) {
+  if (!frame_only_ && !options_.evaluation_free) {
     gaborish_params_ = {
         static_cast<uint32_t>(source_extent_.width),
         static_cast<uint32_t>(source_extent_.height),
@@ -1521,7 +1530,7 @@ Status MetalPreparedAqEvaluation::Prepare(
     };
   }
 
-  if (frame_only_) {
+  if (frame_only_ || options_.evaluation_free) {
     memory_stats_ = {
         persistent_.capacity_bytes(),
         staging_.capacity_bytes(),
@@ -1988,10 +1997,16 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       "Resident Butteraugli final output is invalid");
   }
   if (!input.evaluate_final_field &&
-      (input.iterations == 0 || !frame_requested ||
+      (!frame_requested ||
        block_map_requested || reconstruction_requested)) {
     return Status::InvalidArgument(
       "Resident final-frame-only policy output is invalid");
+  }
+  const size_t score_count =
+    input.iterations + static_cast<size_t>(input.evaluate_final_field);
+  if (options_.evaluation_free && score_count != 0) {
+    return Status::FailedPrecondition(
+      "Evaluation-free preparation cannot evaluate a quantization field");
   }
 
   const AqEvaluationInput evaluation_input{
@@ -2000,11 +2015,11 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
   };
   Status status = ValidateInput(evaluation_input);
   if (!status.ok()) return status;
-  if (butteraugli_ == nullptr) {
+  if (score_count != 0 && butteraugli_ == nullptr) {
     return Status::FailedPrecondition(
       "Prepared AQ Butteraugli state is missing");
   }
-  if (uses_butteraugli_sinks_) {
+  if (score_count != 0 && uses_butteraugli_sinks_) {
     const auto batches =
       MakeResidentButteraugliBatches(block_reduction_params_);
     status = ValidatePreparedMetalButteraugliResidentEncoding(
@@ -2021,7 +2036,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
         .error = reconstruction_error_,
         .batches = batches,
       });
-  } else {
+  } else if (score_count != 0) {
     status = ValidatePreparedMetalButteraugliEncoding(
       *butteraugli_,
       {
@@ -2061,8 +2076,6 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       return status;
     }
   }
-  const size_t score_count =
-    input.iterations + static_cast<size_t>(input.evaluate_final_field);
   try {
     status = resource_budget_internal::PublicationVector<double>::Create(
       score_count, &candidate_scores, resource_budget_internal::ResourceClass::kAqScratch);
@@ -2338,11 +2351,32 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
           iteration);
       }
       if (!resident_evaluate_final_field_) {
+        if (score_count == 0) {
+          append_reconstruction_stage(
+            "aq.final_frame.reset", ReconstructionProfileStage::kReset,
+            0, 0, "aq.final_frame");
+        }
         append_reconstruction_stage(
           "aq.final_frame.quantizer",
           ReconstructionProfileStage::kQuantizer,
           static_cast<uint32_t>(resident_policy_iterations_), 0,
           "aq.final_frame");
+        if (score_count == 0 && profile_forward_coefficients) {
+          for (size_t batch_index = 0; batch_index < batches_.size();
+               ++batch_index) {
+            if (batches_[batch_index].anchor_count == 0) continue;
+            append_reconstruction_stage(
+              AqForwardCoefficientProfileStageId(batches_[batch_index].strategy),
+              ReconstructionProfileStage::kForwardBatch, 0, batch_index,
+              "aq.final_frame");
+          }
+        }
+        if (score_count == 0 && profile_final_color_correlation) {
+          append_reconstruction_stage(
+            "aq.final_frame.final_cfl",
+            ReconstructionProfileStage::kFinalColorCorrelation, 0, 0,
+            "aq.final_frame");
+        }
         for (size_t batch_index = 0; batch_index < batches_.size();
              ++batch_index) {
           if (batches_[batch_index].anchor_count == 0) continue;
@@ -2432,11 +2466,13 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
   }
   candidate_readback_stats.control_bytes = sizeof(device_error);
 
-  status = backend_->CopyDeviceToHost(
-    *resident_policy_scores_.buffer,
-    resident_policy_score_readback_.data(),
-    score_count * sizeof(float),
-    resident_policy_scores_.offset_bytes);
+  if (score_count != 0) {
+    status = backend_->CopyDeviceToHost(
+      *resident_policy_scores_.buffer,
+      resident_policy_score_readback_.data(),
+      score_count * sizeof(float),
+      resident_policy_scores_.offset_bytes);
+  }
   if (status.ok()) {
     candidate_readback_stats.score_history_bytes =
       score_count * sizeof(float);
@@ -3103,6 +3139,10 @@ Status MetalPreparedAqEvaluation::AssembleFrameFromCompletedDeviceBuffers(
 Status MetalPreparedAqEvaluation::SubmitEvaluation(
   AqEvaluationInput input,
   bool profiling_reserved) {
+  if (options_.evaluation_free) {
+    return Status::FailedPrecondition(
+      "Evaluation-free preparation cannot evaluate a quantization field");
+  }
   Status status = ValidateInput(input);
   if (!status.ok()) {
     return status;
@@ -3706,6 +3746,12 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
   status = ValidateOptions(preparation.options);
   if (!status.ok())
     return status;
+  if (preparation.options.evaluation_free &&
+      (!preparation.resident_quantization || preparation.frame_only ||
+       preparation.options.metric != AqEvaluationMetric::kButteraugli)) {
+    return Status::InvalidArgument(
+      "Evaluation-free preparation requires resident Butteraugli encoding");
+  }
   if (preparation.defer_final_transform_metadata &&
       (!preparation.resident_ac_strategy_inputs ||
        !preparation.resident_quantization || preparation.frame_only)) {
@@ -4559,9 +4605,23 @@ void MetalPreparedAqEvaluation::EncodeResidentReconstruction(
 void MetalPreparedAqEvaluation::EncodeResidentFrame(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) {
   write_completed_coefficients_ = completed_coefficients_.buffer != nullptr;
-  reset_params_.preserve_error = 1u;
-  reset_params_.preserve_forward_coefficients = 1u;
+  const bool first_pass = resident_policy_iterations_ == 0;
+  reset_params_.preserve_error = first_pass ? 0u : 1u;
+  reset_params_.preserve_forward_coefficients =
+    first_pass && !resident_forward_coefficients_ready_ ? 0u : 1u;
+  if (first_pass) EncodeReconstructionReset(backend, encoder);
   EncodeResidentQuantizer(backend, encoder);
+  if (first_pass) {
+    if (!resident_forward_coefficients_ready_) {
+      EncodeForwardCoefficients(backend, encoder);
+    }
+    if (resident_color_correlation_pending_) {
+      EncodeFinalColorCorrelation(backend, encoder);
+      resident_color_correlation_pending_ = false;
+      resident_color_correlation_readback_needed_ = true;
+      resident_forward_coefficients_ready_ = true;
+    }
+  }
   for (size_t batch_index = 0; batch_index < batches_.size();
        ++batch_index) {
     EncodeReconstructionCoefficientBatch(backend, encoder, batch_index, false);

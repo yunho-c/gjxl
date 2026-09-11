@@ -178,7 +178,8 @@ ComputeResidentAqProfileStoragePlan(Extent2D source, Extent2D coding,
   status = ComputeButteraugliDispatchPlan(source, blocks, families, &butter);
   if (!status.ok())
     return status;
-  if (policy.butteraugli_sinks != butter.multiscale)
+  if ((policy.iterations != 0 || policy.evaluate_final_field) &&
+      policy.butteraugli_sinks != butter.multiscale)
     return Status::InvalidArgument(
         "Resident AQ profile sink geometry disagrees");
   ResidentAqProfileStoragePlan p;
@@ -196,6 +197,9 @@ ComputeResidentAqProfileStoragePlan(Extent2D source, Extent2D coding,
   p.maximum_dispatches =
       p.metadata.score_count * per_score + 2 * families + 2 +
       size_t(!policy.evaluate_final_field) * (20 + 2 * families);
+  // Completed output counts coefficient zeros once per family after the
+  // final integer stores, including when there are no scored passes.
+  if (frame == AqProfileFrameOutput::kCompleted) p.maximum_dispatches += families;
   p.maximum_id_length = MaximumAqIdLength();
   status = gpu_profile_internal::ComputeSubmissionProfileStoragePlan(
       {p.metadata.stage_capacity, p.maximum_dispatches, p.maximum_id_length,

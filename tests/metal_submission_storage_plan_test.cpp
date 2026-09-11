@@ -55,8 +55,6 @@ bool Plans() {
         for (bool sinks : {false, true})
           for (bool gaborish : {false, true})
             for (size_t epf = 0; epf <= 3; ++epf) {
-              if (iterations == 0 && !final)
-                continue;
               ResidentAqProfileInputStoragePlan p;
               if (!Check(ComputeResidentAqProfileInputStoragePlan(
                              {iterations, final, sinks, gaborish, epf}, &p)
@@ -65,7 +63,8 @@ bool Plans() {
                              p.stage_capacity ==
                                  p.score_count * (47 + 11 * size_t(sinks) +
                                                   size_t(gaborish) + epf) +
-                                     8 * size_t(!final) + 1 &&
+                                     8 * size_t(!final) + 1 +
+                                     9 * size_t(p.score_count == 0) &&
                              p.input.peak_bytes == p.input.retained_bytes &&
                              p.input.peak_bytes >=
                                  p.stage_capacity *
@@ -95,8 +94,7 @@ bool Plans() {
     if (!Check(!ComputeAcSubmissionStoragePlan(bad, &ac).ok() && ac == old_ac,
                "Invalid AC plan changed output"))
       return false;
-  for (const auto bad : {ResidentAqProfileInputOptions{0, false},
-                         {5},
+  for (const auto bad : {ResidentAqProfileInputOptions{5},
                          {huge},
                          {1, true, false, false, 4},
                          {1, true, false, false, huge}})

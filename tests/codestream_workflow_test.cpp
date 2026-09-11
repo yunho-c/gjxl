@@ -604,10 +604,10 @@ bool CheckEffortPolicy() {
     }
   }
 
-  for (const int32_t effort : {1, 7, 10}) {
+  for (const int32_t effort : {1, 2, 3, 4, 7, 10}) {
     const size_t index = static_cast<size_t>(effort - 1);
     const size_t expected_score_count = effort <= 3
-      ? 1
+      ? 0
       : kCases[index].expected_score_count - 1;
     std::vector<uint8_t> bytes;
     gjxl::VarDctEncodingSummary summary;
@@ -618,7 +618,7 @@ bool CheckEffortPolicy() {
       &bytes, &summary);
     if (!status.ok() || bytes.empty() ||
         summary.score_history.size() != expected_score_count ||
-        summary.final_butteraugli_score_evaluated != (effort <= 3) ||
+        summary.final_butteraugli_score_evaluated ||
         summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kMetal ||
         summary.metal_aq_mode !=
@@ -627,6 +627,23 @@ bool CheckEffortPolicy() {
                 << status.message() << " history="
                 << summary.score_history.size() << '\n';
       return false;
+    }
+    if (effort <= 3) {
+      std::vector<uint8_t> scored_bytes;
+      gjxl::VarDctEncodingSummary scored_summary;
+      status = gjxl::EncodeLinearRgbVarDctCodestream(
+        image.View(),
+        {.effort = effort,
+         .backend = gjxl::VarDctBackendPreference::kMetal,
+         .collect_final_butteraugli_score = true},
+        &scored_bytes, &scored_summary);
+      if (!status.ok() || scored_bytes != bytes ||
+          scored_summary.score_history.size() != 1 ||
+          !scored_summary.final_butteraugli_score_evaluated) {
+        std::cerr << "Evaluation-free encoding differs from scored encoding: "
+                  << status.message() << '\n';
+        return false;
+      }
     }
   }
   return true;

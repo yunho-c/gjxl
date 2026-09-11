@@ -413,6 +413,10 @@ Status RunGpuAdaptiveQuantizationImpl(
         ? AqEvaluationMetric::kMaximumError
         : AqEvaluationMetric::kButteraugli,
     .maximum_error = options.maximum_error,
+    .evaluation_free =
+      mode != GpuAdaptiveQuantizationMode::kExactCoefficients &&
+      options.iterations == 0 && !materialization.final_perceptual_evaluation &&
+      options.control_mode == AdaptiveQuantizationControlMode::kButteraugli,
   };
   const bool resident_quantization =
     mode != GpuAdaptiveQuantizationMode::kExactCoefficients;

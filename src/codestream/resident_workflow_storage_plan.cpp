@@ -45,6 +45,12 @@ Status ProfilePlan(Extent2D source, Extent2D coding,
                                            &aux);
   if (!status.ok())
     return status;
+  const bool evaluation_free =
+    policy.iterations == 0 && !policy.evaluate_final_field;
+  if (evaluation_free) {
+    aux.reference = {};
+    aux.reference_dispatches = 0;
+  }
   ResidentAqProfileStoragePlan aq;
   status = ComputeResidentAqProfileStoragePlan(
       source, coding, policy, AqProfileFrameOutput::kCompleted, &aq);
@@ -52,12 +58,14 @@ Status ProfilePlan(Extent2D source, Extent2D coding,
     return status;
   // Six orchestration wall stages, four AC stages, three completed-output
   // stages. Reference, initial, AC, adjustment and resident policy each emit
-  // one child submission. The input preparer does not emit a profile graph.
+  // one child submission. Zero-update encoding omits the reference child.
+  // The input preparer does not emit a profile graph.
   // Max label includes registered kernel IDs and generated fallback IDs.
   p->profile_shape = {
       .wall_stages = 6 + 4 + 3,
-      .submissions = 5,
-      .stages = 3 + ac.stage_capacity + aq.metadata.stage_capacity,
+      .submissions = evaluation_free ? 4u : 5u,
+      .stages = (evaluation_free ? 2u : 3u) + ac.stage_capacity +
+                aq.metadata.stage_capacity,
       .dispatches = aux.reference_dispatches + aux.initial_dispatches +
                     ac.maximum_dispatches + aux.adjustment_dispatches +
                     aq.maximum_dispatches,
@@ -138,12 +146,13 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
   if (!status.ok())
     return status;
   const auto filters = AdaptiveQuantizationOptions{}.profile.loop_filter;
-  const size_t filter_images = std::min(
-      size_t{2}, size_t(filters.gaborish) + filters.epf_options.iterations);
-  const bool sinks = source.width >= 15 && source.height >= 15;
   const size_t iterations = AdaptiveQuantizationIterations(e);
-  const bool final_score = e.collect_final_butteraugli_score || iterations == 0;
+  const bool final_score = e.collect_final_butteraugli_score;
   p.score_count = iterations + size_t(final_score);
+  const bool evaluation_free = p.score_count == 0;
+  const size_t filter_images = evaluation_free ? 0 : std::min(
+      size_t{2}, size_t(filters.gaborish) + filters.epf_options.iterations);
+  const bool sinks = !evaluation_free && source.width >= 15 && source.height >= 15;
   AqHostStoragePlan host;
   status = ComputeAqHostStoragePlan({.source_extent = source,
                                      .coding_extent = coding,
@@ -179,17 +188,18 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
                                   .anchor_capacity_count = p.blocks,
                                   .maximum_coefficient_count = max_coefficients,
                                   .filter_scratch_image_count = filter_images,
+                                  .evaluation_free = evaluation_free,
                                   .borrowed_original_linear_rgb = true,
                                   .borrowed_coding_opsin = true,
-                                  .needs_reconstructed = true,
+                                  .needs_reconstructed = !evaluation_free || filters.gaborish,
                                   .frame_only_resident_initial_quant = true,
                                   .resident_quantization = true,
                                   .uses_butteraugli_sinks = sinks},
                                  &aq))
            .ok() ||
-      !(status = ComputeButteraugliStoragePlan(
+      (!evaluation_free && !(status = ComputeButteraugliStoragePlan(
             source, sinks && filter_images == 2, &butter))
-           .ok() ||
+           .ok()) ||
       !(status = ComputeCompletedFrameStoragePlan(source, coding, p.blocks,
                                                   &completed))
            .ok() ||

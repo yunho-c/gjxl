@@ -916,7 +916,6 @@ PrepareWorkflow(ConstImage3FView linear_rgb, VarDctEncodingOptions options,
       .maximum_error_result = &encoding.maximum_error_result,
       .collect_final_butteraugli_score =
         options.collect_final_butteraugli_score ||
-        pipeline_options.adaptive_quantization.iterations == 0 ||
         options.metal_aq_mode ==
           GpuAdaptiveQuantizationMode::kExactCoefficients ||
         options.rate_control_mode == VarDctRateControlMode::kMaximumError,
@@ -1040,8 +1039,7 @@ PrepareWorkflow(ConstImage3FView linear_rgb, VarDctEncodingOptions options,
     (!selected_metal ||
      options.metal_aq_mode ==
        GpuAdaptiveQuantizationMode::kExactCoefficients ||
-     options.collect_final_butteraugli_score ||
-     pipeline_options.adaptive_quantization.iterations == 0);
+     options.collect_final_butteraugli_score);
   candidate_summary.execution_backend = selected_metal
     ? VarDctExecutionBackend::kMetal
     : VarDctExecutionBackend::kCpu;
