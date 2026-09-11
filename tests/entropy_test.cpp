@@ -1561,6 +1561,86 @@ bool CheckDirectAnsSourcePolicies() {
   return true;
 }
 
+bool CheckCollectedDefaultPopulations() {
+  using namespace gjxl;
+  using namespace gjxl::codestream_internal;
+  // Independent checked conversion oracle, including empty sections/contexts,
+  // singleton symbols, the tiny-stream threshold and full-width values.
+  for (size_t length : {size_t{0}, size_t{1}, size_t{99}, size_t{100}, size_t{4096}}) {
+    for (bool singleton : {false, true}) {
+      std::vector<EntropyToken> tokens;
+      std::vector<uint32_t> values;
+      std::vector<uint16_t> contexts;
+      Storage<PreparedFixedAnsCluster> expected(6);
+      constexpr std::array<uint32_t, 8> probes = {
+        0, 1, 15, 16, 17, 65535, 65536, UINT32_MAX};
+      for (size_t i = 0; i < length; ++i) {
+        const uint32_t context = static_cast<uint32_t>(i % 5);
+        const uint32_t value = singleton ? context : probes[(i / 5) % probes.size()];
+        tokens.push_back({context, value});
+        values.push_back(value);
+        contexts.push_back(static_cast<uint16_t>(context));
+        HybridUintToken encoded;
+        if (!EncodeHybridUint(value, kDefaultHybridUintConfig, &encoded).ok())
+          return false;
+        auto& population = expected[context];
+        ++population.counts[encoded.symbol];
+        ++population.token_count;
+        population.extra_bits += encoded.extra_bit_count;
+        population.maximum_symbol = std::max(population.maximum_symbol, encoded.symbol);
+      }
+      for (bool split : {false, true}) {
+        const std::array<EntropyTokenStreamView, 3> streams = {
+          EntropyTokenStreamView::Interleaved({}),
+          split ? EntropyTokenStreamView::Split(values, contexts)
+                : EntropyTokenStreamView::Interleaved(tokens),
+          EntropyTokenStreamView::Interleaved({})};
+        Storage<PreparedFixedAnsCluster> actual;
+        if (!CollectDefaultEntropyPopulations(streams, 6, &actual).ok() ||
+            actual != expected) {
+          std::cerr << "Collected default populations differ from checked oracle\n";
+          return false;
+        }
+        EntropyCodingMode mode;
+        if (!SelectOrdinaryEntropyCodingMode(streams, {.context_count = 6}, &mode).ok())
+          return false;
+        if (mode == EntropyCodingMode::kAns) {
+          EntropyCode scanned, prepared;
+          EntropyCodeCost scanned_cost, prepared_cost;
+          if (!OptimizeDirectAnsEntropyCode(streams, {.context_count = 6},
+                DirectAnsEntropyMode::kBalanced, &scanned, &scanned_cost).ok() ||
+              !OptimizeDirectAnsEntropyCodeWithFixedPopulations(streams,
+                {.context_count = 6}, actual, &prepared, &prepared_cost).ok() ||
+              scanned != prepared || scanned_cost != prepared_cost) {
+            std::cerr << "Collected default populations changed ANS output\n";
+            return false;
+          }
+        }
+      }
+    }
+  }
+  Storage<PreparedFixedAnsCluster> output(1);
+  output[0].token_count = 123;
+  const auto sentinel = output;
+  const std::array<EntropyToken, 2> invalid_context = {{{0, 1}, {6, 2}}};
+  const std::array<uint32_t, 2> values = {1, 2};
+  const std::array<uint16_t, 1> contexts = {0};
+  for (const auto stream : {
+         EntropyTokenStreamView::Interleaved(invalid_context),
+         EntropyTokenStreamView::Split(values, contexts)}) {
+    const std::array<EntropyTokenStreamView, 1> streams = {stream};
+    if (CollectDefaultEntropyPopulations(streams, 6, &output).code() !=
+          StatusCode::kInvalidArgument || output != sentinel) {
+      std::cerr << "Rejected populations changed output\n";
+      return false;
+    }
+  }
+  return CollectDefaultEntropyPopulations({}, 0, &output).code() ==
+           StatusCode::kInvalidArgument && output == sentinel &&
+         CollectDefaultEntropyPopulations({}, 6, nullptr).code() ==
+           StatusCode::kInvalidArgument;
+}
+
 bool CheckOrdinaryCoderSelectionPolicy() {
   std::vector<gjxl::EntropyToken> tokens;
   tokens.reserve(100);
@@ -1956,6 +2036,7 @@ int main() {
       !CheckAnsSmallHistograms() ||
       !CheckDirectAnsSourcePolicies() ||
       !CheckOrdinaryCoderSelectionPolicy() ||
+      !CheckCollectedDefaultPopulations() ||
       !CheckBestDirectAnsClusteringRefinement() ||
       !CheckSparseDirectAnsPopulations() ||
       !CheckBorrowedDirectAnsValidation() ||
