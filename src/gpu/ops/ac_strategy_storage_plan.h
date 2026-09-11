@@ -10,6 +10,7 @@
 #include "codec/ac_strategy_storage_plan.h"
 #include "core/geometry.h"
 #include "core/status.h"
+#include "gpu/backend.h"
 
 namespace gjxl::ac_strategy_search_internal {
 
@@ -32,20 +33,25 @@ struct StoragePlan {
   size_t block_cost_bytes_per_stage = 0;
   std::array<StageStoragePlan, ac_strategy_internal::kCandidateStages.size()>
       stages;
-  size_t maximum_packed_bytes = 0; // Two separate backings of this size.
+  size_t maximum_packed_bytes = 0; // Conservative coefficient-sized maximum.
+  size_t maximum_scratch_a_bytes = 0;
+  size_t maximum_scratch_b_bytes = 0;
   size_t maximum_rate_bytes = 0;
   size_t device_bytes = 0;
   bool operator==(const StoragePlan &) const = default;
 };
 
-/// Exact fresh device allocation requests, independent of image values and CPU
+/// Fresh device allocation requests, independent of image values and CPU
 /// placement decisions. Reused buffers/vector capacities and replacement
 /// overlap still need admission-aware handling; device_bytes is not a
-/// whole-work bound. No backend access or heap allocation on success (an error
-/// Status may allocate its small diagnostic string); failure leaves output
+/// whole-work bound. Without a backend, returns conservative scratch bounds.
+/// With a backend, queries its selected kernels without allocation/submission.
+/// No heap allocation on success (an error Status may allocate its small
+/// diagnostic string); failure leaves output
 /// unchanged.
 [[nodiscard]] Status ComputeStoragePlan(Extent2D coding, bool resident,
-                                        StoragePlan *out);
+                                        StoragePlan *out,
+                                        GpuBackend *backend = nullptr);
 
 struct HostStoragePlan {
   // Candidates, quantization matrices, readback costs and dense cost tables.

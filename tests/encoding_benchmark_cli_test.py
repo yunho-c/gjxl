@@ -71,6 +71,16 @@ ELIMINATED_WORK_PHASES = {
     "codestream_section_candidate_measure_work",
 }
 
+AC_CANDIDATE_KERNEL_SUFFIX = {
+    "dct8": "local",
+    "dct16": "parallel",
+    "dct16x8": "parallel",
+    "dct8x16": "parallel",
+    "dct32x16": "local",
+    "dct16x32": "local",
+    "dct32": "local",
+}
+
 
 class EncodingBenchmarkCliTest(unittest.TestCase):
     benchmark: Path
@@ -511,12 +521,14 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                 dispatch["kernel_id"] for dispatch in stage["dispatches"]
             }
             candidate_kernel = next((kernel for kernel in kernel_ids
-                                     if kernel.endswith("_candidate_loss_parallel")), None)
+                                     if kernel.endswith(("_candidate_loss_parallel",
+                                                         "_candidate_loss_local"))), None)
             if candidate_kernel:
                 shape = stage["stage_id"].removeprefix("frontend.ac_strategy.")
-                self.assertIn(shape, ("dct16", "dct16x8", "dct8x16"))
+                self.assertIn(shape, AC_CANDIDATE_KERNEL_SUFFIX)
                 self.assertEqual(candidate_kernel,
-                                 f"gjxl_ac_strategy_{shape}_candidate_loss_parallel")
+                                 f"gjxl_ac_strategy_{shape}_candidate_loss_"
+                                 f"{AC_CANDIDATE_KERNEL_SUFFIX[shape]}")
                 self.assertEqual(len(stage["dispatches"]), 2)
                 self.assertEqual(kernel_ids, {
                     candidate_kernel,
@@ -624,13 +636,15 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                         for dispatch in stage["dispatches"]
                     }
                     candidate_kernel = next((kernel for kernel in kernel_ids
-                        if kernel.endswith("_candidate_loss_parallel")), None)
+                        if kernel.endswith(("_candidate_loss_parallel",
+                                            "_candidate_loss_local"))), None)
                     if candidate_kernel:
                         self.assertEqual(mode, "fused-tuned")
                         shape = stage["stage_id"].removeprefix("frontend.ac_strategy.")
-                        self.assertIn(shape, ("dct16", "dct16x8", "dct8x16"))
+                        self.assertIn(shape, AC_CANDIDATE_KERNEL_SUFFIX)
                         self.assertEqual(candidate_kernel,
-                            f"gjxl_ac_strategy_{shape}_candidate_loss_parallel")
+                            f"gjxl_ac_strategy_{shape}_candidate_loss_"
+                            f"{AC_CANDIDATE_KERNEL_SUFFIX[shape]}")
                         self.assertEqual(len(stage["dispatches"]), 2)
                         self.assertEqual(kernel_ids, {
                             candidate_kernel,

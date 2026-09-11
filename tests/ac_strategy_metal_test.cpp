@@ -20,6 +20,7 @@
 #include "gpu/metal/metal_backend.h"
 #include "gpu/metal/metal_submission_storage_plan.h"
 #include "gpu/ops/ac_strategy.h"
+#include "gpu/ops/ac_strategy_storage_plan.h"
 #include "gpu/ops/gpu_execution_profile_internal.h"
 
 namespace {
@@ -237,6 +238,7 @@ bool Allocate(
   std::string_view role,
   std::unique_ptr<gjxl::DeviceBuffer>* buffer) {
 
+  if (bytes == 0) { buffer->reset(); return true; }
   return CheckStatus(gpu.Allocate(bytes, buffer), role);
 }
 
@@ -290,6 +292,18 @@ bool CheckSubmissionStorage(gjxl::GpuBackend& gpu,
       if (stage.dispatches.size() == 2) {
         const char* expected_kernel = nullptr;
         switch (batch.strategy) {
+          case AcStrategyType::kDct8:
+            expected_kernel = "gjxl_ac_strategy_dct8_candidate_loss_local";
+            break;
+          case AcStrategyType::kDct32x16:
+            expected_kernel = "gjxl_ac_strategy_dct32x16_candidate_loss_local";
+            break;
+          case AcStrategyType::kDct16x32:
+            expected_kernel = "gjxl_ac_strategy_dct16x32_candidate_loss_local";
+            break;
+          case AcStrategyType::kDct32x32:
+            expected_kernel = "gjxl_ac_strategy_dct32_candidate_loss_local";
+            break;
           case AcStrategyType::kDct16x16:
             expected_kernel = "gjxl_ac_strategy_dct16_candidate_loss_parallel";
             break;
@@ -419,8 +433,9 @@ bool RunStrategyCase(
   const size_t matrix_bytes = matrices.size() * sizeof(float);
   const size_t candidate_bytes =
     candidates.size() * sizeof(gjxl::AcStrategyCandidate);
-  const size_t packed_bytes =
-    candidates.size() * 3 * coefficient_count * sizeof(float);
+  gjxl::AcStrategyScratchRequirements scratch;
+  if (!CheckStatus(gjxl::GetAcStrategyScratchRequirements(
+        gpu, strategy, candidates.size(), &scratch), "Query scratch")) return false;
   const size_t rate_bytes = candidates.size() * 3 *
     gjxl::kAcStrategyRateScratchBytesPerChannel;
   const size_t cost_bytes = candidates.size() * sizeof(float);
@@ -440,8 +455,8 @@ bool RunStrategyCase(
       !Allocate(gpu, matrix_bytes, "Allocate matrices", &device_matrices) ||
       !Allocate(
         gpu, candidate_bytes, "Allocate candidates", &device_candidates) ||
-      !Allocate(gpu, packed_bytes, "Allocate scratch A", &scratch_a) ||
-      !Allocate(gpu, packed_bytes, "Allocate scratch B", &scratch_b) ||
+      !Allocate(gpu, scratch.scratch_a_bytes, "Allocate scratch A", &scratch_a) ||
+      !Allocate(gpu, scratch.scratch_b_bytes, "Allocate scratch B", &scratch_b) ||
       !Allocate(gpu, rate_bytes, "Allocate rate scratch", &rate_scratch) ||
       !Allocate(gpu, cost_bytes, "Allocate costs", &device_costs) ||
       !CheckStatus(
@@ -495,6 +510,22 @@ bool RunStrategyCase(
     .butteraugli_target = kButteraugliTarget,
   };
   std::unique_ptr<gjxl::GpuSubmission> submission;
+  // Minimum-sized buffers must execute; one byte less must fail before submit.
+  for (unsigned slot = 0; slot < 2; ++slot) {
+    const size_t bytes = slot == 0 ? scratch.scratch_a_bytes : scratch.scratch_b_bytes;
+    if (bytes == 0) continue;
+    std::unique_ptr<gjxl::DeviceBuffer> short_buffer;
+    if (!Allocate(gpu, bytes - 1, "Allocate undersized scratch", &short_buffer)) return false;
+    auto invalid_batch = batch;
+    (slot == 0 ? invalid_batch.scratch_a : invalid_batch.scratch_b) = short_buffer.get();
+    const auto before = gpu.stats();
+    if (gjxl::EvaluateAcStrategyCandidates(gpu, invalid_batch, &submission).code() !=
+          gjxl::StatusCode::kInvalidArgument || submission != nullptr ||
+        gpu.stats().committed_submissions != before.committed_submissions) {
+      std::cerr << "Undersized scratch was submitted\n";
+      return false;
+    }
+  }
   if (!CheckStatus(
         gjxl::EvaluateAcStrategyCandidates(gpu, batch, &submission),
         "Submit candidate batch") ||
@@ -643,7 +674,8 @@ bool RunStrategyCase(
   }
 
   gjxl::AcStrategyCandidateBatch aliased_batch = batch;
-  aliased_batch.scratch_b = aliased_batch.scratch_a;
+  if (scratch.scratch_b_bytes != 0) aliased_batch.scratch_b = aliased_batch.scratch_a;
+  else aliased_batch.scratch_a = aliased_batch.costs;
   if (gjxl::EvaluateAcStrategyCandidates(
         gpu, aliased_batch, &submission).ok() || submission != nullptr) {
     std::cerr << implementation << ' ' << info->name
@@ -735,6 +767,23 @@ bool CheckValidation() {
     std::cerr << "Zero-sized candidate batch was rejected\n";
     return false;
   }
+  const auto before_query = gpu->stats();
+  for (auto strategy : kStrategies) {
+    gjxl::AcStrategyScratchRequirements sizes{1, 2, 3};
+    if (!gjxl::GetAcStrategyScratchRequirements(*gpu, strategy, 0, &sizes).ok() ||
+        sizes.scratch_a_bytes || sizes.scratch_b_bytes || sizes.rate_scratch_bytes) return false;
+    sizes = {1, 2, 3};
+    if (gjxl::GetAcStrategyScratchRequirements(*gpu, strategy,
+          std::numeric_limits<size_t>::max(), &sizes).ok() ||
+        sizes.scratch_a_bytes != 1 || sizes.scratch_b_bytes != 2 ||
+        sizes.rate_scratch_bytes != 3) return false;
+  }
+  gjxl::AcStrategyScratchRequirements sizes{1, 2, 3};
+  if (gjxl::GetAcStrategyScratchRequirements(*gpu, gjxl::AcStrategyType::kCount, 1, &sizes).ok() ||
+      gjxl::GetAcStrategyScratchRequirements(*gpu, gjxl::AcStrategyType::kDct8, 1, nullptr).ok() ||
+      sizes.scratch_a_bytes != 1 || sizes.scratch_b_bytes != 2 || sizes.rate_scratch_bytes != 3 ||
+      gpu->stats().successful_allocations != before_query.successful_allocations ||
+      gpu->stats().committed_submissions != before_query.committed_submissions) return false;
   gjxl::AcStrategyCandidateBatch invalid;
   invalid.candidate_count = 1;
   if (gjxl::EvaluateAcStrategyCandidates(
@@ -754,6 +803,12 @@ bool CheckLossFusionExact(const Fixture& fixture) {
     if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH,
           OptionsFor(gjxl::MetalDctImplementation::kSimdgroupMatmul, modes[index]),
           &gpu), "Create exact loss-fusion comparison backend")) return false;
+    gjxl::ac_strategy_search_internal::StoragePlan plan;
+    if (!gjxl::ac_strategy_search_internal::ComputeStoragePlan(
+          {3840, 2160}, true, &plan, gpu.get()).ok()) return false;
+    std::cout << "4K AC scratch mode=" << index << " A=" << plan.maximum_scratch_a_bytes
+              << " B=" << plan.maximum_scratch_b_bytes << " rate=" << plan.maximum_rate_bytes
+              << " device=" << plan.device_bytes << '\n';
     for (auto strategy : kStrategies) {
       if (!RunStrategyCase(*gpu, "exact loss fusion", strategy, fixture,
                            &costs[index])) return false;
