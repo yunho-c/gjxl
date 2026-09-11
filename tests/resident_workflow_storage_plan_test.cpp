@@ -302,7 +302,7 @@ struct LifetimeTrace {
   }
 
   bool CheckBoundary(const ResidentWorkflowStoragePlan &plan,
-                     size_t attempts) const {
+                     size_t attempts, bool fixed_dct8) const {
     if (!Check(count == attempts && count <= entries.size(),
                "Missing serializer lifetime boundary"))
       return false;
@@ -318,7 +318,7 @@ struct LifetimeTrace {
                  "Completed output or retry lifetime decision is incorrect"))
         return false;
       if (entry.may_retry) {
-        if (!Check(live(ResourceClass::kAcSearch) > 0 &&
+        if (!Check((live(ResourceClass::kAcSearch) > 0) == !fixed_dct8 &&
                        live(ResourceClass::kInput) > 0 &&
                        live(ResourceClass::kAqScratch) >
                            plan.score_count * sizeof(double),
@@ -403,7 +403,8 @@ bool RunCase(GpuBackend &gpu, ConstImage3FView image,
                 << budget.snapshot().peak_backing_bytes << '\n';
       return false;
     }
-    if (!trace.CheckBoundary(plan, measured.summary.encode_attempt_count))
+    if (!trace.CheckBoundary(plan, measured.summary.encode_attempt_count,
+                             UseFixedDct8Strategy(o.encoding)))
       return false;
     if (!Check(measured.bytes == oracle.bytes &&
                    measured.summary == oracle.summary &&

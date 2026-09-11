@@ -55,5 +55,10 @@ now includes score/timing publication storage in its aggregate bound comparison;
 without AC search, it cannot assume a strict saving from releasing search
 storage before completion.
 
-Encoder-based regression runs and fresh performance/quality measurements are
-deferred while the separate evaluation is running.
+After encoder runs were enabled, the Release workflow, low-effort policy,
+CPU/resident/compatibility storage-plan, and Metal quantization-pipeline tests
+passed. The resident retry-lifetime assertion now expects no AC-search storage
+for fixed DCT8 and retained search storage for mixed-transform preparations.
+The three previously calibrated DCT8 probes also match the production e1
+output bytes exactly. These checks do not establish corpus-wide rate-quality
+behavior or speed parity.
