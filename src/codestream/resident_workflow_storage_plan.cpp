@@ -15,6 +15,7 @@
 #include "codestream/workflow_internal.h"
 #include "gpu/metal/metal_aq_host_storage_plan.h"
 #include "gpu/metal/metal_aq_profile_storage_plan.h"
+#include "gpu/metal/metal_backend.h"
 #include "gpu/ops/ac_strategy_storage_plan.h"
 
 namespace gjxl::codestream_internal {
@@ -229,8 +230,23 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
       !device_inventory.Add({ac.device_bytes, ac.device_bytes}))
     return Overflow();
   p.device_bytes = device_inventory.peak_bytes;
+  // Production uses the default output-cache limit. A variable strategy grid
+  // may fit that limit even when the maximum-anchor plan exceeds it. Only
+  // exclude retention when even a lower bound on output size is oversized.
+  constexpr size_t completed_cache_limit = MetalBackendOptions{}.completed_frame_cache_bytes;
+  size_t completed_cache_bytes = completed.capacity_bytes;
+  if (completed_cache_bytes > completed_cache_limit) {
+    completed_cache_bytes = 0;
+    if (!fixed_dct8) {
+      CompletedFrameStoragePlan minimum_completed;
+      status = ComputeCompletedFrameStoragePlan(source, coding, 1, &minimum_completed);
+      if (!status.ok()) return status;
+      if (minimum_completed.capacity_bytes <= completed_cache_limit)
+        completed_cache_bytes = completed_cache_limit;
+    }
+  }
   p.idle_pool_capacity = {input.capacity_bytes, aq.persistent_bytes,
-                          aq.staging_bytes, butter.capacity_bytes};
+                          aq.staging_bytes, butter.capacity_bytes, completed_cache_bytes};
   frontend_storage_internal::ColorCorrelationStoragePlan cfl;
   status = frontend_storage_internal::ComputeColorCorrelationStoragePlan(
       coding, frontend_storage_internal::ColorCorrelationStorageMode::kCopy,

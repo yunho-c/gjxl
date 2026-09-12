@@ -32,9 +32,9 @@ struct WorkflowStoragePlan {
   HostStorageBound publication;
   HostStorageBound output;
   HostStorageBound working;
-  // One production backend's four idle pools: resident input, AQ persistent,
-  // AQ staging, Butteraugli. They are already included in backend_working.
-  std::array<size_t, 4> idle_pool_capacity{};
+  // One production backend's idle pools: resident input, AQ persistent, AQ
+  // staging, Butteraugli, completed frame. Already included in backend_working.
+  std::array<size_t, 5> idle_pool_capacity{};
   bool operator==(const WorkflowStoragePlan &) const = default;
 };
 
@@ -92,7 +92,7 @@ private:
   size_t encodable_ = 0;
   size_t maximum_working_ = 0;
   HostStorageBound retained_;
-  std::array<size_t, 4> idle_{};
+  decltype(WorkflowStoragePlan::idle_pool_capacity) idle_{};
 };
 
 } // namespace gjxl::codestream_internal

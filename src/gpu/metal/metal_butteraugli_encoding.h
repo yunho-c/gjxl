@@ -11,19 +11,21 @@
 
 #include "core/status.h"
 #include "gpu/ops/butteraugli.h"
+#include "gpu/metal/metal_storage_plan.h"
 
 namespace gjxl::metal_internal {
 
 class MetalBackend;
 
-/// Nine disjoint mutable planes borrowed from the enclosing AQ operation.
+/// Disjoint mutable planes borrowed from the enclosing AQ operation, ordered
+/// by kButteraugliBorrowedPlaneSlots.
 /// They must be F32, large enough for the unpadded reference, and remain owned
 /// until this prepared Butteraugli object is destroyed. AQ orders reference
 /// preparation before reconstruction and each comparison after filtering and
 /// gathering, so no other consumer may use these planes during either phase.
 /// Immutable reference data and final outputs are never stored here.
 struct MetalButteraugliScratch {
-  std::array<DevicePlaneView, 9> planes;
+  std::array<DevicePlaneView, kButteraugliBorrowedPlaneCount> planes;
 };
 
 enum class MetalButteraugliPsychoStage : uint8_t {

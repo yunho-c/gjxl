@@ -271,6 +271,38 @@ bool RunCase(Extent2D extent, bool deferred_frontend = false,
             !SerializeEqual(profiled)) return false;
         retained.push_back(std::move(profiled));
         retained.push_back(std::move(next));
+        if (shared_gpu == nullptr && configuration == 1 && iterations == 2 &&
+            !final_score) {
+          // Independent retained outputs stay readable while a released
+          // output's capacity cycles through subsequent complete encodes.
+          if (!Check(gpu->TrimPreparationCache())) return false;
+          const auto allocations = gpu->stats().successful_allocations;
+          for (size_t repeat = 0; repeat < 2; ++repeat) {
+            Retained reusable;
+            reusable.bytes = retained.back().bytes;
+            std::vector<double> scores;
+            if (!Check(prepared->EvaluateResidentButteraugliPolicy(
+                  input, {.score_history = &scores,
+                          .completed_frame = &reusable.frame})) ||
+                scores != expected_scores || !SerializeEqual(reusable) ||
+                gpu->stats().successful_allocations != allocations + 1)
+              return false;
+          }
+          // A failure after GPU completion consumes a warm output allocation
+          // but must not publish it or return it to the reusable cache.
+          if (!Check(metal_internal::FailNextMetalAqReadbackForTesting(*prepared)))
+            return false;
+          Retained failed;
+          std::vector<double> scores;
+          if (prepared->EvaluateResidentButteraugliPolicy(
+                input, {.score_history = &scores,
+                        .completed_frame = &failed.frame}).ok() ||
+              failed.frame != nullptr ||
+              budget.snapshot().classes[completed_class].idle_capacity_bytes != 0) {
+            std::cerr << "Failed completed output was published or cached\n";
+            return false;
+          }
+        }
       }
     }
     prepared.reset();
@@ -293,9 +325,12 @@ bool RunCase(Extent2D extent, bool deferred_frontend = false,
           ++anchors;
           return Status::Ok();
         }))) return false;
+    const size_t device_bytes =
+      (3 * view.ac_group_count() * kVarDctAcGroupCoefficientCapacity + anchors + 6144) * sizeof(int32_t) + anchors;
+    constexpr size_t bucket = 1024 * 1024;
     expected_bytes += blocks.width * blocks.height * (1 + 1 + 4 + 3 * (4 + 4)) +
       tiles.width * tiles.height * 2 + view.ac_group_count() * sizeof(size_t) +
-      (3 * view.ac_group_count() * kVarDctAcGroupCoefficientCapacity + anchors + 6144) * sizeof(int32_t) + anchors;
+      (device_bytes + bucket - 1) / bucket * bucket;
   }
   const auto usage = budget.snapshot().classes[completed_class];
   if (usage.backing_count != earlier_backings + 9 * retained.size() ||

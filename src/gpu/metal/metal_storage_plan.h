@@ -123,7 +123,9 @@ struct CompletedFrameStoragePlan {
 /// The final group-major coefficients, destination table, zero populations, and
 /// sample flags share one independent allocation. Block count bounds anchor
 /// capacity; actual output generation supplies its authoritative final anchor
-/// count.
+/// count. Capacity rounds to 1 MiB so changing anchor counts can reuse a cache
+/// entry while admission still charges the complete allocation capacity.
+inline constexpr size_t kCompletedFrameCapacityGranularity = size_t{1} << 20;
 [[nodiscard]] Status
 ComputeCompletedFrameStoragePlan(Extent2D source_extent, Extent2D coding_extent,
                                  size_t anchor_count,
@@ -134,7 +136,18 @@ inline constexpr size_t kButteraugliReductionWidth = 256;
 inline constexpr size_t kButteraugliWorkingPlaneCount = 33;
 inline constexpr size_t kButteraugliPsychoPlaneCount = 10;
 inline constexpr size_t kButteraugliBorrowedFirstPlane = 21;
-inline constexpr size_t kButteraugliBorrowedPlaneCount = 9;
+// Stable mapping from the enclosing AQ scratch views to mutable metric slots.
+// The last two are distorted-image bands, dead outside a comparison. Reference
+// bands and both cached reference masks retain independent storage.
+inline constexpr std::array<size_t, 11> kButteraugliBorrowedPlaneSlots{
+    21, 22, 23, 24, 25, 26, 27, 28, 29, 10, 11};
+inline constexpr size_t kButteraugliBorrowedPlaneCount =
+    kButteraugliBorrowedPlaneSlots.size();
+[[nodiscard]] constexpr size_t ButteraugliBorrowedPlaneIndex(size_t slot) {
+  for (size_t index = 0; index < kButteraugliBorrowedPlaneCount; ++index)
+    if (kButteraugliBorrowedPlaneSlots[index] == slot) return index;
+  return kButteraugliBorrowedPlaneCount;
+}
 inline constexpr size_t kButteraugliFinalStagingPlane = 32;
 inline constexpr std::array<size_t, 5> kButteraugliKernelSizes{5, 33, 15, 7,
                                                                13};
