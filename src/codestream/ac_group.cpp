@@ -677,8 +677,8 @@ AcTokenError AppendDirectAcToken(
   codestream_internal::SimpleAcTokenizationScratch* scratch,
   codestream_internal::SimpleAcGroupTokenData* group) {
 
-  group->values.push_back(value);
-  group->contexts.push_back(context);
+  group->values.emplace_back(value);
+  group->contexts.emplace_back(context);
   if (!collect_fixed_populations) return AcTokenError::kNone;
   if (context >= scratch->population_slots.size()) {
     return AcTokenError::kContextOutOfRange;
