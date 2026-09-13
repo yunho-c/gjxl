@@ -106,6 +106,18 @@ enum {
   GJXL_COMPRESSION_MAXIMUM = 1,
 };
 
+typedef int32_t GJXLDcPrediction;
+enum {
+  GJXL_DC_PREDICTION_GRADIENT = 0,
+  GJXL_DC_PREDICTION_WEIGHTED = 1,
+};
+
+typedef int32_t GJXLDcQuantization;
+enum {
+  GJXL_DC_QUANTIZATION_ROUND = 0,
+  GJXL_DC_QUANTIZATION_PREDICTION_AWARE = 1,
+};
+
 typedef struct {
   uint32_t struct_size;
   float distance;
@@ -115,6 +127,12 @@ typedef struct {
   /// Selects the entropy/codestream search policy independently of effort.
   /// Callers using the previous struct size implicitly select AUTOMATIC.
   GJXLCompressionMode compression_mode;
+  /// Lossless prediction of quantized DC. Older struct sizes select GRADIENT.
+  GJXLDcPrediction dc_prediction;
+  /// Opt-in lossy DC quantization; older sizes select ROUND.
+  GJXLDcQuantization dc_quantization;
+  /// Decoder adaptive DC smoothing: 0 disables, 1 enables. Defaults to 0.
+  uint32_t adaptive_dc_smoothing;
 } GJXLEncoderOptions;
 
 typedef int32_t GJXLPixelFormat;
@@ -156,7 +174,7 @@ GJXL_API GJXLResult gjxl_execution_domain_snapshot(const GJXLExecutionDomain *do
                                                    size_t caller_size) GJXL_NOEXCEPT;
 
 /// Initializes encoder options with distance 1.0, effort 7, and automatic
-/// compression behavior.
+/// compression behavior with gradient DC prediction.
 /// caller_size must describe the complete caller allocation and fit uint32_t.
 GJXL_API GJXLResult gjxl_encoder_options_init(
   GJXLEncoderOptions* options, size_t caller_size) GJXL_NOEXCEPT;

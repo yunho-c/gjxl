@@ -256,7 +256,9 @@ public:
                 .color_correlation = &color_correlation,
                 .epf_sharpness = epf_sharpness_,
             },
-            options_.profile, &exact_coefficients);
+            options_.profile, &exact_coefficients,
+            AcCoefficientDecisionMode::kAdjustedSharedQuant,
+            options_.dc_quantization, options_.dc_prediction);
         if (!status.ok()) {
           return status;
         }
@@ -417,6 +419,8 @@ Status RunGpuAdaptiveQuantizationImpl(
       mode != GpuAdaptiveQuantizationMode::kExactCoefficients &&
       options.iterations == 0 && !materialization.final_perceptual_evaluation &&
       options.control_mode == AdaptiveQuantizationControlMode::kButteraugli,
+    .dc_quantization = options.dc_quantization,
+    .dc_prediction = options.dc_prediction,
   };
   const bool resident_quantization =
     mode != GpuAdaptiveQuantizationMode::kExactCoefficients;
@@ -885,7 +889,9 @@ Status RunGpuFrameOnlyQuantizationImpl(
         .coding_opsin = opsin,
         .strategies = &strategies,
         .epf_sharpness = epf_sharpness,
-        .options = {options.profile, options.butteraugli},
+        .options = {.profile = options.profile, .butteraugli = options.butteraugli,
+                    .dc_quantization = options.dc_quantization,
+                    .dc_prediction = options.dc_prediction},
         .frame_only = true,
         .frame_only_inverse_gaborish =
           options.profile.loop_filter.gaborish,
@@ -991,7 +997,9 @@ Status RunGpuFrameOnlyQuantizationResidentFrontend(
         .coding_opsin = opsin,
         .strategies = &strategies,
         .epf_sharpness = epf_sharpness,
-        .options = {options.profile, options.butteraugli},
+        .options = {.profile = options.profile, .butteraugli = options.butteraugli,
+                    .dc_quantization = options.dc_quantization,
+                    .dc_prediction = options.dc_prediction},
         .frame_only = true,
         .frame_only_inverse_gaborish = options.profile.loop_filter.gaborish,
         .resident_initial_cfl = true,

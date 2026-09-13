@@ -39,6 +39,9 @@ struct CpuAqStorageOptions {
   size_t epf_iterations = 2;
   bool prepared_reference = true;
   bool collect_profile = false;
+  DcQuantizationMode dc_quantization = DcQuantizationMode::kRound;
+  VarDctDcPrediction dc_prediction = VarDctDcPrediction::kGradient;
+  bool adaptive_dc_smoothing = false;
 };
 
 struct CpuAqStoragePlan {

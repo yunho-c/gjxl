@@ -133,9 +133,7 @@ Status vardct_frame_internal::ValidateSimpleCodestreamFrame(
     return Status::InvalidArgument(
       "Quantizer parameters cannot be encoded");
   }
-  if (profile.extra_dc_precision != 0 ||
-      profile.dc_cfl_mode != DcCflMode::kDefault ||
-      profile.adaptive_dc_smoothing) {
+  if (profile.dc_cfl_mode != DcCflMode::kDefault) {
     return Status::InvalidArgument(
       "DC coding state is outside the initial profile");
   }

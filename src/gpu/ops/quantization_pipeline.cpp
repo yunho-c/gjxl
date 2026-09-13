@@ -214,6 +214,8 @@ Status PrepareResidentFrontend(
       : AqEvaluationMetric::kButteraugli,
     .maximum_error = options.adaptive_quantization.maximum_error,
     .evaluation_free = evaluation_free,
+    .dc_quantization = options.adaptive_quantization.dc_quantization,
+    .dc_prediction = options.adaptive_quantization.dc_prediction,
   };
   const bool compatible = state.evaluation != nullptr &&
     state.quantization_pipeline_generation == prepared.generation &&

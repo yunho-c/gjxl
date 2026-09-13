@@ -20,7 +20,10 @@ static_assert(std::is_standard_layout_v<GJXLImageView>);
 static_assert(std::is_standard_layout_v<GJXLBuffer>);
 static_assert(GJXL_MAX_CPU_THREADS == 256);
 static_assert(offsetof(GJXLEncoderOptions, compression_mode) == 12);
-static_assert(sizeof(GJXLEncoderOptions) == 16);
+static_assert(offsetof(GJXLEncoderOptions, dc_prediction) == 16);
+static_assert(offsetof(GJXLEncoderOptions, dc_quantization) == 20);
+static_assert(offsetof(GJXLEncoderOptions, adaptive_dc_smoothing) == 24);
+static_assert(sizeof(GJXLEncoderOptions) == 28);
 
 static_assert(noexcept(gjxl_context_options_init(nullptr, 0)));
 static_assert(noexcept(gjxl_encoder_options_init(nullptr, 0)));

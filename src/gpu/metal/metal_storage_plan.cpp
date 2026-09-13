@@ -36,7 +36,9 @@ Status ValidateAqStorageGeometry(Extent2D source, Extent2D coding) {
 
 Status ComputeAqStoragePlan(const AqStoragePlanOptions &options,
                             AqStoragePlan *plan) {
-  if (plan == nullptr)
+  if (plan == nullptr ||
+      !IsValidDcQuantization({options.dc_quantization, options.dc_prediction,
+                              options.extra_dc_precision}))
     return Status::InvalidArgument("AQ storage-plan output is null");
   size_t pixel_count = 0;
   Status status =
@@ -332,12 +334,29 @@ Status ComputeAqStoragePlan(const AqStoragePlanOptions &options,
     if (!status.ok())
       return status;
   }
-  if (!options.frame_only) {
+  if (!options.frame_only ||
+      options.dc_quantization == DcQuantizationMode::kPredictionAware ||
+      options.extra_dc_precision != 0) {
     status =
         staging.AddPlane(DeviceElementType::kF32, {3 * block_count, 1},
                          3 * block_count, kAqStorageAlignment, &candidate.dc);
     if (!status.ok())
       return status;
+  }
+  if (options.dc_quantization == DcQuantizationMode::kPredictionAware &&
+      options.dc_prediction == VarDctDcPrediction::kWeighted) {
+    const size_t groups = ((block_extent.width + 255) / 256) *
+                          ((block_extent.height + 255) / 256);
+    const size_t values = groups * 5 * std::min<size_t>(256, block_extent.width) *
+                          std::min<size_t>(256, block_extent.height);
+    status = staging.AddPlane(DeviceElementType::kI32, {values, 1}, values,
+                               kAqStorageAlignment, &candidate.dc_predictor_scratch);
+    if (!status.ok()) return status;
+  }
+  if (options.adaptive_dc_smoothing && !options.frame_only && !options.evaluation_free) {
+    status = staging.AddPlane(DeviceElementType::kF32, {3 * block_count, 1},
+                               3 * block_count, kAqStorageAlignment, &candidate.smoothed_dc);
+    if (!status.ok()) return status;
   }
   status = staging.AddPlane(DeviceElementType::kI32, {3 * block_count, 1},
                             3 * block_count, kAqStorageAlignment,

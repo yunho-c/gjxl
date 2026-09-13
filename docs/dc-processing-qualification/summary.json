@@ -1,0 +1,1062 @@
+{
+  "bd_rate_groups_excluded": [],
+  "calibration_unresolved": [
+    {
+      "case": {
+        "distance": 1.0,
+        "effort": 3,
+        "id": "edge-e3-d1",
+        "image": {
+          "category": "synthetic",
+          "height": 193,
+          "name": "edge",
+          "path": "/Users/yunhocho/GitHub/gjxl-metal-expanded-resident-qualify/build/metal-qualification-bilinear-20260910/corpus/edge.pfm",
+          "sha256": "3a761665e5e8f441894ef06eb8fc1e40e56debbc5d88618173f844aeee42d13d",
+          "stratum": "compact",
+          "width": 257
+        }
+      },
+      "target": 95.70046418672958,
+      "unresolved": [
+        {
+          "best": {
+            "adaptive_dc_smoothing": true,
+            "artifact": "/Users/yunhocho/GitHub/gjxl-dc-coding/build/dc-processing-qualification-v1/calibration/edge-e3-d1/both/attempt-0003/encoded/both.jxl",
+            "dc_prediction": "weighted",
+            "dc_quantization": "prediction-aware",
+            "decoded": {
+              "finite": true,
+              "pfm_sha256": "e9a9330312ed5d0617e63c214da231701961a397c5f84742199ac8ab205dbe31",
+              "sha256": "8592780249a73c3dab47691d0bbbecd951b4ad1c0404aea458279c7a1154c1b3"
+            },
+            "distance": 0.777391850948,
+            "encoded_bytes": 648,
+            "metric_mode": "cached-full",
+            "name": "both",
+            "quality": 95.78731745774266,
+            "samples_ns": [
+              10224917
+            ],
+            "sha256": "ee0f79ccf6b6c7277660e21542a614b489359705e325b9d4a2710d58cfda07b1"
+          },
+          "reason": "probe-budget-exhausted",
+          "variant": "both"
+        }
+      ]
+    },
+    {
+      "case": {
+        "distance": 1.0,
+        "effort": 7,
+        "id": "edge-e7-d1",
+        "image": {
+          "category": "synthetic",
+          "height": 193,
+          "name": "edge",
+          "path": "/Users/yunhocho/GitHub/gjxl-metal-expanded-resident-qualify/build/metal-qualification-bilinear-20260910/corpus/edge.pfm",
+          "sha256": "3a761665e5e8f441894ef06eb8fc1e40e56debbc5d88618173f844aeee42d13d",
+          "stratum": "compact",
+          "width": 257
+        }
+      },
+      "target": 95.51215799404562,
+      "unresolved": [
+        {
+          "best": {
+            "adaptive_dc_smoothing": false,
+            "artifact": "/Users/yunhocho/GitHub/gjxl-dc-coding/build/dc-processing-qualification-v1/calibration/edge-e7-d1/quantize/attempt-0003/encoded/quantize.jxl",
+            "dc_prediction": "weighted",
+            "dc_quantization": "prediction-aware",
+            "decoded": {
+              "finite": true,
+              "pfm_sha256": "668d831780207053a0314902a2abb292c9731af941f0f0b1639c5de7b543f4c7",
+              "sha256": "61733409df9b784ddbcf1a6c1e2510b0d3112aadf5156962bf58123a30a13f8e"
+            },
+            "distance": 0.798802852631,
+            "encoded_bytes": 763,
+            "metric_mode": "cached-full",
+            "name": "quantize",
+            "quality": 95.62979020765204,
+            "samples_ns": [
+              11811208
+            ],
+            "sha256": "8b4608d8cf7ad2ce882afe848231b2c291a30de4824fe2e7edee0dedbf761c9e"
+          },
+          "reason": "probe-budget-exhausted",
+          "variant": "quantize"
+        }
+      ]
+    }
+  ],
+  "curve_cases_complete": 270,
+  "curve_cases_expected": 270,
+  "curve_missing": [],
+  "rate_summaries": [
+    {
+      "effort": 3,
+      "images": 6,
+      "maximum_percent": 1.1022723736421494,
+      "median_percent": -0.6985888535908545,
+      "minimum_percent": -5.795159754577292,
+      "reference": "default",
+      "stratum": "clic2024_test",
+      "variant": "both"
+    },
+    {
+      "effort": 3,
+      "images": 6,
+      "maximum_percent": 0.9437232333513654,
+      "median_percent": -1.3829890090753665,
+      "minimum_percent": -8.527827796511724,
+      "reference": "default",
+      "stratum": "clic2024_test",
+      "variant": "quantize"
+    },
+    {
+      "effort": 3,
+      "images": 6,
+      "maximum_percent": 0.001328145767715225,
+      "median_percent": -0.9950428931002949,
+      "minimum_percent": -3.912647906853376,
+      "reference": "default",
+      "stratum": "clic2024_test",
+      "variant": "smooth"
+    },
+    {
+      "effort": 3,
+      "images": 6,
+      "maximum_percent": -0.0012665553793325506,
+      "median_percent": -0.996235788284843,
+      "minimum_percent": -3.8576455088847856,
+      "reference": "default",
+      "stratum": "clic2024_test",
+      "variant": "weighted"
+    },
+    {
+      "effort": 3,
+      "images": 6,
+      "maximum_percent": 1.6023120174178753,
+      "median_percent": -0.024692983092185095,
+      "minimum_percent": -2.0152556653598057,
+      "reference": "weighted",
+      "stratum": "clic2024_test",
+      "variant": "both"
+    },
+    {
+      "effort": 3,
+      "images": 6,
+      "maximum_percent": 4.0124308680637535,
+      "median_percent": 1.0074476033565465,
+      "minimum_percent": 0.0012665714211610181,
+      "reference": "weighted",
+      "stratum": "clic2024_test",
+      "variant": "default"
+    },
+    {
+      "effort": 3,
+      "images": 6,
+      "maximum_percent": 1.172964821901801,
+      "median_percent": -0.49462671664313895,
+      "minimum_percent": -4.857570123330528,
+      "reference": "weighted",
+      "stratum": "clic2024_test",
+      "variant": "quantize"
+    },
+    {
+      "effort": 3,
+      "images": 6,
+      "maximum_percent": 0.25387131671212,
+      "median_percent": 0.08338850765708442,
+      "minimum_percent": -1.0646428313063623,
+      "reference": "weighted",
+      "stratum": "clic2024_test",
+      "variant": "smooth"
+    },
+    {
+      "effort": 4,
+      "images": 6,
+      "maximum_percent": 1.0207599714261688,
+      "median_percent": -0.49712627958330663,
+      "minimum_percent": -5.212167837495977,
+      "reference": "default",
+      "stratum": "clic2024_test",
+      "variant": "both"
+    },
+    {
+      "effort": 4,
+      "images": 6,
+      "maximum_percent": 1.0204715781054978,
+      "median_percent": -1.1463769737531173,
+      "minimum_percent": -7.551663943932492,
+      "reference": "default",
+      "stratum": "clic2024_test",
+      "variant": "quantize"
+    },
+    {
+      "effort": 4,
+      "images": 6,
+      "maximum_percent": 0.0013894288252375064,
+      "median_percent": -0.8817478301470755,
+      "minimum_percent": -4.099325502427864,
+      "reference": "default",
+      "stratum": "clic2024_test",
+      "variant": "smooth"
+    },
+    {
+      "effort": 4,
+      "images": 6,
+      "maximum_percent": -0.0021421567555769787,
+      "median_percent": -1.0453182218783303,
+      "minimum_percent": -4.016055912953728,
+      "reference": "default",
+      "stratum": "clic2024_test",
+      "variant": "weighted"
+    },
+    {
+      "effort": 4,
+      "images": 6,
+      "maximum_percent": 1.7767777607282869,
+      "median_percent": 0.8853646285229418,
+      "minimum_percent": -1.2461583402506506,
+      "reference": "weighted",
+      "stratum": "clic2024_test",
+      "variant": "both"
+    },
+    {
+      "effort": 4,
+      "images": 6,
+      "maximum_percent": 4.184091361479824,
+      "median_percent": 1.0575467782079129,
+      "minimum_percent": 0.002142202644915655,
+      "reference": "weighted",
+      "stratum": "clic2024_test",
+      "variant": "default"
+    },
+    {
+      "effort": 4,
+      "images": 6,
+      "maximum_percent": 1.2586364483934105,
+      "median_percent": 0.004209196546943961,
+      "minimum_percent": -3.6835411011787333,
+      "reference": "weighted",
+      "stratum": "clic2024_test",
+      "variant": "quantize"
+    },
+    {
+      "effort": 4,
+      "images": 6,
+      "maximum_percent": 0.2601703197519532,
+      "median_percent": 0.07543336779591932,
+      "minimum_percent": -0.5593239515379592,
+      "reference": "weighted",
+      "stratum": "clic2024_test",
+      "variant": "smooth"
+    },
+    {
+      "effort": 7,
+      "images": 6,
+      "maximum_percent": 1.0268349179496343,
+      "median_percent": -1.2173347025770003,
+      "minimum_percent": -6.988071579942094,
+      "reference": "default",
+      "stratum": "clic2024_test",
+      "variant": "both"
+    },
+    {
+      "effort": 7,
+      "images": 6,
+      "maximum_percent": 1.0168494612194288,
+      "median_percent": -1.7160150832743555,
+      "minimum_percent": -10.509150947857888,
+      "reference": "default",
+      "stratum": "clic2024_test",
+      "variant": "quantize"
+    },
+    {
+      "effort": 7,
+      "images": 6,
+      "maximum_percent": 0.028008053073095503,
+      "median_percent": -1.2550537806899935,
+      "minimum_percent": -4.6265975730478655,
+      "reference": "default",
+      "stratum": "clic2024_test",
+      "variant": "smooth"
+    },
+    {
+      "effort": 7,
+      "images": 6,
+      "maximum_percent": -0.0038300971663209485,
+      "median_percent": -1.132561584793886,
+      "minimum_percent": -4.6061140777548495,
+      "reference": "default",
+      "stratum": "clic2024_test",
+      "variant": "weighted"
+    },
+    {
+      "effort": 7,
+      "images": 6,
+      "maximum_percent": 1.4068692994345213,
+      "median_percent": 0.19242676492806698,
+      "minimum_percent": -2.4969708269655357,
+      "reference": "weighted",
+      "stratum": "clic2024_test",
+      "variant": "both"
+    },
+    {
+      "effort": 7,
+      "images": 6,
+      "maximum_percent": 4.828521275995885,
+      "median_percent": 1.1464199760484994,
+      "minimum_percent": 0.003830243868382814,
+      "reference": "weighted",
+      "stratum": "clic2024_test",
+      "variant": "default"
+    },
+    {
+      "effort": 7,
+      "images": 6,
+      "maximum_percent": 1.0207186529019503,
+      "median_percent": -0.5862353172672112,
+      "minimum_percent": -6.188066261305844,
+      "reference": "weighted",
+      "stratum": "clic2024_test",
+      "variant": "quantize"
+    },
+    {
+      "effort": 7,
+      "images": 6,
+      "maximum_percent": 0.443576210114012,
+      "median_percent": 0.053318564010775185,
+      "minimum_percent": -1.0403777191450228,
+      "reference": "weighted",
+      "stratum": "clic2024_test",
+      "variant": "smooth"
+    },
+    {
+      "effort": 3,
+      "images": 4,
+      "maximum_percent": 11.599685475816415,
+      "median_percent": 2.967242738248271,
+      "minimum_percent": 0.573645082216556,
+      "reference": "default",
+      "stratum": "compact",
+      "variant": "both"
+    },
+    {
+      "effort": 3,
+      "images": 4,
+      "maximum_percent": 7.17089260007004,
+      "median_percent": 3.1122235177272244,
+      "minimum_percent": 0.5755430050056257,
+      "reference": "default",
+      "stratum": "compact",
+      "variant": "quantize"
+    },
+    {
+      "effort": 3,
+      "images": 4,
+      "maximum_percent": 15.032295793760914,
+      "median_percent": 0.6656564435029442,
+      "minimum_percent": -0.12203881141981444,
+      "reference": "default",
+      "stratum": "compact",
+      "variant": "smooth"
+    },
+    {
+      "effort": 3,
+      "images": 4,
+      "maximum_percent": 5.731339852813872,
+      "median_percent": 0.8871543114972905,
+      "minimum_percent": -0.1072121057710074,
+      "reference": "default",
+      "stratum": "compact",
+      "variant": "weighted"
+    },
+    {
+      "effort": 3,
+      "images": 4,
+      "maximum_percent": 5.550242370116306,
+      "median_percent": 2.1287419357126898,
+      "minimum_percent": 0.5314463794459662,
+      "reference": "weighted",
+      "stratum": "compact",
+      "variant": "both"
+    },
+    {
+      "effort": 3,
+      "images": 4,
+      "maximum_percent": 0.10732717349377459,
+      "median_percent": -0.8723961257174364,
+      "minimum_percent": -5.420663221323343,
+      "reference": "weighted",
+      "stratum": "compact",
+      "variant": "default"
+    },
+    {
+      "effort": 3,
+      "images": 4,
+      "maximum_percent": 3.3388895714591413,
+      "median_percent": 1.2827030194460904,
+      "minimum_percent": 0.533343505904351,
+      "reference": "weighted",
+      "stratum": "compact",
+      "variant": "quantize"
+    },
+    {
+      "effort": 3,
+      "images": 4,
+      "maximum_percent": 8.796782443024638,
+      "median_percent": -0.014793659230985114,
+      "minimum_percent": -0.4209525471980667,
+      "reference": "weighted",
+      "stratum": "compact",
+      "variant": "smooth"
+    },
+    {
+      "effort": 4,
+      "images": 4,
+      "maximum_percent": 11.03142955674003,
+      "median_percent": 3.574836119356908,
+      "minimum_percent": 0.4991916651805405,
+      "reference": "default",
+      "stratum": "compact",
+      "variant": "both"
+    },
+    {
+      "effort": 4,
+      "images": 4,
+      "maximum_percent": 10.59450529488506,
+      "median_percent": 4.62164362039146,
+      "minimum_percent": 0.6138766575882402,
+      "reference": "default",
+      "stratum": "compact",
+      "variant": "quantize"
+    },
+    {
+      "effort": 4,
+      "images": 4,
+      "maximum_percent": 8.831429631784452,
+      "median_percent": 0.46534479413330193,
+      "minimum_percent": -0.17403789595377558,
+      "reference": "default",
+      "stratum": "compact",
+      "variant": "smooth"
+    },
+    {
+      "effort": 4,
+      "images": 4,
+      "maximum_percent": 8.911340486502532,
+      "median_percent": 0.934397640239974,
+      "minimum_percent": -0.15799751217477123,
+      "reference": "default",
+      "stratum": "compact",
+      "variant": "weighted"
+    },
+    {
+      "effort": 4,
+      "images": 4,
+      "maximum_percent": 2.9362928309818166,
+      "median_percent": 2.2162140406288575,
+      "minimum_percent": 0.4658387895001568,
+      "reference": "weighted",
+      "stratum": "compact",
+      "variant": "both"
+    },
+    {
+      "effort": 4,
+      "images": 4,
+      "maximum_percent": 0.15824753935002206,
+      "median_percent": -0.9178487191060208,
+      "minimum_percent": -8.182197048255889,
+      "reference": "weighted",
+      "stratum": "compact",
+      "variant": "default"
+    },
+    {
+      "effort": 4,
+      "images": 4,
+      "maximum_percent": 4.976476897277852,
+      "median_percent": 2.0236302453653803,
+      "minimum_percent": 0.5804857211609907,
+      "reference": "weighted",
+      "stratum": "compact",
+      "variant": "quantize"
+    },
+    {
+      "effort": 4,
+      "images": 4,
+      "maximum_percent": -0.0160657672916369,
+      "median_percent": -0.0585703186473684,
+      "minimum_percent": -0.8782026537111073,
+      "reference": "weighted",
+      "stratum": "compact",
+      "variant": "smooth"
+    },
+    {
+      "effort": 7,
+      "images": 4,
+      "maximum_percent": 38.02433433256513,
+      "median_percent": 5.86995819513827,
+      "minimum_percent": 0.7877849090699922,
+      "reference": "default",
+      "stratum": "compact",
+      "variant": "both"
+    },
+    {
+      "effort": 7,
+      "images": 4,
+      "maximum_percent": 21.459284244844284,
+      "median_percent": 4.362141606058458,
+      "minimum_percent": 0.712531083961955,
+      "reference": "default",
+      "stratum": "compact",
+      "variant": "quantize"
+    },
+    {
+      "effort": 7,
+      "images": 4,
+      "maximum_percent": 8.887616976070596,
+      "median_percent": 0.5161921441839713,
+      "minimum_percent": -0.1196169144294254,
+      "reference": "default",
+      "stratum": "compact",
+      "variant": "smooth"
+    },
+    {
+      "effort": 7,
+      "images": 4,
+      "maximum_percent": 7.040666843699822,
+      "median_percent": 2.6679500317166354,
+      "minimum_percent": -0.10430922649735722,
+      "reference": "default",
+      "stratum": "compact",
+      "variant": "weighted"
+    },
+    {
+      "effort": 7,
+      "images": 4,
+      "maximum_percent": 31.263082345109865,
+      "median_percent": 2.325175387043512,
+      "minimum_percent": 0.6016884898462732,
+      "reference": "weighted",
+      "stratum": "compact",
+      "variant": "both"
+    },
+    {
+      "effort": 7,
+      "images": 4,
+      "maximum_percent": 0.1044181442559535,
+      "median_percent": -2.5416180016820324,
+      "minimum_percent": -6.577562576268854,
+      "reference": "weighted",
+      "stratum": "compact",
+      "variant": "default"
+    },
+    {
+      "effort": 7,
+      "images": 4,
+      "maximum_percent": 15.509486834362649,
+      "median_percent": 1.4900273694075685,
+      "minimum_percent": -0.6193873239798291,
+      "reference": "weighted",
+      "stratum": "compact",
+      "variant": "quantize"
+    },
+    {
+      "effort": 7,
+      "images": 4,
+      "maximum_percent": 3.5536545248202565,
+      "median_percent": 0.03214936182539703,
+      "minimum_percent": -5.860422790260129,
+      "reference": "weighted",
+      "stratum": "compact",
+      "variant": "smooth"
+    },
+    {
+      "effort": 3,
+      "images": 6,
+      "maximum_percent": 0.9171110858547087,
+      "median_percent": 0.3484389435432879,
+      "minimum_percent": -0.9226232226657787,
+      "reference": "default",
+      "stratum": "kodak",
+      "variant": "both"
+    },
+    {
+      "effort": 3,
+      "images": 6,
+      "maximum_percent": 0.8577771473266071,
+      "median_percent": 0.16990004879170048,
+      "minimum_percent": -1.371778088486925,
+      "reference": "default",
+      "stratum": "kodak",
+      "variant": "quantize"
+    },
+    {
+      "effort": 3,
+      "images": 6,
+      "maximum_percent": 0.43355752140766624,
+      "median_percent": -0.24308117103556437,
+      "minimum_percent": -1.1866025173089163,
+      "reference": "default",
+      "stratum": "kodak",
+      "variant": "smooth"
+    },
+    {
+      "effort": 3,
+      "images": 6,
+      "maximum_percent": 0.43081079413957063,
+      "median_percent": -0.30430806462240323,
+      "minimum_percent": -1.3851864714051845,
+      "reference": "default",
+      "stratum": "kodak",
+      "variant": "weighted"
+    },
+    {
+      "effort": 3,
+      "images": 6,
+      "maximum_percent": 1.2294599201654555,
+      "median_percent": 0.5400505020744314,
+      "minimum_percent": 0.12566002293874168,
+      "reference": "weighted",
+      "stratum": "kodak",
+      "variant": "both"
+    },
+    {
+      "effort": 3,
+      "images": 6,
+      "maximum_percent": 1.4046434017781002,
+      "median_percent": 0.3052371072464882,
+      "minimum_percent": -0.4289627761968738,
+      "reference": "weighted",
+      "stratum": "kodak",
+      "variant": "default"
+    },
+    {
+      "effort": 3,
+      "images": 6,
+      "maximum_percent": 1.1085974253101172,
+      "median_percent": 0.10455140069231564,
+      "minimum_percent": -0.013236742944124514,
+      "reference": "weighted",
+      "stratum": "kodak",
+      "variant": "quantize"
+    },
+    {
+      "effort": 3,
+      "images": 6,
+      "maximum_percent": 0.20137335050447125,
+      "median_percent": 0.10344775699838166,
+      "minimum_percent": -0.0008617333815088359,
+      "reference": "weighted",
+      "stratum": "kodak",
+      "variant": "smooth"
+    },
+    {
+      "effort": 4,
+      "images": 6,
+      "maximum_percent": 0.9929770117096143,
+      "median_percent": 0.43297104663004526,
+      "minimum_percent": -0.746506313864406,
+      "reference": "default",
+      "stratum": "kodak",
+      "variant": "both"
+    },
+    {
+      "effort": 4,
+      "images": 6,
+      "maximum_percent": 0.6237744714938465,
+      "median_percent": 0.11735064721560715,
+      "minimum_percent": -1.6330992206729396,
+      "reference": "default",
+      "stratum": "kodak",
+      "variant": "quantize"
+    },
+    {
+      "effort": 4,
+      "images": 6,
+      "maximum_percent": 0.3511901771475291,
+      "median_percent": -0.07290388379196783,
+      "minimum_percent": -1.5199685336552002,
+      "reference": "default",
+      "stratum": "kodak",
+      "variant": "smooth"
+    },
+    {
+      "effort": 4,
+      "images": 6,
+      "maximum_percent": 0.44270018597006566,
+      "median_percent": -0.31395016648070995,
+      "minimum_percent": -1.4139011998000228,
+      "reference": "default",
+      "stratum": "kodak",
+      "variant": "weighted"
+    },
+    {
+      "effort": 4,
+      "images": 6,
+      "maximum_percent": 1.2550640004833842,
+      "median_percent": 0.7391818308953861,
+      "minimum_percent": 0.12036417867427777,
+      "reference": "weighted",
+      "stratum": "kodak",
+      "variant": "both"
+    },
+    {
+      "effort": 4,
+      "images": 6,
+      "maximum_percent": 1.4341790749479932,
+      "median_percent": 0.3149389185476207,
+      "minimum_percent": -0.44074898937444384,
+      "reference": "weighted",
+      "stratum": "kodak",
+      "variant": "default"
+    },
+    {
+      "effort": 4,
+      "images": 6,
+      "maximum_percent": 0.8907908182064179,
+      "median_percent": 0.053546609739554746,
+      "minimum_percent": -0.3186949571326246,
+      "reference": "weighted",
+      "stratum": "kodak",
+      "variant": "quantize"
+    },
+    {
+      "effort": 4,
+      "images": 6,
+      "maximum_percent": 0.4476722721452874,
+      "median_percent": 0.11150825556695881,
+      "minimum_percent": -0.10758852936268379,
+      "reference": "weighted",
+      "stratum": "kodak",
+      "variant": "smooth"
+    },
+    {
+      "effort": 7,
+      "images": 6,
+      "maximum_percent": 0.46449953417391804,
+      "median_percent": -0.332691341053522,
+      "minimum_percent": -1.0207136406083461,
+      "reference": "default",
+      "stratum": "kodak",
+      "variant": "both"
+    },
+    {
+      "effort": 7,
+      "images": 6,
+      "maximum_percent": 0.6757777259668041,
+      "median_percent": -0.5480167525511015,
+      "minimum_percent": -1.8028015188419348,
+      "reference": "default",
+      "stratum": "kodak",
+      "variant": "quantize"
+    },
+    {
+      "effort": 7,
+      "images": 6,
+      "maximum_percent": 0.4677045007723094,
+      "median_percent": -0.23539862188448946,
+      "minimum_percent": -1.4794032833578188,
+      "reference": "default",
+      "stratum": "kodak",
+      "variant": "smooth"
+    },
+    {
+      "effort": 7,
+      "images": 6,
+      "maximum_percent": 0.4435256455811042,
+      "median_percent": -0.3261221871499232,
+      "minimum_percent": -1.521327179762627,
+      "reference": "default",
+      "stratum": "kodak",
+      "variant": "weighted"
+    },
+    {
+      "effort": 7,
+      "images": 6,
+      "maximum_percent": 0.7234543478775031,
+      "median_percent": 0.11847802555727649,
+      "minimum_percent": -0.2203206092426612,
+      "reference": "weighted",
+      "stratum": "kodak",
+      "variant": "both"
+    },
+    {
+      "effort": 7,
+      "images": 6,
+      "maximum_percent": 1.5448290845060964,
+      "median_percent": 0.3271964067635822,
+      "minimum_percent": -0.44156718188696575,
+      "reference": "weighted",
+      "stratum": "kodak",
+      "variant": "default"
+    },
+    {
+      "effort": 7,
+      "images": 6,
+      "maximum_percent": 0.9352771251214593,
+      "median_percent": -0.18391595350307766,
+      "minimum_percent": -0.6015232772685337,
+      "reference": "weighted",
+      "stratum": "kodak",
+      "variant": "quantize"
+    },
+    {
+      "effort": 7,
+      "images": 6,
+      "maximum_percent": 0.37697118344459507,
+      "median_percent": 0.03332181912577632,
+      "minimum_percent": -0.4733006997634813,
+      "reference": "weighted",
+      "stratum": "kodak",
+      "variant": "smooth"
+    },
+    {
+      "effort": 3,
+      "images": 2,
+      "maximum_percent": -0.1303116785039512,
+      "median_percent": -0.793703974615918,
+      "minimum_percent": -1.4570962707278847,
+      "reference": "default",
+      "stratum": "photo_4k",
+      "variant": "both"
+    },
+    {
+      "effort": 3,
+      "images": 2,
+      "maximum_percent": -0.43651837760837275,
+      "median_percent": -1.6991145734829431,
+      "minimum_percent": -2.9617107693575138,
+      "reference": "default",
+      "stratum": "photo_4k",
+      "variant": "quantize"
+    },
+    {
+      "effort": 3,
+      "images": 2,
+      "maximum_percent": -0.4625346454593977,
+      "median_percent": -0.7872146366335885,
+      "minimum_percent": -1.1118946278077793,
+      "reference": "default",
+      "stratum": "photo_4k",
+      "variant": "smooth"
+    },
+    {
+      "effort": 3,
+      "images": 2,
+      "maximum_percent": -0.6947666763963088,
+      "median_percent": -1.0642145994142715,
+      "minimum_percent": -1.4336625224322341,
+      "reference": "default",
+      "stratum": "photo_4k",
+      "variant": "weighted"
+    },
+    {
+      "effort": 3,
+      "images": 2,
+      "maximum_percent": 0.568404080027667,
+      "median_percent": 0.27231474213133694,
+      "minimum_percent": -0.02377459576499304,
+      "reference": "weighted",
+      "stratum": "photo_4k",
+      "variant": "both"
+    },
+    {
+      "effort": 3,
+      "images": 2,
+      "maximum_percent": 1.4545153640902144,
+      "median_percent": 1.0770714094507357,
+      "minimum_percent": 0.6996274548112571,
+      "reference": "weighted",
+      "stratum": "photo_4k",
+      "variant": "default"
+    },
+    {
+      "effort": 3,
+      "images": 2,
+      "maximum_percent": 0.2600550747878395,
+      "median_percent": -0.6451094343298398,
+      "minimum_percent": -1.550273943447519,
+      "reference": "weighted",
+      "stratum": "photo_4k",
+      "variant": "quantize"
+    },
+    {
+      "effort": 3,
+      "images": 2,
+      "maximum_percent": 0.32644805808847716,
+      "median_percent": 0.2801524240363443,
+      "minimum_percent": 0.2338567899842115,
+      "reference": "weighted",
+      "stratum": "photo_4k",
+      "variant": "smooth"
+    },
+    {
+      "effort": 4,
+      "images": 2,
+      "maximum_percent": 0.059805180343440296,
+      "median_percent": -0.9937433473035403,
+      "minimum_percent": -2.047291874950521,
+      "reference": "default",
+      "stratum": "photo_4k",
+      "variant": "both"
+    },
+    {
+      "effort": 4,
+      "images": 2,
+      "maximum_percent": -0.17970453340809597,
+      "median_percent": -1.8015684003193273,
+      "minimum_percent": -3.4234322672305586,
+      "reference": "default",
+      "stratum": "photo_4k",
+      "variant": "quantize"
+    },
+    {
+      "effort": 4,
+      "images": 2,
+      "maximum_percent": -0.49255157893699686,
+      "median_percent": -1.1425125684974604,
+      "minimum_percent": -1.792473558057924,
+      "reference": "default",
+      "stratum": "photo_4k",
+      "variant": "smooth"
+    },
+    {
+      "effort": 4,
+      "images": 2,
+      "maximum_percent": -0.7246607725236048,
+      "median_percent": -1.1027524955562362,
+      "minimum_percent": -1.4808442185888677,
+      "reference": "default",
+      "stratum": "photo_4k",
+      "variant": "weighted"
+    },
+    {
+      "effort": 4,
+      "images": 2,
+      "maximum_percent": 0.7901921655181097,
+      "median_percent": 0.10761510920176215,
+      "minimum_percent": -0.5749619471145854,
+      "reference": "weighted",
+      "stratum": "photo_4k",
+      "variant": "both"
+    },
+    {
+      "effort": 4,
+      "images": 2,
+      "maximum_percent": 1.5031028299455622,
+      "median_percent": 1.1165266334724833,
+      "minimum_percent": 0.7299504369994041,
+      "reference": "weighted",
+      "stratum": "photo_4k",
+      "variant": "default"
+    },
+    {
+      "effort": 4,
+      "images": 2,
+      "maximum_percent": 0.5489341495643879,
+      "median_percent": -0.7114264975053102,
+      "minimum_percent": -1.9717871445750084,
+      "reference": "weighted",
+      "stratum": "photo_4k",
+      "variant": "quantize"
+    },
+    {
+      "effort": 4,
+      "images": 2,
+      "maximum_percent": 0.2338034756595091,
+      "median_percent": -0.0412549866150238,
+      "minimum_percent": -0.3163134488895567,
+      "reference": "weighted",
+      "stratum": "photo_4k",
+      "variant": "smooth"
+    },
+    {
+      "effort": 7,
+      "images": 2,
+      "maximum_percent": -0.08461859544546,
+      "median_percent": -1.0670462784031356,
+      "minimum_percent": -2.0494739613608113,
+      "reference": "default",
+      "stratum": "photo_4k",
+      "variant": "both"
+    },
+    {
+      "effort": 7,
+      "images": 2,
+      "maximum_percent": -0.5754182824623162,
+      "median_percent": -2.4077006427606475,
+      "minimum_percent": -4.2399830030589785,
+      "reference": "default",
+      "stratum": "photo_4k",
+      "variant": "quantize"
+    },
+    {
+      "effort": 7,
+      "images": 2,
+      "maximum_percent": -0.6242951208243596,
+      "median_percent": -0.8442268605193379,
+      "minimum_percent": -1.0641586002143164,
+      "reference": "default",
+      "stratum": "photo_4k",
+      "variant": "smooth"
+    },
+    {
+      "effort": 7,
+      "images": 2,
+      "maximum_percent": -0.7268063841440636,
+      "median_percent": -1.1646498089995787,
+      "minimum_percent": -1.602493233855094,
+      "reference": "default",
+      "stratum": "photo_4k",
+      "variant": "weighted"
+    },
+    {
+      "effort": 7,
+      "images": 2,
+      "maximum_percent": 0.6468894223183663,
+      "median_percent": 0.0963146027876225,
+      "minimum_percent": -0.45426021674312134,
+      "reference": "weighted",
+      "stratum": "photo_4k",
+      "variant": "both"
+    },
+    {
+      "effort": 7,
+      "images": 2,
+      "maximum_percent": 1.6285912992324465,
+      "median_percent": 1.1803594165161218,
+      "minimum_percent": 0.7321275337997971,
+      "reference": "weighted",
+      "stratum": "photo_4k",
+      "variant": "default"
+    },
+    {
+      "effort": 7,
+      "images": 2,
+      "maximum_percent": 0.15249645565705652,
+      "median_percent": -1.263973621223114,
+      "minimum_percent": -2.680443698103285,
+      "reference": "weighted",
+      "stratum": "photo_4k",
+      "variant": "quantize"
+    },
+    {
+      "effort": 7,
+      "images": 2,
+      "maximum_percent": 0.547101904645006,
+      "median_percent": 0.32518184057435984,
+      "minimum_percent": 0.10326177650371376,
+      "reference": "weighted",
+      "stratum": "photo_4k",
+      "variant": "smooth"
+    }
+  ],
+  "timing_complete": 10,
+  "timing_expected": 12,
+  "timing_missing": [
+    "edge-e3-d1",
+    "edge-e7-d1"
+  ]
+}

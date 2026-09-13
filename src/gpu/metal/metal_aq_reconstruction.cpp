@@ -183,10 +183,78 @@ void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
     }
   }
 
-  for (size_t batch_index = 0; batch_index < self.batches_.size();
-       ++batch_index) {
-    self.EncodeReconstructionBatch(backend, encoder, batch_index);
+  if (self.DeferredLlf()) {
+    // A DC prediction group and a smoothing neighbourhood may span transform
+    // batches. Materialize every DC sample before consuming either dependency.
+    for (size_t batch_index = 0; batch_index < self.batches_.size(); ++batch_index) {
+      self.EncodeReconstructionCoefficientBatch(backend, encoder, batch_index);
+    }
+    self.EncodeDcQuantization(backend, encoder);
+    self.EncodeDcSmoothing(backend, encoder);
+    for (size_t batch_index = 0; batch_index < self.batches_.size(); ++batch_index) {
+      self.EncodeDcLowFrequencies(backend, encoder, batch_index);
+      self.EncodeReconstructionInverseBatch(backend, encoder, batch_index);
+      self.EncodeReconstructionScatterBatch(backend, encoder, batch_index);
+    }
+  } else {
+    for (size_t batch_index = 0; batch_index < self.batches_.size(); ++batch_index) {
+      self.EncodeReconstructionBatch(backend, encoder, batch_index);
+    }
   }
+}
+
+AqDcProcessingParams MetalPreparedAqEvaluation::DcProcessingParams() const noexcept {
+  const auto& params = reconstruction_params_[0];
+  return {static_cast<uint32_t>(block_extent_.width),
+          static_cast<uint32_t>(block_extent_.height),
+          params.global_scale, params.quant_dc,
+          static_cast<uint32_t>(options_.dc_quantization),
+          static_cast<uint32_t>(options_.dc_prediction),
+          options_.profile.extra_dc_precision, params.use_resident_quantizer};
+}
+
+void MetalPreparedAqEvaluation::EncodeDcQuantization(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
+  if (!DeferredDc() || exact_coefficient_reconstruction_ || exact_linear_reconstruction_) return;
+  const auto params = DcProcessingParams();
+  encoder->setComputePipelineState(backend.aq_pipelines_.dc_quantize.get());
+  BindPlane(encoder, dc_, 0);
+  BindPlane(encoder, quantized_dc_, 1);
+  BindPlane(encoder, dc_predictor_scratch_.buffer ? dc_predictor_scratch_ : raw_quant_, 2);
+  BindPlane(encoder, reconstruction_error_, 3);
+  encoder->setBytes(&params, sizeof(params), 4);
+  BindPlane(encoder, params.use_resident_quantizer ? resident_quantizer_params_ : raw_quant_, 5);
+  DispatchMetalThreadgroups(encoder,
+    MTL::Size(((block_extent_.width + 255) / 256) * ((block_extent_.height + 255) / 256), 1, 1),
+    MTL::Size(std::min<size_t>(256, block_extent_.height), 1, 1));
+}
+
+void MetalPreparedAqEvaluation::EncodeDcSmoothing(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
+  if (!options_.profile.adaptive_dc_smoothing || exact_linear_reconstruction_) return;
+  const auto params = DcProcessingParams();
+  encoder->setComputePipelineState(backend.aq_pipelines_.dc_smooth.get());
+  BindPlane(encoder, dc_, 0);
+  BindPlane(encoder, smoothed_dc_, 1);
+  BindPlane(encoder, reconstruction_error_, 2);
+  encoder->setBytes(&params, sizeof(params), 3);
+  BindPlane(encoder, params.use_resident_quantizer ? resident_quantizer_params_ : raw_quant_, 4);
+  DispatchThreads1d(encoder, block_count_);
+}
+
+void MetalPreparedAqEvaluation::EncodeDcLowFrequencies(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    size_t batch_index) const {
+  if (!DeferredLlf() || exact_linear_reconstruction_ || batch_index >= batches_.size()) return;
+  const auto& batch = batches_[batch_index];
+  if (batch.anchor_count == 0) return;
+  const auto& params = reconstruction_params_[batch_index];
+  encoder->setComputePipelineState(backend.aq_pipelines_.dc_low_frequencies.get());
+  BindPlane(encoder, anchors_, 0);
+  BindPlane(encoder, options_.profile.adaptive_dc_smoothing ? smoothed_dc_ : dc_, 1);
+  BindPlane(encoder, reconstruction_coefficients_, 2);
+  encoder->setBytes(&params, sizeof(params), 3);
+  DispatchThreads1d(encoder, batch.anchor_count * 3 * params.covered_width * params.covered_height);
 }
 
 void MetalPreparedAqEvaluation::EncodeReconstructionReset(
@@ -270,6 +338,18 @@ void MetalPreparedAqEvaluation::EncodeReconstructionProfileStage(
   }
   if (stage == ReconstructionProfileStage::kCoefficientBatch) {
     EncodeReconstructionCoefficientBatch(backend, encoder, batch_index);
+    return;
+  }
+  if (stage == ReconstructionProfileStage::kDcQuantization) {
+    EncodeDcQuantization(backend, encoder);
+    return;
+  }
+  if (stage == ReconstructionProfileStage::kDcSmoothing) {
+    EncodeDcSmoothing(backend, encoder);
+    return;
+  }
+  if (stage == ReconstructionProfileStage::kDcLowFrequencies) {
+    EncodeDcLowFrequencies(backend, encoder, batch_index);
     return;
   }
   if (stage == ReconstructionProfileStage::kInverseBatch) {
@@ -685,11 +765,13 @@ void MetalPreparedAqEvaluation::EncodeFrameSubmission(
     BindPlane(encoder, self.reconstruction_error_, 8);
     encoder->setBytes(&params, sizeof(params), 9);
     BindPlane(encoder, self.gathered_pixels_, 10);
+    BindPlane(encoder, self.DeferredDc() ? self.dc_ : self.gathered_pixels_, 11);
     DispatchMetalThreadgroups(
         encoder,
         MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
         MTL::Size(kAqThreadCount, 1, 1));
   }
+  self.EncodeDcQuantization(backend, encoder);
 }
 
 void MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission(

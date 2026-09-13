@@ -5,6 +5,8 @@
 
 #pragma once
 
+#include "codestream/dc_prediction.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <span>
@@ -39,11 +41,10 @@ struct SimpleBlockContextMap;
 
 /// Writes DC global with the supplied validated AC block-context map.
 [[nodiscard]] Status WriteSimpleDcGlobal(
-  QuantizerParams params,
-  size_t dc_group_count,
-  const SimpleBlockContextMap& block_context_map,
-  const EntropyCode& dc_code,
-  BitWriter* writer);
+    QuantizerParams params, size_t dc_group_count,
+    const SimpleBlockContextMap &block_context_map, const EntropyCode &dc_code,
+    BitWriter *writer,
+    VarDctDcPrediction prediction = VarDctDcPrediction::kGradient);
 
 /// Writes the complete initial-profile AC global section.
 [[nodiscard]] Status WriteSimpleAcGlobal(

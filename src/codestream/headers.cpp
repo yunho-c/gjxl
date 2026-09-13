@@ -5,6 +5,7 @@
 // encoder/enc_frame.cc.
 
 #include "codestream/headers.h"
+#include "codestream/weighted_dc.h"
 
 #include <algorithm>
 #include <array>
@@ -247,13 +248,19 @@ Status WriteBlockContextMap(
   return WriteContextMap(map, writer);
 }
 
-Status WriteContextTree(size_t dc_group_count, BitWriter* writer) {
+Status WriteContextTree(size_t dc_group_count, BitWriter *writer,
+                        VarDctDcPrediction prediction) {
   if (dc_group_count == 0 ||
       dc_group_count >= static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
     return Status::InvalidArgument("DC-group count cannot be encoded");
   }
 
   auto tokens = std::to_array(kContextTreeTokens);
+  if (prediction == VarDctDcPrediction::kWeighted) {
+    Status status = codestream_internal::UseWeightedDcTree(tokens);
+    if (!status.ok())
+      return status;
+  }
   tokens[1].value = PackSigned(static_cast<int32_t>(1 + dc_group_count));
   const std::array streams = {EntropyTokenStreamView::Interleaved(tokens)};
   EntropyCode code;
@@ -443,6 +450,8 @@ Status WriteSimpleFrameHeader(
   SimpleVarDctCodestreamProfile normalized = profile;
   normalized.x_qm_scale = defaults.x_qm_scale;
   normalized.b_qm_scale = defaults.b_qm_scale;
+  normalized.extra_dc_precision = defaults.extra_dc_precision;
+  normalized.adaptive_dc_smoothing = defaults.adaptive_dc_smoothing;
   if (!profile.valid() || normalized != defaults) {
     return Status::InvalidArgument(
       "Profile cannot be represented by the simple frame header");
@@ -453,8 +462,9 @@ Status WriteSimpleFrameHeader(
     {1, 0},   // not all default
     {2, 0},   // regular frame
     {1, 0},   // VarDCT
-    {2, 2},   // flags selector
-    {8, 111}, // kSkipAdaptiveDCSmoothing
+    {2, profile.adaptive_dc_smoothing ? 0u : 2u}, // flags selector
+    {profile.adaptive_dc_smoothing ? 0u : 8u,
+     profile.adaptive_dc_smoothing ? 0u : 111u}, // kSkipAdaptiveDCSmoothing
     {2, 0},   // no upsampling
     {3, profile.x_qm_scale},
     {3, profile.b_qm_scale},
@@ -483,11 +493,13 @@ Status WriteSimpleQuantizer(QuantizerParams params, BitWriter* writer) {
   return AppendTemporary(writer, temporary);
 }
 
-Status WriteSimpleDcGlobal(
-  QuantizerParams params, size_t dc_group_count,
-  const SimpleBlockContextMap& block_context_map,
-  const EntropyCode& dc_code,
-  BitWriter* writer) {
+Status WriteSimpleDcGlobal(QuantizerParams params, size_t dc_group_count,
+                           const SimpleBlockContextMap &block_context_map,
+                           const EntropyCode &dc_code, BitWriter *writer,
+                           VarDctDcPrediction prediction) {
+
+  if (!IsValidDcPrediction(prediction))
+    return Status::InvalidArgument("DC prediction is invalid");
 
   if (writer == nullptr) {
     return Status::InvalidArgument("DC-global output is null");
@@ -509,7 +521,8 @@ Status WriteSimpleDcGlobal(
     if (Status status = temporary.WriteBits(1, 1); !status.ok()) {
       return status;
     }
-    if (Status status = WriteContextTree(dc_group_count, &temporary);
+    if (Status status =
+            WriteContextTree(dc_group_count, &temporary, prediction);
         !status.ok()) {
       return status;
     }

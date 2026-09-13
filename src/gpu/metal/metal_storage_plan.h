@@ -38,6 +38,10 @@ struct AqStoragePlanOptions {
   bool resident_quantization = false;
   bool uses_butteraugli_sinks = false;
   AqEvaluationMetric metric = AqEvaluationMetric::kButteraugli;
+  DcQuantizationMode dc_quantization = DcQuantizationMode::kRound;
+  VarDctDcPrediction dc_prediction = VarDctDcPrediction::kGradient;
+  uint8_t extra_dc_precision = 0;
+  bool adaptive_dc_smoothing = false;
 };
 
 struct AqStoragePlan {
@@ -82,6 +86,8 @@ struct AqStoragePlan {
   DevicePlaneLayout quantized_coefficients;
   DevicePlaneLayout reconstruction_coefficients;
   DevicePlaneLayout dc;
+  DevicePlaneLayout dc_predictor_scratch;
+  DevicePlaneLayout smoothed_dc;
   DevicePlaneLayout quantized_dc;
   DevicePlaneLayout reconstruction_error;
   DevicePlaneLayout quant_probe_input;

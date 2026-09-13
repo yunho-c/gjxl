@@ -193,54 +193,58 @@ bool PurePlans() {
                             {2049, 257},
                             {3839, 2159},
                             {1ul << 24, 1}}) {
-      for (auto entropy : {kBalanced, kHighDensity, kMaximumCompression}) {
-        for (auto order : {kFull, kEffort7Dct8Sampled}) {
-          size_t previous = 0;
-          for (size_t threads : {1ul, 2ul, 8ul, SIZE_MAX}) {
-            SerializerStoragePlan plan;
-            const SerializerStorageOptions options{
-                {entropy, order}, threads, true};
-            if (!FixtureOk(
-                    ComputeSerializerStoragePlan(extent, options, &plan)))
-              return false;
-            const auto blocks = extent.ceil_div(8);
-            size_t b = 0, g = 0, d = 0, tiles = 0;
-            if (!blocks.try_area(&b) || !blocks.ceil_div(32).try_area(&g) ||
-                !blocks.ceil_div(256).try_area(&d) ||
-                !blocks.ceil_div(8).try_area(&tiles))
-              return false;
-            if (!FixtureCheck(
-                    plan.ac_group_count == g && plan.dc_group_count == d &&
-                        plan.maximum_ac_tokens == 195 * b &&
-                        plan.maximum_dc_tokens == 6 * b + 2 * tiles &&
-                        plan.output.retained_bytes ==
-                            plan.maximum_output_bytes &&
-                        plan.output.peak_bytes == plan.maximum_output_bytes &&
-                        plan.working.peak_bytes >= plan.output.peak_bytes &&
-                        plan.working.peak_bytes >= previous,
-                    "Serializer count or concurrency bound is inconsistent"))
-              return false;
-            previous = plan.working.peak_bytes;
-            SerializerStoragePlan no_profile;
-            auto bare = options;
-            bare.collect_profile = false;
-            if (!FixtureOk(
-                    ComputeSerializerStoragePlan(extent, bare, &no_profile)) ||
-                !FixtureCheck(
-                    no_profile.working.peak_bytes <= plan.working.peak_bytes &&
-                        no_profile.maximum_output_bytes ==
-                            plan.maximum_output_bytes,
-                    "Profiling changed output bound or reduced storage"))
+      for (auto prediction :
+           {VarDctDcPrediction::kGradient, VarDctDcPrediction::kWeighted})
+        for (auto entropy : {kBalanced, kHighDensity, kMaximumCompression}) {
+          for (auto order : {kFull, kEffort7Dct8Sampled}) {
+            size_t previous = 0;
+            for (size_t threads : {1ul, 2ul, 8ul, SIZE_MAX}) {
+              SerializerStoragePlan plan;
+              const SerializerStorageOptions options{
+                  {entropy, order, prediction}, threads, true};
+              if (!FixtureOk(
+                      ComputeSerializerStoragePlan(extent, options, &plan)))
+                return false;
+              const auto blocks = extent.ceil_div(8);
+              size_t b = 0, g = 0, d = 0, tiles = 0;
+              if (!blocks.try_area(&b) || !blocks.ceil_div(32).try_area(&g) ||
+                  !blocks.ceil_div(256).try_area(&d) ||
+                  !blocks.ceil_div(8).try_area(&tiles))
+                return false;
+              if (!FixtureCheck(
+                      plan.ac_group_count == g && plan.dc_group_count == d &&
+                          plan.maximum_ac_tokens == 195 * b &&
+                          plan.maximum_dc_tokens == 6 * b + 2 * tiles &&
+                          plan.output.retained_bytes ==
+                              plan.maximum_output_bytes &&
+                          plan.output.peak_bytes == plan.maximum_output_bytes &&
+                          plan.working.peak_bytes >= plan.output.peak_bytes &&
+                          plan.working.peak_bytes >= previous,
+                      "Serializer count or concurrency bound is inconsistent"))
+                return false;
+              previous = plan.working.peak_bytes;
+              SerializerStoragePlan no_profile;
+              auto bare = options;
+              bare.collect_profile = false;
+              if (!FixtureOk(ComputeSerializerStoragePlan(extent, bare,
+                                                          &no_profile)) ||
+                  !FixtureCheck(
+                      no_profile.working.peak_bytes <=
+                              plan.working.peak_bytes &&
+                          no_profile.maximum_output_bytes ==
+                              plan.maximum_output_bytes,
+                      "Profiling changed output bound or reduced storage"))
+                return false;
+            }
+            SerializerStoragePlan automatic;
+            if (!FixtureOk(ComputeSerializerStoragePlan(
+                    extent, {{entropy, order, prediction}, 0, true},
+                    &automatic)) ||
+                !FixtureCheck(automatic.working.peak_bytes >= previous,
+                              "Auto plan omitted nested dispatch storage"))
               return false;
           }
-          SerializerStoragePlan automatic;
-          if (!FixtureOk(ComputeSerializerStoragePlan(
-                  extent, {{entropy, order}, 0, true}, &automatic)) ||
-              !FixtureCheck(automatic.working.peak_bytes >= previous,
-                            "Auto plan omitted nested dispatch storage"))
-            return false;
         }
-      }
       SerializerStoragePlan full, sampled;
       if (!FixtureOk(ComputeSerializerStoragePlan(
               extent, {{kMaximumCompression, kFull}}, &full)) ||
@@ -271,7 +275,9 @@ bool PurePlans() {
        {SerializerStorageOptions{
             {static_cast<VarDctEntropyBehavior>(99), kFull}},
         SerializerStorageOptions{
-            {kBalanced, static_cast<VarDctCoefficientOrderBehavior>(99)}}}) {
+            {kBalanced, static_cast<VarDctCoefficientOrderBehavior>(99)}},
+        SerializerStorageOptions{
+            {kBalanced, kFull, static_cast<VarDctDcPrediction>(99)}}}) {
     if (!FixtureCheck(
             !ComputeSerializerStoragePlan({32, 32}, options, &plan).ok() &&
                 plan == sentinel,
@@ -343,21 +349,24 @@ bool RealEncodes() {
     FrameFixture f;
     if (!Create(c, &f))
       return false;
-    for (auto entropy : {kBalanced, kHighDensity, kMaximumCompression}) {
-      for (auto order : {kFull, kEffort7Dct8Sampled}) {
-        std::vector<uint8_t> oracle;
-        if (!Oracle(f, {entropy, order}, &oracle))
-          return false;
-        for (size_t threads : {0ul, 1ul, 2ul, 8ul}) {
-          for (bool profile : {false, true}) {
-            if (!EncodeWithinPlan(f, {{entropy, order}, threads, profile},
-                                  oracle))
-              return false;
-            ++count;
+    for (auto prediction :
+         {VarDctDcPrediction::kGradient, VarDctDcPrediction::kWeighted})
+      for (auto entropy : {kBalanced, kHighDensity, kMaximumCompression}) {
+        for (auto order : {kFull, kEffort7Dct8Sampled}) {
+          std::vector<uint8_t> oracle;
+          if (!Oracle(f, {entropy, order, prediction}, &oracle))
+            return false;
+          for (size_t threads : {0ul, 1ul, 2ul, 8ul}) {
+            for (bool profile : {false, true}) {
+              if (!EncodeWithinPlan(
+                      f, {{entropy, order, prediction}, threads, profile},
+                      oracle))
+                return false;
+              ++count;
+            }
           }
         }
       }
-    }
   }
   std::cerr << "Whole-serializer reservation cases: " << count << '\n';
   return Empty(DefaultResourceBudget());
@@ -370,65 +379,69 @@ bool FailureSweep() {
   const std::array<uint8_t, 3> sentinel{17, 19, 23};
   thread_budget_internal::EncodeScope serial(
       1); // Physical hooks are thread-local.
-  for (auto entropy : {kBalanced, kHighDensity, kMaximumCompression}) {
-    SerializerStorageOptions options{{entropy, kFull}, 1, true};
-    SerializerStoragePlan plan;
-    std::vector<uint8_t> oracle;
-    if (!FixtureOk(
-            ComputeSerializerStoragePlan(f.geometry.frame(), options, &plan)) ||
-        !Oracle(f, options.coding, &oracle))
-      return false;
-    bool completed = false;
-    for (size_t fail = 0; fail < 32768; ++fail) {
-      ResourceBudget budget(plan.working.peak_bytes);
-      ResourceReservation job;
-      if (!FixtureOk(budget.Reserve(plan.working.peak_bytes, &job)))
+  for (auto prediction :
+       {VarDctDcPrediction::kGradient, VarDctDcPrediction::kWeighted})
+    for (auto entropy : {kBalanced, kHighDensity, kMaximumCompression}) {
+      SerializerStorageOptions options{{entropy, kFull, prediction}, 1, true};
+      SerializerStoragePlan plan;
+      std::vector<uint8_t> oracle;
+      if (!FixtureOk(ComputeSerializerStoragePlan(f.geometry.frame(), options,
+                                                  &plan)) ||
+          !Oracle(f, options.coding, &oracle))
         return false;
-      bool injected = false;
-      {
-        CodestreamBuffer output;
-        if (!FixtureOk(CodestreamBuffer::CopyFrom(sentinel, &output)))
+      bool completed = false;
+      for (size_t fail = 0; fail < 32768; ++fail) {
+        ResourceBudget budget(plan.working.peak_bytes);
+        ResourceReservation job;
+        if (!FixtureOk(budget.Reserve(plan.working.peak_bytes, &job)))
           return false;
-        VarDctCodestreamProfile profile;
-        profile.total_nanoseconds = 17;
-        profile.assembly.output_copy_nanoseconds = 19;
-        profile.selected_block_context_candidate_index = 23;
-        const auto before = profile;
+        bool injected = false;
         {
-          ResourceContextScope scope({&job, ResourceClass::kPreparation});
-          ArmManagedHostAllocationFailureAfterForTest(fail);
-          const Status status = EncodeVarDctCodestreamToBuffer(
-              f.view(), options.coding, &output, &profile);
-          injected = !ManagedHostAllocationFailurePendingForTest();
-          DisarmManagedHostAllocationFailureForTest();
-          if (injected) {
-            if (!FixtureCheck(status.code() == StatusCode::kOutOfMemory &&
-                                  !status.resource_plan_exceeded() &&
-                                  profile == before &&
-                                  std::ranges::equal(output.view(), sentinel) &&
-                                  budget.snapshot().total.backing_count == 0,
-                              "Serializer allocation failure changed "
-                              "output/profile or leaked"))
-              return false;
-          } else if (!FixtureOk(status) ||
-                     !FixtureCheck(std::ranges::equal(output.view(), oracle),
-                                   "Fault-free final encode changed bytes"))
+          CodestreamBuffer output;
+          if (!FixtureOk(CodestreamBuffer::CopyFrom(sentinel, &output)))
             return false;
+          VarDctCodestreamProfile profile;
+          profile.total_nanoseconds = 17;
+          profile.assembly.output_copy_nanoseconds = 19;
+          profile.selected_block_context_candidate_index = 23;
+          const auto before = profile;
+          {
+            ResourceContextScope scope({&job, ResourceClass::kPreparation});
+            ArmManagedHostAllocationFailureAfterForTest(fail);
+            const Status status = EncodeVarDctCodestreamToBuffer(
+                f.view(), options.coding, &output, &profile);
+            injected = !ManagedHostAllocationFailurePendingForTest();
+            DisarmManagedHostAllocationFailureForTest();
+            if (injected) {
+              if (!FixtureCheck(
+                      status.code() == StatusCode::kOutOfMemory &&
+                          !status.resource_plan_exceeded() &&
+                          profile == before &&
+                          std::ranges::equal(output.view(), sentinel) &&
+                          budget.snapshot().total.backing_count == 0,
+                      "Serializer allocation failure changed "
+                      "output/profile or leaked"))
+                return false;
+            } else if (!FixtureOk(status) ||
+                       !FixtureCheck(std::ranges::equal(output.view(), oracle),
+                                     "Fault-free final encode changed bytes"))
+              return false;
+          }
+        }
+        job.Reset();
+        if (!Empty(budget))
+          return false;
+        if (!injected) {
+          std::cerr << "Whole-serializer allocation failure positions "
+                    << static_cast<int>(entropy) << ": " << fail << '\n';
+          completed = true;
+          break;
         }
       }
-      job.Reset();
-      if (!Empty(budget))
+      if (!FixtureCheck(completed,
+                        "Whole-serializer fault sweep did not finish"))
         return false;
-      if (!injected) {
-        std::cerr << "Whole-serializer allocation failure positions "
-                  << static_cast<int>(entropy) << ": " << fail << '\n';
-        completed = true;
-        break;
-      }
     }
-    if (!FixtureCheck(completed, "Whole-serializer fault sweep did not finish"))
-      return false;
-  }
   // An underestimated admitted envelope cannot grow, fallback or publish.
   ResourceBudget budget(1);
   ResourceReservation job;

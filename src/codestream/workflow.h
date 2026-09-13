@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "codestream/dc_prediction.h"
 #include "codestream/entropy_behavior.h"
 #include "core/ac_strategy.h"
 #include "core/execution_domain.h"
@@ -118,6 +119,12 @@ struct VarDctEncodingOptions {
   /// handle. Null selects the process-wide default, not a new per-call budget.
   /// Its CPU cap includes callers, reserved workers and dormant joined workers.
   std::shared_ptr<const ExecutionDomain> execution_domain;
+  /// Lossless DC residual prediction; independent of effort and AQ policy.
+  VarDctDcPrediction dc_prediction = VarDctDcPrediction::kGradient;
+  /// Opt-in lossy DC quantization experiment; uses one extra precision bit.
+  DcQuantizationMode dc_quantization = DcQuantizationMode::kRound;
+  /// Signals and uses the decoder's adaptive DC smoothing during AQ.
+  bool adaptive_dc_smoothing = false;
 };
 
 /// Encoder analysis reported without exposing temporary pipeline storage.
@@ -164,6 +171,10 @@ struct VarDctEncodingSummary {
   /// Reports the requested mode when `execution_backend` is Metal.
   GpuAdaptiveQuantizationMode metal_aq_mode =
     GpuAdaptiveQuantizationMode::kFullyResident;
+
+  VarDctDcPrediction dc_prediction = VarDctDcPrediction::kGradient;
+  DcQuantizationMode dc_quantization = DcQuantizationMode::kRound;
+  bool adaptive_dc_smoothing = false;
 
   friend bool operator==(
     const VarDctEncodingSummary&,

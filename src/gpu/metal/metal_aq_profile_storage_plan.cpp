@@ -40,6 +40,10 @@ constexpr size_t MaximumAqIdLength() {
                               "aq.reconstruction.reset",
                               "aq.reconstruction.quantizer",
                               "aq.reconstruction.final_cfl",
+                              "aq.reconstruction.dc_quantization",
+                              "aq.reconstruction.dc_smoothing",
+                              "aq.reconstruction.dc_llf",
+                              "aq.final_frame.dc_quantization",
                               "aq.policy_initialize",
                               "aq.policy_update",
                               "aq.gaborish",
@@ -190,13 +194,16 @@ ComputeResidentAqProfileStoragePlan(Extent2D source, Extent2D coding,
   // scatter dispatches + filters + Opsin-to-linear + perceptual work + update.
   // First use also gathers/transforms each family, computes final CfL and
   // initializes the policy. Counting all first-use work bounds cached runs too.
-  const size_t per_score = 1 + 20 + 4 * families + size_t(policy.gaborish) +
+  const size_t dc_dispatches = size_t(policy.deferred_dc) +
+    size_t(policy.adaptive_dc_smoothing) +
+    size_t(policy.deferred_dc || policy.adaptive_dc_smoothing) * families;
+  const size_t per_score = 1 + 20 + 4 * families + dc_dispatches + size_t(policy.gaborish) +
                            policy.epf_iterations + 1 + 1 +
                            (butter.multiscale ? butter.resident_comparison
                                               : butter.comparison + families);
   p.maximum_dispatches =
       p.metadata.score_count * per_score + 2 * families + 2 +
-      size_t(!policy.evaluate_final_field) * (20 + 2 * families);
+      size_t(!policy.evaluate_final_field) * (20 + 2 * families + size_t(policy.deferred_dc));
   // Completed output counts coefficient zeros once per family after the
   // final integer stores, including when there are no scored passes.
   if (frame == AqProfileFrameOutput::kCompleted) p.maximum_dispatches += families;

@@ -271,7 +271,8 @@ Status ComputePreparedForwardStoragePlan(Extent2D padded_extent,
 }
 
 Status ComputeCoefficientReconstructionStorageBound(Extent2D frame_extent,
-                                                    HostStorageBound *out) {
+                                                    HostStorageBound *out,
+                                                    bool adaptive_dc_smoothing) {
   if (out == nullptr)
     return Status::InvalidArgument("Reconstruction storage output is null");
   FrameGeometry geometry;
@@ -284,6 +285,14 @@ Status ComputeCoefficientReconstructionStorageBound(Extent2D frame_extent,
   if (!status.ok())
     return status;
   const Extent2D block_extent = geometry.block_grid().blocks;
+  if (adaptive_dc_smoothing) {
+    HostStorageBound dc_image;
+    status = ComputeImage3FStorageBound(block_extent, &dc_image);
+    if (!status.ok()) return status;
+    // Reconstruction destination plus the smoothing primitive's atomic
+    // candidate. The unsmoothed source belongs to the borrowed frame.
+    if (!bound.Add(dc_image, 2)) return Overflow();
+  }
   size_t coefficients = 0, dc = 0;
   // Fixed format table: geometry and the current CPU support predicate bound
   // every possible strategy, including both rectangular orientations.

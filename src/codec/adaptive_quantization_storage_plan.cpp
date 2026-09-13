@@ -62,7 +62,8 @@ Status ComputeAqPolicyStoragePlan(Extent2D blocks,
 
 Status ComputeCpuAqStoragePlan(Extent2D source, const CpuAqStorageOptions &o,
                                CpuAqStoragePlan *out) {
-  if (out == nullptr || o.epf_iterations > 3)
+  if (out == nullptr || o.epf_iterations > 3 ||
+      !IsValidDcQuantization({o.dc_quantization, o.dc_prediction, 0}))
     return Status::InvalidArgument("CPU AQ storage shape is invalid");
   FrameGeometry geometry;
   Status status = FrameGeometry::Create(source, &geometry);
@@ -92,7 +93,7 @@ Status ComputeCpuAqStoragePlan(Extent2D source, const CpuAqStorageOptions &o,
             coding, ColorCorrelationStorageMode::kTransform, &cfl))
            .ok() ||
       !(status = ComputeCoefficientReconstructionStorageBound(source,
-                                                              &reconstruction))
+          &reconstruction, o.adaptive_dc_smoothing))
            .ok() ||
       !(status = ComputeLoopFilterStorageBound(source, o.gaborish,
                                                o.epf_iterations, &filters))
@@ -107,6 +108,15 @@ Status ComputeCpuAqStoragePlan(Extent2D source, const CpuAqStorageOptions &o,
       !p.evaluation_output.AddVector<float>(block_count, kFreshExact))
     return Overflow();
   p.evaluation_working = p.evaluation_output;
+  if (o.dc_quantization == DcQuantizationMode::kPredictionAware) {
+    if (!p.evaluation_working.AddVector<int32_t>(block_count, kFreshExact, 3))
+      return Overflow();
+    if (o.dc_prediction == VarDctDcPrediction::kWeighted &&
+        !p.evaluation_working.AddVector<uint32_t>(
+          2 * (std::min(blocks.width, kDcPredictionGroupBlockDimension) + 2),
+          kFreshExact, 5))
+      return Overflow();
+  }
   // The two other source images are cropped reconstruction and filtered Opsin.
   if (!p.evaluation_working.Add(image, 2) ||
       !p.evaluation_working.Add(padded_image) ||

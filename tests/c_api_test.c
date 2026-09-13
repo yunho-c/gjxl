@@ -49,8 +49,11 @@ static int CheckInitializers(void) {
                                   sizeof(encoder_options)) == GJXL_OK,
         "encoder initializer failed");
   CHECK(encoder_options.struct_size == sizeof(encoder_options) &&
-          encoder_options.distance == 1.0f && encoder_options.effort == 7 &&
-          encoder_options.compression_mode == GJXL_COMPRESSION_AUTOMATIC,
+            encoder_options.distance == 1.0f && encoder_options.effort == 7 &&
+            encoder_options.compression_mode == GJXL_COMPRESSION_AUTOMATIC &&
+            encoder_options.dc_prediction == GJXL_DC_PREDICTION_GRADIENT &&
+            encoder_options.dc_quantization == GJXL_DC_QUANTIZATION_ROUND &&
+            encoder_options.adaptive_dc_smoothing == 0,
         "encoder defaults are incorrect");
 
   GJXLEncoderOptions legacy_encoder;
@@ -331,6 +334,69 @@ static int CheckEncoding(GJXLContext* context) {
         "legacy encoder options did not use automatic compression");
   gjxl_buffer_free(&legacy_output);
 
+  // The intermediate ABI includes compression but no DC-prediction field.
+  GJXLEncoderOptions old_compression_options = options;
+  old_compression_options.struct_size =
+      offsetof(GJXLEncoderOptions, dc_prediction);
+  old_compression_options.dc_prediction = 99;
+  GJXLBuffer old_compression_output = {NULL, 0};
+  CHECK(gjxl_encode(context, &rgb_view, &old_compression_options,
+                    &old_compression_output) == GJXL_OK,
+        "old compression options read a missing DC field");
+  CHECK(old_compression_output.size == rgb_output.size &&
+            memcmp(old_compression_output.data, rgb_output.data,
+                   rgb_output.size) == 0,
+        "old compression options changed gradient bytes");
+  gjxl_buffer_free(&old_compression_output);
+
+  for (size_t old_size = offsetof(GJXLEncoderOptions, dc_quantization);
+       old_size <= offsetof(GJXLEncoderOptions, adaptive_dc_smoothing);
+       old_size += sizeof(uint32_t)) {
+    GJXLEncoderOptions old_dc_options = options;
+    old_dc_options.struct_size = (uint32_t)old_size;
+    if (old_size == offsetof(GJXLEncoderOptions, dc_quantization))
+      old_dc_options.dc_quantization = 99;
+    old_dc_options.adaptive_dc_smoothing = 99;
+    GJXLBuffer old_dc_output = {NULL, 0};
+    CHECK(gjxl_encode(context, &rgb_view, &old_dc_options, &old_dc_output) == GJXL_OK,
+          "old DC options read a missing field");
+    CHECK(old_dc_output.size == rgb_output.size &&
+          memcmp(old_dc_output.data, rgb_output.data, rgb_output.size) == 0,
+          "old DC options changed default bytes");
+    gjxl_buffer_free(&old_dc_output);
+  }
+
+  options.dc_prediction = GJXL_DC_PREDICTION_WEIGHTED;
+  GJXLBuffer weighted_output = {NULL, 0}, weighted_repeat = {NULL, 0};
+  CHECK(gjxl_encode(context, &rgb_view, &options, &weighted_output) ==
+                GJXL_OK &&
+            gjxl_encode(context, &rgb_view, &options, &weighted_repeat) ==
+                GJXL_OK,
+        "weighted DC encoding failed");
+  CHECK(weighted_output.size == weighted_repeat.size &&
+            memcmp(weighted_output.data, weighted_repeat.data,
+                   weighted_output.size) == 0,
+        "weighted DC output is not deterministic");
+  gjxl_buffer_free(&weighted_output);
+  gjxl_buffer_free(&weighted_repeat);
+  options.dc_prediction = GJXL_DC_PREDICTION_GRADIENT;
+
+  for (int mode = 0; mode < 4; ++mode) {
+    options.dc_quantization = mode & 1 ? GJXL_DC_QUANTIZATION_PREDICTION_AWARE
+                                      : GJXL_DC_QUANTIZATION_ROUND;
+    options.adaptive_dc_smoothing = (uint32_t)(mode >> 1);
+    GJXLBuffer first = {NULL, 0}, second = {NULL, 0};
+    CHECK(gjxl_encode(context, &rgb_view, &options, &first) == GJXL_OK &&
+          gjxl_encode(context, &rgb_view, &options, &second) == GJXL_OK,
+          "DC processing option failed");
+    CHECK(first.size == second.size && memcmp(first.data, second.data, first.size) == 0,
+          "DC processing output is not deterministic");
+    gjxl_buffer_free(&first);
+    gjxl_buffer_free(&second);
+  }
+  options.dc_quantization = GJXL_DC_QUANTIZATION_ROUND;
+  options.adaptive_dc_smoothing = 0;
+
   options.compression_mode = GJXL_COMPRESSION_MAXIMUM;
   GJXLBuffer maximum_output = {NULL, 0};
   CHECK(gjxl_encode(context, &rgb_view, &options, &maximum_output) == GJXL_OK,
@@ -413,6 +479,21 @@ static int CheckEncoding(GJXLContext* context) {
                           GJXL_ERROR_INVALID_ARGUMENT, "effort eleven"),
         "effort-eleven result is incorrect");
   options.effort = 7;
+  options.dc_prediction = 99;
+  CHECK(ExpectEncodeError(context, &rgb_view, &options,
+                          GJXL_ERROR_INVALID_ARGUMENT, "unknown DC prediction"),
+        "unknown DC prediction accepted");
+  options.dc_prediction = GJXL_DC_PREDICTION_GRADIENT;
+  options.dc_quantization = 99;
+  CHECK(ExpectEncodeError(context, &rgb_view, &options,
+                          GJXL_ERROR_INVALID_ARGUMENT, "unknown DC quantization"),
+        "unknown DC quantization accepted");
+  options.dc_quantization = GJXL_DC_QUANTIZATION_ROUND;
+  options.adaptive_dc_smoothing = 2;
+  CHECK(ExpectEncodeError(context, &rgb_view, &options,
+                          GJXL_ERROR_INVALID_ARGUMENT, "invalid DC smoothing"),
+        "invalid DC smoothing accepted");
+  options.adaptive_dc_smoothing = 0;
   options.compression_mode = 99;
   CHECK(ExpectEncodeError(context, &rgb_view, &options,
                           GJXL_ERROR_INVALID_ARGUMENT,

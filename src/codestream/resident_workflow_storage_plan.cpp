@@ -199,7 +199,11 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
                                   .frame_only_resident_initial_quant = true,
                                   .omit_initial_search_data = fixed_dct8,
                                   .resident_quantization = true,
-                                  .uses_butteraugli_sinks = sinks},
+                                  .uses_butteraugli_sinks = sinks,
+                                  .dc_quantization = e.dc_quantization,
+                                  .dc_prediction = e.dc_prediction,
+                                  .extra_dc_precision = uint8_t(e.dc_quantization == DcQuantizationMode::kPredictionAware),
+                                  .adaptive_dc_smoothing = e.adaptive_dc_smoothing},
                                  &aq))
            .ok() ||
       (!evaluation_free && !(status = ComputeButteraugliStoragePlan(
@@ -285,7 +289,9 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
   if (o.collect_gpu_profile) {
     status = ProfilePlan(source, coding,
                          {iterations, final_score, sinks, filters.gaborish,
-                          filters.epf_options.iterations},
+                          filters.epf_options.iterations,
+                          e.dc_quantization == DcQuantizationMode::kPredictionAware,
+                          e.adaptive_dc_smoothing},
                          fixed_dct8, submission, &p, &profile_output);
     if (!status.ok())
       return status;
@@ -295,7 +301,8 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
       source,
       {.coding = {.entropy_behavior = ResolveEntropyBehavior(e),
                   .coefficient_order_behavior =
-                      ResolveCoefficientOrderBehavior(e)},
+                      ResolveCoefficientOrderBehavior(e),
+                  .dc_prediction = e.dc_prediction},
        .cpu_thread_count = e.cpu_thread_count,
        .collect_profile = o.collect_profile || o.collect_gpu_profile},
       &p.serializer);

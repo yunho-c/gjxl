@@ -16,6 +16,7 @@
 #include "core/managed_allocator.h"
 #include "codec/dc_conversion.h"
 #include "codec/dc_quantization.h"
+#include "codec/dc_smoothing.h"
 #include "codec/dct.h"
 #include "codec/frontend_storage_plan.h"
 #include "codec/frontend_dispatch_internal.h"
@@ -393,11 +394,23 @@ Status ComputeQuantizedCoefficientsImpl(
   VarDctFrameInput input,
   SimpleVarDctCodestreamProfile profile,
   VarDctEncoderFrame* out,
-  AcCoefficientDecisionMode decision_mode) {
+  AcCoefficientDecisionMode decision_mode,
+  DcQuantizationMode dc_quantization,
+  VarDctDcPrediction dc_prediction) {
 
   if (out == nullptr) {
     return Status::InvalidArgument(
       "Quantized coefficient output is null");
+  }
+  const DcQuantizationOptions dc_options{
+    dc_quantization, dc_prediction, profile.extra_dc_precision};
+  if (!IsValidDcQuantization(dc_options)) {
+    return Status::InvalidArgument("DC quantization options are invalid");
+  }
+  if (dc_quantization == DcQuantizationMode::kPredictionAware &&
+      profile.extra_dc_precision == 0) {
+    return Status::InvalidArgument(
+      "Prediction-aware coefficient coding requires extra DC precision");
   }
   switch (decision_mode) {
     case AcCoefficientDecisionMode::kAdjustedSharedQuant:
@@ -722,7 +735,8 @@ Status ComputeQuantizedCoefficientsImpl(
     status = QuantizeDcCoefficients(
       result.dc(),
       result.quantizer_,
-      {.quantized = quantized_dc, .reconstructed = reconstructed_dc});
+      {.quantized = quantized_dc, .reconstructed = reconstructed_dc},
+      dc_options);
     if (!status.ok()) {
       return status;
     }
@@ -752,10 +766,13 @@ Status ComputeQuantizedCoefficients(
   VarDctFrameInput input,
   SimpleVarDctCodestreamProfile profile,
   VarDctEncoderFrame* out,
-  AcCoefficientDecisionMode decision_mode) {
+  AcCoefficientDecisionMode decision_mode,
+  DcQuantizationMode dc_quantization,
+  VarDctDcPrediction dc_prediction) {
 
   return prepared_coefficients_internal::ComputeQuantizedCoefficientsImpl(
-    opsin, nullptr, input, profile, out, decision_mode);
+    opsin, nullptr, input, profile, out, decision_mode, dc_quantization,
+    dc_prediction);
 }
 
 Status prepared_coefficients_internal::ComputeQuantizedCoefficientsPrepared(
@@ -763,10 +780,13 @@ Status prepared_coefficients_internal::ComputeQuantizedCoefficientsPrepared(
   VarDctFrameInput input,
   SimpleVarDctCodestreamProfile profile,
   VarDctEncoderFrame* out,
-  AcCoefficientDecisionMode decision_mode) {
+  AcCoefficientDecisionMode decision_mode,
+  DcQuantizationMode dc_quantization,
+  VarDctDcPrediction dc_prediction) {
 
   return ComputeQuantizedCoefficientsImpl(
-    {}, &prepared, input, profile, out, decision_mode);
+    {}, &prepared, input, profile, out, decision_mode, dc_quantization,
+    dc_prediction);
 }
 
 Status ReconstructQuantizedCoefficients(
@@ -789,7 +809,15 @@ Status ReconstructQuantizedCoefficients(
     const Image3FView result_view = result.view();
 
     ManagedVector<size_t> group_offsets(frame.ac_group_count(), 0);
-    const ConstImage3FView frame_dc = frame.dc();
+    ConstImage3FView frame_dc = frame.dc();
+    Image3FBuffer smoothed_dc;
+    if (frame.profile_.adaptive_dc_smoothing) {
+      smoothed_dc = Image3FBuffer(block_extent);
+      const Status status = SmoothDcCoefficients(
+        frame_dc, frame.quantizer_, smoothed_dc.view());
+      if (!status.ok()) return status;
+      frame_dc = smoothed_dc.const_view();
+    }
     const Status reconstruct_status = frame.strategies_.ForEachAnchor(
       [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
         const AcStrategyInfo* info = GetAcStrategyInfo(strategy);

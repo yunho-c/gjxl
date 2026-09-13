@@ -27,6 +27,9 @@ namespace fs = std::filesystem;
 struct Options {
   fs::path input, output, raw;
   float distance = 1.0f;
+  gjxl::VarDctDcPrediction dc_prediction = gjxl::VarDctDcPrediction::kGradient;
+  gjxl::DcQuantizationMode dc_quantization = gjxl::DcQuantizationMode::kRound;
+  bool adaptive_dc_smoothing = false;
   size_t effort = 7, threads = 8, warmups = 1, samples = 1;
 };
 
@@ -46,6 +49,12 @@ Options Parse(int argc, char **argv) {
   Options options;
   for (int i = 1; i < argc; ++i) {
     const std::string key = argv[i];
+    if (key == "--adaptive-dc-smoothing") {
+      if (options.adaptive_dc_smoothing)
+        throw std::runtime_error("Duplicate adaptive DC smoothing option");
+      options.adaptive_dc_smoothing = true;
+      continue;
+    }
     if (i + 1 == argc)
       throw std::runtime_error("Missing argument value: " + key);
     const std::string value = argv[++i];
@@ -60,6 +69,20 @@ Options Parse(int argc, char **argv) {
       options.distance = std::stof(value, &end);
       if (end != value.size())
         throw std::runtime_error("Invalid distance");
+    } else if (key == "--dc-prediction") {
+      if (value == "gradient")
+        options.dc_prediction = gjxl::VarDctDcPrediction::kGradient;
+      else if (value == "weighted")
+        options.dc_prediction = gjxl::VarDctDcPrediction::kWeighted;
+      else
+        throw std::runtime_error("Invalid DC prediction");
+    } else if (key == "--dc-quantization") {
+      if (value == "round")
+        options.dc_quantization = gjxl::DcQuantizationMode::kRound;
+      else if (value == "prediction-aware")
+        options.dc_quantization = gjxl::DcQuantizationMode::kPredictionAware;
+      else
+        throw std::runtime_error("Invalid DC quantization");
     } else if (key == "--effort")
       options.effort = Integer(value);
     else if (key == "--num-threads")
@@ -118,7 +141,9 @@ int main(int argc, char **argv) {
       std::cout
           << "gjxl_quality_benchmark --input IMAGE.pfm --output IMAGE.jxl "
              "--raw-samples REPORT.json [--distance D] [--effort 1..10] "
-             "[--num-threads 1..256] [--warmups N] [--samples N]\n";
+             "[--num-threads 1..256] [--warmups N] [--samples N] "
+             "[--dc-prediction gradient|weighted] "
+             "[--dc-quantization round|prediction-aware] [--adaptive-dc-smoothing]\n";
       return 0;
     }
     const Options options = Parse(argc, argv);
@@ -131,6 +156,9 @@ int main(int argc, char **argv) {
         .backend = gjxl::VarDctBackendPreference::kMetal,
         .metal_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
         .collect_final_butteraugli_score = false,
+        .dc_prediction = options.dc_prediction,
+        .dc_quantization = options.dc_quantization,
+        .adaptive_dc_smoothing = options.adaptive_dc_smoothing,
     };
     std::vector<uint8_t> bytes;
     gjxl::VarDctEncodingSummary summary;
@@ -143,6 +171,9 @@ int main(int argc, char **argv) {
           summary.metal_aq_mode !=
               gjxl::GpuAdaptiveQuantizationMode::kFullyResident ||
           summary.extent != image.extent() ||
+          summary.dc_prediction != options.dc_prediction ||
+          summary.dc_quantization != options.dc_quantization ||
+          summary.adaptive_dc_smoothing != options.adaptive_dc_smoothing ||
           summary.encoded_bytes != bytes.size() || bytes.size() < 2 ||
           bytes[0] != 0xff || bytes[1] != 0x0a)
         throw std::runtime_error(
@@ -185,7 +216,16 @@ int main(int argc, char **argv) {
            << "\"metal_aq_mode\":\"fully-resident\",\"density\":\"default\","
            << "\"compression\":\"automatic\",\"collect_final_score\":false,"
            << "\"input_layout\":\"planar-linear-srgb-f32\",\"resampling\":1,"
-           << "\"thread_count\":" << options.threads
+           << "\"dc_prediction\":\""
+           << (options.dc_prediction == gjxl::VarDctDcPrediction::kWeighted
+                   ? "weighted"
+                   : "gradient")
+           << "\",\"dc_quantization\":\""
+           << (options.dc_quantization == gjxl::DcQuantizationMode::kRound
+                   ? "round" : "prediction-aware")
+           << "\",\"adaptive_dc_smoothing\":"
+           << (options.adaptive_dc_smoothing ? "true" : "false")
+           << ",\"thread_count\":" << options.threads
            << ",\"thread_semantics\":\"maximum-participating-cpu-threads\","
            << "\"input_width\":" << image.extent().width
            << ",\"input_height\":" << image.extent().height

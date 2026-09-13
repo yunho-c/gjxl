@@ -69,7 +69,10 @@ Status ComputeCpuWorkflowStoragePlan(Extent2D source,
        .epf_iterations = filters.epf_options.iterations,
        .prepared_reference = true,
        // The workflow CPU profile does not request the nested AQ profile.
-       .collect_profile = false},
+       .collect_profile = false,
+       .dc_quantization = e.dc_quantization,
+       .dc_prediction = e.dc_prediction,
+       .adaptive_dc_smoothing = e.adaptive_dc_smoothing},
       &p.aq);
   if (!status.ok())
     return status;
@@ -120,7 +123,8 @@ Status ComputeCpuWorkflowStoragePlan(Extent2D source,
       source,
       {.coding = {.entropy_behavior = ResolveEntropyBehavior(e),
                   .coefficient_order_behavior =
-                      ResolveCoefficientOrderBehavior(e)},
+                      ResolveCoefficientOrderBehavior(e),
+                  .dc_prediction = e.dc_prediction},
        .cpu_thread_count = e.cpu_thread_count,
        .collect_profile = o.collect_profile},
       &p.serializer);

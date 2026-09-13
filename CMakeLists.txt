@@ -246,6 +246,7 @@ add_library(
   src/codec/convolution.cpp
   src/codec/dc_conversion.cpp
   src/codec/dc_quantization.cpp
+  src/codec/dc_smoothing.cpp
   src/codec/dct.cpp
   src/codec/epf.cpp
   src/codec/gaborish.cpp
@@ -288,6 +289,7 @@ add_library(
   src/codestream/block_context_map.cpp
   src/codestream/coefficient_order.cpp
   src/codestream/dc_group.cpp
+  src/codestream/weighted_dc.cpp
   src/codestream/entropy.cpp
   src/codestream/encoder.cpp
   src/codestream/headers.cpp
@@ -810,6 +812,7 @@ add_custom_command(
   DEPENDS
     "${GJXL_AQ_RECONSTRUCTION_METAL_SOURCE}"
     "${GJXL_AQ_QUANTIZATION_HEADER}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/dc_processing.h"
 
   COMMENT
     "Compiling Metal AQ reconstruction shaders"
@@ -1302,6 +1305,19 @@ if(GJXL_BUILD_TESTS)
     NAME dc_group
     COMMAND gjxl_dc_group_test
   )
+
+  if(GJXL_ENABLE_LIBJXL_REFERENCE)
+    # Test-only pinned predictor oracle; the native encoder has no libjxl link.
+    add_executable(gjxl_weighted_dc_test
+      tests/weighted_dc_test.cpp
+      third_party/libjxl/lib/jxl/fields.cc
+      third_party/libjxl/lib/jxl/dec_bit_reader.cc)
+    target_include_directories(gjxl_weighted_dc_test PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl"
+      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/lib/include")
+    target_link_libraries(gjxl_weighted_dc_test PRIVATE gjxl_codestream hwy)
+    add_test(NAME weighted_dc COMMAND gjxl_weighted_dc_test)
+  endif()
 
   add_executable(
     gjxl_ac_group_test
@@ -1911,6 +1927,48 @@ if(GJXL_BUILD_TESTS)
     NAME dc_quantization
     COMMAND gjxl_dc_quantization_test
   )
+
+  add_executable(gjxl_dc_processing_test tests/dc_processing_test.cpp)
+  target_link_libraries(gjxl_dc_processing_test PRIVATE gjxl_codec)
+  add_test(NAME dc_processing COMMAND gjxl_dc_processing_test)
+
+  # Optional direct oracle from a separately built, pinned libjxl archive.
+  # These dependencies never enter the native library or installed interface.
+  set(GJXL_DC_ORACLE_BUILD "" CACHE PATH "Pinned libjxl build for direct DC algorithm oracle")
+  if(GJXL_DC_ORACLE_BUILD)
+    file(STRINGS "${GJXL_DC_ORACLE_BUILD}/CMakeCache.txt" dc_oracle_home
+      REGEX "^CMAKE_HOME_DIRECTORY:INTERNAL=")
+    string(REPLACE "CMAKE_HOME_DIRECTORY:INTERNAL=" "" dc_oracle_source "${dc_oracle_home}")
+    execute_process(COMMAND git -C "${dc_oracle_source}" rev-parse HEAD
+      OUTPUT_VARIABLE dc_oracle_revision OUTPUT_STRIP_TRAILING_WHITESPACE
+      RESULT_VARIABLE dc_oracle_revision_result)
+    execute_process(COMMAND git -C "${dc_oracle_source}" diff --quiet HEAD --
+      RESULT_VARIABLE dc_oracle_dirty)
+    if(NOT dc_oracle_revision_result EQUAL 0 OR NOT dc_oracle_dirty EQUAL 0 OR
+       NOT dc_oracle_revision STREQUAL GJXL_PINNED_LIBJXL_REVISION)
+      message(FATAL_ERROR "Direct DC oracle requires a clean pinned libjxl source/build")
+    endif()
+    add_executable(gjxl_dc_processing_oracle_test tests/dc_processing_oracle_test.cpp)
+    # The pinned archive is built without RTTI. UBSan's vptr check on its
+    # header-defined modular Image destructor requires unavailable typeinfo.
+    # Only the external-oracle adapter omits that check; native libraries keep
+    # all configured sanitizers, and this adapter retains ASan/other UBSan.
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+      target_compile_options(gjxl_dc_processing_oracle_test PRIVATE -fno-sanitize=vptr)
+    endif()
+    target_include_directories(gjxl_dc_processing_oracle_test PRIVATE
+      "${dc_oracle_source}" "${dc_oracle_source}/lib/include"
+      "${GJXL_DC_ORACLE_BUILD}/lib/include"
+      "${dc_oracle_source}/third_party/highway")
+    target_link_libraries(gjxl_dc_processing_oracle_test PRIVATE gjxl_codec
+      "${GJXL_DC_ORACLE_BUILD}/lib/libjxl-internal.a"
+      "${GJXL_DC_ORACLE_BUILD}/third_party/highway/libhwy.a"
+      "${GJXL_DC_ORACLE_BUILD}/lib/libjxl_cms${CMAKE_SHARED_LIBRARY_SUFFIX}"
+      "${GJXL_DC_ORACLE_BUILD}/third_party/brotli/libbrotlienc${CMAKE_SHARED_LIBRARY_SUFFIX}"
+      "${GJXL_DC_ORACLE_BUILD}/third_party/brotli/libbrotlidec${CMAKE_SHARED_LIBRARY_SUFFIX}"
+      "${GJXL_DC_ORACLE_BUILD}/third_party/brotli/libbrotlicommon${CMAKE_SHARED_LIBRARY_SUFFIX}")
+    add_test(NAME dc_processing_oracle COMMAND gjxl_dc_processing_oracle_test)
+  endif()
 
   add_executable(
     gjxl_adaptive_quantization_test
@@ -2677,6 +2735,13 @@ if(GJXL_BUILD_TESTS)
   set_tests_properties(metal_aq_host_storage_plan PROPERTIES TIMEOUT 180)
 
   add_executable(gjxl_metal_submission_storage_plan_test tests/metal_submission_storage_plan_test.cpp)
+  add_executable(gjxl_metal_dc_processing_test tests/metal_dc_processing_test.cpp)
+  target_link_libraries(gjxl_metal_dc_processing_test PRIVATE gjxl_metal gjxl_codec)
+  target_include_directories(gjxl_metal_dc_processing_test SYSTEM PRIVATE third_party/metal-cpp)
+  target_compile_definitions(gjxl_metal_dc_processing_test PRIVATE GJXL_METALLIB_PATH="${GJXL_METALLIB}")
+  add_dependencies(gjxl_metal_dc_processing_test gjxl_metal_shaders)
+  add_test(NAME metal_dc_processing COMMAND gjxl_metal_dc_processing_test)
+  set_tests_properties(metal_dc_processing PROPERTIES TIMEOUT 180)
   target_link_libraries(gjxl_metal_submission_storage_plan_test PRIVATE gjxl_metal)
   target_include_directories(gjxl_metal_submission_storage_plan_test SYSTEM PRIVATE third_party/metal-cpp)
   add_test(NAME metal_submission_storage_plan COMMAND gjxl_metal_submission_storage_plan_test)
@@ -2814,6 +2879,18 @@ if(GJXL_BUILD_BENCHMARKS)
   target_compile_definitions(gjxl_quality_benchmark PRIVATE
     GJXL_QUALITY_REVISION="${GJXL_QUALITY_REVISION}")
   add_dependencies(gjxl_quality_benchmark gjxl_embedded_metal_shaders)
+  add_executable(gjxl_dc_prediction_benchmark benchmarks/dc_prediction_benchmark.cpp)
+  target_link_libraries(gjxl_dc_prediction_benchmark PRIVATE
+    gjxl_codestream gjxl_metal gjxl_pfm_io)
+  target_compile_definitions(gjxl_dc_prediction_benchmark PRIVATE
+    GJXL_QUALITY_REVISION="${GJXL_QUALITY_REVISION}")
+  add_dependencies(gjxl_dc_prediction_benchmark gjxl_embedded_metal_shaders)
+  add_executable(gjxl_dc_processing_benchmark benchmarks/dc_processing_benchmark.cpp)
+  target_link_libraries(gjxl_dc_processing_benchmark PRIVATE
+    gjxl_codestream gjxl_metal gjxl_pfm_io)
+  target_compile_definitions(gjxl_dc_processing_benchmark PRIVATE
+    GJXL_QUALITY_REVISION="${GJXL_QUALITY_REVISION}")
+  add_dependencies(gjxl_dc_processing_benchmark gjxl_embedded_metal_shaders)
   if(GJXL_BUILD_TESTS)
     add_test(NAME quality_benchmark_cli
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/quality_benchmark_cli_test.py"

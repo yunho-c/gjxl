@@ -39,6 +39,8 @@ struct AqEvaluationOptions {
   /// Resident zero-update encoding without reconstruction or metric storage.
   /// Only a final-frame policy with no evaluations may use this preparation.
   bool evaluation_free = false;
+  DcQuantizationMode dc_quantization = DcQuantizationMode::kRound;
+  VarDctDcPrediction dc_prediction = VarDctDcPrediction::kGradient;
 
   friend bool operator==(const AqEvaluationOptions&,
                          const AqEvaluationOptions&) = default;

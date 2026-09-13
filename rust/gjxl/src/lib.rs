@@ -88,12 +88,29 @@ pub enum CompressionMode {
     Maximum,
 }
 
+/// Lossless DC residual prediction; decoded pixels are unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DcPrediction {
+    Gradient,
+    Weighted,
+}
+
+/// Lossy DC quantization policy; prediction-aware uses an extra precision bit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DcQuantization {
+    Round,
+    PredictionAware,
+}
+
 /// Canonical compression controls.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EncoderOptions {
     pub distance: f32,
     pub effort: i32,
     pub compression_mode: CompressionMode,
+    pub dc_prediction: DcPrediction,
+    pub dc_quantization: DcQuantization,
+    pub adaptive_dc_smoothing: bool,
 }
 
 impl Default for EncoderOptions {
@@ -102,6 +119,9 @@ impl Default for EncoderOptions {
             distance: 1.0,
             effort: 7,
             compression_mode: CompressionMode::Automatic,
+            dc_prediction: DcPrediction::Gradient,
+            dc_quantization: DcQuantization::Round,
+            adaptive_dc_smoothing: false,
         }
     }
 }
@@ -314,6 +334,15 @@ impl Context {
             CompressionMode::Automatic => sys::GJXL_COMPRESSION_AUTOMATIC,
             CompressionMode::Maximum => sys::GJXL_COMPRESSION_MAXIMUM,
         } as sys::GJXLCompressionMode;
+        native_options.dc_prediction = match options.dc_prediction {
+            DcPrediction::Gradient => sys::GJXL_DC_PREDICTION_GRADIENT,
+            DcPrediction::Weighted => sys::GJXL_DC_PREDICTION_WEIGHTED,
+        } as sys::GJXLDcPrediction;
+        native_options.dc_quantization = match options.dc_quantization {
+            DcQuantization::Round => sys::GJXL_DC_QUANTIZATION_ROUND,
+            DcQuantization::PredictionAware => sys::GJXL_DC_QUANTIZATION_PREDICTION_AWARE,
+        } as sys::GJXLDcQuantization;
+        native_options.adaptive_dc_smoothing = u32::from(options.adaptive_dc_smoothing);
 
         let mut output = NativeBuffer::empty();
         check(unsafe { sys::gjxl_encode(self.raw, &image, &native_options, &mut output.raw) })?;
@@ -506,6 +535,44 @@ mod tests {
             .unwrap();
         assert!(maximum.starts_with(&[0xff, 0x0a]));
         assert_ne!(maximum, automatic);
+    }
+
+    #[test]
+    fn weighted_dc_is_selectable_and_deterministic() {
+        let context = Context::new(Backend::Cpu).expect("CPU context should initialize");
+        let pixels = rgba_fixture(64, 64);
+        let image = ImageView::rgba8(64, 64, 256, &pixels).unwrap();
+        let gradient = context.encode(&image, EncoderOptions::default()).unwrap();
+        let options = EncoderOptions {
+            dc_prediction: DcPrediction::Weighted,
+            ..EncoderOptions::default()
+        };
+        let weighted = context.encode(&image, options).unwrap();
+        assert!(weighted.starts_with(&[0xff, 0x0a]));
+        assert_ne!(weighted, gradient);
+        assert_eq!(weighted, context.encode(&image, options).unwrap());
+    }
+
+    #[test]
+    fn dc_processing_modes_are_selectable_and_deterministic() {
+        let context = Context::new(Backend::Cpu).expect("CPU context should initialize");
+        let pixels = rgba_fixture(64, 64);
+        let image = ImageView::rgba8(64, 64, 256, &pixels).unwrap();
+        for dc_prediction in [DcPrediction::Gradient, DcPrediction::Weighted] {
+            for dc_quantization in [DcQuantization::Round, DcQuantization::PredictionAware] {
+                for adaptive_dc_smoothing in [false, true] {
+                    let options = EncoderOptions {
+                        dc_prediction,
+                        dc_quantization,
+                        adaptive_dc_smoothing,
+                        ..EncoderOptions::default()
+                    };
+                    let first = context.encode(&image, options).unwrap();
+                    assert!(first.starts_with(&[0xff, 0x0a]));
+                    assert_eq!(first, context.encode(&image, options).unwrap());
+                }
+            }
+        }
     }
 
     #[test]

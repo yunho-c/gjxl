@@ -81,7 +81,7 @@ Status ComputeTokenizationStoragePlan(Extent2D blocks,
   const auto add_dc = [&](Extent2D extent, size_t count) {
     DcGroupTokenStoragePlan group;
     Status status = ComputeDcGroupTokenStoragePlan(
-        extent, extent.width * extent.height, &group);
+        extent, extent.width * extent.height, &group, options.dc_prediction);
     if (!status.ok())
       return status;
     if (!AddScaled(group.counts.dc_tokens, count, &plan.maximum_dc_tokens) ||
@@ -99,8 +99,9 @@ Status ComputeTokenizationStoragePlan(Extent2D blocks,
   const Extent2D dc_extent{
       std::min(blocks.width, kSimpleDcGroupBlockDimension),
       std::min(blocks.height, kSimpleDcGroupBlockDimension)};
-  status = ComputeDcGroupTokenStoragePlan(
-      dc_extent, dc_extent.width * dc_extent.height, &maximum_dc);
+  status = ComputeDcGroupTokenStoragePlan(dc_extent,
+                                          dc_extent.width * dc_extent.height,
+                                          &maximum_dc, options.dc_prediction);
   if (!status.ok())
     return status;
   // DC tokenization is serial; all group outputs survive into entropy coding.

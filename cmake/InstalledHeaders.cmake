@@ -31,7 +31,9 @@ set(GJXL_PUBLIC_CXX_HEADERS
   codec/color_transform.h
   codec/convolution.h
   codec/dc_conversion.h
+  codec/dc_prediction.h
   codec/dc_quantization.h
+  codec/dc_smoothing.h
   codec/dct.h
   codec/epf.h
   codec/gaborish.h
@@ -48,6 +50,7 @@ set(GJXL_PUBLIC_CXX_HEADERS
   codestream/block_context_map.h
   codestream/coefficient_order.h
   codestream/dc_group.h
+  codestream/dc_prediction.h
   codestream/encoder.h
   codestream/entropy.h
   codestream/entropy_behavior.h

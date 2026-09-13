@@ -5,6 +5,7 @@
 
 #include <cstddef>
 
+#include "codestream/dc_prediction.h"
 #include "core/geometry.h"
 #include "core/host_storage_bound.h"
 #include "core/status.h"
@@ -64,9 +65,9 @@ struct DcGroupTokenStoragePlan {
 [[nodiscard]] Status ComputeAcGroupTokenStoragePlan(
     Extent2D blocks, size_t anchors, size_t context_count,
     bool collect_fixed_populations, AcGroupTokenStoragePlan *out);
-[[nodiscard]] Status
-ComputeDcGroupTokenStoragePlan(Extent2D blocks, size_t anchors,
-                               DcGroupTokenStoragePlan *out);
+[[nodiscard]] Status ComputeDcGroupTokenStoragePlan(
+    Extent2D blocks, size_t anchors, DcGroupTokenStoragePlan *out,
+    VarDctDcPrediction prediction = VarDctDcPrediction::kGradient);
 [[nodiscard]] Status ComputeAcNaturalOrderStorageBound(HostStorageBound *out);
 
 struct TokenizationStorageOptions {
@@ -76,6 +77,7 @@ struct TokenizationStorageOptions {
   size_t order_count = 1; // Exhaustive: natural plus optional custom order.
   size_t map_count = 1;   // Exhaustive: independently retained context maps.
   size_t workers = 1;     // Upper bound on simultaneous tokenizer participants.
+  VarDctDcPrediction dc_prediction = VarDctDcPrediction::kGradient;
 };
 
 struct TokenizationStoragePlan {

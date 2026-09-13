@@ -110,6 +110,8 @@ bool CheckAqSlices(const AqStoragePlanOptions &p, const AqStoragePlan &plan) {
   staging.push_back(plan.quantized_coefficients);
   staging.push_back(plan.reconstruction_coefficients);
   staging.push_back(plan.dc);
+  staging.push_back(plan.dc_predictor_scratch);
+  staging.push_back(plan.smoothed_dc);
   staging.push_back(plan.quantized_dc);
   staging.push_back(plan.reconstruction_error);
   staging.push_back(plan.quant_probe_input);

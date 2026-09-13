@@ -158,6 +158,9 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> encode_reconstruction_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> encode_scored_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> encode_final_coefficients;
+  NS::SharedPtr<MTL::ComputePipelineState> dc_quantize;
+  NS::SharedPtr<MTL::ComputePipelineState> dc_smooth;
+  NS::SharedPtr<MTL::ComputePipelineState> dc_low_frequencies;
   NS::SharedPtr<MTL::ComputePipelineState> count_coefficient_zeros;
   NS::SharedPtr<MTL::ComputePipelineState> encode_frame_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> scatter_reconstructed_pixels;
@@ -447,6 +450,7 @@ private:
   friend class MetalPreparedResidentInput;
   friend class MetalPreparedDeviceButteraugli;
   friend struct MetalCacheAdmissionTestAccess;
+  friend struct MetalDcProcessingTestAccess;
   friend class MetalCompletedVarDctFrame;
   friend Status EmptyMetalAqScratchArenasForTesting(GpuBackend& backend);
 

@@ -359,6 +359,21 @@ bool CheckRuntime(GpuBackend &gpu, bool large) {
       }
   }
   auto image = MakeImage({128, 96});
+  for (size_t mode = 0; mode < 5; ++mode) {
+    for (unsigned flags = 1; flags < 8; ++flags) {
+      auto o = Options(mode);
+      o.encoding.effort = 4;
+      o.encoding.dc_quantization = flags & 1 ? DcQuantizationMode::kPredictionAware : DcQuantizationMode::kRound;
+      o.encoding.dc_prediction = flags & 2 ? VarDctDcPrediction::kWeighted : VarDctDcPrediction::kGradient;
+      o.encoding.adaptive_dc_smoothing = (flags & 4) != 0;
+      o.collect_profile = true;
+      if (!Run(gpu, image.const_view(), o)) {
+        std::cerr << "DC compatibility flags=" << flags << " mode=" << mode << '\n';
+        return false;
+      }
+      ++cases;
+    }
+  }
   for (bool high_density : {false, true}) {
     auto o = Options(0);
     o.encoding.effort = 1;

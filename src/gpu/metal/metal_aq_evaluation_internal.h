@@ -22,6 +22,7 @@
 #include "gpu/metal/metal_aq_postprocess_test.h"
 #include "gpu/metal/metal_aq_reconstruction_test.h"
 #include "gpu/metal/metal_backend_internal.h"
+#include "gpu/metal/metal_dc_processing_internal.h"
 #include "gpu/metal/metal_butteraugli_encoding.h"
 #include "gpu/scratch.h"
 
@@ -58,6 +59,8 @@ struct AqReconstructionParams {
   std::array<float, 8> epf_sharpness_lut;
   uint32_t use_resident_quantizer;
   uint32_t group_major_output;
+  uint32_t deferred_dc;
+  uint32_t deferred_llf;
 };
 
 struct AqDctImageParams {
@@ -428,6 +431,9 @@ private:
     kForwardBatch,
     kFinalColorCorrelation,
     kCoefficientBatch,
+    kDcQuantization,
+    kDcSmoothing,
+    kDcLowFrequencies,
     kInverseBatch,
     kScatterBatch,
     kBatch,
@@ -526,6 +532,21 @@ private:
                                  const void *context);
   void EncodeReconstructionReset(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const;
+  bool DeferredDc() const noexcept {
+    return options_.dc_quantization == DcQuantizationMode::kPredictionAware ||
+           options_.profile.extra_dc_precision != 0;
+  }
+  bool DeferredLlf() const noexcept {
+    return DeferredDc() || options_.profile.adaptive_dc_smoothing;
+  }
+  AqDcProcessingParams DcProcessingParams() const noexcept;
+  void EncodeDcQuantization(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const;
+  void EncodeDcSmoothing(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const;
+  void EncodeDcLowFrequencies(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      size_t batch_index) const;
   void EncodeReconstructionProfileStage(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
       ReconstructionProfileStage stage, size_t batch_index) const;
@@ -662,6 +683,8 @@ private:
   bool write_completed_coefficients_ = false;
   DevicePlaneView reconstruction_coefficients_;
   DevicePlaneView dc_;
+  DevicePlaneView dc_predictor_scratch_;
+  DevicePlaneView smoothed_dc_;
   DevicePlaneView quantized_dc_;
   DevicePlaneView reconstruction_error_;
   DevicePlaneView quant_probe_input_;
