@@ -1,0 +1,154 @@
+{
+  "schema_version": 1,
+  "corpus_id": "photo-large",
+  "description": "Three Unsplash photographs, each downsampled to approximately 12/24/48 MP; nine inputs, three source scenes.",
+  "input_color_encoding": "RGB_D65_SRG_Rel_Lin",
+  "input_layout": "interleaved-linear-srgb-f32",
+  "prepared_with": "Version: ImageMagick 7.1.2-24 Q16-HDRI aarch64 3c45ab0bf:20260525 https://imagemagick.org",
+  "preparation": {
+    "resize": "Lanczos, in linear RGB, preserving the source aspect ratio with rounded dimensions; no upsampling",
+    "magick_arguments": [
+      "SOURCE",
+      "-auto-orient",
+      "-background",
+      "white",
+      "-alpha",
+      "remove",
+      "-alpha",
+      "off",
+      "-colorspace",
+      "RGB",
+      "-filter",
+      "Lanczos",
+      "-resize",
+      "WIDTHxHEIGHT!",
+      "-define",
+      "quantum:format=floating-point",
+      "-depth",
+      "32",
+      "DESTINATION.pfm"
+    ]
+  },
+  "photos": [
+    {
+      "id": "alpine_lake",
+      "photographer": "Philipp",
+      "page_url": "https://unsplash.com/photos/-hvC60Fen7I",
+      "download_url": "https://images.unsplash.com/photo-1660937472479-f0d9608e8370?fm=jpg&q=100",
+      "license_url": "https://unsplash.com/license",
+      "source_file": "downloads/unsplash/alpine_lake.jpg",
+      "source_sha256": "04e184547385d61cc421e9556a457b7535e1c36da8aed66cb7fde3225dddbc58",
+      "source_width": 9350,
+      "source_height": 6233,
+      "images": [
+        {
+          "id": "unsplash/alpine_lake/12mp",
+          "size_class": "12mp",
+          "file": "pfm/unsplash/alpine_lake/12mp.pfm",
+          "width": 4243,
+          "height": 2828,
+          "bytes": 143990465,
+          "sha256": "ae6bcc2219027ccced998fe41cdbd9bb0401eedcb36674eb93be886ff91b1404"
+        },
+        {
+          "id": "unsplash/alpine_lake/24mp",
+          "size_class": "24mp",
+          "file": "pfm/unsplash/alpine_lake/24mp.pfm",
+          "width": 6000,
+          "height": 4000,
+          "bytes": 288000017,
+          "sha256": "1d15d26a54e295f964bedd297556d72a1dd8db67d98c0514f8e5ad10981d19d4"
+        },
+        {
+          "id": "unsplash/alpine_lake/48mp",
+          "size_class": "48mp",
+          "file": "pfm/unsplash/alpine_lake/48mp.pfm",
+          "width": 8486,
+          "height": 5657,
+          "bytes": 576063641,
+          "sha256": "2788f60710d8a0fcc5e5be0a836efcb0726489f88ea2dc5a5a2bae7f23ae23d6"
+        }
+      ]
+    },
+    {
+      "id": "campus_interior",
+      "photographer": "Ricardo Gomez Angel",
+      "page_url": "https://unsplash.com/photos/jbCLsTtsP3s",
+      "download_url": "https://images.unsplash.com/photo-1680535131131-4d79b312d5d0?fm=jpg&q=100",
+      "license_url": "https://unsplash.com/license",
+      "source_file": "downloads/unsplash/campus_interior.jpg",
+      "source_sha256": "457db301343e42fb9be2916369f2fc0e37f4ffd8f55cbde318802439acb9e129",
+      "source_width": 8729,
+      "source_height": 5802,
+      "images": [
+        {
+          "id": "unsplash/campus_interior/12mp",
+          "size_class": "12mp",
+          "file": "pfm/unsplash/campus_interior/12mp.pfm",
+          "width": 4249,
+          "height": 2824,
+          "bytes": 143990129,
+          "sha256": "d64dc822ae9900fd3a0c8249ac62b1555b2c3da3389e62444bf7e8a3ec53e4e0"
+        },
+        {
+          "id": "unsplash/campus_interior/24mp",
+          "size_class": "24mp",
+          "file": "pfm/unsplash/campus_interior/24mp.pfm",
+          "width": 6009,
+          "height": 3994,
+          "bytes": 287999369,
+          "sha256": "55cf0073bfb12d81ddf05774ba681168711b292063c2d405af3d6b7d6a665a84"
+        },
+        {
+          "id": "unsplash/campus_interior/48mp",
+          "size_class": "48mp",
+          "file": "pfm/unsplash/campus_interior/48mp.pfm",
+          "width": 8498,
+          "height": 5648,
+          "bytes": 575960465,
+          "sha256": "bef0043c18741282181da45cdba327eded1ac649e74877a507331b3aba18ea46"
+        }
+      ]
+    },
+    {
+      "id": "forest_stream",
+      "photographer": "Karthik Sreenivas",
+      "page_url": "https://unsplash.com/photos/5CQ8kGiouQo",
+      "download_url": "https://images.unsplash.com/photo-1668709096799-5d34284a7502?fm=jpg&q=100",
+      "license_url": "https://unsplash.com/license",
+      "source_file": "downloads/unsplash/forest_stream.jpg",
+      "source_sha256": "394a4c201159979d07ce0714620870414893c094b94c0b9127aef0eae2968e77",
+      "source_width": 8636,
+      "source_height": 6336,
+      "images": [
+        {
+          "id": "unsplash/forest_stream/12mp",
+          "size_class": "12mp",
+          "file": "pfm/unsplash/forest_stream/12mp.pfm",
+          "width": 4044,
+          "height": 2967,
+          "bytes": 143982593,
+          "sha256": "008c3e28641d8da8830ad9abdaf95f4d3f136d2d96d3c7c76af5fea00906f454"
+        },
+        {
+          "id": "unsplash/forest_stream/24mp",
+          "size_class": "24mp",
+          "file": "pfm/unsplash/forest_stream/24mp.pfm",
+          "width": 5719,
+          "height": 4196,
+          "bytes": 287963105,
+          "sha256": "413ddef64b8f4e83737614f9ac78c40fde34ff225bbbd26a47ad76bc588138e1"
+        },
+        {
+          "id": "unsplash/forest_stream/48mp",
+          "size_class": "48mp",
+          "file": "pfm/unsplash/forest_stream/48mp.pfm",
+          "width": 8089,
+          "height": 5934,
+          "bytes": 576001529,
+          "sha256": "c7d6f149977ae44390eb34de6f531926bfa6537fa12fa82d20d1fdccbdb500d8"
+        }
+      ]
+    }
+  ]
+}

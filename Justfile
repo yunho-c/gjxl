@@ -87,12 +87,12 @@ encoding-image-benchmark input implementation="simd" samples="5" warmups="2" gpu
 metal-profile workload="padded_4k" implementation="simd" samples="7" warmups="2" gpu_aq="fully-resident" distance="1.2" profile_build_dir="build/metal-profile" output_root="logs/metal-profile":
     python3 tools/metal_profile.py --workload "{{ workload }}" --implementation "{{ implementation }}" --samples "{{ samples }}" --warmups "{{ warmups }}" --gpu-aq "{{ gpu_aq }}" --distance "{{ distance }}" --build-dir "{{ profile_build_dir }}" --output-root "{{ output_root }}"
 
-# Compare warm sequential and bounded-concurrency multi-image throughput.
+# Compare synthetic stress inputs or the pinned photo-large corpus.
 [positional-arguments]
-image-batch-benchmark workload="all" batch_sizes="1,2,4,8" samples="3" warmups="1" backend="metal" gpu_aq="fully-resident" *args:
+image-batch-benchmark workload="all" batch_sizes="auto" samples="3" warmups="1" backend="metal" gpu_aq="fully-resident" *args:
     cmake -S . -B "{{ build_dir }}/release" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DHWY_ENABLE_TESTS=OFF
     cmake --build "{{ build_dir }}/release" --target gjxl_image_batch_benchmark -j
-    "{{ build_dir }}/release/gjxl_image_batch_benchmark" --workload "{{ workload }}" --batch-sizes "{{ batch_sizes }}" --samples "{{ samples }}" --warmups "{{ warmups }}" --backend "{{ backend }}" --metal-aq "{{ gpu_aq }}" "${@:7}"
+    python3 tools/benchmark_image_batch.py --benchmark "{{ build_dir }}/release/gjxl_image_batch_benchmark" --workload "{{ workload }}" --batch-sizes "{{ batch_sizes }}" --samples "{{ samples }}" --warmups "{{ warmups }}" --backend "{{ backend }}" --metal-aq "{{ gpu_aq }}" "${@:7}"
 
 # Measure the CPU coefficient-decision boundary without the complete AQ loop.
 coefficient-benchmark workload="padded_1080p" samples="9" warmups="2":

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cerrno>
 #include <cctype>
 #include <chrono>
@@ -39,7 +40,10 @@ struct CommandLineOptions {
   std::string workload = "all";
   std::vector<std::filesystem::path> inputs;
   std::filesystem::path raw_samples;
+  std::filesystem::path export_inputs;
   std::vector<size_t> batch_sizes = {1, 2, 4, 8};
+  bool batch_sizes_explicit = false;
+  bool dry_run = false;
   size_t samples = 3;
   size_t warmups = 1;
   float butteraugli_target = 1.2f;
@@ -56,13 +60,29 @@ struct WorkloadSpec {
   std::filesystem::path source = {};
 };
 
-const std::array<WorkloadSpec, 5> kWorkloads = {{
+const std::array<WorkloadSpec, 8> kWorkloads = {{
   {"thumbnail_64x64", {64, 64}},
   {"small_256x192", {256, 192}},
   {"medium_512x384", {512, 384}},
   {"1080p", {1920, 1080}},
   {"4k", {3840, 2160}},
+  {"synthetic-12mp", {4000, 3000}},
+  {"synthetic-24mp", {6000, 4000}},
+  {"synthetic-48mp", {8000, 6000}},
 }};
+
+[[nodiscard]] bool IsLargeImage(gjxl::Extent2D extent) {
+  size_t pixels = 0;
+  return extent.try_area(&pixels) && pixels >= 12'000'000;
+}
+
+[[nodiscard]] std::vector<size_t> BatchSizes(
+  const CommandLineOptions& options, gjxl::Extent2D extent) {
+  if (!options.batch_sizes_explicit && IsLargeImage(extent)) {
+    return {1};
+  }
+  return options.batch_sizes;
+}
 
 struct ImageStorage {
   explicit ImageStorage(gjxl::Extent2D image_extent)
@@ -235,13 +255,21 @@ struct BenchmarkRow {
 void PrintUsage(std::string_view executable) {
   std::cout
     << "Usage: " << executable
-    << " [--workload all|thumbnail_64x64|small_256x192|"
-       "medium_512x384|1080p|4k]"
-       " [--batch-sizes 1,2,4,8] [--samples N] [--warmups N]"
+    << " [--workload all|synthetic-large|thumbnail_64x64|small_256x192|"
+       "medium_512x384|1080p|4k|synthetic-12mp|synthetic-24mp|synthetic-48mp]"
+       " [--batch-sizes auto|1,2,4,8] [--samples N] [--warmups N]"
        " [--distance VALUE] [--backend auto|cpu|metal]"
        " [--metal-aq exact-coefficients|fully-resident|throughput|"
        "maximum-throughput] [--input FILE.pfm|DIRECTORY]..."
-       " [--raw-samples NEW.csv]\n"
+       " [--raw-samples NEW.csv] [--dry-run | --export-inputs NEW_DIRECTORY]\n"
+       "all selects synthetic workloads through 4K; synthetic-large selects 12/24/48 MP.\n"
+       "Legacy aliases: large, 12mp, 24mp, 48mp. For photo-large, use "
+       "tools/benchmark_image_batch.py or just image-batch-benchmark photo-large.\n"
+       "Automatic batches: 1 for images >= 12 MP, otherwise 1,2,4,8. "
+       "Explicit batch sizes override this choice.\n"
+       "--dry-run lists selected synthetic dimensions/batches without image "
+       "allocation or encoding. --export-inputs writes selected synthetic PFMs "
+       "without encoding. Neither accepts --input or --raw-samples.\n"
        "Inputs replace synthetic workloads; directories select sorted PFMs "
        "without recursion. Input dimensions are preserved.\n"
        "Defaults: Metal, fully-resident, effort 7, automatic per-image CPU "
@@ -265,8 +293,18 @@ void PrintUsage(std::string_view executable) {
       options.inputs.emplace_back(value(argument));
     } else if (argument == "--raw-samples") {
       options.raw_samples = value(argument);
+    } else if (argument == "--export-inputs") {
+      options.export_inputs = value(argument);
+      if (options.export_inputs.empty()) {
+        throw std::runtime_error("Export directory must not be empty");
+      }
+    } else if (argument == "--dry-run") {
+      options.dry_run = true;
     } else if (argument == "--batch-sizes") {
-      options.batch_sizes = ParseBatchSizes(value(argument));
+      const std::string_view sizes = value(argument);
+      options.batch_sizes_explicit = sizes != "auto";
+      options.batch_sizes = options.batch_sizes_explicit
+        ? ParseBatchSizes(sizes) : std::vector<size_t>{1, 2, 4, 8};
     } else if (argument == "--samples") {
       options.samples = ParsePositiveSize(value(argument), "Samples");
     } else if (argument == "--warmups") {
@@ -286,6 +324,19 @@ void PrintUsage(std::string_view executable) {
       throw std::runtime_error("Unknown argument: " + std::string(argument));
     }
   }
+  if (options.workload == "large") {
+    options.workload = "synthetic-large";
+  } else if (options.workload == "12mp" || options.workload == "24mp" ||
+             options.workload == "48mp") {
+    options.workload = "synthetic-" + options.workload;
+  }
+  if ((options.dry_run || !options.export_inputs.empty()) &&
+      (!options.inputs.empty() || !options.raw_samples.empty() ||
+       (options.dry_run && !options.export_inputs.empty()))) {
+    throw std::runtime_error(
+      "Use --dry-run or --export-inputs with synthetic workloads only, "
+      "without --input or --raw-samples");
+  }
   if (options.backend != gjxl::VarDctBackendPreference::kMetal) {
     if (!options.metal_aq_explicit) {
       options.metal_aq_mode =
@@ -297,6 +348,7 @@ void PrintUsage(std::string_view executable) {
     }
   }
   if (options.inputs.empty() && options.workload != "all" &&
+      options.workload != "synthetic-large" &&
       std::ranges::none_of(kWorkloads, [&](const WorkloadSpec& workload) {
         return workload.name == options.workload;
       })) {
@@ -388,6 +440,39 @@ void FillImage(ImageStorage* image) {
       image->plane[2][index] =
         0.030f + 0.30f * fx + 0.38f * fy + texture;
     }
+  }
+}
+
+void ExportInputs(
+  const std::filesystem::path& directory,
+  const std::vector<WorkloadSpec>& workloads) {
+  if (std::filesystem::exists(directory)) {
+    throw std::runtime_error("Export directory already exists: " + directory.string());
+  }
+  std::filesystem::create_directories(directory);
+  for (const auto& workload : workloads) {
+    ImageStorage image(workload.extent);
+    FillImage(&image);
+    const std::string name = workload.name.starts_with("synthetic-")
+      ? workload.name : "synthetic-" + workload.name;
+    const auto path = directory / (name + ".pfm");
+    std::ofstream output;
+    output.exceptions(std::ios::failbit | std::ios::badbit);
+    output.open(path, std::ios::binary);
+    output << "PF\n" << image.extent.width << ' ' << image.extent.height << '\n'
+           << (std::endian::native == std::endian::little ? "-1.0\n" : "1.0\n");
+    std::vector<float> row(image.extent.width * 3);
+    for (size_t y = image.extent.height; y-- > 0;) {
+      for (size_t x = 0; x < image.extent.width; ++x) {
+        for (size_t channel = 0; channel < 3; ++channel) {
+          row[x * 3 + channel] = image.plane[channel][y * image.extent.width + x];
+        }
+      }
+      output.write(reinterpret_cast<const char*>(row.data()),
+                   static_cast<std::streamsize>(row.size() * sizeof(float)));
+    }
+    output.close();
+    std::cout << "Exported " << path.string() << '\n';
   }
 }
 
@@ -606,10 +691,29 @@ int main(int argc, char** argv) {
     }
     if (options.inputs.empty()) {
       for (const auto& workload : kWorkloads) {
-        if (options.workload == "all" || options.workload == workload.name) {
+        if ((options.workload == "all" && !IsLargeImage(workload.extent)) ||
+            (options.workload == "synthetic-large" && IsLargeImage(workload.extent)) ||
+            options.workload == workload.name) {
           workloads.push_back(workload);
         }
       }
+    }
+    if (options.dry_run) {
+      std::cout << "workload,width,height,batch_sizes\n";
+      for (const auto& workload : workloads) {
+        std::string sizes;
+        for (size_t size : BatchSizes(options, workload.extent)) {
+          if (!sizes.empty()) sizes += ',';
+          sizes += std::to_string(size);
+        }
+        std::cout << workload.name << ',' << workload.extent.width << ','
+                  << workload.extent.height << ',' << CsvField(sizes) << '\n';
+      }
+      return EXIT_SUCCESS;
+    }
+    if (!options.export_inputs.empty()) {
+      ExportInputs(options.export_inputs, workloads);
+      return EXIT_SUCCESS;
     }
     std::ofstream raw_samples;
     if (!options.raw_samples.empty()) {
@@ -663,7 +767,7 @@ int main(int argc, char** argv) {
       }
       std::cout << "reference workload=" << workload.name
                 << " bytes=" << reference_codestream.size() << '\n';
-      for (size_t batch_size : options.batch_sizes) {
+      for (size_t batch_size : BatchSizes(options, workload.extent)) {
         rows.push_back(BenchmarkBatchSize(
           workload, options, image.View(), reference_codestream,
           reference_summary, batch_size,

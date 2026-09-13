@@ -7,8 +7,137 @@ just image-batch-benchmark all 1,2,4
 ```
 
 Defaults are Metal, **fully-resident**, distance 1.2, effort 7, one warmup and
-three paired samples. The full default batch list is 1,2,4,8. Other existing
-AQ modes and synthetic workload names remain supported.
+three paired samples. `--batch-sizes auto` (also the Just default) uses 1,2,4,8
+below 12 million pixels and **1** at or above that size, including external
+PFMs. An explicit numeric batch list overrides this choice. Other existing AQ
+modes and synthetic workload names remain supported.
+
+## Photographic corpus: `photo-large`
+
+Use `photo-large` for photographic comparisons. It reuses the existing Unsplash
+corpus: **three source photographs, each prepared at approximately 12, 24, and
+48 MP** (nine inputs). These are Lanczos downscales in linear RGB from 50–58 MP
+JPEG originals, preserving aspect ratio with rounded dimensions; none is
+upscaled. They are not nine independent scenes or native captures at each size.
+Keep their results separate from the synthetic stress cases below.
+
+The small [corpus manifest](../tools/benchmark_corpora/photo-large.json) records
+source URLs, photographers, preparation arguments, dimensions, and SHA-256
+hashes of both originals and prepared PFMs. Image files stay outside Git.
+
+Inspect and verify all nine inputs without loading an encoder or encoding:
+
+```sh
+python3 tools/benchmark_image_batch.py --workload photo-large --dry-run
+```
+
+When ready to measure:
+
+```sh
+just image-batch-benchmark photo-large
+just image-batch-benchmark photo-large 1 3 1 metal fully-resident \
+  --raw-samples photo-large.csv
+```
+
+The preset explicitly defaults to **batch size 1 for every photograph**, including
+the three “12MP” inputs that round slightly below 12 million pixels. Pass an
+explicit list such as `1,2` to test concurrency. All nine hashes are checked before
+encoding; missing or modified files stop the run. Hashing is outside timing.
+With `--raw-samples NEW.csv`, the wrapper also writes `NEW.csv.inputs.json`,
+recording corpus IDs, size classes, input paths/hashes, the manifest hash, and the
+benchmark command/binary hash. Both output paths must be new. The sidecar records
+selected inputs, not run completion; consult the raw rows and exit status.
+
+By default, the wrapper reuses the existing sibling directory
+`../libjxl-runtime-study-2026-09-03/corpus` when present. Otherwise it uses the
+ignored cache `build/benchmark-corpus/photo-large`. Set `GJXL_PHOTO_CORPUS` or
+pass `--photo-root CORPUS` to select another root containing `pfm/unsplash/...`.
+If the corpus is missing, explicitly prepare it once:
+
+```sh
+python3 tools/benchmark_image_batch.py --prepare-photos \
+  --photo-root build/benchmark-corpus/photo-large
+```
+
+Preparation downloads only missing originals, resizes only missing PFMs, and
+exits without encoding. It requires ImageMagick and network access when those
+files are missing; reusing all nine verified PFMs requires neither. Existing
+files are never replaced. The manifest pins the original ImageMagick version;
+a conversion producing different bytes is rejected. The PFMs occupy about 3 GB.
+Use the same `--photo-root` (or environment variable) when running the benchmark.
+
+The same wrapper can select identical inputs for the libjxl-side batch benchmark:
+
+```sh
+python3 tools/benchmark_image_batch.py --workload photo-large \
+  --benchmark ~/GitHub/libjxl/build-release-codex/tools/jxl_image_batch_benchmark \
+  --raw-samples libjxl-photo-large.csv
+```
+
+The wrapper forwards other encoder options unchanged. Report each encoder's
+settings and thread policy; equal requested distance is not matched decoded
+quality. Neither command builds or invokes the other encoder.
+
+## Synthetic stress corpus: `synthetic-large`
+
+The large synthetic corpus is opt-in; `all` retains the original five workloads
+through 4K. It uses the same deterministic gradient/texture pattern:
+
+| Workload | Dimensions | Pixels |
+| --- | --- | ---: |
+| `synthetic-12mp` | 4000x3000 | 12,000,000 |
+| `synthetic-24mp` | 6000x4000 | 24,000,000 |
+| `synthetic-48mp` | 8000x6000 | 48,000,000 |
+
+Inspect the selected cases without allocating images, initializing Metal, or
+encoding anything:
+
+```sh
+build/release/gjxl_image_batch_benchmark --workload synthetic-large --dry-run
+```
+
+When ready to measure, select one size or `synthetic-large` for all three:
+
+```sh
+just image-batch-benchmark synthetic-12mp
+just image-batch-benchmark synthetic-large
+```
+
+Both commands default to batch size 1. To deliberately test concurrency, pass
+the batch list, for example `just image-batch-benchmark synthetic-12mp 1,2`. Each concurrent
+image requires its own encoder working storage. Single-image success does not
+establish that a larger batch fits in memory, and the default execution domain
+has no hard managed-memory cap. These fixtures remain useful as deterministic
+size stress cases. The old names `large`, `12mp`, `24mp`, and `48mp` remain aliases;
+new CSV workload names explicitly say `synthetic-`. Generated pixels and exported
+filenames are unchanged. Historical results using the old built-in names describe
+these synthetic fixtures, not the photographic corpus.
+
+To prepare the **same inputs for both encoders**, export the corpus once:
+
+```sh
+build/release/gjxl_image_batch_benchmark --workload synthetic-large \
+  --export-inputs /path/to/new-large-pfms
+```
+
+Export writes unit-scale, interleaved float32 linear-RGB PFMs and performs no
+encoding. It requires a new output directory, generates one image at a time,
+and may leave partial files on failure. Payloads are 144, 288, and 576 MB
+(1,008 MB total, decimal). The native executable's `--dry-run` and `--export-inputs`
+are synthetic-only modes and cannot be combined with each other, `--input`, or
+`--raw-samples`. The Python wrapper additionally supports photographic previews.
+Neither exporting nor adding the workload definitions runs a benchmark.
+
+Later, use those PFMs for both tools (each raw CSV destination must be new):
+
+```sh
+build/release/gjxl_image_batch_benchmark \
+  --input /path/to/new-large-pfms --batch-sizes 1 --raw-samples gjxl-large.csv
+~/GitHub/libjxl/build-release-codex/tools/jxl_image_batch_benchmark \
+  --input /path/to/new-large-pfms --batch-sizes 1 --raw-samples libjxl-large.csv
+```
+
+## External images and measurements
 
 Use the built executable to measure real images and save raw samples:
 
@@ -21,7 +150,8 @@ build/release/gjxl_image_batch_benchmark \
 selection is non-recursive and includes `.pfm` files case-insensitively. Inputs
 are sorted and deduplicated by canonical path. They replace synthetic workload
 selection and retain their original dimensions. PFM pixels must be finite
-linear RGB. No downloading, resizing, or new asset registry is involved.
+linear RGB. Direct `--input` selection requires no corpus manifest and performs
+no downloading or resizing.
 
 For a normal still image, reuse the existing optional ImageMagick wrapper:
 
