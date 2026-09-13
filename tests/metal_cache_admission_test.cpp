@@ -12,6 +12,29 @@
 
 namespace gjxl::metal_internal {
 struct MetalCacheAdmissionTestAccess {
+  struct FrameLease {
+    std::unique_ptr<DeviceBuffer> buffer;
+    std::weak_ptr<MetalBackendRegistry> registry;
+  };
+  static Status AcquireFrame(MetalBackend& gpu, size_t bytes, FrameLease* lease) {
+    Status status = gpu.AcquireCompletedFrameAllocation(bytes, &lease->buffer);
+    if (status.ok()) lease->registry = gpu.registry_;
+    return status;
+  }
+  static void ReleaseFrame(FrameLease lease) {
+    MetalBackend::ReturnCompletedFrameAllocation(
+      std::move(lease.buffer), lease.registry);
+  }
+  static size_t FrameBytes(MetalBackend& gpu) {
+    std::lock_guard lock(gpu.preparation_cache_mutex_);
+    return gpu.idle_completed_frame_ ? gpu.idle_completed_frame_->size_bytes() : 0;
+  }
+  static void PurgeFrame(MetalBackend& gpu) {
+    std::lock_guard lock(gpu.preparation_cache_mutex_);
+    if (gpu.idle_completed_frame_)
+      static_cast<MetalBuffer&>(*gpu.idle_completed_frame_).handle()->setPurgeableState(
+        MTL::PurgeableStateEmpty);
+  }
   static Status AcquireAq(MetalBackend &gpu, MetalAqScratchArena kind,
                           size_t bytes, DeviceScratchArena *arena) {
     return gpu.AcquireAqScratchArena(kind, bytes, arena);
@@ -239,11 +262,168 @@ bool CheckRegistryLifetime() {
   trimmer.join();
   return Check(good, "Concurrent registry visit failed") && Empty(budget);
 }
+
+bool CheckFrameCache() {
+  // Real completed frames use at least one 1 MiB capacity bucket. Sub-page
+  // Metal buffers can ignore purgeability changes and cannot model reclamation.
+  constexpr size_t bytes = size_t{1} << 20;
+  std::unique_ptr<GpuBackend> owner;
+  if (!Ok(CreateMetalBackend(GJXL_METALLIB_PATH,
+        {.completed_frame_cache_bytes = bytes}, &owner))) return false;
+  auto& gpu = Metal(owner);
+  Access::FrameLease first, live, reused;
+  if (!Ok(Access::AcquireFrame(gpu, bytes, &first)) ||
+      !Ok(Access::AcquireFrame(gpu, bytes, &live))) return false;
+  auto* live_word = static_cast<uint32_t*>(static_cast<MetalBuffer&>(*live.buffer).contents());
+  *live_word = 0x12345678;
+  Access::ReleaseFrame(std::move(first));
+  const auto before = gpu.stats().successful_allocations;
+  if (!Check(Access::FrameBytes(gpu) == bytes, "Released frame was not cached") ||
+      !Ok(Access::AcquireFrame(gpu, bytes, &reused)) ||
+      !Check(gpu.stats().successful_allocations == before &&
+                 reused.buffer.get() != live.buffer.get() && *live_word == 0x12345678,
+             "Frame reuse allocated anew or altered a retained output")) return false;
+  Access::ReleaseFrame(std::move(reused));
+  Access::PurgeFrame(gpu);
+  if (!Ok(Access::AcquireFrame(gpu, bytes, &reused)) ||
+      !Check(gpu.stats().successful_allocations == before + 1,
+             "Purged frame storage was reused")) return false;
+  if (!Ok(gpu.TrimPreparationCache())) return false;
+  Access::ReleaseFrame(std::move(reused));
+  Access::ReleaseFrame(std::move(live));
+  if (!Check(Access::FrameBytes(gpu) == 0, "Trimmed generation repopulated frame cache"))
+    return false;
+  if (!Ok(Access::AcquireFrame(gpu, bytes * 2, &reused))) return false;
+  Access::ReleaseFrame(std::move(reused));
+  if (!Check(Access::FrameBytes(gpu) == 0, "Oversized frame was retained")) return false;
+  if (!Ok(Access::AcquireFrame(gpu, bytes, &reused))) return false;
+  auto* word = static_cast<uint32_t*>(static_cast<MetalBuffer&>(*reused.buffer).contents());
+  *word = 0xabcd0123;
+  owner.reset();
+  if (!Check(*word == 0xabcd0123, "Backend destruction invalidated a frame")) return false;
+  Access::ReleaseFrame(std::move(reused));
+
+  if (!Ok(CreateMetalBackend(GJXL_METALLIB_PATH,
+        {.completed_frame_cache_bytes = 0}, &owner)) ||
+      !Ok(Access::AcquireFrame(Metal(owner), bytes, &reused))) return false;
+  Access::ReleaseFrame(std::move(reused));
+  if (!Check(Access::FrameBytes(Metal(owner)) == 0, "Disabled frame cache retained memory"))
+    return false;
+  owner.reset();
+  return Empty(DefaultResourceBudget());
+}
+
+bool CheckFrameDomains() {
+  constexpr size_t bytes = 4096;
+  ResourceBudget a(2 * bytes), b(2 * bytes);
+  ResourceReservation producer, next, other;
+  std::unique_ptr<GpuBackend> owner;
+  if (!Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &owner)) ||
+      !Ok(a.Reserve(bytes, &producer))) return false;
+  auto& gpu = Metal(owner);
+  Access::FrameLease frame;
+  {
+    ResourceContextScope scope({&producer, ResourceClass::kCompletedFrame});
+    if (!Ok(Access::AcquireFrame(gpu, bytes, &frame))) return false;
+    Access::ReleaseFrame(std::move(frame));
+  }
+  producer.Reset();
+  if (!Check(a.snapshot().total.idle_capacity_bytes == bytes,
+             "Frame cache dropped its resource charge") ||
+      !Ok(a.Reserve(bytes, &next))) return false;
+  const auto before = gpu.stats().successful_allocations;
+  {
+    ResourceContextScope scope({&next, ResourceClass::kCompletedFrame});
+    if (!Ok(Access::AcquireFrame(gpu, bytes, &frame)) ||
+        !Check(gpu.stats().successful_allocations == before &&
+                   a.snapshot().total.live_capacity_bytes == bytes &&
+                   a.snapshot().total.idle_capacity_bytes == 0,
+               "Frame charge was not transferred to its new reservation")) return false;
+    Access::ReleaseFrame(std::move(frame));
+  }
+  next.Reset();
+  if (!Ok(b.Reserve(bytes, &other))) return false;
+  {
+    ResourceContextScope scope({&other, ResourceClass::kCompletedFrame});
+    if (!Ok(Access::AcquireFrame(gpu, bytes, &frame)) ||
+        !Check(gpu.stats().successful_allocations == before + 1 &&
+                   a.snapshot().total.backing_count == 0,
+               "Frame capacity crossed accounting domains")) return false;
+    Access::ReleaseFrame(std::move(frame));
+  }
+  other.Reset();
+  if (!Ok(TrimMetalPreparationCachesForDomain(a)) ||
+      !Check(Access::FrameBytes(gpu) == bytes, "Domain eviction removed another domain's frame") ||
+      !Ok(TrimMetalPreparationCachesForDomain(b)) ||
+      !Check(Access::FrameBytes(gpu) == 0, "Domain eviction missed the frame cache")) return false;
+  return Empty(a) && Empty(b);
+}
+
+bool CheckFrameQueuedAdmission() {
+  constexpr size_t bytes = 4096;
+  ResourceBudget budget(bytes);
+  ResourceReservation producer;
+  std::unique_ptr<GpuBackend> owner;
+  if (!Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &owner)) ||
+      !Ok(budget.Reserve(bytes, &producer))) return false;
+  auto& gpu = Metal(owner);
+  Access::FrameLease frame;
+  {
+    ResourceContextScope scope({&producer, ResourceClass::kCompletedFrame});
+    if (!Ok(Access::AcquireFrame(gpu, bytes, &frame))) return false;
+  }
+  std::atomic<bool> acquired{false};
+  std::jthread waiter([&](std::stop_token stop) {
+    ResourceReservation consumer;
+    acquired = budget.Reserve(bytes, &consumer, stop, Evict, &budget).ok();
+  });
+  if (!Check(Until([&] { return budget.snapshot().waiting_requests == 1; }),
+             "Frame admission did not queue")) return false;
+  Access::ReleaseFrame(std::move(frame));
+  producer.Reset();
+  if (!Check(Until([&] { return acquired.load(); }), "Frame return stranded admission"))
+    return false;
+  waiter.join();
+  return Check(Access::FrameBytes(gpu) == 0, "Frame cache bypassed queued admission") && Empty(budget);
+}
+
+bool CheckFrameProcessLimitAndTeardown() {
+  constexpr size_t bytes = size_t{128} << 20;
+  std::array<std::unique_ptr<GpuBackend>, 3> owners;
+  for (auto& owner : owners) {
+    Access::FrameLease frame;
+    if (!Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &owner)) ||
+        !Ok(Access::AcquireFrame(Metal(owner), bytes, &frame))) return false;
+    Access::ReleaseFrame(std::move(frame));
+  }
+  size_t retained = 0;
+  for (auto& owner : owners) retained += Access::FrameBytes(Metal(owner));
+  if (!Check(retained == (size_t{256} << 20), "Process frame-cache cap was not enforced"))
+    return false;
+  for (auto& owner : owners) owner.reset();
+
+  // A late frame return races backend unregister/destruction. Only the
+  // registry, never a raw backend pointer, is retained by the returning owner.
+  for (size_t repeat = 0; repeat < 12; ++repeat) {
+    std::unique_ptr<GpuBackend> owner;
+    Access::FrameLease frame;
+    if (!Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &owner)) ||
+        !Ok(Access::AcquireFrame(Metal(owner), 4096, &frame))) return false;
+    std::jthread returning([lease = std::move(frame)]() mutable {
+      Access::ReleaseFrame(std::move(lease));
+    });
+    owner.reset();
+    returning.join();
+  }
+  return Empty(DefaultResourceBudget());
+}
 } // namespace
 
 int main() {
   return CheckDomainEviction() && CheckActiveReturn() &&
-                 CheckOversizedButteraugli() && CheckRegistryLifetime()
+                 CheckOversizedButteraugli() && CheckRegistryLifetime() &&
+                 CheckFrameCache() && CheckFrameDomains() &&
+                 CheckFrameQueuedAdmission() && CheckFrameProcessLimitAndTeardown()
              ? EXIT_SUCCESS
              : EXIT_FAILURE;
 }

@@ -391,7 +391,7 @@ public:
         return Status::InvalidArgument("Borrowed Butteraugli scratch requires "
                                        "an unexpanded multiscale image");
       }
-      std::array<DeviceMemoryRange, 9> ranges;
+      std::array<DeviceMemoryRange, kButteraugliBorrowedPlaneCount> ranges;
       for (size_t index = 0; index < borrowed_scratch_->planes.size();
            ++index) {
         DevicePlaneView &plane = borrowed_scratch_->planes[index];
@@ -430,7 +430,8 @@ public:
       }
     }
     const auto is_borrowed = [borrowing](size_t slot) {
-      return borrowing && slot >= kImage && slot < kImage + 9;
+      return borrowing && ButteraugliBorrowedPlaneIndex(slot) <
+                              kButteraugliBorrowedPlaneCount;
     };
     cached_reference_bytes_ = storage_plan.cached_reference_bytes;
     gaussian_kernel_bytes_ = storage_plan.gaussian_kernel_bytes;
@@ -441,7 +442,7 @@ public:
     for (size_t index = 0; index < planes_.size(); ++index) {
       DevicePlaneView &plane = planes_[index];
       if (is_borrowed(index)) {
-        plane = borrowed_scratch_->planes[index - kImage];
+        plane = borrowed_scratch_->planes[ButteraugliBorrowedPlaneIndex(index)];
         continue;
       }
       status = scratch_.BindPlane(storage_plan.planes[index], &plane);

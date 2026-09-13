@@ -166,8 +166,8 @@ GJXL_API GJXLResult gjxl_context_create(
   const GJXLContextOptions* options,
   GJXLContext** context) GJXL_NOEXCEPT;
 
-/// Releases idle AQ/resident-input and Butteraugli capacity shared by contexts and
-/// batch encoders. Safe alongside encoding; does not wait for active work or
+/// Releases idle AQ/resident-input, Butteraugli, and completed-frame capacity
+/// shared by contexts and batch encoders. Does not wait for active work or
 /// initialize Metal. Pre-trim active leases cannot refill these caches; leases
 /// acquired afterward may cache again. Context destruction does not trim these
 /// process-wide caches. Useful when the application becomes idle.

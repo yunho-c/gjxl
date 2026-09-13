@@ -52,6 +52,11 @@ using resource_budget_internal::ManagedVector;
 class MetalCompletedVarDctFrame final
     : public vardct_frame_internal::CompletedVarDctFrame {
  public:
+  ~MetalCompletedVarDctFrame() override {
+    MetalBackend::ReturnCompletedFrameAllocation(
+      std::move(allocation), allocation_cache);
+  }
+
   vardct_frame_internal::VarDctFrameView view() const noexcept override {
     const Extent2D blocks = strategies.extent();
     const size_t count = raw_quant.size();
@@ -83,6 +88,9 @@ class MetalCompletedVarDctFrame final
   }
 
   std::unique_ptr<DeviceBuffer> allocation;
+  // Populated only after successful completion/publication. Failed operations
+  // release their output allocation instead of returning it to the cache.
+  std::weak_ptr<MetalBackendRegistry> allocation_cache;
   std::span<const int32_t> coefficients;
   vardct_frame_internal::CoefficientOrderPopulationView population;
   FrameGeometry geometry;
@@ -1566,6 +1574,18 @@ Status MetalPreparedAqEvaluation::Prepare(
       plane.row_stride = coding_extent_.width;
       borrowed_butteraugli_scratch.planes[index++] = plane;
     }
+    // All inverse transforms finish before comparison. Residual coefficients
+    // are dead until the next reconstruction, except for the first plane:
+    // CompleteDistanceMapScratch uses it for complete-map diagnostics.
+    // Keep reconstructed_ independent: deferred frontend reconfiguration can
+    // read it again when regenerating cached forward coefficients.
+    for (size_t channel = 1; channel < 3; ++channel) {
+      DevicePlaneView plane = reconstruction_coefficients_;
+      plane.offset_bytes += channel * pixel_count_ * sizeof(float);
+      plane.extent = coding_extent_;
+      plane.row_stride = coding_extent_.width;
+      borrowed_butteraugli_scratch.planes[index++] = plane;
+    }
     borrowed_butteraugli = &borrowed_butteraugli_scratch;
   }
   DeviceButteraugliMemoryStats butteraugli_memory;
@@ -2661,6 +2681,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
   }
   if (output.frame != nullptr) *output.frame = std::move(candidate_frame);
   if (output.completed_frame != nullptr) {
+    candidate_completed_frame->allocation_cache = backend_->registry_;
     *output.completed_frame = std::move(candidate_completed_frame);
   }
   last_readback_stats_ = candidate_readback_stats;
@@ -2947,7 +2968,7 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
         static_cast<uint32_t>(group * 3 * cap + used);
       used += batch.coefficient_count;
     }
-    status = backend_->Allocate(
+    status = backend_->AcquireCompletedFrameAllocation(
       storage_plan.capacity_bytes, &frame->allocation);
     if (!status.ok()) return status;
     auto* metal = MetalBackend::AsMetalBuffer(*frame->allocation);

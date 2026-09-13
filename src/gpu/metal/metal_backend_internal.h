@@ -38,6 +38,7 @@
 namespace gjxl::metal_internal {
 
 class MetalBackend;
+class MetalCompletedVarDctFrame;
 struct MetalBackendRegistry;
 struct MetalButteraugliScratch;
 
@@ -322,7 +323,8 @@ public:
     ButteraugliPipelines butteraugli_pipelines,
     bool test_fail_submission,
     bool test_fail_completion,
-    size_t butteraugli_cache_bytes);
+    size_t butteraugli_cache_bytes,
+    size_t completed_frame_cache_bytes);
 
   ~MetalBackend() override;
 
@@ -445,6 +447,7 @@ private:
   friend class MetalPreparedResidentInput;
   friend class MetalPreparedDeviceButteraugli;
   friend struct MetalCacheAdmissionTestAccess;
+  friend class MetalCompletedVarDctFrame;
   friend Status EmptyMetalAqScratchArenasForTesting(GpuBackend& backend);
 
   Status PrepareDeviceButteraugliImpl(
@@ -477,6 +480,17 @@ private:
   void ReleaseButteraugliArena(
     DeviceScratchArena arena, uint64_t generation, bool reusable) noexcept;
   void DropButteraugliCacheLocked() noexcept;
+
+  Status AcquireCompletedFrameAllocation(
+    size_t capacity_bytes, std::unique_ptr<DeviceBuffer>* allocation);
+  void ReleaseCompletedFrameAllocation(
+    std::unique_ptr<DeviceBuffer> allocation) noexcept;
+  void DropCompletedFrameCacheLocked() noexcept;
+  // Registry locking excludes backend destruction without retaining it in a
+  // completed frame. A missing backend simply releases the independent buffer.
+  static void ReturnCompletedFrameAllocation(
+    std::unique_ptr<DeviceBuffer> allocation,
+    const std::weak_ptr<MetalBackendRegistry>& registry) noexcept;
 
   Status EmptyAqScratchArenasForTesting();
   struct TransformEncodeContext {
@@ -702,6 +716,8 @@ private:
     static_cast<size_t>(MetalAqScratchArena::kCount)> idle_aq_scratch_;
   const size_t butteraugli_cache_limit_;
   std::optional<DeviceScratchArena> idle_butteraugli_scratch_;
+  const size_t completed_frame_cache_limit_;
+  std::unique_ptr<DeviceBuffer> idle_completed_frame_;
   uint64_t preparation_cache_generation_ = 0;
   std::string name_;
   // Keep the registry alive through backend teardown, including static teardown.

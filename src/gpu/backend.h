@@ -46,8 +46,8 @@ public:
     };
   }
 
-  /// Releases idle preparation capacity, if supported. Metal releases both AQ
-  /// arenas (including resident input) and Butteraugli scratch.
+  /// Releases idle preparation capacity, if supported. Metal releases AQ arenas
+  /// (including resident input), Butteraugli scratch, and completed-frame storage.
   /// Safe during independent encodes: active storage remains valid, but leases
   /// already acquired at the trim boundary cannot repopulate this cache.
   /// Does not initialize a device or wait for active work.

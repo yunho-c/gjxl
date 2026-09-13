@@ -666,6 +666,18 @@ std::shared_ptr<MetalBackendRegistry> PreparationCacheRegistry() {
 constexpr size_t kButteraugliProcessCacheLimit = size_t{1024} * 1024 * 1024;
 std::atomic<size_t> idle_butteraugli_bytes{0};
 
+constexpr size_t kCompletedFrameProcessCacheLimit = size_t{256} * 1024 * 1024;
+std::atomic<size_t> idle_completed_frame_bytes{0};
+
+bool ReserveCompletedFrameCacheBytes(size_t bytes) noexcept {
+  size_t current = idle_completed_frame_bytes.load(std::memory_order_relaxed);
+  while (bytes <= kCompletedFrameProcessCacheLimit - current) {
+    if (idle_completed_frame_bytes.compare_exchange_weak(
+          current, current + bytes, std::memory_order_relaxed)) return true;
+  }
+  return false;
+}
+
 bool ReserveButteraugliCacheBytes(size_t bytes) noexcept {
   size_t current = idle_butteraugli_bytes.load(std::memory_order_relaxed);
   while (bytes <= kButteraugliProcessCacheLimit - current) {
@@ -696,7 +708,8 @@ MetalBackend::MetalBackend(
   ButteraugliPipelines butteraugli_pipelines,
   bool test_fail_submission,
   bool test_fail_completion,
-  size_t butteraugli_cache_bytes)
+  size_t butteraugli_cache_bytes,
+  size_t completed_frame_cache_bytes)
   : device_(std::move(device)),
     command_queue_(std::move(command_queue)),
     library_(std::move(library)),
@@ -709,7 +722,9 @@ MetalBackend::MetalBackend(
     test_fail_submission_(test_fail_submission),
     test_fail_completion_(test_fail_completion),
     butteraugli_cache_limit_(std::min(
-      butteraugli_cache_bytes, kButteraugliProcessCacheLimit)) {
+      butteraugli_cache_bytes, kButteraugliProcessCacheLimit)),
+    completed_frame_cache_limit_(std::min(
+      completed_frame_cache_bytes, kCompletedFrameProcessCacheLimit)) {
 
   NS::String* device_name = device_->name();
   if (device_name != nullptr) {
@@ -736,6 +751,7 @@ MetalBackend::~MetalBackend() {
   }
   // All prepared operations must already be destroyed by the backend contract.
   DropButteraugliCacheLocked();
+  DropCompletedFrameCacheLocked();
 }
 
 Status TrimMetalPreparationCachesForDomain(
@@ -760,6 +776,9 @@ Status MetalBackend::TrimPreparationCacheForDomain(
   if (matches(idle_butteraugli_scratch_)) DropButteraugliCacheLocked();
   for (auto& arena : idle_aq_scratch_)
     if (matches(arena)) arena.reset();
+  if (idle_completed_frame_ &&
+      AsMetalBuffer(*idle_completed_frame_)->allocation().SharesDomain(budget))
+    DropCompletedFrameCacheLocked();
   // Unlike explicit trim, eviction does not advance a backend-wide epoch:
   // unrelated domains keep their leases. Queued admission prevents matching
   // active allocations becoming idle until the waiter has made progress.
@@ -777,6 +796,7 @@ Status MetalBackend::TrimPreparationCache() {
   std::lock_guard lock(preparation_cache_mutex_);
   ++preparation_cache_generation_;
   DropButteraugliCacheLocked();
+  DropCompletedFrameCacheLocked();
   for (auto& arena : idle_aq_scratch_) arena.reset();
   return Status::Ok();
 }
@@ -873,7 +893,92 @@ size_t MetalBackend::PreparationCacheBytesForTesting() {
     ? idle_butteraugli_scratch_->capacity_bytes() : 0;
   for (const auto& arena : idle_aq_scratch_)
     if (arena) bytes += arena->capacity_bytes();
+  if (idle_completed_frame_) bytes += idle_completed_frame_->size_bytes();
   return bytes;
+}
+
+void MetalBackend::DropCompletedFrameCacheLocked() noexcept {
+  if (!idle_completed_frame_) return;
+  const size_t bytes = idle_completed_frame_->size_bytes();
+  idle_completed_frame_.reset();
+  idle_completed_frame_bytes.fetch_sub(bytes, std::memory_order_relaxed);
+}
+
+Status MetalBackend::AcquireCompletedFrameAllocation(
+  size_t capacity_bytes, std::unique_ptr<DeviceBuffer>* allocation) {
+  if (allocation == nullptr || *allocation != nullptr || capacity_bytes == 0)
+    return Status::InvalidArgument("Invalid completed-frame allocation request");
+  const resource_budget_internal::ResourceClassScope resource_class(
+    resource_budget_internal::ResourceClass::kCompletedFrame);
+  std::unique_ptr<DeviceBuffer> candidate;
+  uint64_t generation;
+  {
+    std::lock_guard lock(preparation_cache_mutex_);
+    generation = preparation_cache_generation_;
+    candidate = std::move(idle_completed_frame_);
+    if (candidate)
+      idle_completed_frame_bytes.fetch_sub(candidate->size_bytes(),
+                                            std::memory_order_relaxed);
+  }
+  // The storage planner rounds complete-frame capacities into size classes,
+  // so exact matching also preserves the admitted job's capacity bound.
+  if (candidate && candidate->size_bytes() != capacity_bytes) candidate.reset();
+  if (candidate) {
+    auto* buffer = AsMetalBuffer(*candidate);
+    if (buffer->handle()->setPurgeableState(MTL::PurgeableStateNonVolatile) ==
+          MTL::PurgeableStateEmpty ||
+        !resource_budget_internal::ActivateCachedResource(
+          buffer->allocation(), capacity_bytes).ok()) candidate.reset();
+  }
+  if (!candidate) {
+    Status status = Allocate(capacity_bytes, &candidate);
+    if (!status.ok()) return status;
+  }
+  AsMetalBuffer(*candidate)->cache_generation = generation;
+  *allocation = std::move(candidate);
+  return Status::Ok();
+}
+
+void MetalBackend::ReleaseCompletedFrameAllocation(
+  std::unique_ptr<DeviceBuffer> allocation) noexcept {
+  if (!allocation || allocation->size_bytes() > completed_frame_cache_limit_)
+    return;
+  const size_t bytes = allocation->size_bytes();
+  auto* buffer = AsMetalBuffer(*allocation);
+  try {
+    std::lock_guard lock(preparation_cache_mutex_);
+    if (buffer->cache_generation != preparation_cache_generation_) return;
+    if (idle_completed_frame_ && idle_completed_frame_->size_bytes() <= bytes)
+      return;
+    DropCompletedFrameCacheLocked();
+    // Successful publication and destruction of the final frame owner prove
+    // both GPU completion and the end of every CPU serializer's use.
+    (void)buffer->handle()->setPurgeableState(MTL::PurgeableStateVolatile);
+    if (!buffer->allocation().MakeIdle().ok()) return;
+    if (!ReserveCompletedFrameCacheBytes(bytes)) return;
+    idle_completed_frame_ = std::move(allocation);
+  } catch (...) {
+    // Returning an optional cache lease must never throw during destruction.
+  }
+}
+
+void MetalBackend::ReturnCompletedFrameAllocation(
+  std::unique_ptr<DeviceBuffer> allocation,
+  const std::weak_ptr<MetalBackendRegistry>& weak_registry) noexcept {
+  if (!allocation) return;
+  try {
+    const auto registry = weak_registry.lock();
+    if (!registry) return;
+    std::lock_guard lock(registry->mutex);
+    for (auto* backend : registry->backends) {
+      if (backend->owns(*allocation)) {
+        backend->ReleaseCompletedFrameAllocation(std::move(allocation));
+        return;
+      }
+    }
+  } catch (...) {
+    // The buffer still owns its Metal allocation when its backend is gone.
+  }
 }
 
 BackendKind MetalBackend::kind() const noexcept {
@@ -1646,7 +1751,8 @@ Status CreateMetalBackendImpl(
       std::move(butteraugli_pipelines),
       options.test_fail_submission,
       options.test_fail_completion,
-      options.butteraugli_cache_bytes));
+      options.butteraugli_cache_bytes,
+      options.completed_frame_cache_bytes));
 
   return Status::Ok();
 }

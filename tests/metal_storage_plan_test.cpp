@@ -228,7 +228,7 @@ bool CheckButteraugliMatrix() {
         expected = (expected + 63) / 64 * 64 + bytes;
       };
       for (size_t i = 0; i < 33; ++i) {
-        if (borrowing && i >= 21 && i < 30)
+        if (borrowing && ((i >= 21 && i < 30) || (i >= 10 && i < 12)))
           continue;
         add(multiscale && i == 32 ? sub : full);
       }
@@ -251,13 +251,14 @@ bool CheckButteraugliMatrix() {
                      plan.cached_reference_bytes == 12 * (full + sub) &&
                      plan.gaussian_kernel_bytes == 292 &&
                      plan.peak_comparison_scratch_bytes ==
-                         (21 - (borrowing ? 9 : 0)) * full + 8 * partials -
+                         (21 - (borrowing ? 11 : 0)) * full + 8 * partials -
                              (multiscale ? full - sub : 0),
                  "Butteraugli capacity/metrics differ from frozen recipe") ||
           !CheckSlices(std::move(planes), 64, expected))
         return false;
       for (size_t i = 0; i < 33; ++i) {
-        const bool absent = borrowing && i >= 21 && i < 30;
+        const bool absent = borrowing &&
+            ((i >= 21 && i < 30) || (i >= 10 && i < 12));
         if (!Check(plan.planes[i].extent.empty() == absent,
                    "Borrowed BA plane was allocated"))
           return false;
@@ -282,9 +283,11 @@ bool CheckCompletedFrames() {
         const Extent2D groups{(width + 255) / 256, (height + 255) / 256};
         const size_t count = groups.width * groups.height;
         const size_t coefficients = count * 3 * 65536;
+        const size_t used = (coefficients + anchors + 6144) * 4 + anchors;
+        constexpr size_t bucket = 1024 * 1024;
         if (!Check(plan.group_extent == groups && plan.group_count == count &&
                        plan.coefficient_count == coefficients &&
-                       plan.capacity_bytes == (coefficients + anchors + 6144) * 4 + anchors &&
+                       plan.capacity_bytes == (used + bucket - 1) / bucket * bucket &&
                        plan.order_population.offset_bytes == (coefficients + anchors) * 4 &&
                        plan.order_samples.offset_bytes == (coefficients + anchors + 6144) * 4 &&
                        plan.destinations.offset_bytes == coefficients * 4 &&
@@ -293,7 +296,7 @@ bool CheckCompletedFrames() {
                    "Completed frame layout differs from frozen group-major "
                    "recipe") ||
             !CheckSlices({plan.coefficients, plan.destinations, plan.order_population, plan.order_samples}, 1,
-                         plan.capacity_bytes))
+                         used))
           return false;
         ++cases;
       }
