@@ -902,7 +902,10 @@ Status EvaluateQuantization(
           .epf_sharpness = epf_sharpness,
         },
         options.profile,
-        &result.frame);
+        &result.frame,
+        AcCoefficientDecisionMode::kAdjustedSharedQuant,
+        options.dc_quantization,
+        options.dc_prediction);
       if (!coding_status.ok()) {
         return coding_status;
       }
@@ -1217,7 +1220,9 @@ Status ValidateAdaptiveQuantizationPolicyInputs(
       "Adaptive-quantization padding exceeds one partial block");
   }
 
-  if (!options.profile.valid()) {
+  if (!options.profile.valid() ||
+      !IsValidDcQuantization({options.dc_quantization, options.dc_prediction,
+                              options.profile.extra_dc_precision})) {
     return Status::InvalidArgument(
       "Adaptive-quantization profile is invalid");
   }
@@ -1278,7 +1283,9 @@ Status ValidateResidentAdaptiveQuantizationPolicyInputs(
     return Status::InvalidArgument(
       "Resident adaptive-quantization padding exceeds one partial block");
   }
-  if (!options.profile.valid()) {
+  if (!options.profile.valid() ||
+      !IsValidDcQuantization({options.dc_quantization, options.dc_prediction,
+                              options.profile.extra_dc_precision})) {
     return Status::InvalidArgument(
       "Resident adaptive-quantization profile is invalid");
   }

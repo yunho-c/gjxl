@@ -90,6 +90,8 @@ struct AdaptiveQuantizationOptions {
   bool fast_color_correlation = true;
   SimpleVarDctCodestreamProfile profile;
   ButteraugliOptions butteraugli;
+  DcQuantizationMode dc_quantization = DcQuantizationMode::kRound;
+  VarDctDcPrediction dc_prediction = VarDctDcPrediction::kGradient;
 };
 
 struct AdaptiveQuantizationOutput {

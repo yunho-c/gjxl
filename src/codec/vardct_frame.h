@@ -12,6 +12,7 @@
 #include "core/managed_allocator.h"
 #include "codec/chroma_from_luma.h"
 #include "codec/codestream.h"
+#include "codec/dc_quantization.h"
 #include "core/ac_strategy.h"
 #include "core/frame_geometry.h"
 #include "core/image.h"
@@ -63,7 +64,9 @@ struct PreparedForwardDctCoefficients;
   VarDctFrameInput,
   SimpleVarDctCodestreamProfile,
   VarDctEncoderFrame*,
-  AcCoefficientDecisionMode);
+  AcCoefficientDecisionMode,
+  DcQuantizationMode,
+  VarDctDcPrediction);
 }  // namespace prepared_coefficients_internal
 
 /// Read-only view of one fixed-capacity VarDCT AC group.
@@ -138,7 +141,9 @@ private:
     VarDctFrameInput,
     SimpleVarDctCodestreamProfile,
     VarDctEncoderFrame*,
-    AcCoefficientDecisionMode);
+    AcCoefficientDecisionMode,
+    DcQuantizationMode,
+    VarDctDcPrediction);
 
   friend Status prepared_coefficients_internal::
     ComputeQuantizedCoefficientsImpl(
@@ -147,7 +152,9 @@ private:
       VarDctFrameInput,
       SimpleVarDctCodestreamProfile,
       VarDctEncoderFrame*,
-      AcCoefficientDecisionMode);
+      AcCoefficientDecisionMode,
+      DcQuantizationMode,
+      VarDctDcPrediction);
 
   friend Status ReconstructQuantizedCoefficients(
     const VarDctEncoderFrame&,

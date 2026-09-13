@@ -132,7 +132,8 @@ ComputePreparedForwardStoragePlan(Extent2D padded_extent,
 /// included.
 [[nodiscard]] Status
 ComputeCoefficientReconstructionStorageBound(Extent2D frame_extent,
-                                             HostStorageBound *out);
+                                             HostStorageBound *out,
+                                             bool adaptive_dc_smoothing = false);
 
 // All functions are allocation-free on success, O(1) in image size and atomic
 // on invalid inputs/overflow. These are backing-capacity bounds under the

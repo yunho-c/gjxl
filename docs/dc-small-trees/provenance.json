@@ -1,0 +1,9 @@
+{
+  "base_revision": "6ca9d5ff0b313f2380099b72af390b56c3202b41",
+  "branch": "feat/dc-small-trees",
+  "raw_root": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2",
+  "manifest_sha256": "86a2bf09e90b86f160f69968bac64489f9a98f21ba6b3f6ba2c20ab4a35ba48b",
+  "source_zip_sha256": "0e72bc24390fcd1dcc73b4881e85342ab5c54a5b3b8d88fac140852825793255",
+  "encoder_sha256": "7d5adbe52ce4edd4c9db985df15537953fd2a331290ecc2a4f7848f89d969ee3",
+  "legacy_default": true
+}

@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "codestream/dc_context_tree_internal.h"
 #include "codestream/rate_control_internal.h"
 #include "codestream/resident_workflow_storage_plan.h"
 #include "codestream/workflow_internal.h"
@@ -460,6 +461,27 @@ bool CheckRuntime(GpuBackend &gpu) {
     }
   }
   auto image = MakeImage({89, 57});
+  for (int effort : {3, 4, 7}) {
+    for (unsigned flags = 1; flags < 8; ++flags) {
+      for (bool final : {false, true}) {
+        ResidentWorkflowStorageOptions o;
+        o.encoding.backend = VarDctBackendPreference::kMetal;
+        o.encoding.cpu_thread_count = 1;
+        o.encoding.effort = effort;
+        o.encoding.dc_quantization = flags & 1 ? DcQuantizationMode::kPredictionAware : DcQuantizationMode::kRound;
+        o.encoding.dc_prediction = flags & 2 ? VarDctDcPrediction::kWeighted : VarDctDcPrediction::kGradient;
+        o.encoding.adaptive_dc_smoothing = (flags & 4) != 0;
+        o.encoding.collect_final_butteraugli_score = final;
+        o.collect_profile = true;
+        o.collect_gpu_profile = profile_available;
+        if (!RunCase(gpu, image.const_view(), o)) {
+          std::cerr << "DC resident flags=" << flags << " effort=" << effort << " final=" << final << '\n';
+          return false;
+        }
+        ++cases;
+      }
+    }
+  }
   for (size_t flags = 0; flags < 4; ++flags) {
     ResidentWorkflowStorageOptions o;
     o.encoding.backend = VarDctBackendPreference::kMetal;
@@ -709,6 +731,9 @@ bool CheckSearchIntervals() {
 } // namespace
 
 int main(int argc, char **argv) {
+  ScopedDcTreePolicyForTesting dc_tree_choice(
+      argc == 2 && std::string_view(argv[1]) == "--legacy-dc-tree"
+          ? DcTreePolicy::kLegacy : CurrentDcTreePolicy());
   if (!CheckPlans() || !CheckSearchIntervals())
     return EXIT_FAILURE;
   if (argc == 2 && std::string_view(argv[1]) == "--plans-only")

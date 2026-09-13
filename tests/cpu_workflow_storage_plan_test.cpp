@@ -14,6 +14,7 @@
 #include "codec/adaptive_quantization_internal.h"
 #include "codec/color_transform_internal.h"
 #include "codec/frontend_storage_plan.h"
+#include "codestream/dc_context_tree_internal.h"
 #include "codestream/cpu_workflow_storage_plan.h"
 #include "codestream/workflow_internal.h"
 #include "core/thread_budget.h"
@@ -416,7 +417,7 @@ bool CheckEvaluators() {
     }
     std::vector<float> initial(count, 0.5f);
     std::vector<uint8_t> sharpness(count, 4);
-    for (size_t flags = 0; flags < 16; ++flags) {
+    for (size_t flags = 0; flags < 32; ++flags) {
       const bool maximum = bool(flags & 8);
       CpuAqStorageOptions o;
       o.control = maximum ? AdaptiveQuantizationControlMode::kMaximumError
@@ -428,6 +429,13 @@ bool CheckEvaluators() {
       o.collect_profile = bool(flags & 2);
       // There is no combined prepared-reference/profile public AQ overload.
       o.prepared_reference = !o.collect_profile && bool(flags & 1);
+      if (flags & 16) {
+        o.dc_quantization = flags & 1 ? DcQuantizationMode::kPredictionAware
+                                      : DcQuantizationMode::kRound;
+        o.dc_prediction = flags & 2 ? VarDctDcPrediction::kWeighted
+                                    : VarDctDcPrediction::kGradient;
+        o.adaptive_dc_smoothing = bool(flags & 4);
+      }
       CpuAqStoragePlan p;
       if (!Ok(ComputeCpuAqStoragePlan(source, o, &p)))
         return false;
@@ -450,6 +458,11 @@ bool CheckEvaluators() {
           options.maximum_error = {0.05f, 0.05f, 0.05f};
           options.profile.loop_filter.gaborish = o.gaborish;
           options.profile.loop_filter.epf_options.iterations = o.epf_iterations;
+          options.dc_quantization = o.dc_quantization;
+          options.dc_prediction = o.dc_prediction;
+          options.profile.extra_dc_precision =
+            o.dc_quantization == DcQuantizationMode::kPredictionAware ? 1 : 0;
+          options.profile.adaptive_dc_smoothing = o.adaptive_dc_smoothing;
           PreparedButteraugliReference reference;
           if (!maximum && o.prepared_reference &&
               !Ok(reference.Prepare(original.const_view(),
@@ -581,6 +594,23 @@ bool RunWorkflow(ConstImage3FView source, const CpuWorkflowStorageOptions &o) {
 
 bool CheckRuntime() {
   size_t cases = 0;
+  for (int effort : {3, 4, 7}) {
+    Image image({65, 63});
+    for (unsigned flags = 0; flags < 8; ++flags) {
+      CpuWorkflowStorageOptions o;
+      o.encoding.backend = VarDctBackendPreference::kCpu;
+      o.encoding.cpu_thread_count = 1;
+      o.encoding.effort = effort;
+      o.encoding.dc_quantization = flags & 1 ? DcQuantizationMode::kPredictionAware
+                                             : DcQuantizationMode::kRound;
+      o.encoding.dc_prediction = flags & 2 ? VarDctDcPrediction::kWeighted
+                                           : VarDctDcPrediction::kGradient;
+      o.encoding.adaptive_dc_smoothing = bool(flags & 4);
+      o.collect_profile = true;
+      if (!RunWorkflow(image.const_view(), o)) return false;
+      ++cases;
+    }
+  }
   for (Extent2D extent :
        {Extent2D{1, 1}, {14, 15}, {15, 15}, {65, 63}, {257, 9}}) {
     Image image(extent);
@@ -688,6 +718,9 @@ bool CheckFailure() {
 } // namespace
 
 int main(int argc, char **argv) {
+  ScopedDcTreePolicyForTesting dc_tree_choice(
+      argc == 2 && std::string_view(argv[1]) == "--legacy-dc-tree"
+          ? DcTreePolicy::kLegacy : CurrentDcTreePolicy());
   if (argc == 2 && std::string_view(argv[1]) == "--plans-only")
     return CheckPlans() && CheckPolicy() ? EXIT_SUCCESS : EXIT_FAILURE;
   if (argc == 2 && std::string_view(argv[1]) == "--large") {

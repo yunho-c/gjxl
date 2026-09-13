@@ -14,7 +14,9 @@ namespace gjxl::prepared_coefficients_internal {
   VarDctFrameInput input,
   SimpleVarDctCodestreamProfile profile,
   VarDctEncoderFrame* out,
-  AcCoefficientDecisionMode decision_mode);
+  AcCoefficientDecisionMode decision_mode,
+  DcQuantizationMode dc_quantization,
+  VarDctDcPrediction dc_prediction);
 
 /// Quantizes a previously prepared forward-transform set. The prepared set
 /// must describe the strategy grid in `input`.
@@ -24,6 +26,8 @@ namespace gjxl::prepared_coefficients_internal {
   SimpleVarDctCodestreamProfile profile,
   VarDctEncoderFrame* out,
   AcCoefficientDecisionMode decision_mode =
-    AcCoefficientDecisionMode::kAdjustedSharedQuant);
+    AcCoefficientDecisionMode::kAdjustedSharedQuant,
+  DcQuantizationMode dc_quantization = DcQuantizationMode::kRound,
+  VarDctDcPrediction dc_prediction = VarDctDcPrediction::kGradient);
 
 }  // namespace gjxl::prepared_coefficients_internal

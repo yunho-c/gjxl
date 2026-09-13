@@ -1,0 +1,111 @@
+{
+  "accepted_decode_samples": 1600,
+  "accepted_encode_samples": 1000,
+  "analysis_sha256": "85d38d953ea3508c88963f38e98af1e06d4ae96db9591e0c60c53b77f23ca0bd",
+  "bd_rate_groups_excluded": [],
+  "calibration_probes_completed": 107,
+  "curve_artifacts_audited": 1350,
+  "machine": {
+    "hardware": "Mac16,7",
+    "initial_state": {
+      "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=21889123)\t81%; AC attached; not charging present: true",
+      "time_unix": 1789275446.382101,
+      "top_cpu": [
+        {
+          "command": "/Applications/GlobalProtect.app/Contents/Resources/PanGPS",
+          "cpu_percent": 28.9,
+          "pid": 871
+        },
+        {
+          "command": "/Users/yunhocho/.node_modules/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+          "cpu_percent": 6.4,
+          "pid": 34255
+        },
+        {
+          "command": "/usr/libexec/dasd",
+          "cpu_percent": 6.2,
+          "pid": 372
+        },
+        {
+          "command": "/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Renderer).app/Contents/MacOS/Code Helper (Renderer)",
+          "cpu_percent": 6.1,
+          "pid": 22790
+        },
+        {
+          "command": "/opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python",
+          "cpu_percent": 6.1,
+          "pid": 31050
+        },
+        {
+          "command": "/Applications/DaisyDisk.app/Contents/MacOS/DaisyDisk",
+          "cpu_percent": 5.3,
+          "pid": 68545
+        },
+        {
+          "command": "/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper.app/Contents/MacOS/Code Helper",
+          "cpu_percent": 3.6,
+          "pid": 22806
+        },
+        {
+          "command": "/usr/sbin/mDNSResponder",
+          "cpu_percent": 2.2,
+          "pid": 414
+        },
+        {
+          "command": "/Applications/Firefox-School.app/Contents/MacOS/plugin-container.app/Contents/MacOS/plugin-container",
+          "cpu_percent": 2.2,
+          "pid": 74846
+        },
+        {
+          "command": "/usr/libexec/UserEventAgent",
+          "cpu_percent": 2.1,
+          "pid": 570
+        },
+        {
+          "command": "/Applications/Firefox-School.app/Contents/MacOS/plugin-container.app/Contents/MacOS/plugin-container",
+          "cpu_percent": 1.8,
+          "pid": 89067
+        },
+        {
+          "command": "/Applications/Visual Studio Code.app/Contents/Frameworks/Code Helper (Renderer).app/Contents/MacOS/Code Helper (Renderer)",
+          "cpu_percent": 1.7,
+          "pid": 22788
+        }
+      ]
+    },
+    "os": "ProductName:\t\tmacOS\nProductVersion:\t\t15.6\nBuildVersion:\t\t24G84"
+  },
+  "manifest_sha256": "1b81d1cdd5111329a185565531efccb1c0a791b52bb7e98a82a1d2fc589a58a1",
+  "maximum_timing_quality_error": 0.049728370873353356,
+  "measurement_tools": {
+    "/Users/yunhocho/GitHub/gjxl-dc-coding/build/dc-libjxl-reference/lib/libjxl.0.13.0.dylib": "1bf15dbd32c323fd85b45af618ce7759b05354ff819d2292f41302e94acc16d0",
+    "/Users/yunhocho/GitHub/gjxl-dc-coding/build/dc-libjxl-reference/lib/libjxl_cms.0.13.0.dylib": "d7f96ab701f3af7a140d25ec33254818a571fb986d67132916df0a92afdd3d23",
+    "/Users/yunhocho/GitHub/gjxl-dc-coding/build/dc-libjxl-reference/lib/libjxl_threads.0.13.0.dylib": "0c1734e05c400a6b7665c8628ed8dbeaccfb8f3e0752891b058f95b1d0d2e52c",
+    "/Users/yunhocho/GitHub/gjxl-dc-coding/build/dc-libjxl-reference/third_party/brotli/libbrotlicommon.1.2.0.dylib": "9e372bbe8af0af943059714d086ceae105c8aea94018858666a97647c729711a",
+    "/Users/yunhocho/GitHub/gjxl-dc-coding/build/dc-libjxl-reference/third_party/brotli/libbrotlidec.1.2.0.dylib": "513667106f06536825c8c3240a4fe11cfb46599e3e0f2be079aebec79fb0b386",
+    "/Users/yunhocho/GitHub/gjxl-dc-coding/build/dc-libjxl-reference/third_party/brotli/libbrotlienc.1.2.0.dylib": "ff11d8eee070e126ceac64875a7e2d78dda180eb1ae9f9d6f6cc002a68655bd7",
+    "/Users/yunhocho/GitHub/gjxl-dc-coding/build/dc-libjxl-reference/tools/djxl": "3af51c56a12d251f8978c7f3928fab5ee48736ec982db94223917700c6bbc707",
+    "/Users/yunhocho/GitHub/gjxl-dc-coding/build/dc-processing-tools/decode_benchmark": "9ab12880d0a889d005853bceadaea2a6bc01ef85263111da36a5991162ba8c8c",
+    "/Users/yunhocho/GitHub/gjxl-dc-coding/build/release/gjxl_dc_processing_benchmark": "ddeab444861c8fc77eeb312bc3d62c37fe9a7855237579c9d47814c4763744ff",
+    "/Users/yunhocho/GitHub/libjxl/tools/scripts/quality_metric/target/release/cjxl-quality-metric": "fefbd733bbad133ff12489d19bcf7a218f27f3252257a6092f1e3de5cce3125d"
+  },
+  "raw_study": "/Users/yunhocho/GitHub/gjxl-dc-coding/build/dc-processing-qualification-v1",
+  "regressions": {
+    "default_cases": 108,
+    "equivalent_cases": 36
+  },
+  "scorer_version": {
+    "adapter": "0.1.0",
+    "fast_ssim2_revision": "c3867954c7bec8a761951df9256354b305fd0cff",
+    "input": "linear-srgb-f32",
+    "strip_height": 256
+  },
+  "source_revision": "2c936fa96a334d7f67e04abf85fb38ccfcdf73f5",
+  "source_zip_sha256": "8d5a46a5a3f6a12ce526139bdbbff9c4bd22945c87751ed9cf6119d582f9b956",
+  "timing_complete": 10,
+  "timing_expected": 12,
+  "timing_missing": [
+    "edge-e3-d1",
+    "edge-e7-d1"
+  ]
+}

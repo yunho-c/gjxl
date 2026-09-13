@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "codestream/workflow.h"
+#include "codestream/dc_context_tree_internal.h"
 #include "codestream/workflow_internal.h"
 #include "core/image.h"
 #include "gpu/metal/metal_butteraugli_test.h"
@@ -357,6 +358,9 @@ bool CheckDeterministicWorkflow() {
   if (!status.ok() || first.size() < 2 || first[0] != 0xff ||
       first[1] != 0x0a || first_summary.extent != kExtent ||
       first_summary.encoded_bytes != first.size() ||
+      first_summary.dc_prediction != gjxl::VarDctDcPrediction::kWeighted ||
+      first_summary.dc_quantization != gjxl::DcQuantizationMode::kRound ||
+      first_summary.adaptive_dc_smoothing ||
       first_summary.rate_control_mode !=
           gjxl::VarDctRateControlMode::kButteraugliTarget ||
       first_summary.requested_target_bytes != 0 ||
@@ -416,20 +420,45 @@ bool CheckDeterministicWorkflow() {
       profile.execution_backend != gjxl::VarDctExecutionBackend::kCpu ||
       profile_stage_total == 0 || profile.total_nanoseconds < profile_stage_total ||
       profile.codestream.total_nanoseconds == 0 ||
+      profile.codestream.dc_sample_count != 18 ||
+      profile.codestream.dc_leaf_count != 1 ||
+      profile.codestream.dc_context_count != 12 ||
       profile.codestream_encoding_nanoseconds <
         profile.codestream.total_nanoseconds) {
     std::cerr << "Profiled public workflow changed its result or profile\n";
     return false;
   }
 
-  const uint64_t hash = Fnv1a64(first);
+  std::vector<uint8_t> explicit_weighted;
+  status = gjxl::EncodeLinearRgbVarDctCodestream(
+    image.View(),
+    {.butteraugli_target = 1.0f,
+     .dc_prediction = gjxl::VarDctDcPrediction::kWeighted},
+    &explicit_weighted);
+  if (!status.ok() || explicit_weighted != first) {
+    std::cerr << "Default public workflow does not use weighted DC\n";
+    return false;
+  }
+
+  // Keep the original byte fixture as an explicit legacy-policy check.
+  std::vector<uint8_t> legacy_gradient;
+  {
+    gjxl::codestream_internal::ScopedDcTreePolicyForTesting legacy(
+      gjxl::codestream_internal::DcTreePolicy::kLegacy);
+    status = gjxl::EncodeLinearRgbVarDctCodestream(
+      image.View(),
+      {.butteraugli_target = 1.0f,
+       .dc_prediction = gjxl::VarDctDcPrediction::kGradient},
+      &legacy_gradient);
+  }
+  const uint64_t hash = Fnv1a64(legacy_gradient);
   constexpr uint64_t kExpectedHash = 6720271014152865219ull;
-  if (hash != kExpectedHash) {
-    std::cerr << "Public workflow hash changed: " << hash << '\n';
+  if (!status.ok() || hash != kExpectedHash) {
+    std::cerr << "Legacy public workflow hash changed: " << hash << '\n';
     return false;
   }
   std::cout << "Public workflow bytes=" << first.size()
-            << " hash=" << hash << " strategies=" << strategy_count
+            << " hash=" << Fnv1a64(first) << " strategies=" << strategy_count
             << '\n';
   return true;
 }
@@ -1056,7 +1085,8 @@ bool CheckMaximumErrorControl() {
 bool CheckTargetSizeControl() {
   ImageStorage image;
   FillImage(&image);
-  constexpr size_t kTargetBytes = 250;
+  // The weighted/adaptive header makes this tiny fixture about 60 bytes smaller.
+  constexpr size_t kTargetBytes = 190;
   constexpr double kTolerance = 0.12;
   constexpr size_t kMaximumAttempts = 8;
 
@@ -1081,7 +1111,7 @@ bool CheckTargetSizeControl() {
         gjxl::VarDctRateControlMode::kTargetBytes ||
       byte_summary.requested_target_bytes != kTargetBytes ||
       byte_summary.effective_target_bytes != kTargetBytes ||
-      byte_summary.target_size_tolerance_bytes != 30 ||
+      byte_summary.target_size_tolerance_bytes != 23 ||
       byte_summary.encoded_bytes != byte_codestream.size() ||
       byte_summary.encoded_bytes > kTargetBytes ||
       kTargetBytes - byte_summary.encoded_bytes >

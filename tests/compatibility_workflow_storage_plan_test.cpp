@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "codestream/dc_context_tree_internal.h"
 #include "codestream/compatibility_workflow_storage_plan.h"
 #include "codestream/workflow_internal.h"
 #include "codestream/workflow_lifetime_test.h"
@@ -359,6 +360,21 @@ bool CheckRuntime(GpuBackend &gpu, bool large) {
       }
   }
   auto image = MakeImage({128, 96});
+  for (size_t mode = 0; mode < 5; ++mode) {
+    for (unsigned flags = 1; flags < 8; ++flags) {
+      auto o = Options(mode);
+      o.encoding.effort = 4;
+      o.encoding.dc_quantization = flags & 1 ? DcQuantizationMode::kPredictionAware : DcQuantizationMode::kRound;
+      o.encoding.dc_prediction = flags & 2 ? VarDctDcPrediction::kWeighted : VarDctDcPrediction::kGradient;
+      o.encoding.adaptive_dc_smoothing = (flags & 4) != 0;
+      o.collect_profile = true;
+      if (!Run(gpu, image.const_view(), o)) {
+        std::cerr << "DC compatibility flags=" << flags << " mode=" << mode << '\n';
+        return false;
+      }
+      ++cases;
+    }
+  }
   for (bool high_density : {false, true}) {
     auto o = Options(0);
     o.encoding.effort = 1;
@@ -448,6 +464,9 @@ bool CheckFailures(GpuBackend &gpu) {
 } // namespace
 
 int main(int argc, char **argv) {
+  ScopedDcTreePolicyForTesting dc_tree_choice(
+      argc == 2 && std::string_view(argv[1]) == "--legacy-dc-tree"
+          ? DcTreePolicy::kLegacy : CurrentDcTreePolicy());
   const bool large = argc == 2 && std::string_view(argv[1]) == "--large";
   if (!CheckPlans())
     return EXIT_FAILURE;

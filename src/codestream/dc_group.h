@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <vector>
 
+#include "codestream/dc_prediction.h"
 #include "codestream/storage.h"
 
 #include "codestream/bit_writer.h"
@@ -106,8 +107,9 @@ namespace codestream_internal {
 
 /// Serializer-only entry point for an already validated frame.
 [[nodiscard]] Status TokenizeSimpleDcGroupsForEncoder(
-  const vardct_frame_internal::VarDctFrameView& frame,
-  codestream_internal::Storage<SimpleDcGroupTokenStreams>* groups);
+    const vardct_frame_internal::VarDctFrameView &frame,
+    codestream_internal::Storage<SimpleDcGroupTokenStreams> *groups,
+    VarDctDcPrediction prediction = VarDctDcPrediction::kGradient);
 
 /// Compatibility adapter; managed callers select the non-template overload.
 template <typename Allocator>
@@ -121,7 +123,8 @@ template <typename Allocator>
 }  // namespace codestream_internal
 
 /// Writes extra_dc_precision=0, the global tree, default WP, and no transforms.
-[[nodiscard]] Status WriteSimpleDcGroupModularHeader(BitWriter* writer);
+[[nodiscard]] Status WriteSimpleDcGroupModularHeader(
+  BitWriter* writer, uint8_t extra_dc_precision = 0);
 
 /// Writes transform-anchor count followed by the simple modular header.
 [[nodiscard]] Status WriteSimpleAcMetadataModularHeader(

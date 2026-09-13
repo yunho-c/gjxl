@@ -1,0 +1,7 @@
+predictor,stratum,comparisons,legacy_bytes,adaptive_bytes,delta_bytes,delta_percent,grew,shrunk,equal_size
+gradient,compact,72,508244,505760,-2484,-0.48874162803692717,9,63,0
+gradient,thumbnail,108,1976354,1975169,-1185,-0.05995889400380701,43,64,1
+gradient,photo_4k,36,55879952,55879952,0,0.0,0,0,36
+weighted,compact,72,508873,505918,-2955,-0.5806949867648706,9,63,0
+weighted,thumbnail,108,1972777,1977345,4568,0.23155176687481657,85,23,0
+weighted,photo_4k,36,55328696,55328696,0,0.0,0,0,36

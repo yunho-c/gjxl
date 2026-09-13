@@ -1,0 +1,16 @@
+{
+  "release_total": 145,
+  "release_passed_after_fixture_restore": 144,
+  "known_baseline_failure": {
+    "test": "quantization_pipeline",
+    "actual": 0.24919039011001587,
+    "expected": 0.24914586544036865
+  },
+  "sanitizers": {
+    "address_undefined_passed": 4,
+    "total": 4,
+    "environment": "ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1",
+    "leak_check": "ASan leak detection is unsupported by this macOS runtime; initial unsupported attempt retained"
+  },
+  "fixture_restore": "Initialized pinned libjxl testdata local shared clone; six fixture-related failures then passed"
+}

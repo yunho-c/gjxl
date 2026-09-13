@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "codestream/dc_prediction.h"
 #include "codestream/entropy_behavior.h"
 #include "core/status.h"
 
@@ -27,6 +28,7 @@ struct VarDctCodestreamOptions {
     VarDctEntropyBehavior::kBalanced;
   VarDctCoefficientOrderBehavior coefficient_order_behavior =
     VarDctCoefficientOrderBehavior::kFull;
+  VarDctDcPrediction dc_prediction = kDefaultDcPrediction;
 };
 
 /// Serializes one validated initial-profile frame as a raw JPEG XL codestream.

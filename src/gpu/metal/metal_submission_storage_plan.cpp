@@ -88,10 +88,12 @@ Status ComputeResidentAqProfileInputStoragePlan(
       static_cast<size_t>(o.butteraugli_sinks) * 4 +
       (kMetalButteraugliPsychoProfiles.size() - 1) *
         (1 + static_cast<size_t>(o.butteraugli_sinks)) +
-      static_cast<size_t>(o.gaborish) + o.epf_iterations;
+      static_cast<size_t>(o.gaborish) + o.epf_iterations +
+      size_t(o.deferred_dc) + size_t(o.adaptive_dc_smoothing) +
+      size_t(o.deferred_dc || o.adaptive_dc_smoothing) * kSupportedAqStrategies.size();
   p.stage_capacity = p.score_count * stages_per_iteration +
                      static_cast<size_t>(!o.evaluate_final_field) *
-                         (1 + kSupportedAqStrategies.size()) +
+                         (1 + kSupportedAqStrategies.size() + size_t(o.deferred_dc)) +
                      1;
   if (p.score_count == 0) {
     // First use also resets the error state, transforms the source, and

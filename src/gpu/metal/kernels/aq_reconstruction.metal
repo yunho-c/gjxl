@@ -36,6 +36,8 @@ struct AqReconstructionParams {
   float epf_sharpness_lut[8];
   uint use_resident_quantizer;
   uint group_major_output;
+  uint deferred_dc;
+  uint deferred_llf;
 };
 
 struct AqResetParams {
@@ -382,6 +384,8 @@ static int aq_round_dc(float value, device atomic_uint* error) {
   }
   return int(rounded);
 }
+
+#include "dc_processing.h"
 
 kernel void gjxl_aq_reset_reconstruction(
   device float* gathered_pixels [[buffer(0)]],
@@ -1625,8 +1629,8 @@ __attribute__((always_inline)) inline void AqEncodeCoefficients(
   // Mirror the simple codestream's modular DC quantization. Y is rounded and
   // reconstructed first; B then predicts that reconstructed Y with the
   // default DC CfL factor of one, while X has no DC prediction.
-  for (uint small = thread_index; small < covered_count;
-       small += thread_count) {
+  for (uint small = thread_index; params.deferred_dc == 0u &&
+       small < covered_count; small += thread_count) {
     const uint x = small % params.covered_width;
     const uint y = small / params.covered_width;
     const uint block_index =
@@ -1736,7 +1740,7 @@ __attribute__((always_inline)) inline void AqEncodeCoefficients(
 
   // Dequantization above still validates discarded X/B floating results.
   // Final encoding does not consume reconstructed coefficients or LLF.
-  if (!Reconstruct) return;
+  if (!Reconstruct || params.deferred_llf != 0u) return;
 
   // LLF tasks may overwrite coefficients owned by a different AC thread.
   threadgroup_barrier(mem_flags::mem_device);
@@ -1812,6 +1816,7 @@ kernel void gjxl_aq_encode_frame_coefficients(
   device atomic_uint* error [[buffer(8)]],
   constant AqReconstructionParams& params [[buffer(9)]],
   device const float* adjustment_thresholds [[buffer(10)]],
+  device float* raw_dc [[buffer(11)]],
   uint anchor_index [[threadgroup_position_in_grid]],
   uint thread_index [[thread_index_in_threadgroup]]) {
 
@@ -1868,10 +1873,15 @@ kernel void gjxl_aq_encode_frame_coefficients(
       value = 0.0f;
     }
     dc[dc_task] = value;
+    if (params.deferred_dc != 0u) {
+      raw_dc[channel * block_count +
+        (anchor.y + y) * params.block_width + anchor.x + x] = value;
+    }
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  for (uint small = thread_index; small < covered_count; small += 256u) {
+  for (uint small = thread_index; params.deferred_dc == 0u &&
+       small < covered_count; small += 256u) {
     const uint x = small % params.covered_width;
     const uint y = small / params.covered_width;
     const uint block_index =

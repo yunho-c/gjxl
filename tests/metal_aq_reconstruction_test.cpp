@@ -187,7 +187,8 @@ gjxl::Status ComputeCpuFrame(
     gjxl::ConstImage3FView opsin, const gjxl::AcStrategyGrid &strategies,
     const InputStorage &input, gjxl::VarDctEncoderFrame *frame,
     gjxl::AcCoefficientDecisionMode decision_mode =
-        gjxl::AcCoefficientDecisionMode::kFixedRawQuant) {
+        gjxl::AcCoefficientDecisionMode::kFixedRawQuant,
+    gjxl::AqEvaluationOptions options = Options()) {
   gjxl::Quantizer quantizer;
   gjxl::Status status = gjxl::Quantizer::Create(input.params, &quantizer);
   if (!status.ok())
@@ -210,9 +211,9 @@ gjxl::Status ComputeCpuFrame(
        .color_correlation = &input.color,
        .epf_sharpness =
            {epf_sharpness.data(), kBlockExtent, kBlockExtent.width}},
-      Options().profile,
+      options.profile,
       frame,
-      decision_mode);
+      decision_mode, options.dc_quantization, options.dc_prediction);
 }
 
 gjxl::MetalBackendOptions SimdOptions() {
@@ -239,7 +240,8 @@ bool Prepare(gjxl::GpuBackend &gpu, const HostImage &image,
              const gjxl::AcStrategyGrid &strategies,
              std::unique_ptr<gjxl::PreparedAqEvaluation> *prepared,
              gjxl::AcCoefficientDecisionMode decision_mode =
-                 gjxl::AcCoefficientDecisionMode::kFixedRawQuant) {
+                 gjxl::AcCoefficientDecisionMode::kFixedRawQuant,
+             gjxl::AqEvaluationOptions options = Options()) {
 
   const std::vector<uint8_t> sharpness(
       kBlockExtent.width * kBlockExtent.height, 4);
@@ -249,7 +251,7 @@ bool Prepare(gjxl::GpuBackend &gpu, const HostImage &image,
       .strategies = &strategies,
       .epf_sharpness = {
           sharpness.data(), kBlockExtent, kBlockExtent.width},
-      .options = Options(),
+      .options = options,
       .coefficient_decision_mode = decision_mode,
   };
   return CheckStatus(gjxl::PrepareAqEvaluation(gpu, preparation, prepared),
@@ -474,10 +476,11 @@ bool CompareCoefficientOracle(
     const HostImage &image, const gjxl::AcStrategyGrid &strategies,
     const InputStorage &input,
     const gjxl::metal_internal::MetalAqReconstructionSnapshotForTesting
-        &snapshot) {
+        &snapshot, gjxl::AqEvaluationOptions options = Options()) {
 
   gjxl::VarDctEncoderFrame frame;
-  if (!CheckStatus(ComputeCpuFrame(image.View(), strategies, input, &frame),
+  if (!CheckStatus(ComputeCpuFrame(image.View(), strategies, input, &frame,
+                    gjxl::AcCoefficientDecisionMode::kFixedRawQuant, options),
                    "CPU coefficient oracle")) {
     return false;
   }
@@ -604,6 +607,58 @@ bool CheckRoundTrip(gjxl::MetalBackendOptions backend_options,
   }
   return CompareForward(image, snapshot) &&
          CompareCoefficientOracle(image, strategies, input, snapshot);
+}
+
+bool CheckDcProcessingIntegration(const HostImage& image,
+                                  const gjxl::AcStrategyGrid& mixed) {
+  using gjxl::AcCoefficientDecisionMode;
+  std::unique_ptr<gjxl::GpuBackend> gpu;
+  InputStorage input;
+  if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu), "DC integration backend") ||
+      !InputStorage::Make(image, &input)) return false;
+  gjxl::AcStrategyGrid uniform;
+  if (!MakeUniformStrategies(gjxl::AcStrategyType::kDct8, &uniform)) return false;
+  const std::vector<uint8_t> sharpness(kBlockExtent.width * kBlockExtent.height, 4);
+  for (unsigned flags = 1; flags < 8; ++flags) {
+    auto options = Options();
+    options.dc_quantization = (flags & 1) ? gjxl::DcQuantizationMode::kPredictionAware : gjxl::DcQuantizationMode::kRound;
+    options.dc_prediction = (flags & 2) ? gjxl::VarDctDcPrediction::kWeighted : gjxl::VarDctDcPrediction::kGradient;
+    options.profile.extra_dc_precision = flags & 1;
+    options.profile.adaptive_dc_smoothing = (flags & 4) != 0;
+    std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+    if (!Prepare(*gpu, image, uniform, &prepared, AcCoefficientDecisionMode::kFixedRawQuant, options)) return false;
+    for (const auto* strategies : std::array<const gjxl::AcStrategyGrid*, 3>{&uniform, &mixed, &uniform}) {
+      if (!CheckStatus(prepared->Reconfigure(*strategies,
+          {sharpness.data(), kBlockExtent, kBlockExtent.width}), "DC integration reconfigure")) return false;
+      gjxl::VarDctEncoderFrame exact;
+      if (!CheckStatus(ComputeCpuFrame(image.View(), *strategies, input, &exact,
+            AcCoefficientDecisionMode::kFixedRawQuant, options), "DC exact input")) return false;
+      for (bool use_exact : {false, true, false}) {
+        auto view = input.View();
+        if (use_exact) view.exact_coefficients = &exact;
+        gjxl::metal_internal::MetalAqReconstructionSnapshotForTesting snapshot;
+        if (!CheckStatus(gjxl::metal_internal::RunMetalAqReconstructionForTesting(*prepared, view, &snapshot),
+                          "DC reconstruction integration") ||
+            !CompareCoefficientOracle(image, *strategies, input, snapshot, options)) {
+          std::cerr << "DC integration flags=" << flags << " exact=" << use_exact << '\n';
+          return false;
+        }
+      }
+    }
+    // The frame-only path has a separate extraction kernel and no inverse pass.
+    const gjxl::AqEvaluationPreparation preparation{
+      .original_linear_rgb = image.View(), .coding_opsin = image.View(),
+      .strategies = &mixed,
+      .epf_sharpness = {sharpness.data(), kBlockExtent, kBlockExtent.width},
+      .options = options, .frame_only = true};
+    if (!CheckStatus(gjxl::PrepareAqEvaluation(*gpu, preparation, &prepared), "DC frame-only preparation")) return false;
+    gjxl::VarDctEncoderFrame expected, actual;
+    if (!CheckStatus(ComputeCpuFrame(image.View(), mixed, input, &expected,
+          AcCoefficientDecisionMode::kFixedRawQuant, options), "DC frame-only oracle") ||
+        !CheckStatus(prepared->EncodeFrame(input.View(), &actual), "DC frame-only encode") ||
+        !EqualFrames(expected, actual, 0, 0)) return false;
+  }
+  return true;
 }
 
 bool CheckQuantizationProbe(const HostImage &image,
@@ -1818,7 +1873,8 @@ int main() {
       !CheckFrameOnlyFailures(structured, strategies)) {
     return EXIT_FAILURE;
   }
-  if (!CheckRoundTrip({}, structured, strategies, true) ||
+  if (!CheckDcProcessingIntegration(structured, strategies) ||
+      !CheckRoundTrip({}, structured, strategies, true) ||
       !CheckRoundTrip(SimdOptions(), structured, strategies, true) ||
       !CheckRoundTrip({}, flat, strategies, false) ||
       !CheckRoundTrip(SimdOptions(), flat, strategies, false) ||

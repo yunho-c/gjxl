@@ -234,7 +234,8 @@ bool vardct_frame_internal::VarDctFrameView::valid() const {
       }
     }
   }
-  const std::array<float, 3>& dc_steps = quantizer().dc_steps();
+  std::array<float, 3> dc_steps = quantizer().dc_steps();
+  for (float& step : dc_steps) step /= float(1u << profile().extra_dc_precision);
   for (size_t y = 0; y < blocks.height; ++y) {
     for (size_t x = 0; x < blocks.width; ++x) {
       const float reconstructed_y =
@@ -242,11 +243,17 @@ bool vardct_frame_internal::VarDctFrameView::valid() const {
       const float dc_x = dc().plane[0].Row(y)[x];
       const float dc_y = dc().plane[1].Row(y)[x];
       const float dc_b = dc().plane[2].Row(y)[x];
+      // The finer-grid path follows the decoder's separate dequantization
+      // product and subsequent CfL multiply-add. Preserve legacy arithmetic
+      // for the default precision-zero encoder path.
+      const float reconstructed_b = profile().extra_dc_precision != 0
+        ? std::fma(reconstructed_y, 1.0f,
+            static_cast<float>(quantized_dc().plane[2].Row(y)[x]) * dc_steps[2])
+        : static_cast<float>(quantized_dc().plane[2].Row(y)[x]) * dc_steps[2] + reconstructed_y;
       if (dc_x != static_cast<float>(quantized_dc().plane[0].Row(y)[x]) *
             dc_steps[0] ||
           dc_y != reconstructed_y ||
-          dc_b != static_cast<float>(quantized_dc().plane[2].Row(y)[x]) *
-            dc_steps[2] + reconstructed_y) {
+          dc_b != reconstructed_b) {
         return false;
       }
     }
@@ -471,7 +478,9 @@ Status AssembleVarDctEncoderFrame(
       }
     }
 
-    const std::array<float, 3>& dc_steps = result.quantizer_.dc_steps();
+    std::array<float, 3> dc_steps = result.quantizer_.dc_steps();
+    for (float& step : dc_steps)
+      step /= float(1u << result.profile_.extra_dc_precision);
     for (size_t index = 0; index < block_count; ++index) {
       const float reconstructed_y =
         static_cast<float>(result.quantized_dc_[1][index]) * dc_steps[1];
@@ -479,8 +488,11 @@ Status AssembleVarDctEncoderFrame(
         static_cast<float>(result.quantized_dc_[0][index]) * dc_steps[0];
       result.dc_[1][index] = reconstructed_y;
       result.dc_[2][index] =
-        static_cast<float>(result.quantized_dc_[2][index]) * dc_steps[2] +
-        reconstructed_y;
+        result.profile_.extra_dc_precision != 0
+          ? std::fma(reconstructed_y, 1.0f,
+              static_cast<float>(result.quantized_dc_[2][index]) * dc_steps[2])
+          : static_cast<float>(result.quantized_dc_[2][index]) * dc_steps[2] +
+              reconstructed_y;
       if (!std::isfinite(result.dc_[0][index]) ||
           !std::isfinite(result.dc_[1][index]) ||
           !std::isfinite(result.dc_[2][index])) {

@@ -203,7 +203,7 @@ void DispatchThreads1d(MTL::ComputeCommandEncoder* encoder,
 
 static_assert(std::is_standard_layout_v<AqReconstructionParams>);
 static_assert(std::is_trivially_copyable_v<AqReconstructionParams>);
-static_assert(sizeof(AqReconstructionParams) == 140);
+static_assert(sizeof(AqReconstructionParams) == 148);
 static_assert(sizeof(AqResetParams) == 32);
 static_assert(sizeof(AqResidentPolicyInitializeParams) == 20);
 static_assert(sizeof(AqResidentPolicyUpdateParams) == 44);
@@ -401,6 +401,14 @@ template <typename T>
 }
 
 [[nodiscard]] Status ValidateOptions(const AqEvaluationOptions& options) {
+  if (!IsValidDcQuantization({options.dc_quantization, options.dc_prediction,
+                              options.profile.extra_dc_precision})) {
+    return Status::InvalidArgument("Prepared AQ DC options are invalid");
+  }
+  if (options.dc_quantization == DcQuantizationMode::kPredictionAware &&
+      options.profile.extra_dc_precision == 0) {
+    return Status::InvalidArgument("Prediction-aware DC requires extra precision");
+  }
   if (!options.profile.valid()) {
     return Status::InvalidArgument(
       "Prepared AQ scalar options must be finite and positive");
@@ -1067,6 +1075,10 @@ Status MetalPreparedAqEvaluation::Prepare(
     .resident_quantization = resident_quantization_,
     .uses_butteraugli_sinks = uses_butteraugli_sinks_,
     .metric = options_.metric,
+    .dc_quantization = options_.dc_quantization,
+    .dc_prediction = options_.dc_prediction,
+    .extra_dc_precision = options_.profile.extra_dc_precision,
+    .adaptive_dc_smoothing = options_.profile.adaptive_dc_smoothing,
   }, &storage_plan);
   if (!status.ok()) return status;
   status = backend_->AcquireAqScratchArena(
@@ -1232,10 +1244,19 @@ Status MetalPreparedAqEvaluation::Prepare(
     if (!status.ok())
       return status;
   }
-  if (!frame_only_) {
+  if (!frame_only_ || DeferredDc()) {
     status = staging_.BindPlane(storage_plan.dc, &dc_);
     if (!status.ok())
       return status;
+  }
+  if (options_.dc_quantization == DcQuantizationMode::kPredictionAware &&
+      options_.dc_prediction == VarDctDcPrediction::kWeighted) {
+    status = staging_.BindPlane(storage_plan.dc_predictor_scratch, &dc_predictor_scratch_);
+    if (!status.ok()) return status;
+  }
+  if (options_.profile.adaptive_dc_smoothing && !frame_only_ && !options_.evaluation_free) {
+    status = staging_.BindPlane(storage_plan.smoothed_dc, &smoothed_dc_);
+    if (!status.ok()) return status;
   }
   status = staging_.BindPlane(storage_plan.quantized_dc, &quantized_dc_);
   if (!status.ok())
@@ -1355,6 +1376,9 @@ Status MetalPreparedAqEvaluation::Prepare(
         static_cast<uint32_t>(epf_sharpness_.row_stride),
         options_.profile.epf_sigma.quant_multiplier,
         options_.profile.epf_sigma.sharpness_lut,
+        0u, 0u,
+        DeferredDc() ? 1u : 0u,
+        DeferredLlf() ? 1u : 0u,
     };
     if (!frame_only_) {
       block_reduction_params_[batch_index] = {
@@ -1755,6 +1779,9 @@ Status MetalPreparedAqEvaluation::Reconfigure(
         static_cast<uint32_t>(epf_sharpness_.row_stride),
         options_.profile.epf_sigma.quant_multiplier,
         options_.profile.epf_sigma.sharpness_lut,
+        0u, 0u,
+        DeferredDc() ? 1u : 0u,
+        DeferredLlf() ? 1u : 0u,
       };
       block_reduction_params[batch_index] = {
         static_cast<uint32_t>(source_extent_.width),
@@ -2183,7 +2210,9 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
        .evaluate_final_field = resident_evaluate_final_field_,
        .butteraugli_sinks = butteraugli_multiscale,
        .gaborish = options_.profile.loop_filter.gaborish,
-       .epf_iterations = epf_iterations}, &storage);
+       .epf_iterations = epf_iterations,
+       .deferred_dc = DeferredDc(),
+       .adaptive_dc_smoothing = options_.profile.adaptive_dc_smoothing}, &storage);
     if (!status.ok()) {
       Invalidate();
       return status;
@@ -2281,14 +2310,29 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
             "aq.reconstruction.final_cfl",
             ReconstructionProfileStage::kFinalColorCorrelation, iteration);
         }
+        if (DeferredLlf()) {
+          for (size_t batch_index = 0; batch_index < batches_.size(); ++batch_index) {
+            if (batches_[batch_index].anchor_count == 0) continue;
+            append_reconstruction_stage(
+              AqReconstructionCoefficientProfileStageId(batches_[batch_index].strategy),
+              ReconstructionProfileStage::kCoefficientBatch, iteration, batch_index);
+          }
+          if (DeferredDc()) append_reconstruction_stage(
+            "aq.reconstruction.dc_quantization", ReconstructionProfileStage::kDcQuantization, iteration);
+          if (options_.profile.adaptive_dc_smoothing) append_reconstruction_stage(
+            "aq.reconstruction.dc_smoothing", ReconstructionProfileStage::kDcSmoothing, iteration);
+        }
         for (size_t batch_index = 0; batch_index < batches_.size();
              ++batch_index) {
           if (batches_[batch_index].anchor_count == 0) continue;
-          append_reconstruction_stage(
+          if (!DeferredLlf()) append_reconstruction_stage(
             AqReconstructionCoefficientProfileStageId(
               batches_[batch_index].strategy),
             ReconstructionProfileStage::kCoefficientBatch, iteration,
             batch_index);
+          else append_reconstruction_stage(
+            "aq.reconstruction.dc_llf", ReconstructionProfileStage::kDcLowFrequencies,
+            iteration, batch_index);
           append_reconstruction_stage(
             AqReconstructionProfileStageId(batches_[batch_index].strategy),
             ReconstructionProfileStage::kInverseBatch, iteration, batch_index);
@@ -2411,6 +2455,9 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
             static_cast<uint32_t>(resident_policy_iterations_), batch_index,
             "aq.final_frame");
         }
+        if (DeferredDc()) append_reconstruction_stage(
+          "aq.final_frame.dc_quantization", ReconstructionProfileStage::kDcQuantization,
+          static_cast<uint32_t>(resident_policy_iterations_), 0, "aq.final_frame");
       }
     } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
       Invalidate();
@@ -3074,13 +3121,16 @@ Status MetalPreparedAqEvaluation::FinishCompletedFrame(
     {last_y_to_b_.data(), tile_extent_, tile_extent_.width},
     &frame.color_correlation);
   if (!status.ok()) return status;
-  const auto& steps = frame.quantizer.dc_steps();
+  auto steps = frame.quantizer.dc_steps();
+  for (auto& step : steps) step /= float(1u << options_.profile.extra_dc_precision);
   for (size_t i = 0; i < block_count_; ++i) {
     const float y = static_cast<float>(frame.quantized_dc[block_count_ + i]) * steps[1];
     frame.dc[i] = static_cast<float>(frame.quantized_dc[i]) * steps[0];
     frame.dc[block_count_ + i] = y;
     frame.dc[2 * block_count_ + i] =
-      static_cast<float>(frame.quantized_dc[2 * block_count_ + i]) * steps[2] + y;
+      options_.profile.extra_dc_precision != 0
+        ? std::fma(y, 1.0f, static_cast<float>(frame.quantized_dc[2 * block_count_ + i]) * steps[2])
+        : static_cast<float>(frame.quantized_dc[2 * block_count_ + i]) * steps[2] + y;
   }
   if (!frame.view().valid()) {
     return Status::DeviceError("Completed Metal frame is invalid");
@@ -4292,6 +4342,20 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
           reconstruction_coefficients_.offset_bytes);
       upload_bytes +=
           exact_reconstruction_coefficients_.size() * sizeof(float);
+      // Exact input integers are authoritative. Upload their unsmoothed DC
+      // reconstruction for the optional resident smoothing/LLF passes.
+      if (DeferredLlf()) {
+        const auto source = frame.dc();
+        for (size_t channel = 0; status.ok() && channel < 3; ++channel) {
+          for (size_t y = 0; status.ok() && y < block_extent_.height; ++y) {
+            status = backend_->CopyHostToDevice(
+              *dc_.buffer, source.plane[channel].Row(y),
+              block_extent_.width * sizeof(float),
+              dc_.offset_bytes + (channel * block_count_ + y * block_extent_.width) * sizeof(float));
+            upload_bytes += block_extent_.width * sizeof(float);
+          }
+        }
+      }
     }
   }
   if (status.ok() && exact_linear_reconstruction_) {
@@ -4659,6 +4723,7 @@ void MetalPreparedAqEvaluation::EncodeResidentFrame(
        ++batch_index) {
     EncodeReconstructionCoefficientBatch(backend, encoder, batch_index, false);
   }
+  EncodeDcQuantization(backend, encoder);
 }
 
 void MetalPreparedAqEvaluation::EncodeResidentPolicyInitialize(
@@ -4829,7 +4894,7 @@ Status CreateAqPipelines(
       "Metal cannot launch the AQ maximum-error threadgroup");
   }
   const std::array<
-    std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>, 36>
+    std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>, 39>
     reconstruction = {{
       {"gjxl_aq_reset_exact_evaluation", &pipelines.reset_exact_evaluation},
       {"gjxl_aq_reset_exact_coefficients", &pipelines.reset_exact_coefficients},
@@ -4877,6 +4942,9 @@ Status CreateAqPipelines(
       {"gjxl_aq_count_coefficient_zeros", &pipelines.count_coefficient_zeros},
       {"gjxl_aq_encode_final_coefficients",
        &pipelines.encode_final_coefficients},
+      {"gjxl_aq_dc_quantize", &pipelines.dc_quantize},
+      {"gjxl_aq_dc_smooth", &pipelines.dc_smooth},
+      {"gjxl_aq_dc_low_frequencies", &pipelines.dc_low_frequencies},
       {"gjxl_aq_encode_frame_coefficients",
        &pipelines.encode_frame_coefficients},
       {"gjxl_aq_scatter_reconstructed_pixels",

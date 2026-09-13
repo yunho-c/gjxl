@@ -4,6 +4,7 @@
 // Adapted for GJXL from libjxl-tiny's encoder/enc_frame.cc.
 
 #include "codestream/dc_group.h"
+#include "codestream/weighted_dc.h"
 
 #include <algorithm>
 #include <array>
@@ -257,7 +258,10 @@ Status codestream_internal::ComputeDcGroupTokenCounts(
 }
 
 Status codestream_internal::ComputeDcGroupTokenStoragePlan(
-  Extent2D blocks, size_t anchors, DcGroupTokenStoragePlan* out) {
+    Extent2D blocks, size_t anchors, DcGroupTokenStoragePlan *out,
+    VarDctDcPrediction prediction) {
+  if (!IsValidDcPrediction(prediction))
+    return Status::InvalidArgument("DC prediction is invalid");
   if (out == nullptr) return Status::InvalidArgument("DC token storage plan is null");
   DcGroupTokenStoragePlan plan;
   Status status = ComputeDcGroupTokenCounts(blocks, anchors, &plan.counts);
@@ -268,6 +272,13 @@ Status codestream_internal::ComputeDcGroupTokenStoragePlan(
       !plan.scratch.AddVector<StrategyAnchor>(plan.counts.block_count, kFreshExact) ||
       !plan.scratch.AddVector<uint8_t>(plan.counts.block_count, kFreshExact)) {
     return Status::OutOfMemory("DC token storage bound overflows");
+  }
+  // One predictor is reused across all channels. Groups are processed
+  // sequentially; no predictor scratch survives the current group's call.
+  if (prediction == VarDctDcPrediction::kWeighted &&
+      !plan.scratch.AddVector<uint32_t>((blocks.width + 2) * 2, kFreshExact,
+                                        5)) {
+    return Status::OutOfMemory("Weighted DC storage bound overflows");
   }
   *out = plan;
   return Status::Ok();
@@ -426,8 +437,11 @@ Status TokenizeSimpleDcGroups(const VarDctEncoderFrame& frame,
 }
 
 Status codestream_internal::TokenizeSimpleDcGroupsForEncoder(
-  const VarDctFrameView& frame,
-  Storage<SimpleDcGroupTokenStreams>* groups) {
+    const VarDctFrameView &frame, Storage<SimpleDcGroupTokenStreams> *groups,
+    VarDctDcPrediction prediction) {
+
+  if (!IsValidDcPrediction(prediction))
+    return Status::InvalidArgument("DC prediction is invalid");
 
   if (groups == nullptr) {
     return Status::InvalidArgument("DC-group token output is null");
@@ -466,7 +480,10 @@ Status codestream_internal::TokenizeSimpleDcGroupsForEncoder(
             SlicePlane(dc.plane[channel], stream.block_x, stream.block_y,
                        stream.block_extent);
         }
-        Status status = TokenizeSimpleDcGroup(group_dc, &stream.dc_tokens);
+        Status status =
+            prediction == VarDctDcPrediction::kWeighted
+                ? TokenizeWeightedDcGroup(group_dc, &stream.dc_tokens)
+                : TokenizeSimpleDcGroup(group_dc, &stream.dc_tokens);
         if (!status.ok()) {
           return status;
         }
@@ -507,12 +524,13 @@ Status codestream_internal::TokenizeSimpleDcGroupsForEncoder(
   return Status::Ok();
 }
 
-Status WriteSimpleDcGroupModularHeader(BitWriter* writer) {
-  if (writer == nullptr) {
-    return Status::InvalidArgument("DC modular-header writer is null");
+Status WriteSimpleDcGroupModularHeader(BitWriter* writer,
+                                       uint8_t extra_dc_precision) {
+  if (writer == nullptr || extra_dc_precision > 3) {
+    return Status::InvalidArgument("DC modular-header inputs are invalid");
   }
   return writer->WithMaxBits(6, [&]() {
-    Status status = writer->WriteBits(2, 0);
+    Status status = writer->WriteBits(2, extra_dc_precision);
     if (!status.ok()) {
       return status;
     }

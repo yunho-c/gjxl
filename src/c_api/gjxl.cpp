@@ -54,6 +54,12 @@ constexpr size_t kEncoderOptionsV1Size =
 constexpr size_t kEncoderOptionsCompressionModeSize =
   offsetof(GJXLEncoderOptions, compression_mode) +
   sizeof(GJXLCompressionMode);
+constexpr size_t kEncoderOptionsDcPredictionSize =
+    offsetof(GJXLEncoderOptions, dc_prediction) + sizeof(GJXLDcPrediction);
+constexpr size_t kEncoderOptionsDcQuantizationSize =
+    offsetof(GJXLEncoderOptions, dc_quantization) + sizeof(GJXLDcQuantization);
+constexpr size_t kEncoderOptionsDcSmoothingSize =
+    offsetof(GJXLEncoderOptions, adaptive_dc_smoothing) + sizeof(uint32_t);
 static_assert(gjxl::kMaximumCpuThreadCount == GJXL_MAX_CPU_THREADS);
 static_assert(gjxl::kMaximumDomainCpuParticipants == GJXL_MAX_CPU_THREADS);
 thread_local std::array<char, kDiagnosticCapacity> last_error{};
@@ -349,6 +355,12 @@ GJXLResult gjxl_encoder_options_init(
     if (caller_size >= kEncoderOptionsCompressionModeSize) {
       options->compression_mode = GJXL_COMPRESSION_AUTOMATIC;
     }
+    if (caller_size >= kEncoderOptionsDcPredictionSize)
+      options->dc_prediction = GJXL_DC_PREDICTION_WEIGHTED;
+    if (caller_size >= kEncoderOptionsDcQuantizationSize)
+      options->dc_quantization = GJXL_DC_QUANTIZATION_ROUND;
+    if (caller_size >= kEncoderOptionsDcSmoothingSize)
+      options->adaptive_dc_smoothing = 0;
     return GJXL_OK;
   });
 }
@@ -453,6 +465,37 @@ GJXLResult gjxl_encode(
         return result;
       }
     }
+    gjxl::VarDctDcPrediction dc_prediction = gjxl::kDefaultDcPrediction;
+    if (options->struct_size >= kEncoderOptionsDcPredictionSize) {
+      switch (options->dc_prediction) {
+      case GJXL_DC_PREDICTION_GRADIENT:
+        dc_prediction = gjxl::VarDctDcPrediction::kGradient;
+        break;
+      case GJXL_DC_PREDICTION_WEIGHTED:
+        dc_prediction = gjxl::VarDctDcPrediction::kWeighted;
+        break;
+      default:
+        return Fail(GJXL_ERROR_INVALID_ARGUMENT, "Invalid DC prediction");
+      }
+    }
+    gjxl::DcQuantizationMode dc_quantization = gjxl::DcQuantizationMode::kRound;
+    if (options->struct_size >= kEncoderOptionsDcQuantizationSize) {
+      switch (options->dc_quantization) {
+      case GJXL_DC_QUANTIZATION_ROUND:
+        break;
+      case GJXL_DC_QUANTIZATION_PREDICTION_AWARE:
+        dc_quantization = gjxl::DcQuantizationMode::kPredictionAware;
+        break;
+      default:
+        return Fail(GJXL_ERROR_INVALID_ARGUMENT, "Invalid DC quantization");
+      }
+    }
+    bool adaptive_dc_smoothing = false;
+    if (options->struct_size >= kEncoderOptionsDcSmoothingSize) {
+      if (options->adaptive_dc_smoothing > 1)
+        return Fail(GJXL_ERROR_INVALID_ARGUMENT, "Invalid adaptive DC smoothing");
+      adaptive_dc_smoothing = options->adaptive_dc_smoothing != 0;
+    }
     result = ValidateEncoderOptions(*options);
     if (result != GJXL_OK) {
       return result;
@@ -484,6 +527,9 @@ GJXLResult gjxl_encode(
     encoding_options.butteraugli_target = options->distance;
     encoding_options.effort = options->effort;
     encoding_options.compression_mode = compression_mode;
+    encoding_options.dc_prediction = dc_prediction;
+    encoding_options.dc_quantization = dc_quantization;
+    encoding_options.adaptive_dc_smoothing = adaptive_dc_smoothing;
     encoding_options.backend = context->backend;
     encoding_options.cpu_thread_count = context->cpu_thread_count;
     encoding_options.execution_domain = context->execution_domain;

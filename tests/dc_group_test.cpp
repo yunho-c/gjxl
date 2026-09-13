@@ -566,6 +566,17 @@ bool HasBytes(const gjxl::BitWriter& writer,
 }
 
 bool CheckModularHeaders() {
+  for (uint8_t precision = 0; precision <= 3; ++precision) {
+    gjxl::BitWriter writer;
+    if (!gjxl::WriteSimpleDcGroupModularHeader(&writer, precision).ok() ||
+        writer.bits_written() != 6 ||
+        !HasBytes(writer, std::array<uint8_t, 1>{uint8_t(0x0c | precision)}))
+      return false;
+    const size_t bits = writer.bits_written();
+    if (gjxl::WriteSimpleDcGroupModularHeader(&writer, 4).ok() ||
+        writer.bits_written() != bits)
+      return false;
+  }
   gjxl::BitWriter dc;
   gjxl::BitWriter one;
   gjxl::BitWriter partial;

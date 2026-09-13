@@ -178,14 +178,8 @@ bool CheckUnsupportedProfileDimensions() {
     RejectsMutation("custom matrices", [](auto* p) {
       p->quantization_matrix_mode = gjxl::QuantizationMatrixMode::kCustom;
     }) &&
-    RejectsMutation("DC precision", [](auto* p) {
-      p->extra_dc_precision = 1;
-    }) &&
     RejectsMutation("DC CfL", [](auto* p) {
       p->dc_cfl_mode = gjxl::DcCflMode::kCustom;
-    }) &&
-    RejectsMutation("adaptive DC smoothing", [](auto* p) {
-      p->adaptive_dc_smoothing = true;
     }) &&
     RejectsMutation("coefficient orders", [](auto* p) {
       p->coefficient_order_mode = gjxl::CoefficientOrderMode::kCustom;
@@ -228,6 +222,27 @@ bool CheckUnsupportedProfileDimensions() {
     });
 }
 
+bool CheckDcProfiles() {
+  for (uint8_t precision = 0; precision <= 3; ++precision) {
+    for (bool smoothing : {false, true}) {
+      gjxl::SimpleVarDctCodestreamProfile profile;
+      profile.extra_dc_precision = precision;
+      profile.adaptive_dc_smoothing = smoothing;
+      gjxl::VarDctEncoderFrame frame;
+      const auto status = MakeFrame(profile, &frame);
+      if (!status.ok() || !frame.valid() || frame.profile() != profile ||
+          !gjxl::ValidateSimpleCodestreamFrame(frame).ok()) {
+        std::cerr << "Supported DC profile failed: " << status.message() << '\n';
+        return false;
+      }
+    }
+  }
+  gjxl::SimpleVarDctCodestreamProfile invalid;
+  invalid.extra_dc_precision = 4;
+  gjxl::VarDctEncoderFrame frame;
+  return !invalid.valid() && !MakeFrame(invalid, &frame).ok();
+}
+
 }  // namespace
 
 int main() {
@@ -237,6 +252,7 @@ int main() {
       !CheckDefaultAndQuantizerBoundary() ||
       !CheckScaleMultipliers() ||
       !CheckRepresentableMatrixScales() ||
+      !CheckDcProfiles() ||
       !CheckUnsupportedProfileDimensions()) {
     return EXIT_FAILURE;
   }

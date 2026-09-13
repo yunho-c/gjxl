@@ -55,6 +55,9 @@ struct Options {
     gjxl::VarDctCompressionMode::kAutomatic;
   gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
     gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
+  gjxl::VarDctDcPrediction dc_prediction = gjxl::kDefaultDcPrediction;
+  gjxl::DcQuantizationMode dc_quantization = gjxl::DcQuantizationMode::kRound;
+  bool adaptive_dc_smoothing = false;
   bool collect_final_butteraugli_score = false;
 };
 
@@ -207,6 +210,8 @@ struct Options {
   bool rate_control_set = false;
   bool target_search_option_set = false;
   bool effort_set = false;
+  bool dc_prediction_set = false;
+  bool dc_quantization_set = false;
   bool high_density_set = false;
   bool maximum_compression_set = false;
   for (int index = 1; index < argc; ++index) {
@@ -282,6 +287,30 @@ struct Options {
           !ParseBackend(argv[++index], &candidate.backend)) {
         return false;
       }
+    } else if (argument == "--dc-prediction") {
+      if (dc_prediction_set || index + 1 >= argc)
+        return false;
+      const std::string_view value = argv[++index];
+      if (value == "gradient")
+        candidate.dc_prediction = gjxl::VarDctDcPrediction::kGradient;
+      else if (value == "weighted")
+        candidate.dc_prediction = gjxl::VarDctDcPrediction::kWeighted;
+      else
+        return false;
+      dc_prediction_set = true;
+    } else if (argument == "--dc-quantization") {
+      if (dc_quantization_set || index + 1 >= argc) return false;
+      const std::string_view value = argv[++index];
+      if (value == "round")
+        candidate.dc_quantization = gjxl::DcQuantizationMode::kRound;
+      else if (value == "prediction-aware")
+        candidate.dc_quantization = gjxl::DcQuantizationMode::kPredictionAware;
+      else
+        return false;
+      dc_quantization_set = true;
+    } else if (argument == "--adaptive-dc-smoothing") {
+      if (candidate.adaptive_dc_smoothing) return false;
+      candidate.adaptive_dc_smoothing = true;
     } else if (argument == "--effort") {
       size_t effort = 0;
       if (effort_set || index + 1 >= argc ||
@@ -447,7 +476,8 @@ void PrintUsage(const char* executable) {
                "--target-bpp BPP) [--size-tolerance FRACTION] "
                "[--max-attempts N] "
                "[--size-selection under-budget|closest] "
-               "[--effort 1..10] "
+               "[--effort 1..10] [--dc-prediction gradient|weighted] "
+               "[--dc-quantization round|prediction-aware] [--adaptive-dc-smoothing] "
                "[--high-density] "
                "[--maximum-compression] "
                "[--backend auto|cpu|metal] "
@@ -477,26 +507,26 @@ int main(int argc, char** argv) {
   gjxl::VarDctEncodingSummary summary;
   gjxl::VarDctEncodingTiming timing;
   status = gjxl::EncodeLinearRgbVarDctCodestreamProfiled(
-    linear_rgb.const_view(),
-    {.butteraugli_target = options.butteraugli_target,
-     .effort = options.effort,
-     .density_mode = options.density_mode,
-     .compression_mode = options.compression_mode,
-     .rate_control_mode = options.rate_control_mode,
-     .maximum_error = options.maximum_error,
-     .target_bytes = options.target_bytes,
-     .target_bits_per_pixel = options.target_bits_per_pixel,
-     .target_size_tolerance = options.target_size_tolerance,
-     .target_size_maximum_attempts =
-       options.target_size_maximum_attempts,
-     .target_size_selection = options.target_size_selection,
-     .backend = options.backend,
-     .metal_aq_mode = options.metal_aq_mode,
-     .collect_final_butteraugli_score =
-       options.collect_final_butteraugli_score},
-    &codestream,
-    &summary,
-    &timing);
+      linear_rgb.const_view(),
+      {.butteraugli_target = options.butteraugli_target,
+       .effort = options.effort,
+       .density_mode = options.density_mode,
+       .compression_mode = options.compression_mode,
+       .rate_control_mode = options.rate_control_mode,
+       .maximum_error = options.maximum_error,
+       .target_bytes = options.target_bytes,
+       .target_bits_per_pixel = options.target_bits_per_pixel,
+       .target_size_tolerance = options.target_size_tolerance,
+       .target_size_maximum_attempts = options.target_size_maximum_attempts,
+       .target_size_selection = options.target_size_selection,
+       .backend = options.backend,
+       .metal_aq_mode = options.metal_aq_mode,
+       .collect_final_butteraugli_score =
+           options.collect_final_butteraugli_score,
+       .dc_prediction = options.dc_prediction,
+       .dc_quantization = options.dc_quantization,
+       .adaptive_dc_smoothing = options.adaptive_dc_smoothing},
+      &codestream, &summary, &timing);
   if (!status.ok()) {
     std::cerr << "Encoding error: " << status.message() << '\n';
     return EXIT_FAILURE;

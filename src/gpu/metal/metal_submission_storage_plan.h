@@ -73,6 +73,8 @@ struct ResidentAqProfileInputOptions {
   bool butteraugli_sinks = false;
   bool gaborish = false;
   size_t epf_iterations = 0;
+  bool deferred_dc = false;
+  bool adaptive_dc_smoothing = false;
 };
 
 struct ResidentAqProfileInputStoragePlan {

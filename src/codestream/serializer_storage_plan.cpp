@@ -138,6 +138,8 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
       frame_extent.height > maximum_dimension)
     return Status::InvalidArgument(
         "Serializer plan frame dimensions are invalid");
+  if (!IsValidDcPrediction(options.coding.dc_prediction))
+    return Status::InvalidArgument("Serializer DC prediction is invalid");
   const auto behavior = options.coding.entropy_behavior;
   if (behavior != VarDctEntropyBehavior::kBalanced &&
       behavior != VarDctEntropyBehavior::kHighDensity &&
@@ -183,7 +185,8 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
        .context_count = maps.maximum_ac_contexts,
        .order_count = plan.maximum_order_variants,
        .map_count = maps.maximum_maps,
-       .workers = workers},
+       .workers = workers,
+       .dc_prediction = options.coding.dc_prediction},
       &tokenization);
   if (!status.ok())
     return status;

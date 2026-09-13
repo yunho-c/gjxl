@@ -41,6 +41,8 @@
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
 #include "core/quantizer.h"
+#include "gpu/metal/metal_backend.h"
+#include "gpu/ops/aq_evaluation.h"
 
 namespace {
 
@@ -66,7 +68,7 @@ enum class Pattern {
 };
 
 struct Fixture {
-  std::string_view name;
+  std::string name;
   gjxl::Extent2D extent;
   Pattern pattern;
   gjxl::AcStrategyType strategy = gjxl::AcStrategyType::kDct8;
@@ -76,6 +78,10 @@ struct Fixture {
   bool require_large_tokens = false;
   uint64_t expected_hash = 0;
   bool mixed_strategies = false;
+  gjxl::DcQuantizationMode dc_quantization = gjxl::DcQuantizationMode::kRound;
+  gjxl::VarDctDcPrediction dc_prediction = gjxl::VarDctDcPrediction::kGradient;
+  uint8_t extra_dc_precision = 0;
+  bool adaptive_dc_smoothing = false;
 };
 
 struct PreparedFixture {
@@ -109,6 +115,9 @@ struct Options {
   fs::path sample;
   fs::path artifacts;
   bool smoke = false;
+  bool dc_processing = false;
+  bool metal_dc_processing = false;
+  bool keep_artifacts = false;
 };
 
 template <typename T>
@@ -265,7 +274,7 @@ gjxl::Status ConfigureMixedStrategies(gjxl::AcStrategyGrid* strategies) {
 }
 
 gjxl::Status PrepareFixture(
-  const Fixture& fixture, PreparedFixture* prepared) {
+  const Fixture& fixture, PreparedFixture* prepared, bool metal = false) {
 
   if (prepared == nullptr || fixture.extent.empty() ||
       fixture.raw_quant < 1 || fixture.raw_quant > gjxl::kMaxRawQuant ||
@@ -348,6 +357,30 @@ gjxl::Status PrepareFixture(
   }
 
   PreparedFixture result;
+  gjxl::SimpleVarDctCodestreamProfile profile;
+  profile.extra_dc_precision = fixture.extra_dc_precision;
+  profile.adaptive_dc_smoothing = fixture.adaptive_dc_smoothing;
+  if (metal) {
+    std::unique_ptr<gjxl::GpuBackend> gpu;
+    status = gjxl::CreateEmbeddedMetalBackend({}, &gpu);
+    if (!status.ok()) return status;
+    std::unique_ptr<gjxl::PreparedAqEvaluation> evaluation;
+    status = gjxl::PrepareAqEvaluation(*gpu, {
+      .original_linear_rgb = preprocessed.cropped_view(fixture.extent),
+      .coding_opsin = preprocessed.const_view(), .strategies = &strategies,
+      .epf_sharpness = View(sharpness, blocks),
+      .options = {.profile = profile, .dc_quantization = fixture.dc_quantization,
+                  .dc_prediction = fixture.dc_prediction},
+      .frame_only = true,
+      .coefficient_decision_mode = gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant}, &evaluation);
+    if (!status.ok()) return status;
+    const std::vector<float> sigma(block_count, -0.05f);
+    status = evaluation->EncodeFrame({.raw_quant_field = View(raw_quant, blocks),
+      .quantizer = fixture.quantizer,
+      .y_to_x = color_correlation.y_to_x_map(),
+      .y_to_b = color_correlation.y_to_b_map(),
+      .epf_inverse_sigma = View(sigma, blocks)}, &result.frame);
+  } else {
   status = gjxl::ComputeQuantizedCoefficients(
     preprocessed.const_view(),
     {
@@ -358,7 +391,9 @@ gjxl::Status PrepareFixture(
       .color_correlation = &color_correlation,
       .epf_sharpness = View(sharpness, blocks),
     },
-    {}, &result.frame);
+    profile, &result.frame, gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant,
+    fixture.dc_quantization, fixture.dc_prediction);
+  }
   if (!status.ok()) {
     return status;
   }
@@ -757,12 +792,46 @@ std::vector<Fixture> FullFixtures() {
   for (const gjxl::AcStrategyType strategy : strategies) {
     const gjxl::AcStrategyInfo* info = gjxl::GetAcStrategyInfo(strategy);
     fixtures.push_back({
-      .name = info->name,
+      .name = std::string(info->name),
       .extent = info->pixel_extent(),
       .pattern = Pattern::kImpulse,
       .strategy = strategy,
       .force_single_strategy = true,
     });
+  }
+  return fixtures;
+}
+
+std::vector<Fixture> DcProcessingFixtures() {
+  auto seeds = SmokeFixtures();
+  seeds.push_back({"dc-edge-horizontal", {2049, 33}, Pattern::kGradient});
+  seeds.push_back({"dc-edge-vertical", {33, 2049}, Pattern::kTexture});
+  std::vector<Fixture> fixtures;
+  for (const auto& seed : seeds) {
+    for (auto prediction : {gjxl::VarDctDcPrediction::kGradient,
+                            gjxl::VarDctDcPrediction::kWeighted}) {
+      for (auto mode : {gjxl::DcQuantizationMode::kRound,
+                        gjxl::DcQuantizationMode::kPredictionAware}) {
+        for (bool smoothing : {false, true}) {
+          auto fixture = seed;
+          fixture.dc_prediction = prediction;
+          fixture.dc_quantization = mode;
+          fixture.extra_dc_precision = mode == gjxl::DcQuantizationMode::kRound ? 0 : 1;
+          fixture.adaptive_dc_smoothing = smoothing;
+          fixture.name += prediction == gjxl::VarDctDcPrediction::kGradient ? "-gradient" : "-weighted";
+          fixture.name += mode == gjxl::DcQuantizationMode::kRound ? "-round" : "-aware";
+          fixture.name += smoothing ? "-smooth" : "-raw";
+          fixtures.push_back(std::move(fixture));
+        }
+      }
+    }
+  }
+  for (uint8_t precision : {2, 3}) {
+    auto fixture = seeds[3];
+    fixture.extra_dc_precision = precision;
+    fixture.adaptive_dc_smoothing = true;
+    fixture.name += "-precision-" + std::to_string(precision);
+    fixtures.push_back(std::move(fixture));
   }
   return fixtures;
 }
@@ -782,7 +851,7 @@ bool RunFixture(
   }
 
   PreparedFixture prepared;
-  gjxl::Status status = PrepareFixture(fixture, &prepared);
+  gjxl::Status status = PrepareFixture(fixture, &prepared, options.metal_dc_processing);
   if (!status.ok()) {
     std::cerr << fixture.name << ": frame preparation failed: "
               << status.message() << '\n';
@@ -801,7 +870,8 @@ bool RunFixture(
   status = gjxl::EncodeVarDctCodestream(
     prepared.frame,
     {.entropy_behavior =
-       gjxl::VarDctEntropyBehavior::kMaximumCompression},
+       gjxl::VarDctEntropyBehavior::kMaximumCompression,
+     .dc_prediction = fixture.dc_prediction},
     &codestream);
   if (!status.ok()) {
     std::cerr << fixture.name << ": codestream encoding failed: "
@@ -1118,6 +1188,13 @@ bool ParseOptions(int argc, char** argv, Options* options) {
       }
     } else if (argument == "--smoke") {
       options->smoke = true;
+    } else if (argument == "--dc-processing") {
+      options->dc_processing = true;
+    } else if (argument == "--metal-dc-processing") {
+      options->dc_processing = true;
+      options->metal_dc_processing = true;
+    } else if (argument == "--keep-artifacts") {
+      options->keep_artifacts = true;
     } else {
       return false;
     }
@@ -1134,7 +1211,8 @@ int main(int argc, char** argv) {
   if (!ParseOptions(argc, argv, &options)) {
     std::cerr << "Usage: " << argv[0]
               << " --decoder DJXL --info JXLINFO --encoder GJXL_ENCODE"
-              << " --sample INPUT.pfm --artifacts DIR [--smoke]\n";
+              << " --sample INPUT.pfm --artifacts DIR [--smoke|--dc-processing]"
+                 " [--keep-artifacts]\n";
     return EXIT_FAILURE;
   }
   if (!fs::exists(options.decoder) || !fs::exists(options.info) ||
@@ -1153,17 +1231,19 @@ int main(int argc, char** argv) {
   }
 
   const std::vector<Fixture> fixtures =
-    options.smoke ? SmokeFixtures() : FullFixtures();
+    options.dc_processing ? DcProcessingFixtures()
+                          : options.smoke ? SmokeFixtures() : FullFixtures();
   bool success = true;
   std::vector<uint8_t> corruption_source;
   for (const Fixture& fixture : fixtures) {
     success &= RunFixture(
       fixture, options, run_directory / fixture.name, &corruption_source);
   }
-  success &= RunWorkflowSample(
-    options, run_directory / "workflow-sample");
-  success &= RunCorruptionChecks(
-    corruption_source, options, run_directory / "corruption");
+  if (!options.dc_processing) {
+    success &= RunWorkflowSample(options, run_directory / "workflow-sample");
+    success &= RunCorruptionChecks(corruption_source, options,
+                                  run_directory / "corruption");
+  }
 
   if (!success) {
     std::cerr << "Conformance artifacts preserved at "
@@ -1171,7 +1251,7 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
 
-  fs::remove_all(run_directory, fs_error);
+  if (!options.keep_artifacts) fs::remove_all(run_directory, fs_error);
   if (fs_error) {
     std::cerr << "Conformance passed, but scratch cleanup failed: "
               << fs_error.message() << '\n';
