@@ -16,6 +16,7 @@
 #include "codec/vardct_frame.h"
 #include "codestream/bit_writer.h"
 #include "codestream/encoder.h"
+#include "codestream/dc_context_tree_internal.h"
 #include "codestream/encoder_internal.h"
 #include "codestream/headers.h"
 #include "core/ac_strategy.h"
@@ -258,6 +259,9 @@ bool CheckEncodedFrame(
   bool expect_ac_ans,
   bool expect_order_ans) {
 
+  // Frozen byte fixtures describe the original gradient/full-tree policy.
+  gjxl::codestream_internal::ScopedDcTreePolicyForTesting legacy(
+    gjxl::codestream_internal::DcTreePolicy::kLegacy);
   gjxl::VarDctEncoderFrame frame;
   gjxl::Status status = MakeFrame(width, height, {3541, 10}, {}, &frame);
   std::vector<uint8_t> first;
@@ -268,21 +272,24 @@ bool CheckEncodedFrame(
     status = gjxl::EncodeVarDctCodestream(
       frame,
       {.entropy_behavior =
-         gjxl::VarDctEntropyBehavior::kMaximumCompression},
+         gjxl::VarDctEntropyBehavior::kMaximumCompression,
+       .dc_prediction = gjxl::VarDctDcPrediction::kGradient},
       &first);
   }
   if (status.ok()) {
     status = gjxl::EncodeVarDctCodestream(
       frame,
       {.entropy_behavior =
-         gjxl::VarDctEntropyBehavior::kMaximumCompression},
+         gjxl::VarDctEntropyBehavior::kMaximumCompression,
+       .dc_prediction = gjxl::VarDctDcPrediction::kGradient},
       &second);
   }
   if (status.ok()) {
     status = gjxl::codestream_internal::EncodeVarDctCodestreamProfiled(
       frame,
       {.entropy_behavior =
-         gjxl::VarDctEntropyBehavior::kMaximumCompression},
+         gjxl::VarDctEntropyBehavior::kMaximumCompression,
+       .dc_prediction = gjxl::VarDctDcPrediction::kGradient},
       &profiled, &profile);
   }
   const uint64_t profile_stage_total =
@@ -698,13 +705,93 @@ bool CheckManagedSerializerStorage() {
   return true;
 }
 
+bool CheckDefaultDcPolicy() {
+  using namespace gjxl;
+  using namespace gjxl::codestream_internal;
+  if (VarDctCodestreamOptions{}.dc_prediction != VarDctDcPrediction::kWeighted ||
+      CurrentDcTreePolicy() != DcTreePolicy::kAdaptive) {
+    std::cerr << "Default DC policy is not weighted/adaptive\n";
+    return false;
+  }
+  const std::array<Extent2D, 4> extents{{{8, 8}, {129, 97}, {384, 384}, {768, 512}}};
+  const std::array<uint32_t, 4> expected_leaves{{1, 2, 4, 34}};
+  for (size_t i = 0; i < extents.size(); ++i) {
+    VarDctEncoderFrame frame;
+    if (!MakeFrame(extents[i].width, extents[i].height, {3541, 10}, {}, &frame).ok())
+      return false;
+    std::vector<uint8_t> defaults, explicit_weighted, profiled;
+    if (!EncodeVarDctCodestream(frame, &defaults).ok()) return false;
+    {
+      ScopedDcTreePolicyForTesting adaptive(DcTreePolicy::kAdaptive);
+      if (!EncodeVarDctCodestream(
+            frame, {.dc_prediction = VarDctDcPrediction::kWeighted},
+            &explicit_weighted).ok()) return false;
+    }
+    VarDctCodestreamProfile profile;
+    if (!EncodeVarDctCodestreamProfiled(frame, {}, &profiled, &profile).ok() ||
+        defaults != explicit_weighted || defaults != profiled ||
+        profile.dc_leaf_count != expected_leaves[i] ||
+        profile.dc_context_count != expected_leaves[i] + 11) {
+      std::cerr << "Default DC encoding differs from explicit weighted/adaptive\n";
+      return false;
+    }
+  }
+  return true;
+}
+
+bool CheckAdaptiveDcTrees() {
+  using namespace gjxl;
+  using namespace gjxl::codestream_internal;
+  for (auto extent : {Extent2D{8,8}, {129,97}, {257,193}, {384,384},
+                      {768,512}, {2049,9}, {2049,257}}) {
+    VarDctEncoderFrame frame;
+    if (!MakeFrame(extent.width, extent.height, {3541,10}, {}, &frame).ok()) return false;
+    const auto before_dc = frame.quantized_dc();
+    std::array<std::vector<int32_t>, 3> original_dc;
+    for (size_t c = 0; c < 3; ++c)
+      for (size_t y = 0; y < before_dc.plane[c].extent.height; ++y)
+        original_dc[c].insert(original_dc[c].end(), before_dc.plane[c].Row(y),
+            before_dc.plane[c].Row(y) + before_dc.plane[c].extent.width);
+    for (auto prediction : {VarDctDcPrediction::kGradient, VarDctDcPrediction::kWeighted})
+      for (auto behavior : {VarDctEntropyBehavior::kBalanced, VarDctEntropyBehavior::kHighDensity,
+                            VarDctEntropyBehavior::kMaximumCompression}) {
+        VarDctCodestreamOptions options{.entropy_behavior = behavior, .dc_prediction = prediction};
+        std::vector<uint8_t> legacy, adaptive, repeated, profiled;
+        { ScopedDcTreePolicyForTesting choice(DcTreePolicy::kLegacy);
+          if (!EncodeVarDctCodestream(frame, options, &legacy).ok()) return false; }
+        VarDctCodestreamProfile profile;
+        { ScopedDcTreePolicyForTesting choice(DcTreePolicy::kAdaptive);
+          if (!EncodeVarDctCodestream(frame, options, &adaptive).ok() ||
+              !EncodeVarDctCodestream(frame, options, &repeated).ok() ||
+              !EncodeVarDctCodestreamProfiled(frame, options, &profiled, &profile).ok()) return false; }
+        size_t samples;
+        const DcContextTreeLayout* layout;
+        if (!ComputeDcSampleCount(extent.ceil_div(8), &samples).ok() ||
+            !SelectDcContextTreeLayout(samples, prediction, DcTreePolicy::kAdaptive, &layout).ok() ||
+            profile.dc_sample_count != samples || profile.dc_leaf_count != layout->dc_leaf_count ||
+            profile.dc_context_count != layout->context_count || adaptive != repeated || adaptive != profiled ||
+            (layout->full_tree() && legacy != adaptive)) {
+          std::cerr << "Adaptive DC serialization mismatch " << extent.width << 'x' << extent.height << '\n';
+          return false;
+        }
+      }
+    for (size_t c = 0; c < 3; ++c)
+      for (size_t y = 0; y < before_dc.plane[c].extent.height; ++y)
+        if (!std::equal(before_dc.plane[c].Row(y), before_dc.plane[c].Row(y) + before_dc.plane[c].extent.width,
+            original_dc[c].data() + y * before_dc.plane[c].extent.width)) return false;
+  }
+  ScopedDcTreePolicyForTesting choice(DcTreePolicy::kAdaptive);
+  return CheckManagedSerializerStorage() && CheckAtomicRejections();
+}
+
 }  // namespace
 
 int main() {
   if (!CheckCodestreamAndFrameHeaders() || !CheckQuantizerSelectors() ||
       !CheckAssemblyAndDeterminism() || !CheckAdaptiveBlockContextSelection() ||
       !CheckEntropyBehaviorPlumbing() || !CheckAtomicRejections() ||
-      !CheckDeferredCandidatePrimitives() || !CheckManagedSerializerStorage()) {
+      !CheckDeferredCandidatePrimitives() || !CheckManagedSerializerStorage() ||
+      !CheckDefaultDcPolicy() || !CheckAdaptiveDcTrees()) {
     return EXIT_FAILURE;
   }
   std::cout << "All codestream encoder tests passed.\n";

@@ -127,7 +127,8 @@ typedef struct {
   /// Selects the entropy/codestream search policy independently of effort.
   /// Callers using the previous struct size implicitly select AUTOMATIC.
   GJXLCompressionMode compression_mode;
-  /// Lossless prediction of quantized DC. Older struct sizes select GRADIENT.
+  /// Lossless prediction of quantized DC. Defaults to WEIGHTED, including
+  /// older struct sizes without this field. GRADIENT remains selectable.
   GJXLDcPrediction dc_prediction;
   /// Opt-in lossy DC quantization; older sizes select ROUND.
   GJXLDcQuantization dc_quantization;

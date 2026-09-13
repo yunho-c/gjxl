@@ -5,9 +5,11 @@ resident Metal integration and bounded matched-quality qualification are
 complete. The [qualification report](dc-processing-qualification/REPORT.md)
 records mixed rate benefits, encoding costs, and two unresolved compact
 calibration targets; the evidence does not support enabling either by default.
-Gradient residual coding, ordinary rounding, and disabled smoothing remain
-the defaults. Weighted residual coding has its separate qualification in
-`dc-prediction-qualification/REPORT.md`.
+Weighted residual coding and size-adaptive predefined DC trees are now the
+encoding defaults. Ordinary rounding and disabled smoothing remain unchanged;
+see [the combined-default decision](dc-small-trees/README.md). The measurements
+below retain their original gradient/round/no-smoothing control, named `default`
+in the frozen study artifacts.
 
 ## Controls and reconstruction contract
 
@@ -32,8 +34,8 @@ coding is still separately selectable.
 
 The C options append `GJXLDcQuantization dc_quantization` and a uint32 smoothing
 flag (only 0/1 accepted). `GJXLEncoderOptions` is now 28 bytes; its 12-, 16-,
-20-, and 24-byte predecessors retain their missing-field defaults through
-`struct_size`. Rust exposes `DcQuantization::{Round, PredictionAware}` and
+20-, and 24-byte predecessors use `struct_size` to select missing-field defaults:
+weighted prediction, ordinary rounding, and disabled smoothing. Rust exposes `DcQuantization::{Round, PredictionAware}` and
 `adaptive_dc_smoothing: bool`.
 
 The completed frame stores authoritative DC integers and an **unsmoothed**
@@ -153,7 +155,7 @@ from matched-quality timing. Their complete rate/quality curves remain visible.
 
 The [portable report and CSVs](dc-processing-qualification/REPORT.md) compare
 each control separately and together, including negative results and a
-piecewise-linear interpolation sensitivity check. Keep gradient residual
-coding, ordinary DC rounding, and disabled smoothing as defaults. Weighted
-coding and both lossy controls remain explicit choices; the measured incremental
-lossy gains do not justify an automatic policy change.
+piecewise-linear interpolation sensitivity check. The measured incremental
+lossy gains do not justify changing ordinary DC rounding or disabled smoothing.
+The later promotion of lossless weighted prediction and adaptive predefined
+trees is independent of this decision; both lossy controls remain opt-in.

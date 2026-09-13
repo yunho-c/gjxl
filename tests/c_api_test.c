@@ -51,7 +51,7 @@ static int CheckInitializers(void) {
   CHECK(encoder_options.struct_size == sizeof(encoder_options) &&
             encoder_options.distance == 1.0f && encoder_options.effort == 7 &&
             encoder_options.compression_mode == GJXL_COMPRESSION_AUTOMATIC &&
-            encoder_options.dc_prediction == GJXL_DC_PREDICTION_GRADIENT &&
+            encoder_options.dc_prediction == GJXL_DC_PREDICTION_WEIGHTED &&
             encoder_options.dc_quantization == GJXL_DC_QUANTIZATION_ROUND &&
             encoder_options.adaptive_dc_smoothing == 0,
         "encoder defaults are incorrect");
@@ -346,7 +346,7 @@ static int CheckEncoding(GJXLContext* context) {
   CHECK(old_compression_output.size == rgb_output.size &&
             memcmp(old_compression_output.data, rgb_output.data,
                    rgb_output.size) == 0,
-        "old compression options changed gradient bytes");
+        "old compression options changed default weighted bytes");
   gjxl_buffer_free(&old_compression_output);
 
   for (size_t old_size = offsetof(GJXLEncoderOptions, dc_quantization);
@@ -377,9 +377,26 @@ static int CheckEncoding(GJXLContext* context) {
             memcmp(weighted_output.data, weighted_repeat.data,
                    weighted_output.size) == 0,
         "weighted DC output is not deterministic");
+  CHECK(weighted_output.size == rgb_output.size &&
+            memcmp(weighted_output.data, rgb_output.data, rgb_output.size) == 0,
+        "default DC output is not weighted");
   gjxl_buffer_free(&weighted_output);
   gjxl_buffer_free(&weighted_repeat);
   options.dc_prediction = GJXL_DC_PREDICTION_GRADIENT;
+
+  GJXLBuffer gradient_output = {NULL, 0}, gradient_repeat = {NULL, 0};
+  CHECK(gjxl_encode(context, &rgb_view, &options, &gradient_output) == GJXL_OK &&
+            gjxl_encode(context, &rgb_view, &options, &gradient_repeat) == GJXL_OK,
+        "explicit gradient DC encoding failed");
+  CHECK(gradient_output.size == gradient_repeat.size &&
+            memcmp(gradient_output.data, gradient_repeat.data,
+                   gradient_output.size) == 0,
+        "gradient DC output is not deterministic");
+  CHECK(gradient_output.size != rgb_output.size ||
+            memcmp(gradient_output.data, rgb_output.data, rgb_output.size) != 0,
+        "explicit gradient DC was ignored");
+  gjxl_buffer_free(&gradient_output);
+  gjxl_buffer_free(&gradient_repeat);
 
   for (int mode = 0; mode < 4; ++mode) {
     options.dc_quantization = mode & 1 ? GJXL_DC_QUANTIZATION_PREDICTION_AWARE

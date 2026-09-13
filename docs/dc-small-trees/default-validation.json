@@ -1,0 +1,160 @@
+{
+  "purpose": "Correctness-only verification of new defaults; no timing conclusions",
+  "cases": 21,
+  "all_passed": true,
+  "binaries": {
+    "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/release/gjxl_encode": "ea28a2175ece127c40a589323cbdb22e96468bcecf22638ba058bd645bbdfbac",
+    "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/release/gjxl_quality_benchmark": "8b12b201de867da9972cb000a6512f1113ec1eb8ede8f6f12afde6d6987f58ae",
+    "/Users/yunhocho/GitHub/gjxl-dc-coding/build/release/gjxl_encode": "5d3f3e8bac7b9f01a59c2c62d2827ee44a525ab9898f13fe837d96b75d42211c",
+    "/Users/yunhocho/GitHub/gjxl-dc-coding/build/dc-tools/decode_benchmark": "db5fc0b8ac7afbc26466c1d39d4df1201b3f4804b4979150d360520075f49692"
+  },
+  "records": [
+    {
+      "id": "quality-flat-e3-d1-weighted",
+      "reference": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2/cases/flat-e3-d1-weighted/attempt-0000/streams/adaptive.jxl",
+      "bytes": 93,
+      "sha256": "f695be88fb7b9c592b61affd33a8440a30b1febc30bdeb88544b362108eab98d",
+      "decoded_sha256": "0fa672237f05a5fba2707b862dae25917b76d26bcf9ecafe678ac363347b2ace"
+    },
+    {
+      "id": "quality-flat-e4-d1-weighted",
+      "reference": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2/cases/flat-e4-d1-weighted/attempt-0000/streams/adaptive.jxl",
+      "bytes": 93,
+      "sha256": "12e501110d9a92ab90b9590a650002ec7757c25b5ac48900327c64d3e2da41cc",
+      "decoded_sha256": "1115c1f2e5f2fdaa923e5ff2106345d23690fc5e1cad1da04f6784f1cdcb1753"
+    },
+    {
+      "id": "quality-flat-e7-d1-weighted",
+      "reference": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2/cases/flat-e7-d1-weighted/attempt-0000/streams/adaptive.jxl",
+      "bytes": 98,
+      "sha256": "734d33b937e139a8b4c3e8dbdb5da82c00e4f6fed01d0acc1fc975749a3239b7",
+      "decoded_sha256": "d274cf033f070d325830388fdc1dae790cfa6f639a0b45e8778f83da1bd09df8"
+    },
+    {
+      "id": "quality-clic2024_test--097cb426910ba8ce2525dd8bb7fb1777-thumb256-e3-d1-weighted",
+      "reference": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2/cases/clic2024_test--097cb426910ba8ce2525dd8bb7fb1777-thumb256-e3-d1-weighted/attempt-0000/streams/adaptive.jxl",
+      "bytes": 5768,
+      "sha256": "ef76f8cfb35cd5548ec6ca7d9a6b8e21c3f9e8e8fd3a914b795a080a12092cc7",
+      "decoded_sha256": "aa117b47530f7a4646a5211ee75825584dc629ecacc175d435c7cb0b5f17078f"
+    },
+    {
+      "id": "quality-clic2024_test--097cb426910ba8ce2525dd8bb7fb1777-thumb256-e4-d1-weighted",
+      "reference": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2/cases/clic2024_test--097cb426910ba8ce2525dd8bb7fb1777-thumb256-e4-d1-weighted/attempt-0000/streams/adaptive.jxl",
+      "bytes": 5344,
+      "sha256": "88787a43470ee40b52c09f2e4f866259cd2d865e402dd227fb2c5e52b6f3ae95",
+      "decoded_sha256": "cb0872d0bc2247aeb4d69498006353e407e5b257c479b009fcbc2acfb9361d2a"
+    },
+    {
+      "id": "quality-clic2024_test--097cb426910ba8ce2525dd8bb7fb1777-thumb256-e7-d1-weighted",
+      "reference": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2/cases/clic2024_test--097cb426910ba8ce2525dd8bb7fb1777-thumb256-e7-d1-weighted/attempt-0000/streams/adaptive.jxl",
+      "bytes": 5255,
+      "sha256": "faba0f0c0f8a95267215fd4d621b00edc2be0087ffce5b86315781d4b5d26c0e",
+      "decoded_sha256": "f4d6d8ecb123f10c09aaa659c019c98701137266c894bb9dc827bca19767d613"
+    },
+    {
+      "id": "quality-clic2024_test--097cb426910ba8ce2525dd8bb7fb1777-thumb384-e3-d1-weighted",
+      "reference": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2/cases/clic2024_test--097cb426910ba8ce2525dd8bb7fb1777-thumb384-e3-d1-weighted/attempt-0000/streams/adaptive.jxl",
+      "bytes": 10187,
+      "sha256": "a4f6a40cba4b0ea1117aae23b2a80d1f01b22240884f166688fccca94d622af7",
+      "decoded_sha256": "d256cdc339182341bcd3498ac6f200bdbab15b4a1bc81dbbe9f34a850e976d12"
+    },
+    {
+      "id": "quality-clic2024_test--097cb426910ba8ce2525dd8bb7fb1777-thumb384-e4-d1-weighted",
+      "reference": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2/cases/clic2024_test--097cb426910ba8ce2525dd8bb7fb1777-thumb384-e4-d1-weighted/attempt-0000/streams/adaptive.jxl",
+      "bytes": 9379,
+      "sha256": "9c387170cce9e7b1b784d74cda8e21b999e71336e5cb0e6078d93189f4cd6140",
+      "decoded_sha256": "a3c1d0e70831681c4d069b1b6d5423ea375250a9bb928d36d9875064f053ec88"
+    },
+    {
+      "id": "quality-clic2024_test--097cb426910ba8ce2525dd8bb7fb1777-thumb384-e7-d1-weighted",
+      "reference": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2/cases/clic2024_test--097cb426910ba8ce2525dd8bb7fb1777-thumb384-e7-d1-weighted/attempt-0000/streams/adaptive.jxl",
+      "bytes": 9136,
+      "sha256": "2ae6120507a8e3c5c0b0ecac7b31ba2ece3ca00a70fa1e55c7637a3fa8db7843",
+      "decoded_sha256": "2045a57d00bbce22fb9d1c90d5e662c237aed5c3c2d18a30fa6ade30f4412afd"
+    },
+    {
+      "id": "quality-imazen26-1029-planter-4k-e3-d1-weighted",
+      "reference": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2/cases/imazen26-1029-planter-4k-e3-d1-weighted/attempt-0000/streams/adaptive.jxl",
+      "bytes": 2326798,
+      "sha256": "f3c9cb1ed9d83d791249605f00def091fadb20c7b2ef958f7959f77960e47631",
+      "decoded_sha256": "5519e95a422def8884d0b6b045d9768eefe06bac7d82fdb2bf918923748de452"
+    },
+    {
+      "id": "quality-imazen26-1029-planter-4k-e4-d1-weighted",
+      "reference": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2/cases/imazen26-1029-planter-4k-e4-d1-weighted/attempt-0000/streams/adaptive.jxl",
+      "bytes": 2245785,
+      "sha256": "ea3cbb5a220a252fdab9a78262002e1f67f65a7f0194bcec66726bcd4e8e0d11",
+      "decoded_sha256": "d58944c683dd19dca52cda6b5a4126c8aa32779ea27e5ca53a42f931275fcd0f"
+    },
+    {
+      "id": "quality-imazen26-1029-planter-4k-e7-d1-weighted",
+      "reference": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2/cases/imazen26-1029-planter-4k-e7-d1-weighted/attempt-0000/streams/adaptive.jxl",
+      "bytes": 2228830,
+      "sha256": "f333a89e29225cc5186706add5fb32d4b289e6d4fe5b45bd4505a8b8e3660aa6",
+      "decoded_sha256": "91c5749004893a0797586ff00f0904b6fc8c331299a26a26a868b3acf49278aa"
+    },
+    {
+      "id": "cli-clic2024_test--097cb426910ba8ce2525dd8bb7fb1777-thumb384-cpu-weighted-f0",
+      "reference": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2/integration/clic2024_test--097cb426910ba8ce2525dd8bb7fb1777-thumb384-cpu-weighted-f0/attempt-0000/streams/adaptive.jxl",
+      "bytes": 9381,
+      "sha256": "587ca13969a55cd18ba8831bf04015f26fe4b71f4d452fd1197859b58faa7aab",
+      "decoded_sha256": "c65cc3a92e2ba7b76379242ca8b956e84f73a69f649dfdd0d93950a95bc71915"
+    },
+    {
+      "id": "cli-clic2024_test--097cb426910ba8ce2525dd8bb7fb1777-thumb384-metal-weighted-f0",
+      "reference": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2/integration/clic2024_test--097cb426910ba8ce2525dd8bb7fb1777-thumb384-metal-weighted-f0/attempt-0000/streams/adaptive.jxl",
+      "bytes": 9379,
+      "sha256": "9c387170cce9e7b1b784d74cda8e21b999e71336e5cb0e6078d93189f4cd6140",
+      "decoded_sha256": "a3c1d0e70831681c4d069b1b6d5423ea375250a9bb928d36d9875064f053ec88"
+    },
+    {
+      "id": "cli-edge-cpu-weighted-f0",
+      "reference": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2/integration/edge-cpu-weighted-f0/attempt-0000/streams/adaptive.jxl",
+      "bytes": 649,
+      "sha256": "0a9f9fed25613abc456e2dfe7267626b584c4dd390bbed2cc124b67827466ce9",
+      "decoded_sha256": "a6c9ad55ea98670892f2718e8dc36a5e8e0b19c6ba342d6a7754a07d8e922c5a"
+    },
+    {
+      "id": "cli-edge-metal-weighted-f0",
+      "reference": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2/integration/edge-metal-weighted-f0/attempt-0000/streams/adaptive.jxl",
+      "bytes": 650,
+      "sha256": "0d28e1fce54b0e5cd695d958a6cc47800801e6a833e792f8e56691fbdb87254c",
+      "decoded_sha256": "7eeec5da92ebc8e12cd7cf94734575bb2c575f3cb70ed5bede7c9083148f5d88"
+    },
+    {
+      "id": "cli-flat-cpu-weighted-f0",
+      "reference": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2/integration/flat-cpu-weighted-f0/attempt-0000/streams/adaptive.jxl",
+      "bytes": 93,
+      "sha256": "52df30366cb7e9b06a206972b78feda6567173b46e78457b4f88a37739997a70",
+      "decoded_sha256": "c5952ba69d3c0dd24386aa64b359a56a173304cbdd7790d34522affd674fbfb2"
+    },
+    {
+      "id": "cli-flat-metal-weighted-f0",
+      "reference": "/Users/yunhocho/GitHub/gjxl-dc-small-trees/build/dc-small-tree-qualification-v2/integration/flat-metal-weighted-f0/attempt-0000/streams/adaptive.jxl",
+      "bytes": 93,
+      "sha256": "12e501110d9a92ab90b9590a650002ec7757c25b5ac48900327c64d3e2da41cc",
+      "decoded_sha256": "1115c1f2e5f2fdaa923e5ff2106345d23690fc5e1cad1da04f6784f1cdcb1753"
+    },
+    {
+      "id": "fixture-balanced",
+      "legacy_sha256": "e4566239f5e15dd67a4716d26da662728c88ffcae19bdf93ff28c2b8df6c8504",
+      "bytes": 202,
+      "sha256": "b0671094599faefd7312880e15aa89373612bbc5b5f028f7f19c60e09492f333",
+      "decoded_sha256": "3e8839b10544f42749bf3132dca1617371f7a175363eb1461cf6fa6a51d7ba10"
+    },
+    {
+      "id": "fixture-maximum-compression",
+      "legacy_sha256": "e5577ebf76a37bf56a93db61b2ccf1fc959292a3d13d6489baf2e7f5b6105558",
+      "bytes": 194,
+      "sha256": "a33d5414e7ac5db07184510e629266682cec583d7527bf9d9877317da86f92c4",
+      "decoded_sha256": "3e8839b10544f42749bf3132dca1617371f7a175363eb1461cf6fa6a51d7ba10"
+    },
+    {
+      "id": "fixture-maximum-error",
+      "legacy_sha256": "a49511547682f801c33f2054e6bd97b990c8f6709f16e1e540c15f2950340f66",
+      "bytes": 163,
+      "sha256": "eeb771640076375d10365be7b773e0768c3b495e0e8e322b6cd12623c8284673",
+      "decoded_sha256": "91af04d704989f7d2efffc069567d57bdc58cb4e0836e19ab1ab193e9390dc08"
+    }
+  ]
+}

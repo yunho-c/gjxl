@@ -182,9 +182,11 @@ Deliverables:
 
 - Derive the DC-group grid from frame geometry.
 - Slice `quantized_dc()` into group-local block rectangles.
-- Apply the JPEG XL clamped-gradient predictor independently within each DC
-  group.
-- Emit packed residuals with the 45 DC contexts.
+- Apply the JPEG XL weighted predictor independently within each DC group
+  and channel by default; clamped-gradient prediction remains selectable.
+- Select the predefined DC subtree from the whole-frame DC sample count.
+  Its 1, 2, 4, or 34 DC leaves share entropy models with eleven AC-metadata
+  leaves, for 12, 13, 15, or 45 contexts. See [DC trees](dc-small-trees/README.md).
 - Emit the DC-group modular header with `extra_dc_precision = 0`, the global
   tree, default weighted predictor settings, and no transforms.
 - Slice and emit the two color-correlation maps.
@@ -472,12 +474,15 @@ after the shared entropy codes are finalized. Each worker owns one `BitWriter`;
 the TOC and final assembly retain canonical section order, so parallelism does
 not change codestream bytes or failure atomicity.
 
-The checked `17x13` sample encodes to 263 bytes at target `1.0`; its balanced
+With weighted prediction and its one-leaf DC tree, the checked `17x13` sample
+encodes to 202 bytes at target `1.0`; its balanced
 codestream SHA-256 is
-`e4566239f5e15dd67a4716d26da662728c88ffcae19bdf93ff28c2b8df6c8504`.
-Maximum compression emits the former default 255-byte codestream with SHA-256
-`e5577ebf76a37bf56a93db61b2ccf1fc959292a3d13d6489baf2e7f5b6105558`.
-Pinned `djxl` decodes it as linear sRGB with native Butteraugli distance
+`b0671094599faefd7312880e15aa89373612bbc5b5f028f7f19c60e09492f333`.
+Maximum compression emits a 194-byte codestream with SHA-256
+`a33d5414e7ac5db07184510e629266682cec583d7527bf9d9877317da86f92c4`.
+Both decode to exactly the same finite linear RGB floats as their former
+gradient/full-tree fixtures (263 and 255 bytes). Pinned `djxl` decodes the
+sample as linear sRGB with native Butteraugli distance
 `1.09415638` from the input. The workflow also has an independent in-memory
 FNV-1a codestream pin, deterministic repeated-encode coverage, strided input,
 strategy reporting, invalid-input atomicity, installed-consumer coverage, and

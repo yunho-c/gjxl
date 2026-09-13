@@ -290,6 +290,7 @@ add_library(
   src/codestream/coefficient_order.cpp
   src/codestream/dc_group.cpp
   src/codestream/weighted_dc.cpp
+  src/codestream/dc_context_tree.cpp
   src/codestream/entropy.cpp
   src/codestream/encoder.cpp
   src/codestream/headers.cpp
@@ -1932,6 +1933,15 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_dc_processing_test PRIVATE gjxl_codec)
   add_test(NAME dc_processing COMMAND gjxl_dc_processing_test)
 
+  # Ordinary workflow tests exercise the adaptive default; retain full-tree
+  # resource and allocation-failure coverage as explicit legacy-policy runs.
+  add_test(NAME cpu_workflow_legacy_dc_tree COMMAND gjxl_cpu_workflow_storage_plan_test --legacy-dc-tree)
+  add_test(NAME resident_workflow_legacy_dc_tree COMMAND gjxl_resident_workflow_storage_plan_test --legacy-dc-tree)
+  add_test(NAME compatibility_workflow_legacy_dc_tree COMMAND gjxl_compatibility_workflow_storage_plan_test --legacy-dc-tree)
+  add_executable(gjxl_dc_context_tree_test tests/dc_context_tree_test.cpp)
+  target_link_libraries(gjxl_dc_context_tree_test PRIVATE gjxl_codestream)
+  add_test(NAME dc_context_tree COMMAND gjxl_dc_context_tree_test)
+
   # Optional direct oracle from a separately built, pinned libjxl archive.
   # These dependencies never enter the native library or installed interface.
   set(GJXL_DC_ORACLE_BUILD "" CACHE PATH "Pinned libjxl build for direct DC algorithm oracle")
@@ -1967,6 +1977,16 @@ if(GJXL_BUILD_TESTS)
       "${GJXL_DC_ORACLE_BUILD}/third_party/brotli/libbrotlienc${CMAKE_SHARED_LIBRARY_SUFFIX}"
       "${GJXL_DC_ORACLE_BUILD}/third_party/brotli/libbrotlidec${CMAKE_SHARED_LIBRARY_SUFFIX}"
       "${GJXL_DC_ORACLE_BUILD}/third_party/brotli/libbrotlicommon${CMAKE_SHARED_LIBRARY_SUFFIX}")
+    add_executable(gjxl_dc_context_tree_oracle_test tests/dc_context_tree_test.cpp)
+    target_compile_definitions(gjxl_dc_context_tree_oracle_test PRIVATE GJXL_DC_TREE_ORACLE=1)
+    get_target_property(dc_oracle_includes gjxl_dc_processing_oracle_test INCLUDE_DIRECTORIES)
+    get_target_property(dc_oracle_libraries gjxl_dc_processing_oracle_test LINK_LIBRARIES)
+    target_include_directories(gjxl_dc_context_tree_oracle_test PRIVATE ${dc_oracle_includes})
+    target_link_libraries(gjxl_dc_context_tree_oracle_test PRIVATE gjxl_codestream ${dc_oracle_libraries})
+    if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+      target_compile_options(gjxl_dc_context_tree_oracle_test PRIVATE -fno-sanitize=vptr)
+    endif()
+    add_test(NAME dc_context_tree_oracle COMMAND gjxl_dc_context_tree_oracle_test)
     add_test(NAME dc_processing_oracle COMMAND gjxl_dc_processing_oracle_test)
   endif()
 
@@ -2885,6 +2905,10 @@ if(GJXL_BUILD_BENCHMARKS)
   target_compile_definitions(gjxl_dc_prediction_benchmark PRIVATE
     GJXL_QUALITY_REVISION="${GJXL_QUALITY_REVISION}")
   add_dependencies(gjxl_dc_prediction_benchmark gjxl_embedded_metal_shaders)
+  add_executable(gjxl_dc_tree_benchmark benchmarks/dc_tree_benchmark.cpp)
+  target_link_libraries(gjxl_dc_tree_benchmark PRIVATE gjxl_codestream gjxl_metal gjxl_pfm_io)
+  target_compile_definitions(gjxl_dc_tree_benchmark PRIVATE GJXL_QUALITY_REVISION="${GJXL_QUALITY_REVISION}")
+  add_dependencies(gjxl_dc_tree_benchmark gjxl_embedded_metal_shaders)
   add_executable(gjxl_dc_processing_benchmark benchmarks/dc_processing_benchmark.cpp)
   target_link_libraries(gjxl_dc_processing_benchmark PRIVATE
     gjxl_codestream gjxl_metal gjxl_pfm_io)

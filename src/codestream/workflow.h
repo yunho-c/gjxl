@@ -120,7 +120,7 @@ struct VarDctEncodingOptions {
   /// Its CPU cap includes callers, reserved workers and dormant joined workers.
   std::shared_ptr<const ExecutionDomain> execution_domain;
   /// Lossless DC residual prediction; independent of effort and AQ policy.
-  VarDctDcPrediction dc_prediction = VarDctDcPrediction::kGradient;
+  VarDctDcPrediction dc_prediction = kDefaultDcPrediction;
   /// Opt-in lossy DC quantization experiment; uses one extra precision bit.
   DcQuantizationMode dc_quantization = DcQuantizationMode::kRound;
   /// Signals and uses the decoder's adaptive DC smoothing during AQ.
@@ -172,7 +172,7 @@ struct VarDctEncodingSummary {
   GpuAdaptiveQuantizationMode metal_aq_mode =
     GpuAdaptiveQuantizationMode::kFullyResident;
 
-  VarDctDcPrediction dc_prediction = VarDctDcPrediction::kGradient;
+  VarDctDcPrediction dc_prediction = kDefaultDcPrediction;
   DcQuantizationMode dc_quantization = DcQuantizationMode::kRound;
   bool adaptive_dc_smoothing = false;
 

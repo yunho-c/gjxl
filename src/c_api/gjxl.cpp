@@ -356,7 +356,7 @@ GJXLResult gjxl_encoder_options_init(
       options->compression_mode = GJXL_COMPRESSION_AUTOMATIC;
     }
     if (caller_size >= kEncoderOptionsDcPredictionSize)
-      options->dc_prediction = GJXL_DC_PREDICTION_GRADIENT;
+      options->dc_prediction = GJXL_DC_PREDICTION_WEIGHTED;
     if (caller_size >= kEncoderOptionsDcQuantizationSize)
       options->dc_quantization = GJXL_DC_QUANTIZATION_ROUND;
     if (caller_size >= kEncoderOptionsDcSmoothingSize)
@@ -465,11 +465,11 @@ GJXLResult gjxl_encode(
         return result;
       }
     }
-    gjxl::VarDctDcPrediction dc_prediction =
-        gjxl::VarDctDcPrediction::kGradient;
+    gjxl::VarDctDcPrediction dc_prediction = gjxl::kDefaultDcPrediction;
     if (options->struct_size >= kEncoderOptionsDcPredictionSize) {
       switch (options->dc_prediction) {
       case GJXL_DC_PREDICTION_GRADIENT:
+        dc_prediction = gjxl::VarDctDcPrediction::kGradient;
         break;
       case GJXL_DC_PREDICTION_WEIGHTED:
         dc_prediction = gjxl::VarDctDcPrediction::kWeighted;

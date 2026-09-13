@@ -84,6 +84,11 @@ void AccumulateCodestreamProfile(
   destination->entropy_behavior = source.entropy_behavior;
   destination->coefficient_order_behavior =
     source.coefficient_order_behavior;
+  // Geometry and tree shape describe one frame, including during target-size
+  // retries. Keep the last attempt's layout instead of summing its counts.
+  destination->dc_sample_count = source.dc_sample_count;
+  destination->dc_leaf_count = source.dc_leaf_count;
+  destination->dc_context_count = source.dc_context_count;
   destination->validation_nanoseconds += source.validation_nanoseconds;
   destination->dc_tokenization_nanoseconds +=
     source.dc_tokenization_nanoseconds;

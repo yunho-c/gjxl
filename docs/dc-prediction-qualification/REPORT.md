@@ -1,10 +1,14 @@
 # Native weighted DC prediction: current-effort qualification
 
-Weighted DC prediction is available as an explicit option. **Gradient remains
-the default.** Weighted coding reduces photographic rates at identical decoded
-pixels, but compact regressions and its complete-call cost do not justify an
-unconditional switch, particularly for efforts 3 and 4. No image-size threshold
+This is the historical predictor-only qualification. Its initial decision
+retained gradient by default: weighted reduced photographic rates at identical
+decoded pixels, but compact regressions and complete-call cost counted against
+an unconditional switch, particularly at efforts 3 and 4. No predictor image-size
 or effort threshold was fitted or enabled.
+
+The subsequent [combined-default decision](../dc-small-trees/README.md) accepts
+those tradeoffs and enables weighted prediction with size-adaptive predefined
+trees. The measurements and frozen artifacts below are unchanged.
 
 ## Size and correctness
 

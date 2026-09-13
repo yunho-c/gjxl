@@ -119,7 +119,7 @@ impl Default for EncoderOptions {
             distance: 1.0,
             effort: 7,
             compression_mode: CompressionMode::Automatic,
-            dc_prediction: DcPrediction::Gradient,
+            dc_prediction: DcPrediction::Weighted,
             dc_quantization: DcQuantization::Round,
             adaptive_dc_smoothing: false,
         }
@@ -538,19 +538,30 @@ mod tests {
     }
 
     #[test]
-    fn weighted_dc_is_selectable_and_deterministic() {
+    fn weighted_dc_is_default_and_gradient_remains_selectable() {
         let context = Context::new(Backend::Cpu).expect("CPU context should initialize");
         let pixels = rgba_fixture(64, 64);
         let image = ImageView::rgba8(64, 64, 256, &pixels).unwrap();
-        let gradient = context.encode(&image, EncoderOptions::default()).unwrap();
+        let defaults = EncoderOptions::default();
+        assert_eq!(defaults.dc_prediction, DcPrediction::Weighted);
+        assert_eq!(defaults.dc_quantization, DcQuantization::Round);
+        assert!(!defaults.adaptive_dc_smoothing);
+        let default_output = context.encode(&image, defaults).unwrap();
         let options = EncoderOptions {
             dc_prediction: DcPrediction::Weighted,
             ..EncoderOptions::default()
         };
         let weighted = context.encode(&image, options).unwrap();
         assert!(weighted.starts_with(&[0xff, 0x0a]));
-        assert_ne!(weighted, gradient);
+        assert_eq!(weighted, default_output);
         assert_eq!(weighted, context.encode(&image, options).unwrap());
+        let options = EncoderOptions {
+            dc_prediction: DcPrediction::Gradient,
+            ..defaults
+        };
+        let gradient = context.encode(&image, options).unwrap();
+        assert_ne!(weighted, gradient);
+        assert_eq!(gradient, context.encode(&image, options).unwrap());
     }
 
     #[test]

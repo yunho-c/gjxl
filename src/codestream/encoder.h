@@ -28,7 +28,7 @@ struct VarDctCodestreamOptions {
     VarDctEntropyBehavior::kBalanced;
   VarDctCoefficientOrderBehavior coefficient_order_behavior =
     VarDctCoefficientOrderBehavior::kFull;
-  VarDctDcPrediction dc_prediction = VarDctDcPrediction::kGradient;
+  VarDctDcPrediction dc_prediction = kDefaultDcPrediction;
 };
 
 /// Serializes one validated initial-profile frame as a raw JPEG XL codestream.

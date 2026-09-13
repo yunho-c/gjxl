@@ -1,15 +1,19 @@
 # DC residual prediction
 
 The native encoder supports two lossless representations of quantized DC:
-`gradient` (the existing default) and `weighted` (the default JPEG XL weighted
-predictor with its matching error contexts and fixed tree). Selecting weighted
+`weighted` (the encoding default) and explicitly selectable `gradient`.
+Weighted uses the JPEG XL weighted predictor with its matching error contexts.
+Complete-frame encoding selects a size-adaptive predefined DC tree for either
+predictor; see [small-image DC trees](dc-small-trees/README.md). Selecting weighted
 prediction preserves reconstructed pixels. It does not enable prediction-aware
 DC quantization or adaptive DC smoothing. Those separately controlled lossy
 experiments are described in [dc-processing.md](dc-processing.md).
 
 The choice is independent of effort and compression mode. Weighted prediction
 can reduce photographic file sizes, but it can increase small/synthetic files
-and adds encoder and decoder work. No automatic selection policy is enabled.
+and adds encoder and decoder work. Predictor selection is not content-adaptive:
+weighted applies at every effort and image size, while only the predefined tree
+shape adapts to the whole-frame DC sample count.
 
 ```sh
 gjxl_encode --distance 1 --effort 4 --dc-prediction weighted input.pfm output.jxl
@@ -19,9 +23,13 @@ For C++, set `VarDctEncodingOptions::dc_prediction` to
 `VarDctDcPrediction::kWeighted`; direct serialization accepts the same field in
 `VarDctCodestreamOptions`. The workflow summary records the selection. For C,
 initialize `GJXLEncoderOptions` and set `dc_prediction` to
-`GJXL_DC_PREDICTION_WEIGHTED`. Older C option sizes select gradient, including the
-original 12-byte and subsequent 16-byte layouts. Rust exposes
-`EncoderOptions::dc_prediction` with `DcPrediction::Gradient` and `Weighted`.
+`GJXL_DC_PREDICTION_WEIGHTED`. These are also the defaults when the choice is
+omitted, including the original 12-byte and subsequent 16-byte C option layouts.
+Rust exposes `EncoderOptions::dc_prediction` with `DcPrediction::Gradient` and
+`Weighted`, defaulting to `Weighted`. Use `--dc-prediction gradient` (or the
+corresponding API enum) to select gradient residuals; the size-adaptive tree
+still applies. Geometry-less low-level token/header helpers retain their explicit
+legacy defaults because they cannot infer a whole-frame tree shape.
 
 The predictor, context property, and tree signaling are changed together. AC
 metadata residuals retain their existing representation; DC and metadata share
@@ -39,8 +47,10 @@ comparisons against stock libjxl.
 
 ## Validation status
 
-Implementation and qualification are isolated on `feat/dc-coding`, based on
-`2c936fa9`. The default policy is unchanged.
+The original predictor qualification below was performed on `feat/dc-coding`,
+based on `2c936fa9`, with gradient as the default. The combined weighted/adaptive
+default was subsequently approved on `feat/dc-small-trees`; its decision and
+validation are recorded in [dc-small-trees/README.md](dc-small-trees/README.md).
 
 - The 45-case pinned weighted-predictor oracle passes in Release and with
   ASan/UBSan. It covers strided and boundary geometries, five signal families,
@@ -72,7 +82,8 @@ calls in one process. Its completed-case resume audit also passes. A standalone
 decoder helper was cross-checked against the pinned `djxl` linear-float output,
 and rejects deliberately unequal decoded pixels. The 612-case current-effort
 study and all 18 timing cases (20 pairs each) are complete. All base-gradient
-bytes and decoded-pixel checks pass. Gradient remains the default because of
-compact regressions and the complete-call cost at low efforts. See the
+bytes and decoded-pixel checks pass. That initial decision retained gradient
+because of compact regressions and the complete-call cost at low efforts; the
+later combined-default decision accepts those tradeoffs. See the historical
 [qualification report](dc-prediction-qualification/REPORT.md) and
 [`tools/dc_coding/README.md`](../tools/dc_coding/README.md).

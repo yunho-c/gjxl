@@ -1,5 +1,10 @@
 # Current-effort DC prediction qualification
 
+The frozen studies' `default` control means gradient/round/no-smoothing; that
+historical label does not follow the current weighted/adaptive encoder default.
+Existing runs retain their frozen sources and reject collection after source
+changes. See [the current policy](../../docs/dc-small-trees/README.md).
+
 This harness qualifies the explicit weighted predictor against gradient in a
 fresh native build. Collection and reporting are separate commands. It does
 not launch calibration or change encoder policy.
@@ -95,11 +100,11 @@ independent measured-quality curves below.
 ## Lossy DC processing study
 
 `processing_study.py` is a separate namespace for reconstruction-changing
-experiments. Its five controls are the unchanged gradient default, weighted
+experiments. Its five controls are the historical gradient default, weighted
 residual coding, weighted prediction-aware quantization, weighted smoothing,
 and weighted quantization plus smoothing. The weighted control isolates the
 lossy changes; the gradient control reports their combined effect against the
-current default. Gradient prediction-aware arithmetic is also covered by the
+original default. Gradient prediction-aware arithmetic is also covered by the
 CPU, device, workflow, and independent-decoder tests.
 
 The full matrix deterministically selects six CLIC and six Kodak photographs

@@ -15,6 +15,11 @@ enum class VarDctDcPrediction : uint8_t {
   kWeighted,
 };
 
+/// Default for complete-frame encoding. Explicit gradient coding remains
+/// available independently of the size-adaptive predefined DC tree.
+inline constexpr VarDctDcPrediction kDefaultDcPrediction =
+    VarDctDcPrediction::kWeighted;
+
 [[nodiscard]] constexpr bool IsValidDcPrediction(VarDctDcPrediction mode) {
   return mode == VarDctDcPrediction::kGradient ||
          mode == VarDctDcPrediction::kWeighted;

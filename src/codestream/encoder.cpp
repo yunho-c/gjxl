@@ -4,6 +4,7 @@
 // Adapted for GJXL from libjxl-tiny's encoder/enc_frame.cc.
 
 #include "codestream/encoder.h"
+#include "codestream/dc_context_tree_internal.h"
 
 #include <algorithm>
 #include <array>
@@ -618,7 +619,7 @@ WriteCommonSections(const VarDctFrameView &frame,
                     const EntropyCode &dc_code, Storage<BitWriter> *sections,
                     uint64_t *token_bits,
                     codestream_internal::SectionWritingWorkProfile *profile,
-                    VarDctDcPrediction prediction) {
+                    const codestream_internal::DcContextTreeLayout& dc_layout) {
 
   if (sections == nullptr || dc_groups.empty() ||
       dc_streams.size() != 2 * dc_groups.size()) {
@@ -628,9 +629,9 @@ WriteCommonSections(const VarDctFrameView &frame,
     Storage<BitWriter> candidate(1 + dc_groups.size());
     const ProfileClock::time_point global_begin =
       WorkBegin(profile != nullptr);
-    Status status = WriteSimpleDcGlobal(frame.quantizer().params(),
-                                        dc_groups.size(), block_context_map,
-                                        dc_code, &candidate[0], prediction);
+    Status status = codestream_internal::WriteDcGlobalWithLayout(
+        frame.quantizer().params(), dc_groups.size(), block_context_map,
+        dc_code, &candidate[0], dc_layout);
     if (!status.ok()) {
       return status;
     }
@@ -839,7 +840,7 @@ Status MeasureCommonSections(const VarDctFrameView &frame,
                              const EntropyCode &dc_code,
                              std::span<const uint64_t> dc_group_section_bits,
                              Storage<uint64_t> *section_bits,
-                             VarDctDcPrediction prediction) {
+                             const codestream_internal::DcContextTreeLayout& dc_layout) {
 
   if (section_bits == nullptr || dc_group_count == 0 ||
       dc_group_section_bits.size() != dc_group_count) {
@@ -847,9 +848,9 @@ Status MeasureCommonSections(const VarDctFrameView &frame,
   }
   try {
     BitWriter global;
-    if (Status status = WriteSimpleDcGlobal(frame.quantizer().params(),
-                                            dc_group_count, block_context_map,
-                                            dc_code, &global, prediction);
+    if (Status status = codestream_internal::WriteDcGlobalWithLayout(
+            frame.quantizer().params(), dc_group_count, block_context_map,
+            dc_code, &global, dc_layout);
         !status.ok()) {
       return status;
     }
@@ -1188,11 +1189,37 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
     return validation;
   }
 
+  size_t dc_samples = 0;
+  const codestream_internal::DcContextTreeLayout* selected_dc_layout = nullptr;
+  if (auto status = codestream_internal::ComputeDcSampleCount(
+          frame.geometry().block_grid().blocks, &dc_samples); !status.ok())
+    return status;
+  if (auto status = codestream_internal::SelectDcContextTreeLayout(
+          dc_samples, options.dc_prediction,
+          codestream_internal::CurrentDcTreePolicy(), &selected_dc_layout);
+      !status.ok()) return status;
+  const auto& dc_layout = *selected_dc_layout;
+  candidate_profile.dc_sample_count = dc_samples;
+  candidate_profile.dc_leaf_count = dc_layout.dc_leaf_count;
+  candidate_profile.dc_context_count = dc_layout.context_count;
+
   try {
     const ProfileClock::time_point dc_tokenization_begin = ProfileBegin(profile);
     Storage<SimpleDcGroupTokenStreams> dc_groups;
     Status status = codestream_internal::TokenizeSimpleDcGroupsForEncoder(
         frame, &dc_groups, options.dc_prediction);
+    // Existing group-local predictors emit legacy context IDs. Translate both
+    // DC and metadata IDs before any population/cost work. Pruning changes BFS
+    // leaf numbering even though the metadata subtree itself is unchanged.
+    // Full trees skip this pass; reduced trees cover at most 8192 DC samples.
+    if (status.ok() && !dc_layout.full_tree()) {
+      for (auto& group : dc_groups) {
+        for (auto* stream : {&group.dc_tokens, &group.ac_metadata_tokens}) {
+          for (auto& token : *stream)
+            token.context = dc_layout.context_map[token.context];
+        }
+      }
+    }
     ProfileEnd(
       profile, dc_tokenization_begin,
       &candidate_profile.dc_tokenization_nanoseconds);
@@ -1528,7 +1555,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
         if (index == 0) {
           if (exhaustive_representation_search) {
             return OptimizeBestEntropyCode(
-              dc_streams, {.context_count = kSimpleDcContextCount}, &dc_code,
+              dc_streams, {.context_count = dc_layout.context_count}, &dc_code,
               &dc_cost, &prefix_dc_code, &prefix_dc_cost, entropy_profile);
           }
           if (options.entropy_behavior == VarDctEntropyBehavior::kBalanced) {
@@ -1543,19 +1570,19 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
             const auto population_begin = WorkBegin(entropy_profile != nullptr);
             Status population_status =
               codestream_internal::CollectDefaultEntropyPopulations(
-                dc_views, kSimpleDcContextCount, &populations);
+                dc_views, dc_layout.context_count, &populations);
             WorkEnd(
               entropy_profile != nullptr, population_begin,
               entropy_profile == nullptr ? nullptr :
                 &entropy_profile->ans_histogram_build_nanoseconds);
             if (!population_status.ok()) return population_status;
             return OptimizeOrdinaryEntropyCode(
-              dc_views, {.context_count = kSimpleDcContextCount},
+              dc_views, {.context_count = dc_layout.context_count},
               options.entropy_behavior, populations, true,
               &dc_code, &dc_cost, entropy_profile);
           }
           return OptimizeOrdinaryEntropyCode(
-            dc_streams, {.context_count = kSimpleDcContextCount},
+            dc_streams, {.context_count = dc_layout.context_count},
             options.entropy_behavior, true,
             &dc_code, &dc_cost, entropy_profile);
         }
@@ -1721,7 +1748,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
         Status measure_status = MeasureCommonSections(
             frame, dc_groups.size(), block_context_maps[map_index],
             *dc_codes[mode], dc_group_section_bits[mode],
-            &common_section_bits[map_index][mode], options.dc_prediction);
+            &common_section_bits[map_index][mode], dc_layout);
         WorkEnd(
           profile != nullptr, work_begin,
           &common_measurement_work[index]);
@@ -1864,7 +1891,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
         selected_dc_code, &common_sections,
         exhaustive_representation_search ? nullptr : &written_dc_token_bits,
         profile == nullptr ? nullptr : &selected_write_profile,
-        options.dc_prediction);
+        dc_layout);
     if (!status.ok()) {
       return status;
     }

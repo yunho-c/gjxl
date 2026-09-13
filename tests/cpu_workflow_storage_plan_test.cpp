@@ -14,6 +14,7 @@
 #include "codec/adaptive_quantization_internal.h"
 #include "codec/color_transform_internal.h"
 #include "codec/frontend_storage_plan.h"
+#include "codestream/dc_context_tree_internal.h"
 #include "codestream/cpu_workflow_storage_plan.h"
 #include "codestream/workflow_internal.h"
 #include "core/thread_budget.h"
@@ -717,6 +718,9 @@ bool CheckFailure() {
 } // namespace
 
 int main(int argc, char **argv) {
+  ScopedDcTreePolicyForTesting dc_tree_choice(
+      argc == 2 && std::string_view(argv[1]) == "--legacy-dc-tree"
+          ? DcTreePolicy::kLegacy : CurrentDcTreePolicy());
   if (argc == 2 && std::string_view(argv[1]) == "--plans-only")
     return CheckPlans() && CheckPolicy() ? EXIT_SUCCESS : EXIT_FAILURE;
   if (argc == 2 && std::string_view(argv[1]) == "--large") {

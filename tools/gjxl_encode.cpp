@@ -55,7 +55,7 @@ struct Options {
     gjxl::VarDctCompressionMode::kAutomatic;
   gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
     gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
-  gjxl::VarDctDcPrediction dc_prediction = gjxl::VarDctDcPrediction::kGradient;
+  gjxl::VarDctDcPrediction dc_prediction = gjxl::kDefaultDcPrediction;
   gjxl::DcQuantizationMode dc_quantization = gjxl::DcQuantizationMode::kRound;
   bool adaptive_dc_smoothing = false;
   bool collect_final_butteraugli_score = false;

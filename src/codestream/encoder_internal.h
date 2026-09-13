@@ -89,6 +89,10 @@ template <typename Allocator>
 }
 
 struct VarDctCodestreamProfile {
+  // Per-frame layout; workflow profiling retains the last attempt's counts.
+  size_t dc_sample_count = 0;
+  uint32_t dc_leaf_count = 0;
+  uint32_t dc_context_count = 0;
   VarDctEntropyBehavior entropy_behavior =
     VarDctEntropyBehavior::kBalanced;
   VarDctCoefficientOrderBehavior coefficient_order_behavior =

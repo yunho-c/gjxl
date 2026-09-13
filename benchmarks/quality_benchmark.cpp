@@ -27,7 +27,7 @@ namespace fs = std::filesystem;
 struct Options {
   fs::path input, output, raw;
   float distance = 1.0f;
-  gjxl::VarDctDcPrediction dc_prediction = gjxl::VarDctDcPrediction::kGradient;
+  gjxl::VarDctDcPrediction dc_prediction = gjxl::kDefaultDcPrediction;
   gjxl::DcQuantizationMode dc_quantization = gjxl::DcQuantizationMode::kRound;
   bool adaptive_dc_smoothing = false;
   size_t effort = 7, threads = 8, warmups = 1, samples = 1;

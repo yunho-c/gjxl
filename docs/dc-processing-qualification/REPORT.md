@@ -7,9 +7,11 @@ some rate benefit, but its incremental encoding cost and inconsistent gains do
 not support enabling it automatically. Smoothing is approximately rate-neutral
 on these photographic medians; combining the two often costs rate.
 
-Weighted residual prediction remains a separate explicit option. Its stronger
-evidence is in the [lossless-prediction report](../dc-prediction-qualification/REPORT.md).
-No automatic effort, image-size, or content threshold was fitted or enabled.
+This historical study uses gradient as its control named `default`. Weighted
+residual prediction and size-adaptive predefined DC trees were subsequently
+[promoted independently](../dc-small-trees/README.md); the frozen measurements
+below retain their original controls. No predictor effort, image-size, or
+content threshold was fitted or enabled.
 
 ## Controls and measured scope
 

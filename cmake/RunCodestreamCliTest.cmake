@@ -390,7 +390,29 @@ if(NOT maximum_compression_repeat_result EQUAL 0)
     "${maximum_compression_repeat_error}")
 endif()
 
+foreach(prediction IN ITEMS gradient weighted)
+  set(predicted "${GJXL_TEST_DIR}/explicit-${prediction}.jxl")
+  execute_process(
+    COMMAND
+      "${GJXL_ENCODER}" --distance 1.0 --backend cpu
+      --dc-prediction "${prediction}" "${GJXL_SAMPLE}" "${predicted}"
+    RESULT_VARIABLE prediction_result
+    OUTPUT_QUIET
+    ERROR_VARIABLE prediction_error
+  )
+  if(NOT prediction_result EQUAL 0)
+    message(FATAL_ERROR "Explicit ${prediction} encode failed: ${prediction_error}")
+  endif()
+  file(SHA256 "${predicted}" ${prediction}_hash)
+endforeach()
+
 file(SHA256 "${first}" first_hash)
+if(NOT first_hash STREQUAL weighted_hash)
+  message(FATAL_ERROR "Default CLI output does not use weighted DC")
+endif()
+if(first_hash STREQUAL gradient_hash)
+  message(FATAL_ERROR "Explicit gradient DC selection was ignored")
+endif()
 file(SHA256 "${second}" second_hash)
 file(SHA256 "${effort_7}" effort_7_hash)
 file(SHA256 "${effort_10}" effort_10_hash)
@@ -438,14 +460,16 @@ endif()
 if(NOT maximum_compression_hash STREQUAL maximum_compression_repeat_hash)
   message(FATAL_ERROR "Maximum-compression CLI output is not deterministic")
 endif()
+# Weighted/adaptive fixtures independently decode identically to the former
+# gradient/full-tree fixtures; see docs/dc-small-trees/default-validation.json.
 set(expected_hash
-  e4566239f5e15dd67a4716d26da662728c88ffcae19bdf93ff28c2b8df6c8504)
+  b0671094599faefd7312880e15aa89373612bbc5b5f028f7f19c60e09492f333)
 if(NOT first_hash STREQUAL expected_hash)
   message(FATAL_ERROR
     "checked sample codestream hash changed: ${first_hash}")
 endif()
 set(expected_maximum_compression_hash
-  e5577ebf76a37bf56a93db61b2ccf1fc959292a3d13d6489baf2e7f5b6105558)
+  a33d5414e7ac5db07184510e629266682cec583d7527bf9d9877317da86f92c4)
 if(NOT maximum_compression_hash STREQUAL expected_maximum_compression_hash)
   message(FATAL_ERROR
     "Maximum-compression sample hash changed: ${maximum_compression_hash}")
@@ -511,6 +535,7 @@ if(high_density_found EQUAL -1)
   message(FATAL_ERROR "High-density CLI report did not identify its policy")
 endif()
 
+# The adaptive tree reduces the tiny fixture header; keep a reachable budget.
 set(target_bytes_first "${GJXL_TEST_DIR}/target-bytes-first.jxl")
 set(target_bytes_second "${GJXL_TEST_DIR}/target-bytes-second.jxl")
 set(target_bpp "${GJXL_TEST_DIR}/target-bpp.jxl")
@@ -519,7 +544,7 @@ foreach(target_output IN ITEMS
         "${target_bytes_first}" "${target_bytes_second}")
   execute_process(
     COMMAND
-      "${GJXL_ENCODER}" --target-bytes 260 --size-tolerance 0.1
+      "${GJXL_ENCODER}" --target-bytes 200 --size-tolerance 0.1
       --max-attempts 8 --backend cpu "${GJXL_SAMPLE}" "${target_output}"
     RESULT_VARIABLE target_result
     OUTPUT_VARIABLE target_report
@@ -528,7 +553,7 @@ foreach(target_output IN ITEMS
   if(NOT target_result EQUAL 0)
     message(FATAL_ERROR "Target-byte CLI encode failed: ${target_error}")
   endif()
-  foreach(expected "for target 260 bytes (met"
+  foreach(expected "for target 200 bytes (met"
                    "selected Butteraugli target" "in 7 attempts"
                    "using CPU")
     string(FIND "${target_report}" "${expected}" found)
@@ -538,9 +563,9 @@ foreach(target_output IN ITEMS
   endforeach()
 endforeach()
 file(SIZE "${target_bytes_first}" target_size)
-if(target_size GREATER 260 OR target_size LESS 234)
+if(target_size GREATER 200 OR target_size LESS 180)
   message(FATAL_ERROR
-    "Target-byte output ${target_size} is outside [234, 260]")
+    "Target-byte output ${target_size} is outside [180, 200]")
 endif()
 file(SHA256 "${target_bytes_first}" target_bytes_first_hash)
 file(SHA256 "${target_bytes_second}" target_bytes_second_hash)
@@ -548,10 +573,10 @@ if(NOT target_bytes_first_hash STREQUAL target_bytes_second_hash)
   message(FATAL_ERROR "Target-byte CLI output is not deterministic")
 endif()
 
-# 9.42 * (17 * 13) / 8 floors to the same 260-byte budget.
+# 7.24 * (17 * 13) / 8 floors to the same 200-byte budget.
 execute_process(
   COMMAND
-    "${GJXL_ENCODER}" --target-bpp 9.42 --size-tolerance 0.1
+    "${GJXL_ENCODER}" --target-bpp 7.24 --size-tolerance 0.1
     --max-attempts 8 --backend cpu "${GJXL_SAMPLE}" "${target_bpp}"
   RESULT_VARIABLE target_bpp_result
   OUTPUT_VARIABLE target_bpp_report
@@ -560,7 +585,7 @@ execute_process(
 if(NOT target_bpp_result EQUAL 0)
   message(FATAL_ERROR "Target-BPP CLI encode failed: ${target_bpp_error}")
 endif()
-string(FIND "${target_bpp_report}" "9.42 bpp / 260 bytes (met" bpp_found)
+string(FIND "${target_bpp_report}" "7.24 bpp / 200 bytes (met" bpp_found)
 if(bpp_found EQUAL -1)
   message(FATAL_ERROR "Target-BPP CLI report did not expose its byte budget")
 endif()
@@ -571,7 +596,7 @@ endif()
 
 execute_process(
   COMMAND
-    "${GJXL_ENCODER}" --target-bytes 260 --size-tolerance 0.1
+    "${GJXL_ENCODER}" --target-bytes 200 --size-tolerance 0.1
     --max-attempts 8 --size-selection closest --backend cpu
     "${GJXL_SAMPLE}" "${target_closest}"
   RESULT_VARIABLE target_closest_result
@@ -582,7 +607,7 @@ if(NOT target_closest_result EQUAL 0)
   message(FATAL_ERROR
     "Closest-absolute CLI encode failed: ${target_closest_error}")
 endif()
-foreach(expected "for target 260 bytes (met" "0 failed" "using CPU")
+foreach(expected "for target 200 bytes (met" "0 failed" "using CPU")
   string(FIND "${target_closest_report}" "${expected}" found)
   if(found EQUAL -1)
     message(FATAL_ERROR
@@ -621,7 +646,7 @@ if(NOT maximum_error_first_hash STREQUAL maximum_error_second_hash)
   message(FATAL_ERROR "Maximum-error CLI output is not deterministic")
 endif()
 set(expected_maximum_error_hash
-  a49511547682f801c33f2054e6bd97b990c8f6709f16e1e540c15f2950340f66)
+  eeb771640076375d10365be7b773e0768c3b495e0e8e322b6cd12623c8284673)
 if(NOT maximum_error_first_hash STREQUAL expected_maximum_error_hash)
   message(FATAL_ERROR
     "Maximum-error sample hash changed: ${maximum_error_first_hash}")

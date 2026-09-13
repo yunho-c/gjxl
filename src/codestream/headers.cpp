@@ -5,7 +5,7 @@
 // encoder/enc_frame.cc.
 
 #include "codestream/headers.h"
-#include "codestream/weighted_dc.h"
+#include "codestream/dc_context_tree_internal.h"
 
 #include <algorithm>
 #include <array>
@@ -32,53 +32,6 @@ struct BitField {
   size_t width;
   uint64_t value;
 };
-
-// Static modular context tree for the DC and AC-metadata channels. Values are
-// already HybridUint inputs; only token 1 depends on the number of DC groups.
-constexpr EntropyToken kContextTreeTokens[] = {
-  {1, 2},   {0, 4},  {1, 1},   {0, 2},  {1, 10},   {0, 0},  {1, 1},   {0, 4},
-  {1, 1},   {0, 0},  {1, 10},  {0, 94}, {1, 10},   {0, 61}, {1, 0},   {2, 0},
-  {3, 0},   {4, 0},  {5, 0},   {1, 3},  {0, 0},    {1, 0},  {2, 5},   {3, 0},
-  {4, 0},   {5, 0},  {1, 0},   {2, 5},  {3, 0},    {4, 0},  {5, 0},   {1, 10},
-  {0, 382}, {1, 10}, {0, 22},  {1, 10}, {0, 13},   {1, 10}, {0, 253}, {1, 8},
-  {0, 10},  {1, 8},  {0, 10},  {1, 10}, {0, 784},  {1, 10}, {0, 190}, {1, 10},
-  {0, 46},  {1, 10}, {0, 10},  {1, 10}, {0, 5},    {1, 10}, {0, 29},  {1, 10},
-  {0, 125}, {1, 10}, {0, 509}, {1, 8},  {0, 22},   {1, 8},  {0, 6},   {1, 8},
-  {0, 22},  {1, 8},  {0, 6},   {1, 10}, {0, 1000}, {1, 10}, {0, 510}, {1, 10},
-  {0, 254}, {1, 10}, {0, 126}, {1, 10}, {0, 62},   {1, 10}, {0, 30},  {1, 10},
-  {0, 14},  {1, 10}, {0, 6},   {1, 10}, {0, 1},    {1, 10}, {0, 7},   {1, 10},
-  {0, 21},  {1, 10}, {0, 45},  {1, 10}, {0, 93},   {1, 10}, {0, 189}, {1, 10},
-  {0, 381}, {1, 10}, {0, 783}, {1, 0},  {2, 1},    {3, 0},  {4, 0},   {5, 0},
-  {1, 0},   {2, 1},  {3, 0},   {4, 0},  {5, 0},    {1, 0},  {2, 1},   {3, 0},
-  {4, 0},   {5, 0},  {1, 0},   {2, 1},  {3, 0},    {4, 0},  {5, 0},   {1, 0},
-  {2, 0},   {3, 0},  {4, 0},   {5, 0},  {1, 0},    {2, 0},  {3, 0},   {4, 0},
-  {5, 0},   {1, 0},  {2, 0},   {3, 0},  {4, 0},    {5, 0},  {1, 0},   {2, 0},
-  {3, 0},   {4, 0},  {5, 0},   {1, 0},  {2, 5},    {3, 0},  {4, 0},   {5, 0},
-  {1, 0},   {2, 5},  {3, 0},   {4, 0},  {5, 0},    {1, 0},  {2, 5},   {3, 0},
-  {4, 0},   {5, 0},  {1, 0},   {2, 5},  {3, 0},    {4, 0},  {5, 0},   {1, 0},
-  {2, 5},   {3, 0},  {4, 0},   {5, 0},  {1, 0},    {2, 5},  {3, 0},   {4, 0},
-  {5, 0},   {1, 0},  {2, 5},   {3, 0},  {4, 0},    {5, 0},  {1, 0},   {2, 5},
-  {3, 0},   {4, 0},  {5, 0},   {1, 0},  {2, 5},    {3, 0},  {4, 0},   {5, 0},
-  {1, 0},   {2, 5},  {3, 0},   {4, 0},  {5, 0},    {1, 0},  {2, 5},   {3, 0},
-  {4, 0},   {5, 0},  {1, 0},   {2, 5},  {3, 0},    {4, 0},  {5, 0},   {1, 0},
-  {2, 5},   {3, 0},  {4, 0},   {5, 0},  {1, 0},    {2, 5},  {3, 0},   {4, 0},
-  {5, 0},   {1, 0},  {2, 5},   {3, 0},  {4, 0},    {5, 0},  {1, 10},  {0, 2},
-  {1, 0},   {2, 5},  {3, 0},   {4, 0},  {5, 0},    {1, 0},  {2, 5},   {3, 0},
-  {4, 0},   {5, 0},  {1, 0},   {2, 5},  {3, 0},    {4, 0},  {5, 0},   {1, 0},
-  {2, 5},   {3, 0},  {4, 0},   {5, 0},  {1, 0},    {2, 5},  {3, 0},   {4, 0},
-  {5, 0},   {1, 0},  {2, 5},   {3, 0},  {4, 0},    {5, 0},  {1, 0},   {2, 5},
-  {3, 0},   {4, 0},  {5, 0},   {1, 0},  {2, 5},    {3, 0},  {4, 0},   {5, 0},
-  {1, 0},   {2, 5},  {3, 0},   {4, 0},  {5, 0},    {1, 0},  {2, 5},   {3, 0},
-  {4, 0},   {5, 0},  {1, 0},   {2, 5},  {3, 0},    {4, 0},  {5, 0},   {1, 0},
-  {2, 5},   {3, 0},  {4, 0},   {5, 0},  {1, 0},    {2, 5},  {3, 0},   {4, 0},
-  {5, 0},   {1, 0},  {2, 5},   {3, 0},  {4, 0},    {5, 0},  {1, 0},   {2, 5},
-  {3, 0},   {4, 0},  {5, 0},   {1, 10}, {0, 999},  {1, 0},  {2, 5},   {3, 0},
-  {4, 0},   {5, 0},  {1, 0},   {2, 5},  {3, 0},    {4, 0},  {5, 0},   {1, 0},
-  {2, 5},   {3, 0},  {4, 0},   {5, 0},  {1, 0},    {2, 5},  {3, 0},   {4, 0},
-  {5, 0},
-};
-
-static_assert(std::size(kContextTreeTokens) == 313);
 
 Status WriteFields(BitWriter* writer, std::span<const BitField> fields) {
   for (const BitField field : fields) {
@@ -249,18 +202,14 @@ Status WriteBlockContextMap(
 }
 
 Status WriteContextTree(size_t dc_group_count, BitWriter *writer,
-                        VarDctDcPrediction prediction) {
+                        const codestream_internal::DcContextTreeLayout& layout) {
   if (dc_group_count == 0 ||
       dc_group_count >= static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
     return Status::InvalidArgument("DC-group count cannot be encoded");
   }
 
-  auto tokens = std::to_array(kContextTreeTokens);
-  if (prediction == VarDctDcPrediction::kWeighted) {
-    Status status = codestream_internal::UseWeightedDcTree(tokens);
-    if (!status.ok())
-      return status;
-  }
+  auto storage = layout.tokens;
+  std::span<EntropyToken> tokens(storage.data(), layout.token_count);
   tokens[1].value = PackSigned(static_cast<int32_t>(1 + dc_group_count));
   const std::array streams = {EntropyTokenStreamView::Interleaved(tokens)};
   EntropyCode code;
@@ -354,12 +303,12 @@ Status codestream_internal::ComputeSerializerHeaderStoragePlan(
   EntropyOptimizationStoragePlan tree_search;
   status = ComputeEntropyOptimizationStoragePlan(
     {.policy = EntropyStoragePolicy::kPrefix,
-     .tokens = std::size(kContextTreeTokens), .contexts = kContextTreeContextCount,
+     .tokens = codestream_internal::DcContextTreeLayout::kMaximumTokens, .contexts = kContextTreeContextCount,
      .sections = 1, .return_cost = false}, &tree_search);
   if (!status.ok()) return status;
   EntropyTokenEmissionStoragePlan tree_tokens, order_emission;
   status = ComputeEntropyTokenEmissionStoragePlan(
-    EntropyCodingMode::kPrefix, std::size(kContextTreeTokens), &tree_tokens);
+    EntropyCodingMode::kPrefix, codestream_internal::DcContextTreeLayout::kMaximumTokens, &tree_tokens);
   if (!status.ok()) return status;
   status = ComputeEntropyTokenEmissionStoragePlan(
     EntropyCodingMode::kAns, order_tokens, &order_emission);
@@ -494,13 +443,20 @@ Status WriteSimpleQuantizer(QuantizerParams params, BitWriter* writer) {
 }
 
 Status WriteSimpleDcGlobal(QuantizerParams params, size_t dc_group_count,
-                           const SimpleBlockContextMap &block_context_map,
-                           const EntropyCode &dc_code, BitWriter *writer,
+                           const SimpleBlockContextMap& block_context_map,
+                           const EntropyCode& dc_code, BitWriter* writer,
                            VarDctDcPrediction prediction) {
-
   if (!IsValidDcPrediction(prediction))
     return Status::InvalidArgument("DC prediction is invalid");
+  return codestream_internal::WriteDcGlobalWithLayout(
+      params, dc_group_count, block_context_map, dc_code, writer,
+      codestream_internal::LegacyDcContextTree(prediction));
+}
 
+Status codestream_internal::WriteDcGlobalWithLayout(
+    QuantizerParams params, size_t dc_group_count,
+    const SimpleBlockContextMap& block_context_map, const EntropyCode& dc_code,
+    BitWriter* writer, const DcContextTreeLayout& layout) {
   if (writer == nullptr) {
     return Status::InvalidArgument("DC-global output is null");
   }
@@ -522,7 +478,7 @@ Status WriteSimpleDcGlobal(QuantizerParams params, size_t dc_group_count,
       return status;
     }
     if (Status status =
-            WriteContextTree(dc_group_count, &temporary, prediction);
+            WriteContextTree(dc_group_count, &temporary, layout);
         !status.ok()) {
       return status;
     }
