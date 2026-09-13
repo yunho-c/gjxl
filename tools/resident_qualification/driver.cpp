@@ -17,6 +17,7 @@
 #include <vector>
 #include "codestream/workflow_internal.h"
 #include "io/pfm.h"
+#include "../../benchmarks/synthetic_images.h"
 #include "codestream/batch_workflow.h"
 #ifdef GJXL_FINAL_SCHEDULER
 #include "codestream/workflow_admission.h"
@@ -79,30 +80,6 @@ struct ImageStorage {
       image.plane[channel].begin());
   }
   return image;
-}
-
-void FillSynthetic(ImageStorage* image) {
-  for (size_t y = 0; y < image->extent.height; ++y) {
-    for (size_t x = 0; x < image->extent.width; ++x) {
-      const float fx =
-          static_cast<float>(x) /
-          static_cast<float>(std::max<size_t>(1, image->extent.width - 1));
-      const float fy =
-          static_cast<float>(y) /
-          static_cast<float>(std::max<size_t>(1, image->extent.height - 1));
-      image->plane[0][y * image->extent.width + x] =
-          std::clamp(0.08f + 0.72f * fx +
-                         0.13f * std::sin(0.47f * static_cast<float>(x + y)),
-                     0.0f, 1.0f);
-      image->plane[1][y * image->extent.width + x] = std::clamp(
-          0.1f + 0.68f * fy +
-              0.16f * std::cos(0.39f * (2.0f * static_cast<float>(x) -
-                                        static_cast<float>(y))),
-          0.0f, 1.0f);
-      image->plane[2][y * image->extent.width + x] =
-          ((x / 7 + y / 5) & 1u) == 0 ? 0.12f : 0.84f;
-    }
-  }
 }
 
 void RequireStatus(std::string_view operation, gjxl::Status status) {
@@ -174,7 +151,8 @@ int main(int argc, char** argv) try {
       const auto separator = value.find('x');
       Check(separator != std::string::npos, "Synthetic input requires WIDTHxHEIGHT");
       ImageStorage image({Number(value.substr(0, separator)), Number(value.substr(separator + 1))});
-      FillSynthetic(&image); original.push_back(std::move(image)); names.push_back(value);
+      gjxl::benchmark::FillEncodingStress(image.View());
+      original.push_back(std::move(image)); names.push_back(value);
     } else throw std::runtime_error("Unknown argument: " + key);
   }
   Check(!original.empty() && count > 0 && in_flight > 0 && callers > 0 && callers <= 2,

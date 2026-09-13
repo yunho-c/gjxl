@@ -45,6 +45,7 @@
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/quantization_pipeline.h"
 #include "io/pfm.h"
+#include "synthetic_images.h"
 
 #ifndef GJXL_FLOWER_PPM_PATH
 #error "GJXL_FLOWER_PPM_PATH must identify the pinned Flower PPM"
@@ -857,30 +858,6 @@ ParseGpuProfilingMode(std::string_view text) {
   return image;
 }
 
-void FillSynthetic(ImageStorage* image) {
-  for (size_t y = 0; y < image->extent.height; ++y) {
-    for (size_t x = 0; x < image->extent.width; ++x) {
-      const float fx =
-          static_cast<float>(x) /
-          static_cast<float>(std::max<size_t>(1, image->extent.width - 1));
-      const float fy =
-          static_cast<float>(y) /
-          static_cast<float>(std::max<size_t>(1, image->extent.height - 1));
-      image->plane[0][y * image->extent.width + x] =
-          std::clamp(0.08f + 0.72f * fx +
-                         0.13f * std::sin(0.47f * static_cast<float>(x + y)),
-                     0.0f, 1.0f);
-      image->plane[1][y * image->extent.width + x] = std::clamp(
-          0.1f + 0.68f * fy +
-              0.16f * std::cos(0.39f * (2.0f * static_cast<float>(x) -
-                                        static_cast<float>(y))),
-          0.0f, 1.0f);
-      image->plane[2][y * image->extent.width + x] =
-          ((x / 7 + y / 5) & 1u) == 0 ? 0.12f : 0.84f;
-    }
-  }
-}
-
 void FillWorkflowGradient(ImageStorage* image) {
   for (size_t y = 0; y < image->extent.height; ++y) {
     for (size_t x = 0; x < image->extent.width; ++x) {
@@ -1524,7 +1501,7 @@ void RunCoefficientCodingOnlyWorkload(
     if (spec.workflow_gradient) {
       FillWorkflowGradient(&original);
     } else {
-      FillSynthetic(&original);
+      gjxl::benchmark::FillEncodingStress(original.View());
     }
   }
   const gjxl::Extent2D coding_extent = PaddedExtent(original.extent);
@@ -1657,7 +1634,7 @@ void RunPublicWorkflowOnlyWorkload(
     if (spec.workflow_gradient) {
       FillWorkflowGradient(&original);
     } else {
-      FillSynthetic(&original);
+      gjxl::benchmark::FillEncodingStress(original.View());
     }
   }
 
@@ -1933,7 +1910,7 @@ void RunGpuProfileWorkflowWorkload(
     if (spec.workflow_gradient) {
       FillWorkflowGradient(&original);
     } else {
-      FillSynthetic(&original);
+      gjxl::benchmark::FillEncodingStress(original.View());
     }
   }
 
@@ -2020,7 +1997,7 @@ void RunGpuCompleteAqOnlyWorkload(
     gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode, gjxl::GpuBackend& gpu,
     double* global_sink) {
   ImageStorage original(spec.source_extent);
-  FillSynthetic(&original);
+  gjxl::benchmark::FillEncodingStress(original.View());
   const gjxl::Extent2D coding_extent = PaddedExtent(original.extent);
   ImageStorage padded_linear(coding_extent);
   ImageStorage opsin(coding_extent);
@@ -2122,7 +2099,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
     if (spec.workflow_gradient) {
       FillWorkflowGradient(&original);
     } else {
-      FillSynthetic(&original);
+      gjxl::benchmark::FillEncodingStress(original.View());
     }
   }
   const gjxl::Extent2D coding_extent = PaddedExtent(original.extent);

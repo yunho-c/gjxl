@@ -44,8 +44,11 @@ def hashes(directory):
 
 def package_hashes():
     # README describes the run; executable/configuration inputs define identity.
-    return {p.name: sha(p) for p in sorted(PACKAGE.iterdir())
-            if p.suffix in ('.py', '.cpp', '.json', '.supp') or p.name == 'CMakeLists.txt'}
+    result = {p.name: sha(p) for p in sorted(PACKAGE.iterdir())
+              if p.suffix in ('.py', '.cpp', '.json', '.supp') or p.name == 'CMakeLists.txt'}
+    shared_fixture = Path('../../benchmarks/synthetic_images.h')
+    result[str(shared_fixture)] = sha(PACKAGE / shared_fixture)
+    return result
 
 
 def output(command, cwd=None):

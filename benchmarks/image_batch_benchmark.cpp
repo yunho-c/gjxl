@@ -30,6 +30,7 @@
 #include "codestream/workflow.h"
 #include "core/image.h"
 #include "io/pfm.h"
+#include "synthetic_images.h"
 
 namespace {
 
@@ -94,6 +95,14 @@ struct ImageStorage {
     for (std::vector<float>& values : plane) {
       values.resize(pixel_count);
     }
+  }
+
+  [[nodiscard]] gjxl::Image3FView MutableView() {
+    return {{
+      gjxl::PlaneF32View{plane[0].data(), extent, extent.width},
+      gjxl::PlaneF32View{plane[1].data(), extent, extent.width},
+      gjxl::PlaneF32View{plane[2].data(), extent, extent.width},
+    }};
   }
 
   [[nodiscard]] gjxl::ConstImage3FView View() const {
@@ -421,28 +430,6 @@ void PrintUsage(std::string_view executable) {
   return escaped + '"';
 }
 
-void FillImage(ImageStorage* image) {
-  const float width_scale = image->extent.width > 1
-    ? 1.0f / static_cast<float>(image->extent.width - 1)
-    : 0.0f;
-  const float height_scale = image->extent.height > 1
-    ? 1.0f / static_cast<float>(image->extent.height - 1)
-    : 0.0f;
-  for (size_t y = 0; y < image->extent.height; ++y) {
-    for (size_t x = 0; x < image->extent.width; ++x) {
-      const float fx = static_cast<float>(x) * width_scale;
-      const float fy = static_cast<float>(y) * height_scale;
-      const float texture = static_cast<float>(
-        (13 * x + 17 * y + (x * y) % 29) % 97) / 1024.0f;
-      const size_t index = y * image->extent.width + x;
-      image->plane[0][index] = 0.025f + 0.72f * fx + texture;
-      image->plane[1][index] = 0.020f + 0.64f * fy + texture;
-      image->plane[2][index] =
-        0.030f + 0.30f * fx + 0.38f * fy + texture;
-    }
-  }
-}
-
 void ExportInputs(
   const std::filesystem::path& directory,
   const std::vector<WorkloadSpec>& workloads) {
@@ -452,7 +439,7 @@ void ExportInputs(
   std::filesystem::create_directories(directory);
   for (const auto& workload : workloads) {
     ImageStorage image(workload.extent);
-    FillImage(&image);
+    gjxl::benchmark::FillBatchTexture(image.MutableView());
     const std::string name = workload.name.starts_with("synthetic-")
       ? workload.name : "synthetic-" + workload.name;
     const auto path = directory / (name + ".pfm");
@@ -745,7 +732,7 @@ int main(int argc, char** argv) {
       ImageStorage image = workload.source.empty()
         ? ImageStorage(workload.extent) : LoadImage(workload.source);
       if (workload.source.empty()) {
-        FillImage(&image);
+        gjxl::benchmark::FillBatchTexture(image.MutableView());
       }
       workload.extent = image.extent;
       const gjxl::VarDctEncodingOptions encode_options = {

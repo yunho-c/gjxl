@@ -44,10 +44,11 @@ canonical hash after conversion; another ImageMagick version is not assumed to
 produce identical floating-point PFMs. Existing canonical files can be reused
 on any machine only when their hashes match.
 
-The two padded stress inputs are exact PFM exports of `FillSynthetic` in
-[driver.cpp](driver.cpp), at 1919x1079 and 3839x2159. They use the same float
-operations as the original encoding benchmark. Store RGB float32 pixels in
-bottom-up PFM order with little-endian scale `-1.0`; preserve the canonical file
+The two padded stress inputs are exact PFM exports of `FillEncodingStress` in
+[the shared fixture header](../../benchmarks/synthetic_images.h), at 1919x1079
+and 3839x2159. The driver and encoding benchmark use this same generator.
+Its header hash is part of the qualification package identity. Store RGB float32
+pixels in bottom-up PFM order with little-endian scale `-1.0`; preserve the canonical file
 header as well as pixels when matching the manifest. These generated inputs
 are distinct from the driver's in-memory `--synthetic` measurements. The
 canonical corpus is an explicit external input, not downloaded during a run.

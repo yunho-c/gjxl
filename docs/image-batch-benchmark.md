@@ -81,7 +81,13 @@ quality. Neither command builds or invokes the other encoder.
 ## Synthetic stress corpus: `synthetic-large`
 
 The large synthetic corpus is opt-in; `all` retains the original five workloads
-through 4K. It uses the same deterministic gradient/texture pattern:
+through 4K. It uses the same deterministic gradient/texture pattern.
+
+The pattern is defined by `FillBatchTexture` in
+[`benchmarks/synthetic_images.h`](../benchmarks/synthetic_images.h). That header
+also contains the distinct `FillEncodingStress` pattern used by the encoding
+benchmark and resident qualification. Sharing the helper preserves each corpus's
+existing pixels; the two patterns remain separate workloads.
 
 | Workload | Dimensions | Pixels |
 | --- | --- | ---: |
