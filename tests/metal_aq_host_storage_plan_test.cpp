@@ -293,6 +293,13 @@ struct Fixture {
   }
   AqEvaluationPreparation Preparation(size_t mode) const {
     AqEvaluationOptions options;
+    // Exercise exact-prefix smoothing scratch in ordinary evaluation, reuse,
+    // and injected allocation failures. Mode 0 also uses extra DC precision.
+    options.profile.adaptive_dc_smoothing = mode == 0 || mode == 3;
+    if (mode == 0) {
+      options.dc_quantization = DcQuantizationMode::kPredictionAware;
+      options.profile.extra_dc_precision = 1;
+    }
     options.profile.loop_filter.gaborish = false;
     options.profile.loop_filter.epf_options.iterations = 0;
     options.metric = mode == 3 ? AqEvaluationMetric::kMaximumError
@@ -326,7 +333,8 @@ struct Fixture {
             .reconstruct_exact_coefficients = mode == 0 || mode == 3,
             .reconstructed_rgb_readback = !p.frame_only,
             .resident_quant_field_readback = p.resident_quantization,
-            .initial_pixel_mask_readback = p.frame_only_resident_initial_quant};
+            .initial_pixel_mask_readback = p.frame_only_resident_initial_quant,
+            .adaptive_dc_smoothing = p.options.profile.adaptive_dc_smoothing};
   }
 };
 
@@ -338,6 +346,7 @@ struct Envelope {
   size_t device = 0, capacity = 0;
   bool Init(const Fixture &f, size_t mode) {
     const auto options = f.Options(mode);
+    const auto evaluation = f.Preparation(mode).options;
     AqStoragePlan aq;
     if (!Ok(ComputeAqHostStoragePlan(options, &host)) ||
         !Ok(ComputeCompletedFrameHostStoragePlan(
@@ -360,7 +369,11 @@ struct Envelope {
                  !options.frame_only &&
                  options.metric == AqEvaluationMetric::kButteraugli &&
                  f.source_extent.width >= 15 && f.source_extent.height >= 15,
-             .metric = options.metric},
+             .metric = options.metric,
+             .dc_quantization = evaluation.dc_quantization,
+             .dc_prediction = evaluation.dc_prediction,
+             .extra_dc_precision = evaluation.profile.extra_dc_precision,
+             .adaptive_dc_smoothing = evaluation.profile.adaptive_dc_smoothing},
             &aq)))
       return false;
     device = aq.persistent_bytes + aq.staging_bytes;

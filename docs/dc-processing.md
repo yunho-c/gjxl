@@ -100,6 +100,39 @@ identity checks, not new timing measurements. All 11 Rust tests pass with a
 fresh Cargo target/native build. The earlier qualification artifacts are
 unchanged. See [the validation record](dc-policy-update-validation.json).
 
+## Exact-coefficient merge regression
+
+The broader merge review exposed an existing interaction in the exact-coefficient
+Metal path when both DC controls were enabled. That path prepared low frequencies
+on the CPU, then overwrote them with Metal's FP32 DC-to-LLF conversion. Its small
+rounding differences could change later AQ decisions. On the existing 128x96
+e7 fixture, CPU produced 537 bytes and exact-coefficient Metal produced 778;
+the maximum score-history difference was 0.136601 against a 0.002 tolerance.
+The same failure reproduced with explicit `both` on the pre-policy main revision.
+
+Exact input now keeps smoothing and DC-to-LLF conversion on the CPU before the
+inverse-transform handoff. The fixture produces matching 537-byte streams, with
+a maximum score-history difference of 0.0000107884. A causal control kept CPU
+smoothing but restored Metal LLF conversion and reproduced the original failure.
+Stored DC integers and the unsmoothed frame cache retain their meanings; the
+fully resident path continues to perform its DC processing on Metal.
+
+The host admission plan includes the smoothing destination and atomic candidate
+alongside group offsets. Allocation-failure and reuse tests exercise this scratch.
+The workflow regression covers all four DC combinations with both predictors at
+e4/e7 without relaxing the existing score tolerance. CLI checks pin the new
+ordinary, maximum-compression, and maximum-error outputs, and separately retain
+the old hashes with explicit round/no-smoothing controls. Follow-up results are
+recorded in [the merge validation record](dc-policy-merge-validation.json).
+
+A fresh Release export passes 125/126 native checks (the 11 worker-launch
+fault-injection tests were excluded). The only failure is the unchanged CPU
+`quantization_pipeline` golden mismatch, independently reproduced on main.
+All 11 Rust tests, formatting, and Clippy pass with a fresh native build.
+All 21 photographic output identities at 12/24/48MP and ten gradient/CLI
+identities match the retained qualification; six invalid CLI cases also pass.
+These are correctness checks, not new performance measurements.
+
 ## Historical implementation validation
 
 - Full Release build succeeds; the final suite passes 139/140 tests. The only failure is the

@@ -1492,6 +1492,52 @@ bool CheckWorkflowBackendSelection() {
     return false;
   }
 
+  // Low-frequency conversion is part of the CPU-authoritative exact prefix.
+  // With both DC controls enabled, a redundant FP32 conversion used to change
+  // later AQ decisions on this fixture (537 CPU bytes versus 778 Metal bytes).
+  for (int effort : {4, 7}) {
+    for (auto prediction : {gjxl::VarDctDcPrediction::kGradient,
+                            gjxl::VarDctDcPrediction::kWeighted}) {
+      for (auto quantization : {gjxl::DcQuantizationMode::kRound,
+                                gjxl::DcQuantizationMode::kPredictionAware}) {
+        for (bool smoothing : {false, true}) {
+          gjxl::VarDctEncodingOptions options{
+              .butteraugli_target = 1.0f,
+              .effort = effort,
+              .backend = gjxl::VarDctBackendPreference::kCpu,
+              .dc_prediction = prediction,
+              .dc_quantization = quantization,
+              .adaptive_dc_smoothing = smoothing};
+          std::vector<uint8_t> cpu, metal;
+          gjxl::VarDctEncodingSummary cpu_result, metal_result;
+          auto status = gjxl::codestream_internal::
+              EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+                  original.ConstView(), options, nullptr, false,
+                  &cpu, &cpu_result);
+          if (status.ok()) {
+            options.backend = gjxl::VarDctBackendPreference::kMetal;
+            options.metal_aq_mode =
+                gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
+            status = gjxl::codestream_internal::
+                EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+                    original.ConstView(), options, gpu.get(), false,
+                    &metal, &metal_result);
+          }
+          if (!status.ok() || cpu != metal ||
+              MaximumScoreError(cpu_result.score_history,
+                                metal_result.score_history) > 2.0e-3) {
+            std::cerr << "Exact DC workflow differs: effort=" << effort
+                      << " prediction=" << static_cast<int>(prediction)
+                      << " quantization=" << static_cast<int>(quantization)
+                      << " smoothing=" << smoothing << ": "
+                      << status.message() << '\n';
+            return false;
+          }
+        }
+      }
+    }
+  }
+
   const gjxl::VarDctEncodingOptions maximum_error_options{
     .rate_control_mode = gjxl::VarDctRateControlMode::kMaximumError,
     .maximum_error = {0.05f, 0.05f, 0.05f},

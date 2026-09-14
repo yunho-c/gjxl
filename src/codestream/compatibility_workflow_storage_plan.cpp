@@ -79,7 +79,8 @@ Status ComputeMetalCompatibilityWorkflowStoragePlan(
        .reconfigure = !frame_only,
        .exact_coefficients = exact,
        .reconstruct_exact_coefficients = exact,
-       .initial_pixel_mask_readback = frame_only},
+       .initial_pixel_mask_readback = frame_only,
+       .adaptive_dc_smoothing = ResolveAdaptiveDcSmoothing(e)},
       &host);
   if (!status.ok())
     return status;
