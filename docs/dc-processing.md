@@ -1,15 +1,15 @@
 # Prediction-aware DC quantization and adaptive DC smoothing
 
-These are separate, opt-in lossy experiments on `feat/dc-coding`. CPU and
-resident Metal integration and bounded matched-quality qualification are
-complete. The [qualification report](dc-processing-qualification/REPORT.md)
-records mixed rate benefits, encoding costs, and two unresolved compact
-calibration targets; the evidence does not support enabling either by default.
-Weighted residual coding and size-adaptive predefined DC trees are now the
-encoding defaults. Ordinary rounding and disabled smoothing remain unchanged;
-see [the combined-default decision](dc-small-trees/README.md). The measurements
-below retain their original gradient/round/no-smoothing control, named `default`
-in the frozen study artifacts.
+The public encoder automatically enables prediction-aware DC quantization and
+adaptive DC smoothing at efforts 4–10. Efforts 1–3 use ordinary rounding and
+no smoothing. Both controls remain independently overridable. Weighted residual
+coding and size-adaptive predefined DC trees remain the lossless defaults.
+
+The [e4 qualification](dc-e4-qualification/REPORT.md) supports this as an
+anti-banding policy, with additional encode time and scene-dependent rate/texture
+tradeoffs. The earlier [rate study](dc-processing-qualification/REPORT.md) used
+a gradient/round/no-smoothing baseline named `default`; its measurements and
+original decision are historical, not a description of today's automatic policy.
 
 ## Controls and reconstruction contract
 
@@ -19,24 +19,39 @@ build/release/gjxl_encode --backend cpu --effort 4 --distance 1 \
   --adaptive-dc-smoothing input.pfm output.jxl
 ```
 
-Omit either of the final two switches to test the other independently.
-`--dc-quantization round` explicitly selects the default. The quality benchmark
-accepts the same switches and records them using fully resident Metal.
+Omitting a control follows effort for that control. Use
+`--dc-quantization round --no-adaptive-dc-smoothing` for the former lossy defaults,
+`--dc-quantization prediction-aware --no-adaptive-dc-smoothing` for quantize alone,
+and `--dc-quantization round --adaptive-dc-smoothing` for smoothing alone.
+`--dc-quantization auto` explicitly restores automatic quantization. Both CLI
+switches for smoothing reject duplicates or conflicts. The quality benchmark
+accepts the same controls and reports their resolved values using resident Metal.
 `gjxl_dc_processing_benchmark` additionally supports independently calibrated
 distances in one shared-backend process; see `tools/dc_coding/README.md`.
 
-C++ `VarDctEncodingOptions` and its result summary append `dc_quantization`
-and `adaptive_dc_smoothing`. Prediction-aware mode uses the selected
+C++ `VarDctEncodingOptions::dc_quantization` defaults to `kAutomatic`.
+`adaptive_dc_smoothing` is `std::optional<bool>`: `nullopt` follows effort,
+while explicit `false` or `true` overrides it. Result summaries always contain
+resolved quantization and a plain smoothing boolean. CPU, resident Metal,
+compatibility, target-size retry, and batch admission use the same resolution;
+low-level DC primitives continue to require explicit modes. Prediction-aware mode uses the selected
 `dc_prediction`, one extra precision bit, a 0.62 residual deadzone, and even
 integer residual quantization beyond magnitude two. Predictor state resets
 per 256x256 DC group and channel; Y is coded before chroma. Lossless residual
 coding is still separately selectable.
 
-The C options append `GJXLDcQuantization dc_quantization` and a uint32 smoothing
-flag (only 0/1 accepted). `GJXLEncoderOptions` is now 28 bytes; its 12-, 16-,
-20-, and 24-byte predecessors use `struct_size` to select missing-field defaults:
-weighted prediction, ordinary rounding, and disabled smoothing. Rust exposes `DcQuantization::{Round, PredictionAware}` and
-`adaptive_dc_smoothing: bool`.
+The C struct remains 28 bytes with unchanged field offsets. Quantization values
+0/1 retain their round/prediction-aware meanings; `GJXL_DC_QUANTIZATION_AUTOMATIC`
+is 2. The smoothing field accepts `GJXL_DC_SMOOTHING_DISABLED` (0),
+`GJXL_DC_SMOOTHING_ENABLED` (1), and `GJXL_DC_SMOOTHING_AUTOMATIC` (2).
+The initializer selects automatic for both. Missing fields in the 12-, 16-,
+20-, and 24-byte layouts also follow effort; fields present with explicit 0/1
+retain those choices. No caller memory beyond `struct_size` is read or written.
+
+Rust adds `DcQuantization::Automatic` and changes `adaptive_dc_smoothing` from
+`bool` to `Option<bool>`. The default is `None`; existing explicit boolean callers
+should use `Some(false)` or `Some(true)`. This distinguishes an override from an
+effort-dependent default.
 
 The completed frame stores authoritative DC integers and an **unsmoothed**
 dequantized cache. Precision scales are reflected in validation, assembly,
@@ -46,7 +61,7 @@ behavior. Smoothing uses the maximum normalized gap across all three channels,
 the base DC steps, explicit fused operations, and unchanged borders.
 
 The new precision path rounds the dequantized blue product before adding
-reconstructed Y, matching the pinned decoder. The precision-zero default keeps
+reconstructed Y, matching the pinned decoder. The precision-zero rounding path keeps
 its legacy arithmetic to avoid changing established outputs as a side effect.
 The coefficient-coding API requires nonzero extra precision for prediction-aware
 quantization; the lower-level primitive can independently test grids 0..3.
@@ -64,9 +79,28 @@ include all added buffers and dispatches.
 Prediction-aware chroma subtraction uses explicit FMA on CPU and Metal. A
 higher-precision boundary test exposed differing implicit contraction; the
 explicit operation matches the pinned native toolchain and removes the backend
-difference. Ordinary default rounding retains its previous arithmetic.
+difference. Ordinary rounding retains its previous arithmetic.
 
-## Validation retained locally
+## Automatic-policy validation
+
+A fresh Release build in `build/dc-policy-e4-20260914` passes 21 selected native
+tests, including CPU/Metal defaults and independent overrides, mixed-effort
+batches, all three workflow storage plans, admission, C ABI layouts and legacy
+sizes, CLI protocol, and the relocated installed consumer. The new policy test
+compares automatic and explicit memory plans at all ten efforts; full encoding
+checks cover efforts 3, 4, and 7 on CPU and Metal. The original workflow hash is
+still pinned using explicit gradient/round/no-smoothing settings.
+
+All 21 retained photographic cases reproduce the qualified bytes: e3 uses the
+previous default, while e4/e7 use the previously measured `both` outputs at
+12/24/48MP. Ten main-CLI checks reproduce corrected gradient streams for all
+four explicit combinations and automatic selection at e3/e4; six duplicate or
+conflicting smoothing requests reject without writing output. These are output
+identity checks, not new timing measurements. All 11 Rust tests pass with a
+fresh Cargo target/native build. The earlier qualification artifacts are
+unchanged. See [the validation record](dc-policy-update-validation.json).
+
+## Historical implementation validation
 
 - Full Release build succeeds; the final suite passes 139/140 tests. The only failure is the
   previously reproduced baseline `quantization_pipeline` golden mismatch
@@ -155,7 +189,8 @@ from matched-quality timing. Their complete rate/quality curves remain visible.
 
 The [portable report and CSVs](dc-processing-qualification/REPORT.md) compare
 each control separately and together, including negative results and a
-piecewise-linear interpolation sensitivity check. The measured incremental
-lossy gains do not justify changing ordinary DC rounding or disabled smoothing.
-The later promotion of lossless weighted prediction and adaptive predefined
-trees is independent of this decision; both lossy controls remain opt-in.
+piecewise-linear interpolation sensitivity check. That original rate-only decision retained ordinary rounding and disabled
+smoothing. The later photographic and gradient [e4 qualification](dc-e4-qualification/REPORT.md)
+adds visual anti-banding evidence and complete-encode costs. The approved current
+policy enables both at e4 and above while preserving explicit overrides; it does
+not claim universal matched-quality rate savings.

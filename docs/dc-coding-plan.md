@@ -2,7 +2,8 @@
 
 Historical plan and progress log. The initial gradient-default decisions below
 were superseded by the approved [weighted/adaptive default](dc-small-trees/README.md).
-Prediction-aware quantization and adaptive DC smoothing remain opt-in.
+The subsequent [e4 policy](dc-processing.md) enables prediction-aware quantization
+and adaptive DC smoothing from effort 4; the decisions below remain historical.
 
 Base: `2c936fa96a334d7f67e04abf85fb38ccfcdf73f5`. Work is isolated on
 `feat/dc-coding`; existing worktrees and historical evidence are preserved.

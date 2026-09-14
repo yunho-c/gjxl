@@ -2059,6 +2059,11 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_low_effort_strategy_policy_test PRIVATE gjxl_codestream)
   add_test(NAME low_effort_strategy_policy COMMAND gjxl_low_effort_strategy_policy_test)
 
+  add_executable(gjxl_dc_policy_test tests/dc_policy_test.cpp)
+  target_link_libraries(gjxl_dc_policy_test PRIVATE gjxl_codestream)
+  target_include_directories(gjxl_dc_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  add_test(NAME dc_policy COMMAND gjxl_dc_policy_test)
+
   add_executable(
     gjxl_gaborish_test
     tests/gaborish_test.cpp

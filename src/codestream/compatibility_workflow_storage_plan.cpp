@@ -122,10 +122,10 @@ Status ComputeMetalCompatibilityWorkflowStoragePlan(
        .uses_butteraugli_sinks = sinks,
        .metric = maximum ? AqEvaluationMetric::kMaximumError
                          : AqEvaluationMetric::kButteraugli,
-       .dc_quantization = e.dc_quantization,
+       .dc_quantization = ResolveDcQuantization(e),
        .dc_prediction = e.dc_prediction,
-       .extra_dc_precision = uint8_t(e.dc_quantization == DcQuantizationMode::kPredictionAware),
-       .adaptive_dc_smoothing = e.adaptive_dc_smoothing},
+       .extra_dc_precision = uint8_t(ResolveDcQuantization(e) == DcQuantizationMode::kPredictionAware),
+       .adaptive_dc_smoothing = ResolveAdaptiveDcSmoothing(e)},
       &device);
   if (!status.ok())
     return status;
@@ -185,7 +185,7 @@ Status ComputeMetalCompatibilityWorkflowStoragePlan(
         !p.evaluator.AddVector<float>(block_count, kFreshExact))
       return Overflow();
     if (exact) {
-      if (e.dc_quantization == DcQuantizationMode::kPredictionAware) {
+      if (ResolveDcQuantization(e) == DcQuantizationMode::kPredictionAware) {
         if (!p.evaluator.AddVector<int32_t>(block_count, kFreshExact, 3) ||
             (e.dc_prediction == VarDctDcPrediction::kWeighted &&
              !p.evaluator.AddVector<uint32_t>(

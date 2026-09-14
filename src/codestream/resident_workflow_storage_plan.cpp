@@ -200,10 +200,10 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
                                   .omit_initial_search_data = fixed_dct8,
                                   .resident_quantization = true,
                                   .uses_butteraugli_sinks = sinks,
-                                  .dc_quantization = e.dc_quantization,
+                                  .dc_quantization = ResolveDcQuantization(e),
                                   .dc_prediction = e.dc_prediction,
-                                  .extra_dc_precision = uint8_t(e.dc_quantization == DcQuantizationMode::kPredictionAware),
-                                  .adaptive_dc_smoothing = e.adaptive_dc_smoothing},
+                                  .extra_dc_precision = uint8_t(ResolveDcQuantization(e) == DcQuantizationMode::kPredictionAware),
+                                  .adaptive_dc_smoothing = ResolveAdaptiveDcSmoothing(e)},
                                  &aq))
            .ok() ||
       (!evaluation_free && !(status = ComputeButteraugliStoragePlan(
@@ -290,8 +290,8 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
     status = ProfilePlan(source, coding,
                          {iterations, final_score, sinks, filters.gaborish,
                           filters.epf_options.iterations,
-                          e.dc_quantization == DcQuantizationMode::kPredictionAware,
-                          e.adaptive_dc_smoothing},
+                          ResolveDcQuantization(e) == DcQuantizationMode::kPredictionAware,
+                          ResolveAdaptiveDcSmoothing(e)},
                          fixed_dct8, submission, &p, &profile_output);
     if (!status.ok())
       return status;

@@ -116,6 +116,13 @@ typedef int32_t GJXLDcQuantization;
 enum {
   GJXL_DC_QUANTIZATION_ROUND = 0,
   GJXL_DC_QUANTIZATION_PREDICTION_AWARE = 1,
+  GJXL_DC_QUANTIZATION_AUTOMATIC = 2,
+};
+
+enum {
+  GJXL_DC_SMOOTHING_DISABLED = 0,
+  GJXL_DC_SMOOTHING_ENABLED = 1,
+  GJXL_DC_SMOOTHING_AUTOMATIC = 2,
 };
 
 typedef struct {
@@ -130,9 +137,11 @@ typedef struct {
   /// Lossless prediction of quantized DC. Defaults to WEIGHTED, including
   /// older struct sizes without this field. GRADIENT remains selectable.
   GJXLDcPrediction dc_prediction;
-  /// Opt-in lossy DC quantization; older sizes select ROUND.
+  /// Defaults to AUTOMATIC: ROUND at efforts 1-3, PREDICTION_AWARE at 4-10.
+  /// Older struct sizes without this field also select AUTOMATIC.
   GJXLDcQuantization dc_quantization;
-  /// Decoder adaptive DC smoothing: 0 disables, 1 enables. Defaults to 0.
+  /// 0 disables, 1 enables, 2 follows effort (off at 1-3, on at 4-10).
+  /// Defaults to AUTOMATIC (2), including older sizes without this field.
   uint32_t adaptive_dc_smoothing;
 } GJXLEncoderOptions;
 

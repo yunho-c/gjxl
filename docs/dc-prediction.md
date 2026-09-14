@@ -5,9 +5,9 @@ The native encoder supports two lossless representations of quantized DC:
 Weighted uses the JPEG XL weighted predictor with its matching error contexts.
 Complete-frame encoding selects a size-adaptive predefined DC tree for either
 predictor; see [small-image DC trees](dc-small-trees/README.md). Selecting weighted
-prediction preserves reconstructed pixels. It does not enable prediction-aware
-DC quantization or adaptive DC smoothing. Those separately controlled lossy
-experiments are described in [dc-processing.md](dc-processing.md).
+prediction preserves reconstructed pixels. The separately controlled lossy
+DC quantization and adaptive smoothing follow effort by default (both on from
+e4); see [dc-processing.md](dc-processing.md) for explicit overrides.
 
 The choice is independent of effort and compression mode. Weighted prediction
 can reduce photographic file sizes, but it can increase small/synthetic files

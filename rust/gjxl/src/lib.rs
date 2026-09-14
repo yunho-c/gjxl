@@ -98,6 +98,8 @@ pub enum DcPrediction {
 /// Lossy DC quantization policy; prediction-aware uses an extra precision bit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DcQuantization {
+    /// Round at efforts 1-3; prediction-aware with extra precision at 4-10.
+    Automatic,
     Round,
     PredictionAware,
 }
@@ -110,7 +112,8 @@ pub struct EncoderOptions {
     pub compression_mode: CompressionMode,
     pub dc_prediction: DcPrediction,
     pub dc_quantization: DcQuantization,
-    pub adaptive_dc_smoothing: bool,
+    /// None follows effort (off at 1-3, on at 4-10); Some overrides it.
+    pub adaptive_dc_smoothing: Option<bool>,
 }
 
 impl Default for EncoderOptions {
@@ -120,8 +123,8 @@ impl Default for EncoderOptions {
             effort: 7,
             compression_mode: CompressionMode::Automatic,
             dc_prediction: DcPrediction::Weighted,
-            dc_quantization: DcQuantization::Round,
-            adaptive_dc_smoothing: false,
+            dc_quantization: DcQuantization::Automatic,
+            adaptive_dc_smoothing: None,
         }
     }
 }
@@ -339,10 +342,15 @@ impl Context {
             DcPrediction::Weighted => sys::GJXL_DC_PREDICTION_WEIGHTED,
         } as sys::GJXLDcPrediction;
         native_options.dc_quantization = match options.dc_quantization {
+            DcQuantization::Automatic => sys::GJXL_DC_QUANTIZATION_AUTOMATIC,
             DcQuantization::Round => sys::GJXL_DC_QUANTIZATION_ROUND,
             DcQuantization::PredictionAware => sys::GJXL_DC_QUANTIZATION_PREDICTION_AWARE,
         } as sys::GJXLDcQuantization;
-        native_options.adaptive_dc_smoothing = u32::from(options.adaptive_dc_smoothing);
+        native_options.adaptive_dc_smoothing = match options.adaptive_dc_smoothing {
+            None => sys::GJXL_DC_SMOOTHING_AUTOMATIC,
+            Some(false) => sys::GJXL_DC_SMOOTHING_DISABLED,
+            Some(true) => sys::GJXL_DC_SMOOTHING_ENABLED,
+        };
 
         let mut output = NativeBuffer::empty();
         check(unsafe { sys::gjxl_encode(self.raw, &image, &native_options, &mut output.raw) })?;
@@ -544,8 +552,8 @@ mod tests {
         let image = ImageView::rgba8(64, 64, 256, &pixels).unwrap();
         let defaults = EncoderOptions::default();
         assert_eq!(defaults.dc_prediction, DcPrediction::Weighted);
-        assert_eq!(defaults.dc_quantization, DcQuantization::Round);
-        assert!(!defaults.adaptive_dc_smoothing);
+        assert_eq!(defaults.dc_quantization, DcQuantization::Automatic);
+        assert_eq!(defaults.adaptive_dc_smoothing, None);
         let default_output = context.encode(&image, defaults).unwrap();
         let options = EncoderOptions {
             dc_prediction: DcPrediction::Weighted,
@@ -575,12 +583,50 @@ mod tests {
                     let options = EncoderOptions {
                         dc_prediction,
                         dc_quantization,
-                        adaptive_dc_smoothing,
+                        adaptive_dc_smoothing: Some(adaptive_dc_smoothing),
                         ..EncoderOptions::default()
                     };
                     let first = context.encode(&image, options).unwrap();
                     assert!(first.starts_with(&[0xff, 0x0a]));
                     assert_eq!(first, context.encode(&image, options).unwrap());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn automatic_dc_tracks_effort_and_preserves_independent_overrides() {
+        let context = Context::new(Backend::Cpu).unwrap();
+        let pixels = rgba_fixture(64, 64);
+        let image = ImageView::rgba8(64, 64, 256, &pixels).unwrap();
+        for effort in [3, 4, 7] {
+            for dc_quantization in [
+                DcQuantization::Automatic,
+                DcQuantization::Round,
+                DcQuantization::PredictionAware,
+            ] {
+                for adaptive_dc_smoothing in [None, Some(false), Some(true)] {
+                    let options = EncoderOptions {
+                        effort,
+                        dc_quantization,
+                        adaptive_dc_smoothing,
+                        ..EncoderOptions::default()
+                    };
+                    let explicit = EncoderOptions {
+                        dc_quantization: match dc_quantization {
+                            DcQuantization::Automatic if effort >= 4 => {
+                                DcQuantization::PredictionAware
+                            }
+                            DcQuantization::Automatic => DcQuantization::Round,
+                            mode => mode,
+                        },
+                        adaptive_dc_smoothing: Some(adaptive_dc_smoothing.unwrap_or(effort >= 4)),
+                        ..options
+                    };
+                    assert_eq!(
+                        context.encode(&image, options).unwrap(),
+                        context.encode(&image, explicit).unwrap()
+                    );
                 }
             }
         }

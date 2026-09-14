@@ -15,6 +15,8 @@ inline constexpr size_t kDcPredictionGroupBlockDimension = 256;
 enum class DcQuantizationMode : uint8_t {
   kRound,
   kPredictionAware,
+  /// Public workflow policy; must be resolved before calling DC primitives.
+  kAutomatic,
 };
 
 struct DcQuantizationOptions {
