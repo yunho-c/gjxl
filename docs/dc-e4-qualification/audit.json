@@ -1,0 +1,96 @@
+{
+  "audit_passed": true,
+  "baseline_controls": 3,
+  "excluded_original_synthetic_cases": 36,
+  "frozen_identity_checks": 1555,
+  "independent_review_decode_equalities": 269,
+  "matched_size_passed": 17,
+  "matched_size_targets": 28,
+  "matched_size_unresolved": [
+    {
+      "case": "gray-gradient-e4-d3",
+      "complete": false,
+      "probes": 10,
+      "reason": "probe-budget-exhausted",
+      "size_error": 0.21858660819699782
+    },
+    {
+      "case": "gray-gradient-e4-d6",
+      "complete": false,
+      "probes": 4,
+      "reason": "distance-bound",
+      "size_error": 0.223705408515535
+    },
+    {
+      "case": "gray-gradient-e7-d3",
+      "complete": false,
+      "probes": 10,
+      "reason": "probe-budget-exhausted",
+      "size_error": 0.024640657084188944
+    },
+    {
+      "case": "dark-gradient-e4-d3",
+      "complete": false,
+      "probes": 10,
+      "reason": "probe-budget-exhausted",
+      "size_error": 0.02835538752362954
+    },
+    {
+      "case": "dark-gradient-e4-d6",
+      "complete": false,
+      "probes": 4,
+      "reason": "distance-bound",
+      "size_error": 0.22596264699100765
+    },
+    {
+      "case": "dark-gradient-e7-d3",
+      "complete": false,
+      "probes": 10,
+      "reason": "probe-budget-exhausted",
+      "size_error": 0.015055467511885912
+    },
+    {
+      "case": "dark-gradient-e7-d6",
+      "complete": false,
+      "probes": 4,
+      "reason": "distance-bound",
+      "size_error": 0.09148936170212774
+    },
+    {
+      "case": "sky-gradient-e4-d6",
+      "complete": false,
+      "probes": 4,
+      "reason": "distance-bound",
+      "size_error": 0.01842684268426842
+    },
+    {
+      "case": "chroma-gradient-e4-d6",
+      "complete": false,
+      "probes": 10,
+      "reason": "probe-budget-exhausted",
+      "size_error": 0.013168086754453912
+    },
+    {
+      "case": "chroma-gradient-e7-d3",
+      "complete": false,
+      "probes": 10,
+      "reason": "probe-budget-exhausted",
+      "size_error": 0.031152647975077885
+    },
+    {
+      "case": "chroma-gradient-e7-d6",
+      "complete": false,
+      "probes": 10,
+      "reason": "probe-budget-exhausted",
+      "size_error": 0.030178326474622708
+    }
+  ],
+  "original_manifest_sha256": "53a076034cd0785c8cf68a5a23e6d005a11c2692d7d3885bf3c0c9ac785ea902",
+  "scope": "All planned fixed cases complete; exhausted bounded calibration targets are explicitly unresolved, not successful matches. Prior overlapping timing and all original synthetic data excluded.",
+  "successful_commands_in_accepted_records": 1094,
+  "supplement_manifest_sha256": "343c55c56f2faa9f4c4126a1978524544cbff72bd333e6cb9ee14fb7bb8b1517",
+  "timing_cases": 21,
+  "timing_overlaps_detected_in_accepted_windows": 0,
+  "unique_scored_codestreams": 414,
+  "visual_streams": 252
+}

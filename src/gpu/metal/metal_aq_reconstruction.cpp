@@ -231,7 +231,8 @@ void MetalPreparedAqEvaluation::EncodeDcQuantization(
 
 void MetalPreparedAqEvaluation::EncodeDcSmoothing(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
-  if (!options_.profile.adaptive_dc_smoothing || exact_linear_reconstruction_) return;
+  if (!options_.profile.adaptive_dc_smoothing ||
+      exact_coefficient_reconstruction_ || exact_linear_reconstruction_) return;
   const auto params = DcProcessingParams();
   encoder->setComputePipelineState(backend.aq_pipelines_.dc_smooth.get());
   BindPlane(encoder, dc_, 0);
@@ -245,7 +246,10 @@ void MetalPreparedAqEvaluation::EncodeDcSmoothing(
 void MetalPreparedAqEvaluation::EncodeDcLowFrequencies(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
     size_t batch_index) const {
-  if (!DeferredLlf() || exact_linear_reconstruction_ || batch_index >= batches_.size()) return;
+  // Exact input already has CPU-authoritative low frequencies, including DC
+  // smoothing. Recomputing them in FP32 can change subsequent AQ decisions.
+  if (!DeferredLlf() || exact_coefficient_reconstruction_ ||
+      exact_linear_reconstruction_ || batch_index >= batches_.size()) return;
   const auto& batch = batches_[batch_index];
   if (batch.anchor_count == 0) return;
   const auto& params = reconstruction_params_[batch_index];

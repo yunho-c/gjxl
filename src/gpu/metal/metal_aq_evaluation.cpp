@@ -25,6 +25,7 @@
 #include "codec/chroma_from_luma.h"
 #include "codec/chroma_from_luma_internal.h"
 #include "codec/dc_conversion.h"
+#include "codec/dc_smoothing.h"
 #include "codec/quantization.h"
 #include "codec/quantization_tables_generated.h"
 #include "codec/vardct_frame_internal.h"
@@ -4187,6 +4188,8 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
       !exact_linear_reconstruction_;
   if (status.ok() && exact_coefficients_) {
     const VarDctEncoderFrame& frame = *input.exact_coefficients;
+    ConstImage3FView frame_dc = frame.dc();
+    Image3FBuffer smoothed_dc;
     const ConstImage3I32View quantized_dc = frame.quantized_dc();
     for (size_t channel = 0; channel < 3; ++channel) {
       for (size_t y = 0; y < block_extent_.height; ++y) {
@@ -4200,14 +4203,22 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
     ManagedVector<size_t> group_offsets;
     try {
       group_offsets.resize(frame.ac_group_count(), 0);
+      if (exact_coefficient_reconstruction_ &&
+          options_.profile.adaptive_dc_smoothing) {
+        smoothed_dc = Image3FBuffer(block_extent_);
+        status = SmoothDcCoefficients(
+            frame_dc, frame.quantizer(), smoothed_dc.view());
+        if (!status.ok()) return status;
+        frame_dc = smoothed_dc.const_view();
+      }
     } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
       return failure.status();
     } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
-        "Unable to allocate exact AQ group-offset staging");
+        "Unable to allocate exact AQ reconstruction scratch");
     } catch (const std::length_error&) {
       return Status::InvalidArgument(
-        "Exact AQ group-offset staging is too large");
+        "Exact AQ reconstruction scratch is too large");
     }
     for (const AqAnchor& anchor : row_major_anchors_) {
       const AcStrategyInfo* info = GetAcStrategyInfo(anchor.strategy);
@@ -4291,7 +4302,6 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
               factors[2] * reconstructed_y;
         }
 
-        const ConstImage3FView frame_dc = frame.dc();
         for (size_t channel = 0; channel < 3; ++channel) {
           // The largest supported strategy covers a 4x4 base-block region.
           std::array<float, 16> dc{};
@@ -4342,8 +4352,8 @@ Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
           reconstruction_coefficients_.offset_bytes);
       upload_bytes +=
           exact_reconstruction_coefficients_.size() * sizeof(float);
-      // Exact input integers are authoritative. Upload their unsmoothed DC
-      // reconstruction for the optional resident smoothing/LLF passes.
+      // Preserve the unsmoothed DC diagnostic snapshot. Exact reconstruction
+      // already includes CPU smoothing and DC/LLF conversion above.
       if (DeferredLlf()) {
         const auto source = frame.dc();
         for (size_t channel = 0; status.ok() && channel < 3; ++channel) {

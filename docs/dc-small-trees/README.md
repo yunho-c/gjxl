@@ -5,7 +5,8 @@ size-adaptive predefined DC trees**, following the approved combined-policy
 review on 2026-09-13. This ports pinned libjxl's `MakeFixedTree` sample-count
 pruning to GJXL's fixed DC subtree. Weighted applies at every effort and image
 size; the tree shape alone adapts to size. Explicit gradient prediction remains
-available. Ordinary DC rounding and disabled adaptive DC smoothing are unchanged.
+available. At this checkpoint, ordinary rounding and disabled smoothing were unchanged.
+The subsequent [DC processing policy](../dc-processing.md) enables both from e4.
 
 The original no-size-growth gate failed. Promotion deliberately accepts the
 measured size/latency tradeoffs; it does not reinterpret that gate as passing.

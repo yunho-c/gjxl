@@ -460,20 +460,52 @@ endif()
 if(NOT maximum_compression_hash STREQUAL maximum_compression_repeat_hash)
   message(FATAL_ERROR "Maximum-compression CLI output is not deterministic")
 endif()
-# Weighted/adaptive fixtures independently decode identically to the former
-# gradient/full-tree fixtures; see docs/dc-small-trees/default-validation.json.
+# Effort 7 defaults to prediction-aware quantization and adaptive DC smoothing.
 set(expected_hash
-  b0671094599faefd7312880e15aa89373612bbc5b5f028f7f19c60e09492f333)
+  97de84316e188f09165c7af3f30d0baeb9d6b395b906a809d34e360527a5cfc2)
 if(NOT first_hash STREQUAL expected_hash)
   message(FATAL_ERROR
     "checked sample codestream hash changed: ${first_hash}")
 endif()
 set(expected_maximum_compression_hash
-  a33d5414e7ac5db07184510e629266682cec583d7527bf9d9877317da86f92c4)
+  9d4f8bb5703b998da3505f5c5506d63735378674ef49d8a118bac81f0ce1f95c)
 if(NOT maximum_compression_hash STREQUAL expected_maximum_compression_hash)
   message(FATAL_ERROR
     "Maximum-compression sample hash changed: ${maximum_compression_hash}")
 endif()
+# Pin the former defaults independently, so selecting the legacy behavior stays
+# covered when the automatic policy changes.
+foreach(compression IN ITEMS ordinary maximum maximum-error)
+  set(legacy "${GJXL_TEST_DIR}/legacy-${compression}.jxl")
+  set(compression_flags)
+  set(rate_control_flags --distance 1.0)
+  set(expected_legacy_hash
+    b0671094599faefd7312880e15aa89373612bbc5b5f028f7f19c60e09492f333)
+  if(compression STREQUAL "maximum")
+    set(compression_flags --maximum-compression)
+    set(expected_legacy_hash
+      a33d5414e7ac5db07184510e629266682cec583d7527bf9d9877317da86f92c4)
+  elseif(compression STREQUAL "maximum-error")
+    set(rate_control_flags --maximum-error 0.1 0.1 0.1)
+    set(expected_legacy_hash
+      eeb771640076375d10365be7b773e0768c3b495e0e8e322b6cd12623c8284673)
+  endif()
+  execute_process(
+    COMMAND "${GJXL_ENCODER}" ${rate_control_flags} --backend cpu
+      --dc-quantization round --no-adaptive-dc-smoothing
+      ${compression_flags} "${GJXL_SAMPLE}" "${legacy}"
+    RESULT_VARIABLE legacy_result
+    OUTPUT_QUIET
+    ERROR_VARIABLE legacy_error
+  )
+  if(NOT legacy_result EQUAL 0)
+    message(FATAL_ERROR "Legacy ${compression} encode failed: ${legacy_error}")
+  endif()
+  file(SHA256 "${legacy}" legacy_hash)
+  if(NOT legacy_hash STREQUAL expected_legacy_hash)
+    message(FATAL_ERROR "Legacy ${compression} hash changed: ${legacy_hash}")
+  endif()
+endforeach()
 foreach(expected "Encoded 17x13" "using CPU" "Strategies:"
                  "Final perceptual score:")
   string(FIND "${first_output}" "${expected}" found)
@@ -646,7 +678,7 @@ if(NOT maximum_error_first_hash STREQUAL maximum_error_second_hash)
   message(FATAL_ERROR "Maximum-error CLI output is not deterministic")
 endif()
 set(expected_maximum_error_hash
-  eeb771640076375d10365be7b773e0768c3b495e0e8e322b6cd12623c8284673)
+  8123c503c88c123679a2f9b302bb3244f973a7316cc8536dcbd32fb2eaf10794)
 if(NOT maximum_error_first_hash STREQUAL expected_maximum_error_hash)
   message(FATAL_ERROR
     "Maximum-error sample hash changed: ${maximum_error_first_hash}")

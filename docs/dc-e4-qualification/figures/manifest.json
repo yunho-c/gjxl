@@ -1,0 +1,182 @@
+[
+  {
+    "case": "alpine_lake-visual-e4-d6",
+    "crop": [
+      1300,
+      0,
+      544,
+      384
+    ],
+    "error_multiplier": null,
+    "modes": [
+      "default",
+      "quantize",
+      "smooth",
+      "both"
+    ],
+    "path": "docs/dc-e4-qualification/figures/alpine-e4-d6-modes.png",
+    "sha256": "84ec89bdcb46bf93dabec7330dc2806a923fe329840df0e0ce9b2618f5833724"
+  },
+  {
+    "case": "alpine_lake-visual-e4-d6",
+    "crop": [
+      1300,
+      0,
+      544,
+      384
+    ],
+    "error_multiplier": null,
+    "modes": [
+      "reference",
+      "default",
+      "both",
+      "both-matched-size"
+    ],
+    "path": "docs/dc-e4-qualification/figures/alpine-e4-d6-matched-size.png",
+    "sha256": "59fef3b1613e112304eb2f576b55a2464701d4269e341da70d0e0e8449785cd8"
+  },
+  {
+    "case": "alpine_lake-visual-e4-d1.2",
+    "crop": [
+      1300,
+      0,
+      544,
+      384
+    ],
+    "error_multiplier": null,
+    "modes": [
+      "default",
+      "quantize",
+      "smooth",
+      "both"
+    ],
+    "path": "docs/dc-e4-qualification/figures/alpine-e4-d1_2-modes.png",
+    "sha256": "d1dbda19a60fa5ec9505085f4a953cdd5a3cc741a556dfb02dad3562c00c94c3"
+  },
+  {
+    "case": "campus_interior-visual-e4-d3",
+    "crop": [
+      768,
+      300,
+      544,
+      384
+    ],
+    "error_multiplier": null,
+    "modes": [
+      "reference",
+      "default",
+      "both",
+      "both-matched-size"
+    ],
+    "path": "docs/dc-e4-qualification/figures/campus-e4-d3-matched-size.png",
+    "sha256": "c78375e765fe671adef7ab93e5cd3525169b6466e850872df169b5f55022712f"
+  },
+  {
+    "case": "gray-gradient-e4-d6",
+    "crop": [
+      768,
+      300,
+      544,
+      384
+    ],
+    "error_multiplier": 40,
+    "modes": [
+      "default",
+      "quantize",
+      "smooth",
+      "both"
+    ],
+    "path": "docs/dc-e4-qualification/figures/gray-e4-d6-error.png",
+    "sha256": "6fe5f926d5f2bf69f9c00fe4a8a437fcaa0f6471d1f516efff1c447c59beb7e6"
+  },
+  {
+    "case": "dark-gradient-e4-d6",
+    "crop": [
+      768,
+      300,
+      544,
+      384
+    ],
+    "error_multiplier": 40,
+    "modes": [
+      "default",
+      "quantize",
+      "smooth",
+      "both"
+    ],
+    "path": "docs/dc-e4-qualification/figures/dark-e4-d6-error.png",
+    "sha256": "80f7df194eff7b3843450f19695dafd45cc804540445bc91c3edcf369c29563d"
+  },
+  {
+    "case": "sky-gradient-e4-d6",
+    "crop": [
+      768,
+      300,
+      544,
+      384
+    ],
+    "error_multiplier": 40,
+    "modes": [
+      "default",
+      "quantize",
+      "smooth",
+      "both"
+    ],
+    "path": "docs/dc-e4-qualification/figures/sky-e4-d6-error.png",
+    "sha256": "a01ed6c0019f1c14aa43dadca9fb46f92728f67cc1a55b4094deb10f76d43d14"
+  },
+  {
+    "case": "chroma-gradient-e4-d6",
+    "crop": [
+      768,
+      300,
+      544,
+      384
+    ],
+    "error_multiplier": 40,
+    "modes": [
+      "default",
+      "quantize",
+      "smooth",
+      "both"
+    ],
+    "path": "docs/dc-e4-qualification/figures/chroma-e4-d6-error.png",
+    "sha256": "5fde6d4a97a9d767a27ccfbc174e85e40d1030ec713550e5ad395f1467a89dad"
+  },
+  {
+    "case": "sky-gradient-e4-d6",
+    "crop": [
+      768,
+      300,
+      544,
+      384
+    ],
+    "error_multiplier": null,
+    "modes": [
+      "default",
+      "quantize",
+      "smooth",
+      "both"
+    ],
+    "path": "docs/dc-e4-qualification/figures/sky-e4-d6-modes.png",
+    "sha256": "762b301427bee65091fb90629f3b10437d2f8b53db7797b25b2a6518b86e099e"
+  },
+  {
+    "case": "chroma-gradient-e4-d6",
+    "crop": [
+      768,
+      300,
+      544,
+      384
+    ],
+    "error_multiplier": null,
+    "modes": [
+      "default",
+      "quantize",
+      "smooth",
+      "both"
+    ],
+    "path": "docs/dc-e4-qualification/figures/chroma-e4-d6-modes.png",
+    "sha256": "4adeb6b832909f7bcd489298515057146c396535927e2e4d12d271f70c2b97da"
+  }
+]

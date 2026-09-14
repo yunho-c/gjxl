@@ -359,8 +359,8 @@ bool CheckDeterministicWorkflow() {
       first[1] != 0x0a || first_summary.extent != kExtent ||
       first_summary.encoded_bytes != first.size() ||
       first_summary.dc_prediction != gjxl::VarDctDcPrediction::kWeighted ||
-      first_summary.dc_quantization != gjxl::DcQuantizationMode::kRound ||
-      first_summary.adaptive_dc_smoothing ||
+      first_summary.dc_quantization != gjxl::DcQuantizationMode::kPredictionAware ||
+      !first_summary.adaptive_dc_smoothing ||
       first_summary.rate_control_mode !=
           gjxl::VarDctRateControlMode::kButteraugliTarget ||
       first_summary.requested_target_bytes != 0 ||
@@ -448,7 +448,9 @@ bool CheckDeterministicWorkflow() {
     status = gjxl::EncodeLinearRgbVarDctCodestream(
       image.View(),
       {.butteraugli_target = 1.0f,
-       .dc_prediction = gjxl::VarDctDcPrediction::kGradient},
+       .dc_prediction = gjxl::VarDctDcPrediction::kGradient,
+       .dc_quantization = gjxl::DcQuantizationMode::kRound,
+       .adaptive_dc_smoothing = false},
       &legacy_gradient);
   }
   const uint64_t hash = Fnv1a64(legacy_gradient);

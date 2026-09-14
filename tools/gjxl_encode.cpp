@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -56,8 +57,8 @@ struct Options {
   gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
     gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
   gjxl::VarDctDcPrediction dc_prediction = gjxl::kDefaultDcPrediction;
-  gjxl::DcQuantizationMode dc_quantization = gjxl::DcQuantizationMode::kRound;
-  bool adaptive_dc_smoothing = false;
+  gjxl::DcQuantizationMode dc_quantization = gjxl::DcQuantizationMode::kAutomatic;
+  std::optional<bool> adaptive_dc_smoothing;
   bool collect_final_butteraugli_score = false;
 };
 
@@ -301,16 +302,18 @@ struct Options {
     } else if (argument == "--dc-quantization") {
       if (dc_quantization_set || index + 1 >= argc) return false;
       const std::string_view value = argv[++index];
-      if (value == "round")
+      if (value == "auto")
+        candidate.dc_quantization = gjxl::DcQuantizationMode::kAutomatic;
+      else if (value == "round")
         candidate.dc_quantization = gjxl::DcQuantizationMode::kRound;
       else if (value == "prediction-aware")
         candidate.dc_quantization = gjxl::DcQuantizationMode::kPredictionAware;
       else
         return false;
       dc_quantization_set = true;
-    } else if (argument == "--adaptive-dc-smoothing") {
-      if (candidate.adaptive_dc_smoothing) return false;
-      candidate.adaptive_dc_smoothing = true;
+    } else if (argument == "--adaptive-dc-smoothing" || argument == "--no-adaptive-dc-smoothing") {
+      if (candidate.adaptive_dc_smoothing.has_value()) return false;
+      candidate.adaptive_dc_smoothing = argument == "--adaptive-dc-smoothing";
     } else if (argument == "--effort") {
       size_t effort = 0;
       if (effort_set || index + 1 >= argc ||
@@ -477,7 +480,7 @@ void PrintUsage(const char* executable) {
                "[--max-attempts N] "
                "[--size-selection under-budget|closest] "
                "[--effort 1..10] [--dc-prediction gradient|weighted] "
-               "[--dc-quantization round|prediction-aware] [--adaptive-dc-smoothing] "
+               "[--dc-quantization auto|round|prediction-aware] [--adaptive-dc-smoothing|--no-adaptive-dc-smoothing] "
                "[--high-density] "
                "[--maximum-compression] "
                "[--backend auto|cpu|metal] "

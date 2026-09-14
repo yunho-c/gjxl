@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "codestream/dc_prediction.h"
@@ -121,11 +122,28 @@ struct VarDctEncodingOptions {
   std::shared_ptr<const ExecutionDomain> execution_domain;
   /// Lossless DC residual prediction; independent of effort and AQ policy.
   VarDctDcPrediction dc_prediction = kDefaultDcPrediction;
-  /// Opt-in lossy DC quantization experiment; uses one extra precision bit.
-  DcQuantizationMode dc_quantization = DcQuantizationMode::kRound;
-  /// Signals and uses the decoder's adaptive DC smoothing during AQ.
-  bool adaptive_dc_smoothing = false;
+  /// Automatic uses ordinary rounding at efforts 1-3 and prediction-aware
+  /// quantization with one extra precision bit at efforts 4-10.
+  DcQuantizationMode dc_quantization = DcQuantizationMode::kAutomatic;
+  /// Nullopt follows effort (off at 1-3, on at 4-10). Explicit false/true
+  /// overrides that policy independently of quantization. The resolved value
+  /// is signaled to the decoder and used for reconstruction during AQ.
+  std::optional<bool> adaptive_dc_smoothing;
 };
+
+/// Resolve public defaults before reconstruction and memory admission.
+[[nodiscard]] constexpr DcQuantizationMode ResolveDcQuantization(
+    const VarDctEncodingOptions& options) {
+  return options.dc_quantization == DcQuantizationMode::kAutomatic
+    ? (options.effort >= 4 ? DcQuantizationMode::kPredictionAware
+                           : DcQuantizationMode::kRound)
+    : options.dc_quantization;
+}
+
+[[nodiscard]] constexpr bool ResolveAdaptiveDcSmoothing(
+    const VarDctEncodingOptions& options) {
+  return options.adaptive_dc_smoothing.value_or(options.effort >= 4);
+}
 
 /// Encoder analysis reported without exposing temporary pipeline storage.
 struct VarDctEncodingSummary {

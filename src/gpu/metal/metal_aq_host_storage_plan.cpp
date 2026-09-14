@@ -130,6 +130,11 @@ Status ComputeAqHostStoragePlan(const AqHostStorageOptions &o,
     HostStorageBound offsets;
     if (!offsets.AddVector<size_t>(groups, kFreshExact))
       return Overflow();
+    // Exact reconstruction keeps smoothing and DC/LLF conversion on the CPU.
+    // The destination and atomic smoothing candidate coexist with offsets.
+    if (o.reconstruct_exact_coefficients && o.adaptive_dc_smoothing &&
+        !offsets.AddVector<float>(blocks, kFreshExact, 6))
+      return Overflow();
     temporary.peak_bytes = std::max(temporary.peak_bytes, offsets.peak_bytes);
     temporary.retained_bytes =
         std::max(temporary.retained_bytes, offsets.retained_bytes);

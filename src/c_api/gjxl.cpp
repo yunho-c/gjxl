@@ -12,6 +12,7 @@
 #include <cstring>
 #include <exception>
 #include <limits>
+#include <optional>
 #include <memory>
 #include <new>
 #include <string_view>
@@ -358,9 +359,9 @@ GJXLResult gjxl_encoder_options_init(
     if (caller_size >= kEncoderOptionsDcPredictionSize)
       options->dc_prediction = GJXL_DC_PREDICTION_WEIGHTED;
     if (caller_size >= kEncoderOptionsDcQuantizationSize)
-      options->dc_quantization = GJXL_DC_QUANTIZATION_ROUND;
+      options->dc_quantization = GJXL_DC_QUANTIZATION_AUTOMATIC;
     if (caller_size >= kEncoderOptionsDcSmoothingSize)
-      options->adaptive_dc_smoothing = 0;
+      options->adaptive_dc_smoothing = GJXL_DC_SMOOTHING_AUTOMATIC;
     return GJXL_OK;
   });
 }
@@ -478,10 +479,13 @@ GJXLResult gjxl_encode(
         return Fail(GJXL_ERROR_INVALID_ARGUMENT, "Invalid DC prediction");
       }
     }
-    gjxl::DcQuantizationMode dc_quantization = gjxl::DcQuantizationMode::kRound;
+    gjxl::DcQuantizationMode dc_quantization = gjxl::DcQuantizationMode::kAutomatic;
     if (options->struct_size >= kEncoderOptionsDcQuantizationSize) {
       switch (options->dc_quantization) {
+      case GJXL_DC_QUANTIZATION_AUTOMATIC:
+        break;
       case GJXL_DC_QUANTIZATION_ROUND:
+        dc_quantization = gjxl::DcQuantizationMode::kRound;
         break;
       case GJXL_DC_QUANTIZATION_PREDICTION_AWARE:
         dc_quantization = gjxl::DcQuantizationMode::kPredictionAware;
@@ -490,11 +494,12 @@ GJXLResult gjxl_encode(
         return Fail(GJXL_ERROR_INVALID_ARGUMENT, "Invalid DC quantization");
       }
     }
-    bool adaptive_dc_smoothing = false;
+    std::optional<bool> adaptive_dc_smoothing;
     if (options->struct_size >= kEncoderOptionsDcSmoothingSize) {
-      if (options->adaptive_dc_smoothing > 1)
+      if (options->adaptive_dc_smoothing > GJXL_DC_SMOOTHING_AUTOMATIC)
         return Fail(GJXL_ERROR_INVALID_ARGUMENT, "Invalid adaptive DC smoothing");
-      adaptive_dc_smoothing = options->adaptive_dc_smoothing != 0;
+      if (options->adaptive_dc_smoothing != GJXL_DC_SMOOTHING_AUTOMATIC)
+        adaptive_dc_smoothing = options->adaptive_dc_smoothing == GJXL_DC_SMOOTHING_ENABLED;
     }
     result = ValidateEncoderOptions(*options);
     if (result != GJXL_OK) {

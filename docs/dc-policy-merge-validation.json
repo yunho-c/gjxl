@@ -1,0 +1,115 @@
+{
+  "backend_regression": {
+    "cause": "Redundant FP32 Metal DC-to-LLF conversion overwrote CPU-authoritative low frequencies and changed later AQ decisions.",
+    "control": "Retaining CPU smoothing while restoring only Metal LLF conversion reproduced the 778-byte output and 0.136601 difference.",
+    "cpu_bytes": 537,
+    "effort": 7,
+    "extent": [
+      128,
+      96
+    ],
+    "fixed_exact_metal_bytes": 537,
+    "fixed_max_score_history_difference": 1.07884e-05,
+    "mode": "weighted prediction-aware DC with adaptive smoothing",
+    "old_exact_metal_bytes": 778,
+    "old_max_score_history_difference": 0.136601,
+    "permanent_case_axes": {
+      "efforts": [
+        4,
+        7
+      ],
+      "predictors": [
+        "gradient",
+        "weighted"
+      ],
+      "quantization": [
+        "round",
+        "prediction-aware"
+      ],
+      "smoothing": [
+        false,
+        true
+      ]
+    },
+    "permanent_explicit_cases": 16,
+    "score_history_tolerance": 0.002
+  },
+  "base_revision": "1ebce125279e9a4f00d85c2ce7b5c493f70be3cd",
+  "binary_sha256": {
+    "gjxl_dc_policy_test": "8507e690ec29ad4973db29bf545df10b4b51c7d65841299af369b9521cf504ea",
+    "gjxl_encode": "b7fb3576dc673009e6abc81ae9dcd48d4a008d72151e738091297ec5ee4d1447",
+    "gjxl_metal_aq_host_storage_plan_test": "753623e96dce2439f5fd5c68c31477652e2c6f48f435fc4dbaa432f4253876c8",
+    "gjxl_metal_aq_reconstruction_test": "68ce54c5722c4b11673ebe248841f1a7d2f75bf777e8451feade563a973f7b51",
+    "gjxl_quality_benchmark": "ec5e88ae17db402fdcc6f6bef3470b572a0491c93c66542c6fcc5b699d3105d3",
+    "gjxl_quantization_gpu_pipeline_test": "a95cb7aa4b737a499127b8b673152f3b4dae5b38fcd4570d08ce166a8c7204c2"
+  },
+  "branch": "feat/dc-behavior-alignment",
+  "build_directory": "build/dc-alignment-fix-ktk5k_kq",
+  "build_type": "Release",
+  "cli_pinned_outputs": [
+    "ordinary default",
+    "maximum-compression default",
+    "maximum-error default",
+    "ordinary explicit legacy",
+    "maximum-compression explicit legacy",
+    "maximum-error explicit legacy"
+  ],
+  "evidence_sha256": {
+    "build/dc-alignment-fix-ktk5k_kq/change.patch": "9a6e8d0fb9bc92bcbd33247b17913a98e2650ef392ba25a7699b5b8c51246fc8",
+    "build/dc-alignment-fix-ktk5k_kq/include-cleanup-binary-audit.json": "1c61b99f0ae3042d05beccbd240a7ddcfa4061c6ea8438f6e39ea49b13dab350",
+    "build/dc-alignment-fix-ktk5k_kq/maximum-error-golden-controls.json": "87a778b16b77dd312f7980276e567a951fdd1e7d12a4f8511453750b14523c9a",
+    "build/dc-alignment-fix-ktk5k_kq/qualified-output-check.log": "deb8732f688a97b0c5f7423bd9a2e2287371094c534d69944d416a5bf9a1f174",
+    "build/dc-alignment-fix-ktk5k_kq/regression-tests.log": "8acd39d1155d28dbf4a0123935a27a5d518963f39c007db2fbbb2330916cab16",
+    "build/dc-alignment-fix-ktk5k_kq/rust-clippy.log": "28e9dbbce1bb4c5672465593b2a1c0c527ce6258a5a8b4c21fba06d92f402cae",
+    "build/dc-alignment-fix-ktk5k_kq/rust-format.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "build/dc-alignment-fix-ktk5k_kq/rust-tests.log": "2d803b01ebb352b030e8f48b3d09cc305499ff6fe435d6af34d3ad21cfd3b094",
+    "build/dc-merge-review-oo_2aloc/baseline-ctest.log": "9669252689dd4d6c0365411625ada2cfc6c5cbdec372db1789ef9fef34b07288",
+    "build/dc-merge-review-oo_2aloc/cpu-llf-control.log": "da3ac805b86c610768628e60025f87eab9ff55cd7f4fbf62409b1c6c073c7a04",
+    "build/dc-merge-review-oo_2aloc/gpu-llf-control.log": "036cf93826bd932fa41dee75daae820333fd4dd711170d82af8d35f5ef0df65b",
+    "build/dc-merge-review-oo_2aloc/isolated-modes.json": "92ee841ed33d54d147a288c4b24189a061ca71f6bd8061f6e2176c5b7d986c29"
+  },
+  "final_include_cleanup": {
+    "binaries_checked": 128,
+    "changed_binaries": []
+  },
+  "libjxl_reference_enabled": false,
+  "metal_profiling_enabled": false,
+  "native_tests": {
+    "baseline_actual_score": 0.24919039011001587,
+    "baseline_expected_score": 0.24914586544036865,
+    "baseline_revision": "8e8c49a42e69a24d469d4bcf0772a9e2c5012d6a",
+    "elapsed_seconds": 338.1,
+    "excluded": "^worker_launch_failure_ (11 tests)",
+    "known_baseline_failures": [
+      "quantization_pipeline"
+    ],
+    "passed": 125,
+    "selected": 126
+  },
+  "new_regressions_resolved": true,
+  "qualified_output_identities": {
+    "gradient_cli_cases": 10,
+    "high_resolution_photographic_cases": 21,
+    "invalid_cli_cases": 6,
+    "output_audit": "build/dc-alignment-fix-ktk5k_kq/native/output-check/audit.json",
+    "output_audit_sha256": "6677cdb30a998c5736594afeb26b593e42570e036a8265a2da76d60e3b099b60",
+    "passed": 31,
+    "scope": "Exact codestream identities against frozen qualified artifacts; no new timing claim."
+  },
+  "rust": {
+    "clippy_workspace_all_targets_warnings_denied": true,
+    "fmt_all_check": true,
+    "fresh_target_and_native_build": true,
+    "tests_passed": 11
+  },
+  "source_sha256": {
+    "cmake/RunCodestreamCliTest.cmake": "6a512d0f3e9059cef64ac251383410269309ba9cf9b86343f749e15782c1a6ca",
+    "src/codestream/compatibility_workflow_storage_plan.cpp": "eaa14128259f6258b4302de09593f4c2ac4227dc6cc2637fa575a0f27eae1560",
+    "src/gpu/metal/metal_aq_evaluation.cpp": "93fdd69c1a475be3551366ffb5278d2c51e0853f333e2537f602fc7da823f77e",
+    "src/gpu/metal/metal_aq_host_storage_plan.cpp": "91a91c264f8d0420e106ad955e7439409420f5b71f22357ce85e65a1f91350bb",
+    "src/gpu/metal/metal_aq_host_storage_plan.h": "49b0de53adfe354abd5cdca31d2ee42c2c9016f279c5b922f2c837562cb36efb",
+    "src/gpu/metal/metal_aq_reconstruction.cpp": "5109a35e36ada9edaca73693e87d3195d53f50fc7bcbeaeac464d3decebfdb08",
+    "tests/metal_aq_host_storage_plan_test.cpp": "0240afb835194d6a5eae513029406bb3b116a4982373bb0838a162e63d66406d",
+    "tests/quantization_gpu_pipeline_test.cpp": "c1316cc53593395c740c6037fe87eeb6573ec0b0285f95ce94a6dccc1a82ac24"
+  }
+}

@@ -52,8 +52,8 @@ static int CheckInitializers(void) {
             encoder_options.distance == 1.0f && encoder_options.effort == 7 &&
             encoder_options.compression_mode == GJXL_COMPRESSION_AUTOMATIC &&
             encoder_options.dc_prediction == GJXL_DC_PREDICTION_WEIGHTED &&
-            encoder_options.dc_quantization == GJXL_DC_QUANTIZATION_ROUND &&
-            encoder_options.adaptive_dc_smoothing == 0,
+            encoder_options.dc_quantization == GJXL_DC_QUANTIZATION_AUTOMATIC &&
+            encoder_options.adaptive_dc_smoothing == GJXL_DC_SMOOTHING_AUTOMATIC,
         "encoder defaults are incorrect");
 
   GJXLEncoderOptions legacy_encoder;
@@ -366,6 +366,32 @@ static int CheckEncoding(GJXLContext* context) {
     gjxl_buffer_free(&old_dc_output);
   }
 
+  for (int effort = 3; effort <= 4; ++effort) {
+    for (int quantization = 0; quantization <= 2; ++quantization) {
+      for (uint32_t smoothing = 0; smoothing <= 2; ++smoothing) {
+        GJXLEncoderOptions automatic = options;
+        automatic.effort = effort;
+        automatic.dc_quantization = quantization;
+        automatic.adaptive_dc_smoothing = smoothing;
+        GJXLEncoderOptions explicit_options = automatic;
+        if (quantization == GJXL_DC_QUANTIZATION_AUTOMATIC)
+          explicit_options.dc_quantization = effort >= 4
+            ? GJXL_DC_QUANTIZATION_PREDICTION_AWARE : GJXL_DC_QUANTIZATION_ROUND;
+        if (smoothing == GJXL_DC_SMOOTHING_AUTOMATIC)
+          explicit_options.adaptive_dc_smoothing = (uint32_t)(effort >= 4);
+        GJXLBuffer actual = {NULL, 0}, expected = {NULL, 0};
+        CHECK(gjxl_encode(context, &rgb_view, &automatic, &actual) == GJXL_OK &&
+              gjxl_encode(context, &rgb_view, &explicit_options, &expected) == GJXL_OK,
+              "automatic DC policy encoding failed");
+        CHECK(actual.size == expected.size &&
+              memcmp(actual.data, expected.data, actual.size) == 0,
+              "automatic DC policy ignored effort or an explicit override");
+        gjxl_buffer_free(&actual);
+        gjxl_buffer_free(&expected);
+      }
+    }
+  }
+
   options.dc_prediction = GJXL_DC_PREDICTION_WEIGHTED;
   GJXLBuffer weighted_output = {NULL, 0}, weighted_repeat = {NULL, 0};
   CHECK(gjxl_encode(context, &rgb_view, &options, &weighted_output) ==
@@ -506,7 +532,7 @@ static int CheckEncoding(GJXLContext* context) {
                           GJXL_ERROR_INVALID_ARGUMENT, "unknown DC quantization"),
         "unknown DC quantization accepted");
   options.dc_quantization = GJXL_DC_QUANTIZATION_ROUND;
-  options.adaptive_dc_smoothing = 2;
+  options.adaptive_dc_smoothing = 3;
   CHECK(ExpectEncodeError(context, &rgb_view, &options,
                           GJXL_ERROR_INVALID_ARGUMENT, "invalid DC smoothing"),
         "invalid DC smoothing accepted");

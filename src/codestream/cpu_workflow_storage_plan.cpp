@@ -70,9 +70,9 @@ Status ComputeCpuWorkflowStoragePlan(Extent2D source,
        .prepared_reference = true,
        // The workflow CPU profile does not request the nested AQ profile.
        .collect_profile = false,
-       .dc_quantization = e.dc_quantization,
+       .dc_quantization = ResolveDcQuantization(e),
        .dc_prediction = e.dc_prediction,
-       .adaptive_dc_smoothing = e.adaptive_dc_smoothing},
+       .adaptive_dc_smoothing = ResolveAdaptiveDcSmoothing(e)},
       &p.aq);
   if (!status.ok())
     return status;

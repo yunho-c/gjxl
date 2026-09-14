@@ -200,7 +200,7 @@ int main(int argc, char **argv) {
                 << ",\"dc_prediction\":\"" << v.prediction
                 << "\",\"dc_quantization\":\"" << v.quantization
                 << "\",\"adaptive_dc_smoothing\":"
-                << (v.options.adaptive_dc_smoothing ? "true" : "false")
+                << (gjxl::ResolveAdaptiveDcSmoothing(v.options) ? "true" : "false")
                 << ",\"encoded_bytes\":" << v.expected.size() << '}';
     }
     std::cout << "],\"samples\":[";

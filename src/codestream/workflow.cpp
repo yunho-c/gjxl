@@ -312,7 +312,7 @@ Status ValidateWorkflowOptions(Extent2D source, const VarDctEncodingOptions &opt
   if (!status.ok()) {
     return status;
   }
-  if (!IsValidDcQuantization({options.dc_quantization, options.dc_prediction, 0})) {
+  if (!IsValidDcQuantization({ResolveDcQuantization(options), options.dc_prediction, 0})) {
     return Status::InvalidArgument("DC coding options are invalid");
   }
   if (options.effort < 1 || options.effort > 10) {
@@ -827,12 +827,12 @@ PrepareWorkflow(ConstImage3FView linear_rgb, VarDctEncodingOptions options,
   pipeline_options.butteraugli_target = options.butteraugli_target;
   pipeline_options.adaptive_quantization.iterations =
     codestream_internal::AdaptiveQuantizationIterations(options);
-  pipeline_options.adaptive_quantization.dc_quantization = options.dc_quantization;
+  pipeline_options.adaptive_quantization.dc_quantization = ResolveDcQuantization(options);
   pipeline_options.adaptive_quantization.dc_prediction = options.dc_prediction;
   pipeline_options.adaptive_quantization.profile.extra_dc_precision =
-    options.dc_quantization == DcQuantizationMode::kPredictionAware ? 1 : 0;
+    ResolveDcQuantization(options) == DcQuantizationMode::kPredictionAware ? 1 : 0;
   pipeline_options.adaptive_quantization.profile.adaptive_dc_smoothing =
-    options.adaptive_dc_smoothing;
+    ResolveAdaptiveDcSmoothing(options);
   if (options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
     pipeline_options.adaptive_quantization.control_mode =
       AdaptiveQuantizationControlMode::kMaximumError;
@@ -852,7 +852,7 @@ PrepareWorkflow(ConstImage3FView linear_rgb, VarDctEncodingOptions options,
   prepared.quantization.profile.b_qm_scale = matrix_scales.b;
   prepared.quantization.profile.extra_dc_precision =
     pipeline_options.adaptive_quantization.profile.extra_dc_precision;
-  prepared.quantization.profile.adaptive_dc_smoothing = options.adaptive_dc_smoothing;
+  prepared.quantization.profile.adaptive_dc_smoothing = ResolveAdaptiveDcSmoothing(options);
 
   GpuBackend* selected_gpu = nullptr;
   bool selected_metal = false;
@@ -1017,8 +1017,8 @@ PrepareWorkflow(ConstImage3FView linear_rgb, VarDctEncodingOptions options,
   candidate_summary.density_mode = options.density_mode;
   candidate_summary.compression_mode = options.compression_mode;
   candidate_summary.dc_prediction = options.dc_prediction;
-  candidate_summary.dc_quantization = options.dc_quantization;
-  candidate_summary.adaptive_dc_smoothing = options.adaptive_dc_smoothing;
+  candidate_summary.dc_quantization = ResolveDcQuantization(options);
+  candidate_summary.adaptive_dc_smoothing = ResolveAdaptiveDcSmoothing(options);
   candidate_summary.entropy_behavior = codestream_options.entropy_behavior;
   candidate_summary.rate_control_mode = options.rate_control_mode;
   candidate_summary.effective_target_bytes = effective_target_bytes;
