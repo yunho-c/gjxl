@@ -18,6 +18,8 @@ struct CpuQuantizationPipelineOptions {
   /// Bypasses AC-strategy search and selects DCT8 for every base block.
   /// Keeps initial quantization, CfL, and adaptive quantization unchanged.
   bool fixed_dct8 = false;
+  /// Initialize a uniform quantization field; AQ updates still run normally.
+  bool uniform_initial_quantization = false;
 };
 
 struct CpuQuantizationPipelineOutput {

@@ -831,69 +831,90 @@ void MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission(
       encoder, self.tile_extent_.width * self.tile_extent_.height);
   }
 
-  encoder->setComputePipelineState(
-      backend.aq_pipelines_.initial_quant_gradient.get());
-  BindPlane(encoder, self.coding_[1], 0);
-  BindPlane(encoder, self.initial_quant_unblurred_pixel_mask_, 1);
-  BindPlane(encoder, self.initial_quant_pre_erosion_, 2);
-  BindPlane(encoder, self.reconstruction_error_, 3);
-  encoder->setBytes(&self.initial_quant_gradient_params_,
-                    sizeof(self.initial_quant_gradient_params_), 4);
-  DispatchThreads2d(encoder, self.initial_quant_pre_erosion_.extent);
+  if (self.uniform_initial_quant_ > 0.0f) {
+    encoder->setComputePipelineState(backend.aq_pipelines_.uniform_initial_quant.get());
+    BindPlane(encoder, self.initial_quant_field_, 0);
+    BindPlane(encoder, self.omit_initial_search_data_
+      ? self.initial_quant_field_ : self.initial_quant_strategy_mask_, 1);
+    BindPlane(encoder, self.omit_initial_search_data_
+      ? self.initial_quant_field_ : self.initial_quant_pixel_mask_, 2);
+    const AqUniformInitialQuantParams params{
+      static_cast<uint32_t>(self.block_extent_.width),
+      static_cast<uint32_t>(self.block_extent_.height),
+      static_cast<uint32_t>(self.initial_quant_field_.row_stride),
+      self.omit_initial_search_data_ ? 0u :
+        static_cast<uint32_t>(self.initial_quant_strategy_mask_.row_stride),
+      self.omit_initial_search_data_ ? 0u :
+        static_cast<uint32_t>(self.initial_quant_pixel_mask_.row_stride),
+      self.uniform_initial_quant_,
+    };
+    encoder->setBytes(&params, sizeof(params), 3);
+    DispatchThreads2d(encoder, self.block_extent_);
+  } else {
+    encoder->setComputePipelineState(
+        backend.aq_pipelines_.initial_quant_gradient.get());
+    BindPlane(encoder, self.coding_[1], 0);
+    BindPlane(encoder, self.initial_quant_unblurred_pixel_mask_, 1);
+    BindPlane(encoder, self.initial_quant_pre_erosion_, 2);
+    BindPlane(encoder, self.reconstruction_error_, 3);
+    encoder->setBytes(&self.initial_quant_gradient_params_,
+                      sizeof(self.initial_quant_gradient_params_), 4);
+    DispatchThreads2d(encoder, self.initial_quant_pre_erosion_.extent);
 
-  encoder->setComputePipelineState(
-      backend.aq_pipelines_.initial_quant_fuzzy_erosion.get());
-  BindPlane(encoder, self.initial_quant_pre_erosion_, 0);
-  BindPlane(encoder, self.initial_quant_field_, 1);
-  BindPlane(encoder, self.initial_quant_strategy_mask_, 2);
-  BindPlane(encoder, self.reconstruction_error_, 3);
-  encoder->setBytes(&self.initial_quant_erosion_params_,
-                    sizeof(self.initial_quant_erosion_params_), 4);
-  DispatchThreads2d(encoder, self.block_extent_);
+    encoder->setComputePipelineState(
+        backend.aq_pipelines_.initial_quant_fuzzy_erosion.get());
+    BindPlane(encoder, self.initial_quant_pre_erosion_, 0);
+    BindPlane(encoder, self.initial_quant_field_, 1);
+    BindPlane(encoder, self.initial_quant_strategy_mask_, 2);
+    BindPlane(encoder, self.reconstruction_error_, 3);
+    encoder->setBytes(&self.initial_quant_erosion_params_,
+                      sizeof(self.initial_quant_erosion_params_), 4);
+    DispatchThreads2d(encoder, self.block_extent_);
 
-  encoder->setComputePipelineState(
-      backend.aq_pipelines_.initial_quant_modulation.get());
-  for (size_t channel = 0; channel < 3; ++channel) {
-    BindPlane(encoder, self.coding_[channel], channel);
-  }
-  BindPlane(encoder, self.initial_quant_field_, 3);
-  BindPlane(encoder, self.reconstruction_error_, 4);
-  encoder->setBytes(&self.initial_quant_modulation_params_,
-                    sizeof(self.initial_quant_modulation_params_), 5);
-  DispatchThreads2d(encoder, self.block_extent_);
-
-  if (!self.omit_initial_search_data_) {
-    constexpr std::array<float, 5> kFilter = {
-        0.364911248f, 0.05f, 0.1688888021f, 0.221069183f, 0.306563504f};
-    constexpr double kWeightSum =
-        1.0 + 4.0 * (kFilter[0] + kFilter[1] + kFilter[2] + kFilter[4] +
-                     2.0 * kFilter[3]);
-    constexpr float kNormalize = static_cast<float>(1.0 / kWeightSum);
-    backend.EncodePrimitive(
-        encoder,
-        Symmetric5ConvolutionCommand{
-            .input = self.initial_quant_unblurred_pixel_mask_,
-            .output = self.initial_quant_pixel_mask_,
-            .weights = {
-                kNormalize,
-                kNormalize * kFilter[0],
-                kNormalize * kFilter[2],
-                kNormalize * kFilter[1],
-                kNormalize * kFilter[4],
-                kNormalize * kFilter[3],
-            },
-        });
-
-    if (self.resident_ac_strategy_inputs_) {
-      encoder->setComputePipelineState(
-        backend.aq_pipelines_.validate_initial_mask.get());
-      BindPlane(encoder, self.initial_quant_pixel_mask_, 0);
-      BindPlane(encoder, self.reconstruction_error_, 1);
-      const uint32_t count = static_cast<uint32_t>(self.pixel_count_);
-      encoder->setBytes(&count, sizeof(count), 2);
-      DispatchThreads1d(encoder, self.pixel_count_);
+    encoder->setComputePipelineState(
+        backend.aq_pipelines_.initial_quant_modulation.get());
+    for (size_t channel = 0; channel < 3; ++channel) {
+      BindPlane(encoder, self.coding_[channel], channel);
     }
-  }  // Search masks are not consumed by fixed-DCT8 encoding.
+    BindPlane(encoder, self.initial_quant_field_, 3);
+    BindPlane(encoder, self.reconstruction_error_, 4);
+    encoder->setBytes(&self.initial_quant_modulation_params_,
+                      sizeof(self.initial_quant_modulation_params_), 5);
+    DispatchThreads2d(encoder, self.block_extent_);
+
+    if (!self.omit_initial_search_data_) {
+      constexpr std::array<float, 5> kFilter = {
+          0.364911248f, 0.05f, 0.1688888021f, 0.221069183f, 0.306563504f};
+      constexpr double kWeightSum =
+          1.0 + 4.0 * (kFilter[0] + kFilter[1] + kFilter[2] + kFilter[4] +
+                       2.0 * kFilter[3]);
+      constexpr float kNormalize = static_cast<float>(1.0 / kWeightSum);
+      backend.EncodePrimitive(
+          encoder,
+          Symmetric5ConvolutionCommand{
+              .input = self.initial_quant_unblurred_pixel_mask_,
+              .output = self.initial_quant_pixel_mask_,
+              .weights = {
+                  kNormalize,
+                  kNormalize * kFilter[0],
+                  kNormalize * kFilter[2],
+                  kNormalize * kFilter[1],
+                  kNormalize * kFilter[4],
+                  kNormalize * kFilter[3],
+              },
+          });
+
+      if (self.resident_ac_strategy_inputs_) {
+        encoder->setComputePipelineState(
+          backend.aq_pipelines_.validate_initial_mask.get());
+        BindPlane(encoder, self.initial_quant_pixel_mask_, 0);
+        BindPlane(encoder, self.reconstruction_error_, 1);
+        const uint32_t count = static_cast<uint32_t>(self.pixel_count_);
+        encoder->setBytes(&count, sizeof(count), 2);
+        DispatchThreads1d(encoder, self.pixel_count_);
+      }
+    }  // Search masks are not consumed by fixed-DCT8 encoding.
+  }
   if (!self.frame_only_resident_quantizer_) return;
   encoder->setComputePipelineState(
       backend.aq_pipelines_.initial_quant_sort_prepare.get());
@@ -1247,6 +1268,15 @@ Status MetalPreparedAqEvaluation::ComputeInitialQuantizationImpl(
     return Status::InvalidArgument(
       "Resident initial CfL output was not prepared");
   }
+
+  const float uniform_quant = options.uniform
+    ? 0.79f / options.butteraugli_target * options.rescale : 0.0f;
+  if (options.uniform &&
+      (!std::isfinite(uniform_quant) || uniform_quant <= 0.0f ||
+       !(1.0f / (uniform_quant + 0.001f) > 0.0f))) {
+    return Status::InvalidArgument("Uniform initial quantization is invalid");
+  }
+  uniform_initial_quant_ = uniform_quant;
 
   constexpr std::array<float, 4> kMulBase = {0.125f, 0.1f, 0.09f, 0.06f};
   constexpr std::array<float, 4> kMulAdd = {0.0f, -0.1f, -0.09f, -0.06f};

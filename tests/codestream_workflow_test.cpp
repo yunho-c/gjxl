@@ -578,6 +578,32 @@ bool CheckHighDensityMode() {
 }
 
 bool CheckEffortPolicy() {
+  using gjxl::codestream_internal::ConfigureInitialQuantizationPolicy;
+  for (int effort = 1; effort <= 10; ++effort) {
+    gjxl::VarDctEncodingOptions options;
+    options.effort = effort;
+    gjxl::CpuQuantizationPipelineOptions pipeline;
+    ConfigureInitialQuantizationPolicy(options, &pipeline);
+    if (pipeline.uniform_initial_quantization != (effort <= 4) ||
+        pipeline.adaptive_quantization.profile.loop_filter.gaborish != (effort >= 5)) {
+      std::cerr << "Initial quantization effort boundary changed\n";
+      return false;
+    }
+    options.metal_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput;
+    ConfigureInitialQuantizationPolicy(options, &pipeline);
+    if (pipeline.uniform_initial_quantization ||
+        !pipeline.adaptive_quantization.profile.loop_filter.gaborish) return false;
+    options.metal_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
+    options.density_mode = gjxl::VarDctDensityMode::kHighDensity;
+    ConfigureInitialQuantizationPolicy(options, &pipeline);
+    if (pipeline.uniform_initial_quantization ||
+        !pipeline.adaptive_quantization.profile.loop_filter.gaborish) return false;
+    options.density_mode = gjxl::VarDctDensityMode::kDefault;
+    options.rate_control_mode = gjxl::VarDctRateControlMode::kMaximumError;
+    ConfigureInitialQuantizationPolicy(options, &pipeline);
+    if (pipeline.uniform_initial_quantization ||
+        !pipeline.adaptive_quantization.profile.loop_filter.gaborish) return false;
+  }
   ImageStorage image;
   FillImage(&image);
   struct EffortCase {

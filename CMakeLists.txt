@@ -2053,6 +2053,8 @@ if(GJXL_BUILD_TESTS)
     NAME quantization_pipeline
     COMMAND gjxl_quantization_pipeline_test
   )
+  add_test(NAME quantization_pipeline_uniform
+    COMMAND gjxl_quantization_pipeline_test --uniform)
 
   add_executable(gjxl_low_effort_strategy_policy_test
     tests/low_effort_strategy_policy_test.cpp)

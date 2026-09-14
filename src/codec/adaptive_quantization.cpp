@@ -601,6 +601,24 @@ Status ComputeInitialQuantField(
       "Block grid dimensions are too large");
   }
 
+  if (options.uniform) {
+    const float quant = 0.79f / options.butteraugli_target * options.rescale;
+    const float mask = 1.0f / (quant + 0.001f);
+    if (!std::isfinite(quant) || quant <= 0.0f ||
+        !std::isfinite(mask) || mask <= 0.0f) {
+      return Status::InvalidArgument("Uniform initial quantization is invalid");
+    }
+    const auto fill = [](PlaneF32View plane, float value) {
+      for (size_t y = 0; y < plane.extent.height; ++y) {
+        std::fill_n(plane.Row(y), plane.extent.width, value);
+      }
+    };
+    fill(output.quant_field, quant);
+    fill(output.strategy_mask, mask);
+    fill(output.pixel_mask, mask);
+    return Status::Ok();
+  }
+
   try {
     ManagedVector<float> pixel_mask(pixel_count);
     const Extent2D pre_erosion_extent{

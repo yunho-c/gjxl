@@ -15,6 +15,7 @@
 #include <span>
 #include <string_view>
 #include <vector>
+#include <string_view>
 
 #include "butteraugli_test_tolerances.h"
 #include "codec/color_transform.h"
@@ -535,10 +536,25 @@ bool CheckGaborishDisabledPath() {
   options.adaptive_quantization.profile.loop_filter.gaborish = false;
   const gjxl::Status status = gjxl::RunCpuQuantizationPipeline(
     original.ConstView(), opsin.ConstView(), options, output.Output());
-  if (!status.ok() || !CheckResult(output, 1, false)) {
+  if (!status.ok() || !CheckResult(output, 1, true)) {
     std::cerr << "No-Gaborish CPU pipeline failed: "
               << status.message() << '\n';
     return false;
+  }
+  options.fixed_dct8 = true;
+  options.uniform_initial_quantization = true;
+  if (!gjxl::RunCpuQuantizationPipeline(
+        original.ConstView(), opsin.ConstView(), options, output.Output()).ok()) {
+    return false;
+  }
+  const auto initial = output.Output().initial_quantization.quant_field;
+  for (size_t y = 0; y < initial.extent.height; ++y) {
+    for (size_t x = 0; x < initial.extent.width; ++x) {
+      if (initial.Row(y)[x] != 0.79f / options.butteraugli_target) {
+        std::cerr << "Uniform pipeline incorrectly applied Gaborish target scaling\n";
+        return false;
+      }
+    }
   }
   return true;
 }
@@ -608,7 +624,10 @@ bool CheckPreparedReuse() {
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
+  if (argc == 2 && std::string_view(argv[1]) == "--uniform") {
+    return CheckGaborishDisabledPath() ? EXIT_SUCCESS : EXIT_FAILURE;
+  }
   if (!RunFixture(Fixture::kGradient, "odd gradient", {21, 13},
                   {kGradientScores, kGradientQuant, kGradientRaw}) ||
       !RunFixture(Fixture::kTexture, "texture", {32, 24},

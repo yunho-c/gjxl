@@ -139,6 +139,7 @@ bool CheckScaleMultipliers() {
 
 bool CheckRepresentableMatrixScales() {
   gjxl::SimpleVarDctCodestreamProfile profile;
+  profile.loop_filter.gaborish = false;
   profile.x_qm_scale = 0;
   profile.b_qm_scale = 7;
   gjxl::VarDctEncoderFrame frame;
@@ -183,9 +184,6 @@ bool CheckUnsupportedProfileDimensions() {
     }) &&
     RejectsMutation("coefficient orders", [](auto* p) {
       p->coefficient_order_mode = gjxl::CoefficientOrderMode::kCustom;
-    }) &&
-    RejectsMutation("Gaborish disabled", [](auto* p) {
-      p->loop_filter.gaborish = false;
     }) &&
     RejectsMutation("Gaborish inverse", [](auto* p) {
       p->gaborish_inverse_multipliers[0] = 1.01f;

@@ -143,8 +143,7 @@ Status vardct_frame_internal::ValidateSimpleCodestreamFrame(
   }
 
   const SimpleVarDctCodestreamProfile defaults;
-  if (!profile.loop_filter.gaborish ||
-      profile.gaborish_inverse_multipliers !=
+  if (profile.gaborish_inverse_multipliers !=
         defaults.gaborish_inverse_multipliers ||
       profile.loop_filter.gaborish_options !=
         defaults.loop_filter.gaborish_options) {

@@ -1,7 +1,11 @@
-# Low-effort transform policy
+# Low-effort frontend policy
 
 Ordinary efforts 1–4 select DCT8 for every 8×8 base block without invoking
-AC-strategy search. Effort 5 enables the existing mixed-transform search.
+AC-strategy search. They disable Gaborish and initialize every quantization
+block to `0.79 / distance`, matching libjxl’s e1–4 initialization boundary.
+Effort 5 enables mixed-transform search, spatial initialization, and Gaborish.
+The uniform field is only the starting point; AQ may make the final field
+nonuniform.
 The adaptive-quantization update schedule stays unchanged:
 
 | Effort | Transform selection | AQ updates |
@@ -27,9 +31,11 @@ Resident preparations release retained AC-search scratch when switching to
 fixed mode. CPU, resident Metal, and compatibility Metal admission plans omit
 search-only storage and include overlap for replacement strategy grids.
 
-Initial quantization, CfL, and inverse-Gaborish preparation remain. In
-particular, the resident inverse-Gaborish image also feeds final coefficient
-coding; removing it would change the encoded result. Effort 4 still performs
+Initial quantization and CfL remain. Ordinary efforts 1–4 use a direct uniform
+fill on CPU and Metal, skipping spatial gradient, erosion, modulation, and
+mask convolution work. Their inverse-Gaborish stage is disabled and the frame
+header explicitly signals Gaborish off while retaining two EPF passes.
+Serializer admission includes the longer nondefault filter header. Effort 4 still performs
 its AQ update, so its speed cannot be inferred directly from a zero-update
 DCT8 experiment. Low-effort output bytes and rate-quality behavior change;
 this change does not establish speed parity or a new matched-quality result.
@@ -41,8 +47,8 @@ AC-search masks. The gradient and erosion kernels omit mask-only arithmetic
 and stores; the pixel-mask convolution and validation dispatches are skipped.
 The three mask planes use separate minimal argument bindings instead of
 full-sized backing. Initial strategy-mask and CfL host readbacks are also
-omitted. Initial quantization, device CfL, and inverse Gaborish still feed
-final coefficient coding.
+omitted. Uniform initial quantization and device CfL still feed final
+coefficient coding; higher-effort spatial paths retain inverse Gaborish.
 
 This applies to both zero-update efforts 1–3 and effort 4's AQ update. Full
 initial-quantization diagnostics retain all masks and initial CfL outputs;
@@ -87,3 +93,20 @@ cache transitions with zero and one AQ update, forbidden mask/CfL outputs,
 and atomic numeric/readback failures. Metal API and shader validation also
 pass on the affected workflows. This establishes output parity and less
 search-only backing; measured complete-encode timings remain mixed.
+
+## Uniform-field qualification
+
+The September 13, 2026 study used six Kodak, six CLIC, and three 12 MP
+photographs, with pinned fast SSIMULACRA2 and no extrapolation. Gaborish off
+plus uniform initialization, retaining e4’s one AQ update, changed mean
+BD-rate relative to the previous e4 by −4.93% at scores 75–85, −5.18% at
+45–55, and −4.21% at 25–35. The lower ranges had 2/15 and 3/15 per-image
+regressions respectively, with worst increases +2.36% and +4.86%. These
+content-dependent regressions were accepted for the new default. This is
+not a claim of improvement on every image, metric, or resolution.
+
+The original measurements and decoder/hash audits are retained in
+`/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/e4-rca-20260913`
+and its sibling `e4-low-quality-20260913`. Those studies evaluated rate,
+not production latency. The production replay and validation are recorded
+in `low-effort-frontend-qualification.md`.

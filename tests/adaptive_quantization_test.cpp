@@ -567,6 +567,41 @@ bool CheckAdjustedQuantField() {
   return true;
 }
 
+bool CheckUniformInitialQuantization() {
+  OpsinStorage input;
+  OutputStorage output;
+  for (const float target : {1.2f, 8.0f}) {
+    const float expected = 0.79f / target * 0.87f;
+    const float mask = 1.0f / (expected + 0.001f);
+    if (!gjxl::ComputeInitialQuantField(
+          input.View(), {target, 0.87f, true}, output.Views()).ok()) return false;
+    const auto check = [](gjxl::PlaneF32View plane, float value) {
+      for (size_t y = 0; y < plane.extent.height; ++y) {
+        for (size_t x = 0; x < plane.stride; ++x) {
+          if (plane.Row(y)[x] != (x < plane.extent.width ? value : -777.0f)) {
+            return false;
+          }
+        }
+      }
+      return true;
+    };
+    const auto views = output.Views();
+    if (!check(views.quant_field, expected) ||
+        !check(views.strategy_mask, mask) || !check(views.pixel_mask, mask)) {
+      std::cerr << "Uniform initial field or stride padding changed\n";
+      return false;
+    }
+  }
+  const auto previous = output.quant_field;
+  if (gjxl::ComputeInitialQuantField(input.View(),
+        {std::numeric_limits<float>::min(), 100.0f, true}, output.Views()).ok() ||
+      output.quant_field != previous) {
+    std::cerr << "Invalid uniform quantization was not atomic\n";
+    return false;
+  }
+  return true;
+}
+
 bool CheckParallelInitialQuantization() {
   constexpr gjxl::Extent2D pixels{256, 256};
   constexpr gjxl::Extent2D blocks{32, 32};
@@ -629,6 +664,7 @@ bool CheckParallelInitialQuantization() {
 int main() {
   if (!CheckInitialQuantDc() ||
       !CheckPinnedInitialQuantField() ||
+      !CheckUniformInitialQuantization() ||
       !CheckRescaleContract() ||
       !CheckTileBoundaryGoldens() ||
       !CheckAdjustedQuantField() ||

@@ -128,7 +128,8 @@ enum {
 typedef struct {
   uint32_t struct_size;
   float distance;
-  /// Speed/refinement intent in [1, 10]. Efforts 1-4 use DCT8 only;
+  /// Speed/refinement intent in [1, 10]. Efforts 1-4 use DCT8, disable Gaborish, and start with a uniform
+  /// quantization field (0 AQ updates at e1-3, 1 at e4);
   /// efforts 5-10 enable mixed-transform AC-strategy search.
   int32_t effort;
   /// Selects the entropy/codestream search policy independently of effort.

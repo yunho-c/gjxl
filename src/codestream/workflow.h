@@ -66,7 +66,9 @@ struct VarDctEncodingOptions {
   /// User-facing speed-versus-refinement intent in [1, 10]. Effort 7 preserves
   /// the established two-update adaptive-quantization policy and uses
   /// deterministic DCT8-only coefficient-order sampling.
-  /// In the ordinary policy, efforts 1-4 use only DCT8 transforms; effort 5
+  /// In the ordinary policy, efforts 1-4 use DCT8, disable Gaborish, and
+  /// start with a uniform quantization field. Efforts 1-3 run zero AQ updates
+  /// and effort 4 runs one. Effort 5
   /// enables mixed-transform AC search. High-density and maximum-error
   /// overrides preserve their existing mixed-transform search behavior.
   int32_t effort = 7;
