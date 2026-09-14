@@ -572,7 +572,7 @@ bool CheckAtomicRejections() {
   }
 
   gjxl::SimpleVarDctCodestreamProfile profile;
-  profile.loop_filter.gaborish = false;
+  profile.loop_filter.epf_options.iterations = 1;
   gjxl::VarDctEncoderFrame unsupported;
   gjxl::Status status =
     MakeFrame(8, 8, {3541, 10}, profile, &unsupported);

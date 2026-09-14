@@ -1519,7 +1519,10 @@ bool CheckResidentInitialQuantization(const HostImage& image) {
   const size_t pixel_count = kPixelExtent.width * kPixelExtent.height;
   for (const gjxl::InitialQuantizationOptions options :
        {gjxl::InitialQuantizationOptions{1.0f, 1.0f},
-        gjxl::InitialQuantizationOptions{2.4f, 0.87f}}) {
+        gjxl::InitialQuantizationOptions{2.4f, 0.87f},
+        gjxl::InitialQuantizationOptions{1.2f, 1.0f, true},
+        gjxl::InitialQuantizationOptions{8.0f, 0.87f, true},
+        gjxl::InitialQuantizationOptions{1.0f, 1.0f}}) {
     std::vector<float> expected_quant(block_count);
     std::vector<float> expected_strategy(block_count);
     std::vector<float> expected_pixel(pixel_count);

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "codec/quantization_pipeline.h"
 #include "codestream/encoder_internal.h"
 #include "codestream/encoding_result_internal.h"
 #include "codestream/workflow.h"
@@ -35,6 +36,22 @@ namespace gjxl::codestream_internal {
   return options.effort <= 4 &&
     options.density_mode == VarDctDensityMode::kDefault &&
     options.rate_control_mode != VarDctRateControlMode::kMaximumError;
+}
+
+/// Default low efforts match libjxl's e1-4 Gaborish/initial-field policy.
+/// Explicit transform/error modes retain their existing perceptual recipe.
+[[nodiscard]] constexpr bool UseUniformInitialQuantization(
+  const VarDctEncodingOptions& options) noexcept {
+  return UseFixedDct8Strategy(options) &&
+    options.metal_aq_mode != GpuAdaptiveQuantizationMode::kMaximumThroughput;
+}
+
+inline void ConfigureInitialQuantizationPolicy(
+  const VarDctEncodingOptions& options,
+  CpuQuantizationPipelineOptions* pipeline) noexcept {
+  pipeline->uniform_initial_quantization = UseUniformInitialQuantization(options);
+  pipeline->adaptive_quantization.profile.loop_filter.gaborish =
+    !pipeline->uniform_initial_quantization;
 }
 
 /// Internal complete-encode result. Candidate bytes stay charged until the

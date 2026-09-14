@@ -49,6 +49,8 @@ struct MaximumErrorResult {
 struct InitialQuantizationOptions {
   float butteraugli_target = 1.0f;
   float rescale = 1.0f;
+  /// Use the low-effort constant 0.79 / target instead of spatial modulation.
+  bool uniform = false;
 };
 
 struct InitialQuantFieldOutput {

@@ -280,10 +280,10 @@ Status codestream_internal::ComputeSerializerHeaderStoragePlan(
   };
   SerializerHeaderStoragePlan plan;
   // Maximum file header: 17 prefix + 32 height + 3 ratio + 32 width +
-  // 33 metadata = 117 bits, padded to 120. The frame header is 33 bits.
-  plan.frame_prefix_bits = 120 + 33;
+  // 33 metadata = 117 bits, padded to 120. The no-Gaborish frame header is at most 41 bits.
+  plan.frame_prefix_bits = 120 + 41;
   if (!writer(120, &plan.frame_scratch) ||
-      !writer(33, &plan.frame_scratch)) return overflow();
+      !writer(41, &plan.frame_scratch)) return overflow();
   Status status = either_model(kSimpleDcContextCount, &plan.dc_model);
   if (!status.ok()) return status;
   status = either_model(maps.maximum_ac_contexts, &plan.ac_model, maximum_ac_ans_clusters);
@@ -400,6 +400,7 @@ Status WriteSimpleFrameHeader(
   normalized.x_qm_scale = defaults.x_qm_scale;
   normalized.b_qm_scale = defaults.b_qm_scale;
   normalized.extra_dc_precision = defaults.extra_dc_precision;
+  normalized.loop_filter.gaborish = defaults.loop_filter.gaborish;
   normalized.adaptive_dc_smoothing = defaults.adaptive_dc_smoothing;
   if (!profile.valid() || normalized != defaults) {
     return Status::InvalidArgument(
@@ -407,7 +408,7 @@ Status WriteSimpleFrameHeader(
   }
 
   BitWriter temporary;
-  const std::array<BitField, 15> fields = {{
+  const std::array<BitField, 21> fields = {{
     {1, 0},   // not all default
     {2, 0},   // regular frame
     {1, 0},   // VarDCT
@@ -422,7 +423,13 @@ Status WriteSimpleFrameHeader(
     {2, 0},   // replace blend mode
     {1, 1},   // final frame
     {2, 0},   // no name
-    {1, 1},   // default loop filter
+    {1, profile.loop_filter.gaborish ? 1u : 0u}, // loop-filter all_default
+    {profile.loop_filter.gaborish ? 0u : 1u, 0}, // gaborish off
+    {profile.loop_filter.gaborish ? 0u : 2u, profile.loop_filter.gaborish ? 0u : 2u}, // two EPF passes
+    {profile.loop_filter.gaborish ? 0u : 1u, 0}, // default sharpness
+    {profile.loop_filter.gaborish ? 0u : 1u, 0}, // default weights
+    {profile.loop_filter.gaborish ? 0u : 1u, 0}, // default sigma
+    {profile.loop_filter.gaborish ? 0u : 2u, 0}, // loop-filter extensions
     {2, 0},   // no extensions
   }};
   if (Status status = WriteFields(&temporary, fields); !status.ok()) {

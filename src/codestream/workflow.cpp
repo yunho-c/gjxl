@@ -625,6 +625,8 @@ PrepareWorkflow(ConstImage3FView linear_rgb, VarDctEncodingOptions options,
         ElapsedNanoseconds(geometry_begin);
     }
     CpuQuantizationPipelineOptions preparation_options;
+    codestream_internal::ConfigureInitialQuantizationPolicy(
+      options, &preparation_options);
     preparation_options.fixed_dct8 =
       codestream_internal::UseFixedDct8Strategy(options);
     if (options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
@@ -822,6 +824,7 @@ PrepareWorkflow(ConstImage3FView linear_rgb, VarDctEncodingOptions options,
   gpu_profile_internal::GpuExecutionProfile candidate_gpu_profile;
 
   CpuQuantizationPipelineOptions pipeline_options;
+  codestream_internal::ConfigureInitialQuantizationPolicy(options, &pipeline_options);
   pipeline_options.fixed_dct8 =
     codestream_internal::UseFixedDct8Strategy(options);
   pipeline_options.butteraugli_target = options.butteraugli_target;

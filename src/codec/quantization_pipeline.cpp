@@ -414,7 +414,8 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
         AdaptiveQuantizationControlMode::kMaximumError
       ? kMaximumErrorInitializationTarget
       : options.butteraugli_target;
-  const float initial_quant_target = prepared.profile.loop_filter.gaborish
+  const float initial_quant_target =
+    (options.uniform_initial_quantization || prepared.profile.loop_filter.gaborish)
     ? control_target
     : 0.62f * control_target;
   if (!initial_quantization_ready) {
@@ -423,6 +424,7 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
       {
         .butteraugli_target = initial_quant_target,
         .rescale = options.initial_quant_rescale,
+        .uniform = options.uniform_initial_quantization,
       },
       {
         .quant_field = {

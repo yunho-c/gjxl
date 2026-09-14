@@ -317,11 +317,13 @@ Status PrepareResidentFrontend(
       ? kMaximumErrorInitializationTarget
       : options.butteraugli_target;
   const float initial_quant_target =
-    options.adaptive_quantization.profile.loop_filter.gaborish
+    (options.uniform_initial_quantization ||
+     options.adaptive_quantization.profile.loop_filter.gaborish)
       ? control_target : 0.62f * control_target;
   const InitialQuantizationOptions initial_options{
     .butteraugli_target = initial_quant_target,
     .rescale = options.initial_quant_rescale,
+    .uniform = options.uniform_initial_quantization,
   };
   const InitialQuantFieldOutput initial_output{
     .quant_field = {prepared.initial_quant.data(), prepared.block_extent,
@@ -435,7 +437,8 @@ Status RunGpuFrameOnlyQuantizationPipeline(
     ManagedVector<float> strategy_mask(block_count);
     ManagedVector<float> pixel_mask(pixel_count);
     const float initial_quant_target =
-      options.adaptive_quantization.profile.loop_filter.gaborish
+      (options.uniform_initial_quantization ||
+       options.adaptive_quantization.profile.loop_filter.gaborish)
         ? options.butteraugli_target
         : 0.62f * options.butteraugli_target;
     AcStrategyGrid strategies;
@@ -457,6 +460,7 @@ Status RunGpuFrameOnlyQuantizationPipeline(
       {
         .butteraugli_target = initial_quant_target,
         .rescale = options.initial_quant_rescale,
+        .uniform = options.uniform_initial_quantization,
       },
       adaptive_options,
       {

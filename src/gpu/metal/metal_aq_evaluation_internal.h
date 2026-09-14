@@ -149,6 +149,15 @@ struct AqInitialQuantModulationParams {
   float addend;
 };
 
+struct AqUniformInitialQuantParams {
+  uint32_t block_width;
+  uint32_t block_height;
+  uint32_t quant_stride;
+  uint32_t strategy_mask_stride;
+  uint32_t pixel_mask_stride;
+  float quant;
+};
+
 struct AqInitialQuantSelectionParams {
   uint32_t value_count;
   uint32_t padded_count;
@@ -721,6 +730,7 @@ private:
   AqInitialQuantGradientParams initial_quant_gradient_params_{};
   AqInitialQuantErosionParams initial_quant_erosion_params_{};
   AqInitialQuantModulationParams initial_quant_modulation_params_{};
+  float uniform_initial_quant_ = 0.0f;
   AqInitialQuantSelectionParams initial_quant_selection_params_{};
   AqInitialQuantSelectionParams resident_quant_selection_params_{};
   std::array<AqQuantFieldAdjustmentParams, 7>

@@ -259,6 +259,15 @@ struct AqInitialQuantModulationParams {
   float addend;
 };
 
+struct AqUniformInitialQuantParams {
+  uint block_width;
+  uint block_height;
+  uint quant_stride;
+  uint strategy_mask_stride;
+  uint pixel_mask_stride;
+  float quant;
+};
+
 struct AqInitialQuantSelectionParams {
   uint value_count;
   uint padded_count;
@@ -975,6 +984,28 @@ static float aq_initial_quant_fast_pow2(float value) {
   denominator = fma(denominator, fraction, -1.94414990e+01f);
   denominator = fma(denominator, fraction, 9.85506633e+01f);
   return numerator / denominator;
+}
+
+// The uniform policy has no gradient, erosion, or spatial modulation work.
+kernel void gjxl_aq_uniform_initial_quant(
+  device float* quant_field [[buffer(0)]],
+  device float* strategy_mask [[buffer(1)]],
+  device float* pixel_mask [[buffer(2)]],
+  constant AqUniformInitialQuantParams& params [[buffer(3)]],
+  uint2 block [[thread_position_in_grid]]) {
+  if (block.x >= params.block_width || block.y >= params.block_height) return;
+  quant_field[block.y * params.quant_stride + block.x] = params.quant;
+  const float mask = 1.0f / (params.quant + 0.001f);
+  if (params.strategy_mask_stride != 0) {
+    strategy_mask[block.y * params.strategy_mask_stride + block.x] = mask;
+  }
+  if (params.pixel_mask_stride != 0) {
+    for (uint y = 0; y < 8; ++y) {
+      for (uint x = 0; x < 8; ++x) {
+        pixel_mask[(block.y * 8 + y) * params.pixel_mask_stride + block.x * 8 + x] = mask;
+      }
+    }
+  }
 }
 
 kernel void gjxl_aq_initial_quant_modulation(

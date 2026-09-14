@@ -82,6 +82,7 @@ struct Fixture {
   gjxl::VarDctDcPrediction dc_prediction = gjxl::VarDctDcPrediction::kGradient;
   uint8_t extra_dc_precision = 0;
   bool adaptive_dc_smoothing = false;
+  bool gaborish = true;
 };
 
 struct PreparedFixture {
@@ -359,6 +360,7 @@ gjxl::Status PrepareFixture(
   PreparedFixture result;
   gjxl::SimpleVarDctCodestreamProfile profile;
   profile.extra_dc_precision = fixture.extra_dc_precision;
+  profile.loop_filter.gaborish = fixture.gaborish;
   profile.adaptive_dc_smoothing = fixture.adaptive_dc_smoothing;
   if (metal) {
     std::unique_ptr<gjxl::GpuBackend> gpu;
@@ -741,6 +743,8 @@ bool ComparePixels(
 std::vector<Fixture> SmokeFixtures() {
   return {
     {"one-pixel-flat", {1, 1}, Pattern::kFlat},
+    {.name = "no-gaborish-odd", .extent = {13, 17},
+     .pattern = Pattern::kGradient, .gaborish = false},
     {"odd-gradient", {13, 17}, Pattern::kGradient},
     {"ac-edge-random", {257, 9}, Pattern::kRandom},
     {
@@ -755,6 +759,8 @@ std::vector<Fixture> SmokeFixtures() {
 std::vector<Fixture> FullFixtures() {
   std::vector<Fixture> fixtures = {
     {"one-pixel-flat", {1, 1}, Pattern::kFlat},
+    {.name = "no-gaborish-odd", .extent = {13, 17},
+     .pattern = Pattern::kGradient, .gaborish = false},
     {"single-block-impulse", {8, 8}, Pattern::kImpulse,
      gjxl::AcStrategyType::kDct8, false, {3541, 10}, 29, false,
      11459255244783164287ull},
