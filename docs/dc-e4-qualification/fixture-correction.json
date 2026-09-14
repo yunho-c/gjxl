@@ -1,0 +1,94 @@
+{
+  "affected_original_cases": 36,
+  "all_original_synthetic_excluded": true,
+  "fixture_audit": {
+    "checks": [
+      {
+        "image": "gray-gradient",
+        "max": 0.09462962299585342,
+        "min": 0.03968190774321556,
+        "scalar_reference_max_error": 3.5987157559480565e-09,
+        "sha256": "6d997cb8f6351ffee75247be7edda9664bf6872cb5d7d475a18ddfa13253c626"
+      },
+      {
+        "image": "dark-gradient",
+        "max": 0.0134117491543293,
+        "min": 0.0011609906796365976,
+        "scalar_reference_max_error": 2.566708304230225e-10,
+        "sha256": "9cc260e71b8a1251784367194bb8a206e8d46a8ebdb5d8146434f473bda8577f"
+      },
+      {
+        "image": "sky-gradient",
+        "max": 0.6382831931114197,
+        "min": 0.08353512734174728,
+        "scalar_reference_max_error": 2.843679625108564e-08,
+        "sha256": "135a324676da0e8e4fcefdfcbeb292dd9a6e13534aceb2c8e011321a507f9856"
+      },
+      {
+        "image": "chroma-gradient",
+        "max": 0.2199999988079071,
+        "max_luminance_error": 7.423758496827304e-09,
+        "min": 0.14000000059604645,
+        "scalar_reference_max_error": 7.152557379708213e-09,
+        "sha256": "a5288c01dc9d5af09001d847a7cc6b2670e3b9981d7c250bf36093d3f621db38"
+      }
+    ],
+    "passed": true,
+    "reference": "Python scalar math.pow at five coordinates; full finite/range and chroma luminance checks"
+  },
+  "photographic_cross_check": {
+    "float32_transfer_checks": [
+      {
+        "equal_float32_srgb": true,
+        "name": "alpine_lake-visual"
+      },
+      {
+        "equal_float32_srgb": true,
+        "name": "campus_interior-visual"
+      },
+      {
+        "equal_float32_srgb": true,
+        "name": "forest_stream-visual"
+      }
+    ],
+    "observations_pooled": false,
+    "prior_e7_exact_codestream_decode_quality_cases": [
+      "unsplash--alpine_lake--24mp-e7",
+      "unsplash--alpine_lake--48mp-e7",
+      "unsplash--alpine_lake--12mp-e7",
+      "unsplash--forest_stream--12mp-e7",
+      "unsplash--forest_stream--48mp-e7",
+      "unsplash--forest_stream--24mp-e7",
+      "unsplash--campus_interior--12mp-e7",
+      "unsplash--campus_interior--48mp-e7",
+      "unsplash--campus_interior--24mp-e7"
+    ]
+  },
+  "replacement_cases": 36,
+  "transfer_function_checks": [
+    {
+      "dtype": "float32",
+      "input_unchanged": true,
+      "roundtrip_max_error": 0.0,
+      "samples": 2
+    },
+    {
+      "dtype": "float32",
+      "input_unchanged": true,
+      "roundtrip_max_error": 0.0,
+      "samples": 1000000
+    },
+    {
+      "dtype": "float64",
+      "input_unchanged": true,
+      "roundtrip_max_error": 2.7755575615628914e-17,
+      "samples": 2
+    },
+    {
+      "dtype": "float64",
+      "input_unchanged": true,
+      "roundtrip_max_error": 2.7755575615628914e-17,
+      "samples": 1000000
+    }
+  ]
+}
