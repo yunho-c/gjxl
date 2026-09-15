@@ -30,7 +30,12 @@ struct MetalDcProcessingTestAccess {
                          index);
     };
     if (invocation.quantize) {
-      encoder->setComputePipelineState(backend.aq_pipelines_.dc_quantize.get());
+      const bool simd_wave = invocation.params.quantization_mode == 1u &&
+        invocation.params.predictor == 1u &&
+        backend.aq_pipelines_.dc_quantize_simd_wave->threadExecutionWidth() == 32;
+      encoder->setComputePipelineState(simd_wave
+        ? backend.aq_pipelines_.dc_quantize_simd_wave.get()
+        : backend.aq_pipelines_.dc_quantize.get());
       bind(invocation.dc, 0);
       bind(invocation.integers, 1);
       bind(invocation.scratch, 2);
@@ -39,7 +44,7 @@ struct MetalDcProcessingTestAccess {
       bind(invocation.resident, 5);
       const size_t groups = ((invocation.params.width + 255) / 256) *
                             ((invocation.params.height + 255) / 256);
-      const MTL::Size threads(std::min<size_t>(256, invocation.params.height), 1, 1);
+      const MTL::Size threads(simd_wave ? std::min<size_t>(256, (invocation.params.height + 31) / 32 * 32) : std::min<size_t>(256, invocation.params.height), 1, 1);
       uint32_t channel_base = 0;
       encoder->setBytes(&channel_base, sizeof(channel_base), 6);
       DispatchMetalThreadgroups(encoder, MTL::Size(groups, 2, 1), threads);
@@ -237,8 +242,9 @@ int main() {
              {{1024, 64}, {799, 37}, {32768, 65536}}}) {
       Quantizer quantizer;
       Check(Quantizer::Create(params, &quantizer));
-      for (auto extent : std::array<Extent2D, 5>{
-               {{1, 1}, {7, 13}, {1, 257}, {257, 1}, {259, 259}}}) {
+      for (auto extent : std::array<Extent2D, 11>{
+               {{1, 1}, {7, 13}, {1, 257}, {257, 1}, {259, 259},
+                {31, 31}, {32, 32}, {33, 33}, {63, 65}, {255, 256}, {257, 65}}}) {
         for (unsigned mode = 0; mode < 3; ++mode) {
           DcQuantizationOptions options{
               mode == 0 ? DcQuantizationMode::kRound

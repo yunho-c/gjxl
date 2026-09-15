@@ -161,6 +161,7 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> encode_scored_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> encode_final_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> dc_quantize;
+  NS::SharedPtr<MTL::ComputePipelineState> dc_quantize_simd_wave;
   NS::SharedPtr<MTL::ComputePipelineState> dc_smooth;
   NS::SharedPtr<MTL::ComputePipelineState> dc_low_frequencies;
   NS::SharedPtr<MTL::ComputePipelineState> count_coefficient_zeros;

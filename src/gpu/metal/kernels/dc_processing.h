@@ -208,6 +208,199 @@ kernel void gjxl_aq_dc_quantize(
   }
 }
 
+// Private exact weighted-DC traversal: all rows advance together.
+// Intra-SIMD dependencies use registers/shuffles. Only the last row of
+// each SIMD group publishes a four-wave boundary ring (768 bytes total).
+struct AqDcSimdState {
+  uint width;
+  long predictions[4];
+  long prediction;
+  uint4 errors;
+  int signed_error;
+
+  long Predict(uint x, uint y, long n, long w, long ne,
+               uint4 north_errors, uint4 west_errors,
+               uint4 northeast_errors, uint4 northwest_errors,
+               uint4 two_west_errors,
+               long ew, long en, long enw, long ene) {
+    uint weights[4];
+    uint weight_sum = 0;
+    for (uint i = 0; i < 4; ++i) {
+      const uint north = (y ? north_errors[i] : 0u) +
+                         (x ? west_errors[i] : 0u);
+      const uint northeast = x + 1u < width
+        ? (y ? northeast_errors[i] : 0u) : north;
+      const uint northwest = x
+        ? (y ? northwest_errors[i] : 0u) +
+          (x > 1u ? two_west_errors[i] : 0u) : north;
+      const uint error = north + northeast + northwest;
+      const uint bits = 64u - clz(ulong(error) + 1u);
+      const uint shift = bits > 6u ? bits - 6u : 0u;
+      weights[i] = 4u + (((i == 0u ? 13u : 12u) *
+                          kDcReciprocal[error >> shift]) >> shift);
+      weight_sum += weights[i];
+    }
+    const uint log_weight = 31u - clz(weight_sum);
+    weight_sum = 0u;
+    for (uint i = 0; i < 4; ++i) {
+      weights[i] >>= log_weight - 4u;
+      weight_sum += weights[i];
+    }
+    ew = x ? ew : 0;
+    en = y ? en : 0;
+    enw = x && y ? enw : en;
+    ene = y && x + 1u < width ? ene : en;
+    n *= 8; w *= 8; ne *= 8;
+    predictions[0] = w + ne - n;
+    predictions[1] = n - (((en + ew + ene) * 16) >> 5);
+    predictions[2] = w - (((en + ew + enw) * 10) >> 5);
+    predictions[3] = n - (((enw + en + ene) * 7) >> 5);
+    long sum = long(weight_sum >> 1u) - 1;
+    for (uint i = 0; i < 4; ++i) sum += predictions[i] * long(weights[i]);
+    prediction = (sum * long(kDcReciprocal[weight_sum - 1u])) >> 24;
+    if (((en ^ ew) | (en ^ enw)) <= 0)
+      prediction = clamp(prediction, min(w, min(ne, n)), max(w, max(ne, n)));
+    return (prediction + 3) >> 3;
+  }
+
+  bool Update(int value) {
+    const long scaled = long(value) * 8;
+    const long error = prediction - scaled;
+    bool valid = error >= -2147483648l && error <= 2147483647l;
+    signed_error = valid ? int(error) : 0;
+    for (uint i = 0; i < 4; ++i) {
+      const ulong magnitude = (abs(predictions[i] - scaled) + 3u) >> 3u;
+      valid = valid && magnitude <= 4294967295ul;
+      errors[i] = uint(magnitude);
+    }
+    return valid;
+  }
+};
+
+kernel void gjxl_aq_dc_quantize_simd_wave(
+  device float* dc [[buffer(0)]],
+  device int* quantized [[buffer(1)]],
+  device uint* scratch [[buffer(2)]],
+  device atomic_uint* error [[buffer(3)]],
+  constant AqDcProcessingParams& params [[buffer(4)]],
+  device const uint* resident_quantizer [[buffer(5)]],
+  constant uint& channel_base [[buffer(6)]],
+  uint3 position [[threadgroup_position_in_grid]],
+  uint row_index [[thread_index_in_threadgroup]]) {
+  const uint lane = row_index & 31u;
+  const uint simd_group = row_index / 32u;
+  const uint group = position.x;
+  const uint c = channel_base + position.y;
+  const uint groups_x = (params.width + 255u) / 256u;
+  const uint groups_y = (params.height + 255u) / 256u;
+  if (group >= groups_x * groups_y) return;
+  if (c >= 3u || params.quantization_mode != 1u || params.predictor != 1u) {
+    atomic_fetch_or_explicit(error, 16u, memory_order_relaxed);
+    return;
+  }
+  const uint gx = (group % groups_x) * 256u;
+  const uint gy = (group / groups_x) * 256u;
+  const uint width = min(256u, params.width - gx);
+  const uint height = min(256u, params.height - gy);
+  const uint area = params.width * params.height;
+  const uint global_scale = params.use_resident_quantizer ? resident_quantizer[0] : params.global_scale;
+  const uint quant_dc = params.use_resident_quantizer ? resident_quantizer[1] : params.quant_dc;
+  const float scale = float(global_scale) / 65536.0f;
+  const float inverse_dc = (65536.0f / float(global_scale)) / float(quant_dc);
+  const float precision = float(1u << params.extra_precision);
+  const float factors[3] = {4096.0f, 512.0f, 256.0f};
+  float steps[3], inverse[3];
+  for (uint channel = 0; channel < 3; ++channel) {
+    steps[channel] = (inverse_dc / factors[channel]) / precision;
+    inverse[channel] = (factors[channel] * scale * float(quant_dc)) * precision;
+  }
+
+  threadgroup uint4 boundary_errors[32];
+  threadgroup int boundary_signed[32];
+  threadgroup int boundary_quantized[32];
+  device int* plane = quantized + c * area;
+  {
+    uint4 e1 = 0u, e2 = 0u, e3 = 0u;
+    int s1 = 0, s2 = 0, s3 = 0;
+    int q1 = 0, q2 = 0;
+    const uint waves = width + 2u * (height - 1u);
+    for (uint wave = 0u; wave < waves; ++wave) {
+      uint4 en = simd_shuffle_up(e2, 1u);
+      uint4 ene = simd_shuffle_up(e1, 1u);
+      uint4 enw = simd_shuffle_up(e3, 1u);
+      int sn = simd_shuffle_up(s2, 1u);
+      int sne = simd_shuffle_up(s1, 1u);
+      int snw = simd_shuffle_up(s3, 1u);
+      int qn = simd_shuffle_up(q2, 1u);
+      int qne = simd_shuffle_up(q1, 1u);
+      uint4 current_errors = 0u;
+      int current_signed = 0;
+      int current_quantized = 0;
+      const int column = int(wave) - int(2u * row_index);
+      if (row_index < height && column >= 0 && uint(column) < width) {
+        const uint x = uint(column), y = row_index;
+        if (lane == 0u && row_index != 0u) {
+          const uint previous = simd_group - 1u;
+          const uint one = ((wave - 1u) & 3u) * 8u + previous;
+          const uint two = ((wave - 2u) & 3u) * 8u + previous;
+          const uint three = ((wave - 3u) & 3u) * 8u + previous;
+          en = boundary_errors[two];
+          ene = boundary_errors[one];
+          enw = boundary_errors[three];
+          sn = boundary_signed[two];
+          sne = boundary_signed[one];
+          snw = boundary_signed[three];
+          qn = boundary_quantized[two];
+          qne = boundary_quantized[one];
+        }
+        const uint index = (gy + y) * params.width + gx + x;
+        float value = dc[c * area + index];
+        if (c == 2u)
+          value = fma(-float(quantized[area + index]), steps[1], value);
+        const long w = x ? q1 : y ? qn : 0;
+        const long n = y ? qn : w;
+        const long ne = y && x + 1u < width ? qne : n;
+        AqDcSimdState state;
+        state.width = width;
+        const long guess = state.Predict(x, y, n, w, ne,
+          en, e1, ene, enw, e2, s1, sn, snw, sne);
+        float residual = value * inverse[c];
+        residual -= float(guess);
+        if (residual > -0.62f && residual < 0.62f) residual = 0.0f;
+        float rounded = round(residual);
+        if (rounded > 2.0f || rounded < -2.0f)
+          rounded = round(residual * 0.5f) * 2.0f;
+        const long integer = guess + long(aq_round_dc(rounded, error));
+        const bool in_range = integer >= -2147483648l && integer <= 2147483647l;
+        const int q = in_range ? int(integer) : 0;
+        const bool predictor_valid = state.Update(q);
+        if (!in_range || !predictor_valid)
+          atomic_fetch_or_explicit(error, 16u, memory_order_relaxed);
+        plane[index] = q;
+        float reconstructed = float(q) * steps[c];
+        if (c == 2u)
+          reconstructed = float(quantized[area + index]) * steps[1] + reconstructed;
+        dc[c * area + index] = reconstructed;
+        current_errors = state.errors;
+        current_signed = state.signed_error;
+        current_quantized = q;
+      }
+      if (lane == 31u) {
+        const uint boundary_index = (wave & 3u) * 8u + simd_group;
+        boundary_errors[boundary_index] = current_errors;
+        boundary_signed[boundary_index] = current_signed;
+        boundary_quantized[boundary_index] = current_quantized;
+      }
+      e3 = e2; e2 = e1; e1 = current_errors;
+      s3 = s2; s2 = s1; s1 = current_signed;
+      q2 = q1; q1 = current_quantized;
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+  }
+  threadgroup_barrier(mem_flags::mem_device);
+}
+
+
 kernel void gjxl_aq_dc_smooth(
   device const float* dc [[buffer(0)]],
   device float* smoothed [[buffer(1)]],

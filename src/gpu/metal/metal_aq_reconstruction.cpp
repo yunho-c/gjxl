@@ -217,7 +217,11 @@ void MetalPreparedAqEvaluation::EncodeDcQuantization(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
   if (!DeferredDc() || exact_coefficient_reconstruction_ || exact_linear_reconstruction_) return;
   const auto params = DcProcessingParams();
-  encoder->setComputePipelineState(backend.aq_pipelines_.dc_quantize.get());
+  const bool simd_wave = params.quantization_mode == 1u && params.predictor == 1u &&
+    backend.aq_pipelines_.dc_quantize_simd_wave->threadExecutionWidth() == 32;
+  encoder->setComputePipelineState(simd_wave
+    ? backend.aq_pipelines_.dc_quantize_simd_wave.get()
+    : backend.aq_pipelines_.dc_quantize.get());
   BindPlane(encoder, dc_, 0);
   BindPlane(encoder, quantized_dc_, 1);
   BindPlane(encoder, dc_predictor_scratch_.buffer ? dc_predictor_scratch_ : raw_quant_, 2);
@@ -226,7 +230,7 @@ void MetalPreparedAqEvaluation::EncodeDcQuantization(
   BindPlane(encoder, params.use_resident_quantizer ? resident_quantizer_params_ : raw_quant_, 5);
   const size_t groups = ((block_extent_.width + 255) / 256) *
                         ((block_extent_.height + 255) / 256);
-  const MTL::Size threads(std::min<size_t>(256, block_extent_.height), 1, 1);
+  const MTL::Size threads(simd_wave ? std::min<size_t>(256, (block_extent_.height + 31) / 32 * 32) : std::min<size_t>(256, block_extent_.height), 1, 1);
   uint32_t channel_base = 0;
   encoder->setBytes(&channel_base, sizeof(channel_base), 6);
   DispatchMetalThreadgroups(encoder, MTL::Size(groups, 2, 1), threads);
@@ -649,7 +653,8 @@ void MetalPreparedAqEvaluation::EncodeFinalColorCorrelation(
   const bool nonlinear = final_cfl_params_.nonlinear_iterations != 0u;
   // Six derivative contributions and a two-channel validity mask per coefficient.
   constexpr size_t kChunkScratchBytes = 128 * (6 * sizeof(float) + sizeof(uint32_t));
-  encoder->setThreadgroupMemoryLength(nonlinear ? kChunkScratchBytes : 0, 0);
+  // Metal validation requires a bound slot even when linear CfL does not read it.
+  encoder->setThreadgroupMemoryLength(nonlinear ? kChunkScratchBytes : 16, 0);
   DispatchMetalThreadgroups(
       encoder,
       MTL::Size(static_cast<NS::UInteger>(
