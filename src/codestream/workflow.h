@@ -67,10 +67,10 @@ struct VarDctEncodingOptions {
   /// the established two-update adaptive-quantization policy and uses
   /// deterministic DCT8-only coefficient-order sampling.
   /// In the ordinary policy, efforts 1-4 use DCT8, disable Gaborish, and
-  /// start with a uniform quantization field. Efforts 1-3 run zero AQ updates
-  /// and effort 4 runs one. Effort 5
-  /// enables mixed-transform AC search. High-density and maximum-error
-  /// overrides preserve their existing mixed-transform search behavior.
+  /// start with a uniform quantization field and run zero AQ updates.
+  /// Efforts 5-6 enable mixed-transform AC search and run one AQ update.
+  /// High-density and maximum-error overrides preserve their existing
+  /// refinement and mixed-transform search behavior.
   int32_t effort = 7;
   /// Maximum participating CPU threads per encode. Zero selects the existing
   /// automatic stage-specific desired parallelism. Both are additionally bounded

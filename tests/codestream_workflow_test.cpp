@@ -614,7 +614,7 @@ bool CheckEffortPolicy() {
     {1, 1},
     {2, 1},
     {3, 1},
-    {4, 2},
+    {4, 1},
     {5, 2},
     {6, 2},
     {7, 3},
@@ -671,7 +671,7 @@ bool CheckEffortPolicy() {
 
   for (const int32_t effort : {1, 2, 3, 4, 5, 7, 10}) {
     const size_t index = static_cast<size_t>(effort - 1);
-    const size_t expected_score_count = effort <= 3
+    const size_t expected_score_count = effort <= 4
       ? 0
       : kCases[index].expected_score_count - 1;
     std::vector<uint8_t> bytes;
@@ -701,7 +701,7 @@ bool CheckEffortPolicy() {
       std::cerr << "Low Metal effort selected a non-DCT8 strategy\n";
       return false;
     }
-    if (effort <= 3) {
+    if (effort <= 4) {
       std::vector<uint8_t> scored_bytes;
       gjxl::VarDctEncodingSummary scored_summary;
       status = gjxl::EncodeLinearRgbVarDctCodestream(
