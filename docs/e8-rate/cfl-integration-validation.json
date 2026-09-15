@@ -1,0 +1,90 @@
+{
+  "state": "complete",
+  "scope": "effort-8 eight-step nonlinear resident Metal final CfL above the integrated writer",
+  "base_revision": "4c31e04d0ac58ceb13ef9ec91e9dab411e5ae77d",
+  "production_sources_match_build": true,
+  "full_corpus_points": 390,
+  "exact_combined_prototype_bytes": 390,
+  "exact_standalone_cfl_pixels": 390,
+  "bd_rate": {
+    "writer": {
+      "ready_images": 65,
+      "images": 65,
+      "pchip": -0.5200574755339918,
+      "akima": -0.5290359081855064,
+      "improved_images": 48
+    },
+    "original": {
+      "ready_images": 65,
+      "images": 65,
+      "pchip": -1.5351354227520162,
+      "akima": -1.5425733874645269,
+      "improved_images": 64
+    },
+    "libjxl": {
+      "ready_images": 65,
+      "images": 65,
+      "pchip": -1.389240696052598,
+      "akima": -1.395296725071967,
+      "improved_images": 55
+    }
+  },
+  "ctest": {
+    "passed": 137,
+    "total": 138,
+    "failure": "quantization_pipeline",
+    "unchanged_baseline_reproduced": true
+  },
+  "exact_input_cfl_cases": 144,
+  "conformance": {
+    "full_conformance_exit_code": 1,
+    "control_conformance_exit_code": 1,
+    "inherited_failure": "single-block-impulse FNV pin: 10525847038797353681 != 11459255244783164287; direct decoder replay passed",
+    "remaining_fixtures_passed": 22,
+    "workflow_cases_passed": 4
+  },
+  "conformance_exact_control_streams_and_pixels": 23,
+  "other_efforts_exact_bytes": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    9,
+    10
+  ],
+  "secondary_metric": "Exact-pixel reuse of six-image Butteraugli controls; 3 incremental regressions, 2 improvements, 1 unsupported curve",
+  "runtime_qualified": false,
+  "staged": false,
+  "committed": false,
+  "artifacts": {
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/docs/e8-rate/cfl-integrated-rate.json": "44be0d3f2314601791454f3135e8e975ef616f8e27021ca96b1e8feb0a651873",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/docs/e8-rate/cfl-integrated-secondary.json": "89e61e2d8e99fa9b5f8c513d57dd193156b19b1cf74b3519c900974432575d8e",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-integrated/build.json": "ee8b45f455c1d314f5c696bcdea812f3a18dd9b1eed6e612d13e18b549a26894",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-combined-probe/build.json": "a939887cef96033df49a69f5454709cb5fc5b0d80f7ed7957d0b6d408781f19b",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-other-efforts/results.json": "949c7d43552c77b8ee0287bc454670fd1cf80b3d3a8713015d3c7b221672a9fb",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated-baseline-check/build.json": "7beaa005f4de26ea0d11178a727434115f363259e5df2b8b7945b95eea76196d",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated-baseline-check/result.log": "7ce432a751482953a717004e4f9f85c3b89415f8e24be37783cd954a8a947882",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/tools/e8_rate/integrated_cfl_rate.py": "2f55f46cb6afa0509dfeb283e8f86260544359f184a0da92feb2bf3d29738ce4",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/tools/e8_rate/integrated_cfl_secondary.py": "838798d0ebbff1b8b159e153bebae8207bd7aa00128e1c671d29f68fa3136e9c",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-integrated-rate/manifest.json": "35c58ba00c94358bde29a731b944b738aa0b06fe6f054a60d281aa5e85c8ca5a",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-integrated-rate/results.jsonl": "06076ddc1bdae7979443d9ccc129637ffaf85254d37de0461a5bb571a6be6fa6",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-integrated-rate/status.json": "ca10b0b1e2aad8592bda0464ee8bb1076f40d76018b1e18772090c32199caec9",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-integrated-rate/analysis.json": "44be0d3f2314601791454f3135e8e975ef616f8e27021ca96b1e8feb0a651873",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-integrated-rate/commands.jsonl": "32498386a7f6fef8672fa4cb7073ec72079bf963b8d13a36493a76281145c77e",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-validation/ctest-detail.log": "be90981def143b318caaa95de1e3c7d22fa8f2fe818ca6035aadcb43ad5071e1",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-validation/configure.log": "7e01fae9fe5d9f5df6060656b8955d893fd0096a26bcd2c10f45d9485228f7b7",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-validation/production-inputs.json": "555acc31795eddb7eb2794a601e0b4e238fff6872f22ab6b62b3f66707670661",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-validation/conformance-control.log": "523b025989448b522cc555c39a4ee631b045dcd544c1ec7dc6ec0843ca9686d2",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-validation/rate.log": "43c8cea46fc87fe5ef334bb6befbdf26bac92e1bc39821217a419a2b288e972f",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-validation/source-review.json": "b19d85480361166194c87aaba6f1f61f7a5793edcec3eb912dee9288c8688120",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-validation/secondary.log": "e0e1ccd09dc337173e7e031df66bb1dc830780c1c336c919f64fa2b861f24bfe",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-validation/conformance-replay.json": "6ce78f53b36fde02432e26c8bcb134561b101c81fe86b785c074ca9d074d87be",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-validation/ctest.log": "b0c8d2be56e6d19dd8ad4b2af1580c82312a5d3665b40ef33b88f7ba8069c044",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-validation/conformance.log": "9b55f8840e9f8f82d4f6c28d607d41b255e9b2d2a5626b5d4ef8bb5a52ea415d",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-validation/reconstruction.log": "a4b3aec7dcdca0ca112e7764881ea4d3c32e398d040dee190f251f45cba76d0c",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-cfl-validation/build.log": "70e5e217e5c0021226c31036efbf74898af7aec06300caa6bda667d880709b1f"
+  }
+}

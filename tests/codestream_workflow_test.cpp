@@ -761,6 +761,24 @@ bool CheckCompressionPolicy() {
     std::cerr << "Effort 8 did not resolve to rate-optimized entropy\n";
     return false;
   }
+  using gjxl::codestream_internal::FinalColorCorrelationIterations;
+  for (int32_t effort = 1; effort <= 10; ++effort) {
+    if (FinalColorCorrelationIterations({.effort = effort}, true) !=
+          (effort == 8 ? 8u : 0u) ||
+        FinalColorCorrelationIterations({.effort = effort}, false) != 0)
+      return false;
+  }
+  for (auto mode : {gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients,
+                    gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput})
+    if (FinalColorCorrelationIterations({.effort = 8, .metal_aq_mode = mode}, true) != 0)
+      return false;
+  if (FinalColorCorrelationIterations(
+        {.effort = 8, .density_mode = VarDctDensityMode::kHighDensity}, true) != 0 ||
+      FinalColorCorrelationIterations(
+        {.effort = 8, .compression_mode = VarDctCompressionMode::kMaximumCompression}, true) != 8 ||
+      FinalColorCorrelationIterations(
+        {.effort = 8, .rate_control_mode = gjxl::VarDctRateControlMode::kMaximumError}, true) != 0)
+    return false;
   for (const int32_t effort : {9, 10}) {
     if (ResolveEntropyBehavior({.effort = effort}) !=
         VarDctEntropyBehavior::kHighDensity) {

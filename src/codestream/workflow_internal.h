@@ -17,6 +17,18 @@
 
 namespace gjxl::codestream_internal {
 
+/// Nonlinear final CfL is qualified for ordinary effort-8 resident Metal AQ.
+/// Zero denotes the established fast regression. This changes no host/device
+/// arena dimensions; it adds only bounded threadgroup-local shader scratch.
+[[nodiscard]] constexpr uint32_t FinalColorCorrelationIterations(
+  const VarDctEncodingOptions& options, bool selected_metal) noexcept {
+  return selected_metal && options.effort == 8 &&
+      options.metal_aq_mode == GpuAdaptiveQuantizationMode::kFullyResident &&
+      options.density_mode == VarDctDensityMode::kDefault &&
+      options.rate_control_mode != VarDctRateControlMode::kMaximumError
+    ? 8u : 0u;
+}
+
 /// Shared policy resolution for execution and whole-workflow storage planning.
 /// The caller validates effort and density mode before using this recipe.
 [[nodiscard]] constexpr size_t AdaptiveQuantizationIterations(

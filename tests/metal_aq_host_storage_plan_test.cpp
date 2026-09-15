@@ -583,7 +583,7 @@ bool CheckProfileInputs(GpuBackend &gpu) {
                          &setup)) &&
                      Ok(owner->PrepareInvariantColorCorrelationResident(
                          {f.adjusted.data(), f.blocks, f.blocks.width},
-                         setup.quant_dc));
+                         setup.quant_dc, iterations % 2 == 0 ? 8u : 0u));
             };
             if (!prepare(reference) || !prepare(measured)) return false;
             const AqResidentButteraugliPolicyInput input{

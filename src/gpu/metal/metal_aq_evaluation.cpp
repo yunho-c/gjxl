@@ -216,7 +216,8 @@ static_assert(std::is_trivially_copyable_v<AqResidentInputParams>);
 static_assert(sizeof(AqResidentInputParams) == 24);
 static_assert(std::is_standard_layout_v<AqFinalCflParams>);
 static_assert(std::is_trivially_copyable_v<AqFinalCflParams>);
-static_assert(sizeof(AqFinalCflParams) == 16);
+static_assert(sizeof(AqFinalCflParams) == 20);
+static_assert(offsetof(AqFinalCflParams, nonlinear_iterations) == 16);
 static_assert(std::is_standard_layout_v<AqInitialQuantGradientParams>);
 static_assert(std::is_trivially_copyable_v<AqInitialQuantGradientParams>);
 static_assert(sizeof(AqInitialQuantGradientParams) == 28);
@@ -1432,6 +1433,7 @@ Status MetalPreparedAqEvaluation::Prepare(
       static_cast<uint32_t>(tile_extent_.height),
       static_cast<uint32_t>(y_to_x_.row_stride),
       static_cast<uint32_t>(anchor_count_),
+      0, // Fast until PrepareInvariantColorCorrelationResident selects a policy.
   };
   if (frame_only_resident_initial_quant_) {
     initial_quant_gradient_params_ = {
@@ -2803,7 +2805,11 @@ Status MetalPreparedAqEvaluation::SetInvariantColorCorrelation(
 }
 
 Status MetalPreparedAqEvaluation::PrepareInvariantColorCorrelationResident(
-    ConstPlaneF32View quant_field, float quant_dc) {
+    ConstPlaneF32View quant_field, float quant_dc,
+    uint32_t nonlinear_iterations) {
+
+  if (nonlinear_iterations > 20)
+    return Status::InvalidArgument("Resident final CfL iteration limit is invalid");
 
   if (!resident_quantization_ || frame_only_ ||
       final_transform_metadata_pending_) {
@@ -2835,6 +2841,7 @@ Status MetalPreparedAqEvaluation::PrepareInvariantColorCorrelationResident(
   // quantizer. Schedule final CfL in that same command buffer so no additional
   // submission or host synchronization is introduced.
   (void)quant_dc;
+  final_cfl_params_.nonlinear_iterations = nonlinear_iterations;
   invariant_color_correlation_ready_ = true;
   resident_forward_coefficients_ready_ = false;
   resident_color_correlation_pending_ = true;

@@ -52,9 +52,13 @@ retained in `build/e8-integrated/build.json`.
   against the frozen baseline libraries: actual `0.24919039011001587` versus
   pinned `0.24914586544036865`. Baseline reproduction is retained under
   `build/e8-integrated-baseline-check`.
-- Full codestream conformance passed with the study's pinned decoder. The
-  new behavior is included alongside balanced and high-density encoding for
-  the conformance fixtures, with artifacts in
+- Full codestream conformance passed 22 fixtures and four workflow cases with
+  the study's pinned decoder. The `single-block-impulse` fixture failed its
+  existing codestream hash pin before decoding. This corrects the earlier
+  claim that the entire run passed: the retained log already contained that
+  failure. The CfL integration replays it with the frozen writer binary and
+  independently decodes the identical stream; see
+  [CfL integration validation](cfl-integration.md). Artifacts remain in
   `build/e8-integrated/pinned-conformance`.
 - A retained Kodak20 check at distance 1.9 confirmed byte-identical baseline
   and integrated outputs at every other effort: 1–7, 9, and 10. This is a

@@ -1791,6 +1791,90 @@ void MetalPreparedAqEvaluation::EncodeQuantizationProbeSubmission(
   DispatchThreads1d(encoder, self.quant_probe_params_.coefficient_count);
 }
 
+Status MetalPreparedAqEvaluation::RunFinalColorCorrelationProbe(
+    const prepared_coefficients_internal::PreparedForwardDctCoefficients& coefficients,
+    ConstPlaneI32View raw_quant, const Quantizer& quantizer,
+    uint32_t nonlinear_iterations, ColorCorrelationMap* output) {
+  if (output == nullptr || !coefficients.valid() || !quantizer.valid() ||
+      coefficients.block_extent != block_extent_ || !raw_quant.valid() ||
+      raw_quant.extent != block_extent_ || nonlinear_iterations > 20 ||
+      coefficients.transforms.size() != row_major_anchors_.size())
+    return Status::InvalidArgument("Final CfL probe inputs are invalid");
+  if (!resident_quantization_ || final_transform_metadata_pending_)
+    return Status::FailedPrecondition("Final CfL probe requires resident metadata");
+  for (size_t i = 0; i < row_major_anchors_.size(); ++i) {
+    const auto& anchor = row_major_anchors_[i];
+    const auto& transform = coefficients.transforms[i];
+    if (anchor.block_x != transform.block_x || anchor.block_y != transform.block_y ||
+        anchor.strategy != transform.strategy)
+      return Status::InvalidArgument("Final CfL probe transform layout differs");
+  }
+  Status status = BeginOperation();
+  if (!status.ok()) return status;
+  const uint32_t previous_iterations = final_cfl_params_.nonlinear_iterations;
+  final_cfl_params_.nonlinear_iterations = nonlinear_iterations;
+  // Diagnostics replace resident data, so it must not be reused as a cache.
+  resident_forward_coefficients_ready_ = false;
+  invariant_color_correlation_ready_ = false;
+  resident_color_correlation_pending_ = false;
+  for (size_t i = 0; status.ok() && i < row_major_anchors_.size(); ++i) {
+    const auto& anchor = row_major_anchors_[i];
+    const auto& batch = batches_[anchor.batch_index];
+    const auto& transform = coefficients.transforms[i];
+    for (size_t channel = 0; status.ok() && channel < 3; ++channel) {
+      const size_t offset = batch.coefficient_offset +
+        channel * batch.anchor_count * batch.coefficient_count +
+        anchor.index_in_batch * batch.coefficient_count;
+      status = backend_->CopyHostToDevice(*forward_coefficients_.buffer,
+        coefficients.coefficients[channel].data() + transform.coefficient_offset,
+        transform.coefficient_count * sizeof(float),
+        forward_coefficients_.offset_bytes + offset * sizeof(float));
+    }
+  }
+  for (size_t y = 0; status.ok() && y < block_extent_.height; ++y)
+    status = backend_->CopyHostToDevice(*raw_quant_.buffer, raw_quant.Row(y),
+      block_extent_.width * sizeof(int32_t),
+      raw_quant_.offset_bytes + y * raw_quant_.row_stride * sizeof(int32_t));
+  const auto q = quantizer.params();
+  if (status.ok()) status = backend_->CopyHostToDevice(
+    *resident_quantizer_params_.buffer, &q.global_scale, sizeof(q.global_scale),
+    resident_quantizer_params_.offset_bytes);
+  const uint32_t zero = 0;
+  if (status.ok()) status = backend_->CopyHostToDevice(
+    *reconstruction_error_.buffer, &zero, sizeof(zero), reconstruction_error_.offset_bytes);
+  std::unique_ptr<GpuSubmission> submission;
+  if (status.ok()) status = backend_->SubmitCompute("gjxl final CfL probe",
+    [](MetalBackend& backend, MTL::ComputeCommandEncoder* encoder, const void* context) {
+      static_cast<const MetalPreparedAqEvaluation*>(context)->
+        EncodeFinalColorCorrelation(backend, encoder);
+    }, this, &submission);
+  if (!status.ok() || submission == nullptr) {
+    Invalidate();
+    return status.ok() ? Status::Internal("Final CfL probe has no submission") : status;
+  }
+  {
+    std::lock_guard lock(mutex_);
+    submission_ = std::move(submission);
+  }
+  status = WaitForOperation();
+  if (!status.ok()) return status;
+  uint32_t error = 0;
+  status = CopyReadback(*backend_, reconstruction_error_, &error, sizeof(error));
+  if (status.ok() && error != 0)
+    status = Status::DeviceError("Final CfL probe detected invalid numeric input");
+  if (status.ok()) status = ReadbackColorCorrelation();
+  if (!status.ok()) {
+    Invalidate();
+    return status;
+  }
+  status = chroma_from_luma_internal::CreateColorCorrelationMap(
+    {last_y_to_x_.data(), tile_extent_, tile_extent_.width},
+    {last_y_to_b_.data(), tile_extent_, tile_extent_.width}, output);
+  final_cfl_params_.nonlinear_iterations = previous_iterations;
+  CompleteOperation();
+  return status;
+}
+
 Status MetalPreparedAqEvaluation::RunQuantizationProbe(
     const MetalAqQuantizationProbeForTesting &probe,
     std::vector<int32_t> *quantized, std::vector<float> *dequantized) {
@@ -2124,6 +2208,18 @@ Status RunMetalAqReconstructionForTesting(
         "AQ reconstruction requires a Metal prepared evaluation");
   }
   return metal->RunReconstruction(input, snapshot);
+}
+
+Status RunMetalAqFinalColorCorrelationForTesting(
+    PreparedAqEvaluation& prepared,
+    const prepared_coefficients_internal::PreparedForwardDctCoefficients& coefficients,
+    ConstPlaneI32View raw_quant, const Quantizer& quantizer,
+    uint32_t nonlinear_iterations, ColorCorrelationMap* output) {
+  auto* metal = AsMetalPrepared(prepared);
+  if (metal == nullptr)
+    return Status::InvalidArgument("Final CfL probe requires Metal preparation");
+  return metal->RunFinalColorCorrelationProbe(
+    coefficients, raw_quant, quantizer, nonlinear_iterations, output);
 }
 
 Status RunMetalAqQuantizationProbeForTesting(

@@ -229,12 +229,16 @@ public:
 
   /// Derives and retains the fixed final color-correlation map from resident
   /// coding pixels and the supplied initial quantization field. Backends may
-  /// also retain invariant forward coefficients for later evaluations.
+  /// also retain invariant forward coefficients for later evaluations. Zero
+  /// nonlinear_iterations selects fast regression; [1, 20] selects the bounded
+  /// nonlinear objective. The map is fixed for subsequent AQ evaluations.
   [[nodiscard]] virtual Status PrepareInvariantColorCorrelationResident(
     ConstPlaneF32View quant_field,
-    float quant_dc) {
+    float quant_dc,
+    uint32_t nonlinear_iterations = 0) {
     (void)quant_field;
     (void)quant_dc;
+    (void)nonlinear_iterations;
     return Status::Unavailable(
       "Prepared resident color correlation is unavailable");
   }

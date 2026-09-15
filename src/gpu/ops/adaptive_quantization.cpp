@@ -232,7 +232,8 @@ public:
         chroma_from_luma_internal::ComputeFinalColorCorrelationMapPrepared(
           forward_coefficients_,
           {raw_quant.data(), block_extent, block_extent.width},
-          quantizer, options_.fast_color_correlation, &color_correlation);
+          quantizer, options_.fast_color_correlation, &color_correlation,
+          options_.color_correlation_iterations);
       if (!status.ok()) {
         return status;
       }
@@ -594,7 +595,8 @@ Status RunGpuAdaptiveQuantizationImpl(
         adjustment_target, &invariant_quant_dc);
       if (status.ok()) {
         status = prepared->PrepareInvariantColorCorrelationResident(
-          policy_initial, invariant_quant_dc);
+          policy_initial, invariant_quant_dc,
+          options.fast_color_correlation ? 0 : options.color_correlation_iterations);
       }
       if (!status.ok()) return status;
     } else {

@@ -90,6 +90,8 @@ struct AdaptiveQuantizationOptions {
   std::array<float, 3> maximum_error{};
   size_t iterations = 2;
   bool fast_color_correlation = true;
+  /// Nonlinear final-CfL Newton steps, in [1, 20]. Ignored by the fast search.
+  uint32_t color_correlation_iterations = 20;
   SimpleVarDctCodestreamProfile profile;
   ButteraugliOptions butteraugli;
   DcQuantizationMode dc_quantization = DcQuantizationMode::kRound;

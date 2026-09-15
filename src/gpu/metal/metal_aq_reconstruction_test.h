@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "codec/quantization.h"
+#include "codec/chroma_from_luma_internal.h"
 #include "core/ac_strategy.h"
 #include "gpu/ops/aq_evaluation.h"
 
@@ -54,6 +55,15 @@ struct MetalAqAdjustmentResultForTesting {
   AdjustedAcQuantization decision;
   std::vector<int32_t> quantized_y;
 };
+
+/// Runs the production final-CfL kernel on identical CPU-supplied coefficients,
+/// tables and quantization. Zero iterations selects fast regression. This
+/// diagnostic invalidates cached forward/CfL bindings; output commits atomically.
+[[nodiscard]] Status RunMetalAqFinalColorCorrelationForTesting(
+    PreparedAqEvaluation& prepared,
+    const prepared_coefficients_internal::PreparedForwardDctCoefficients& coefficients,
+    ConstPlaneI32View raw_quant, const Quantizer& quantizer,
+    uint32_t nonlinear_iterations, ColorCorrelationMap* output);
 
 /// Runs the Milestone 3 coefficient round trip as one Metal submission.
 /// Caller-visible snapshot storage changes only after successful completion.

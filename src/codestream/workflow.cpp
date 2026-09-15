@@ -839,6 +839,13 @@ PrepareWorkflow(ConstImage3FView linear_rgb, VarDctEncodingOptions options,
   ProfileEnd(
     profile, selection_begin,
     &candidate_profile.backend_selection_nanoseconds);
+  const uint32_t final_cfl_iterations =
+    codestream_internal::FinalColorCorrelationIterations(options, selected_metal);
+  if (final_cfl_iterations != 0) {
+    pipeline_options.adaptive_quantization.fast_color_correlation = false;
+    pipeline_options.adaptive_quantization.color_correlation_iterations =
+      final_cfl_iterations;
+  }
   const WorkflowClock::time_point pipeline_begin = ProfileBegin(profile);
   EncodingArtifacts encoding;
   if (!prepared.backend_preselected && selected_metal &&
