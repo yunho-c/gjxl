@@ -9,11 +9,13 @@ permissions:
 jobs:
   publish:
     name: Publish gjxl 0.0.x
-    runs-on: macos-latest
+    runs-on: macos-26
     defaults:
       run:
         working-directory: rust
     env:
+      # Match the toolchain tested by the Rust Bindings workflow.
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
       GJXL_SOURCE_DIR: ${{ github.workspace }}
 

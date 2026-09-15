@@ -12,6 +12,11 @@ contract:
 | Standard library ABI | Stable ABI version 1; stock SDK configuration |
 | C++ and Objective-C++ language mode | C++20 or C++23, including GNU modes; default C++20 |
 
+The Rust CI and publishing workflows select Xcode 26.3 (build `17C529`) on
+the `macos-26` runner through `DEVELOPER_DIR`. This provides the audited
+compiler and libc++ headers above; the runner's default Xcode can change
+independently and is not a supported-toolchain selection.
+
 The qualified machine is Apple M4 Pro on macOS 15.6, as recorded in the
 [final scheduling qualification](resident-scheduling-qualification.md). The
 version checks identify the reviewed implementation family, not the hash of
