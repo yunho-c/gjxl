@@ -71,6 +71,9 @@ struct VarDctEncodingOptions {
   /// Efforts 5-6 enable mixed-transform AC search and run one AQ update.
   /// High-density and maximum-error overrides preserve their existing
   /// refinement and mixed-transform search behavior.
+  /// Ordinary automatic effort 4 also searches DC integer mappings when DC
+  /// quantization is prediction-aware. Native context-map compression is
+  /// automatic at every effort.
   int32_t effort = 7;
   /// Maximum participating CPU threads per encode. Zero selects the existing
   /// automatic stage-specific desired parallelism. Both are additionally bounded

@@ -43,6 +43,8 @@ void CheckUintSearchPolicy() {
     Check(!UseDcUintSearch(options), "Ordinary DC enabled uint search");
   }
   VarDctEncodingOptions options{.effort = 4};
+  Check(UseDcUintSearch(options) && AdaptiveQuantizationIterations(options) == 0,
+        "Default e4 must combine DC uint search with zero AQ updates");
   options.density_mode = VarDctDensityMode::kHighDensity;
   Check(!UseDcUintSearch(options), "High density enabled DC uint search");
   options.density_mode = VarDctDensityMode::kDefault;

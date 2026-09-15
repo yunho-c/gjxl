@@ -5,6 +5,9 @@ AC-strategy search. They disable Gaborish and initialize every quantization
 block to `0.79 / distance`, matching libjxl’s e1–4 initialization boundary.
 Effort 5 enables mixed-transform search, spatial initialization, and Gaborish.
 Ordinary effort 4 now skips perceptual AQ refinement, like efforts 1–3.
+It also enables the [default DC integer-mapping search](entropy-defaults.md)
+under automatic compression; native context-map compression applies at every
+effort. These serializer choices preserve the frontend's reconstruction.
 The adaptive-quantization update schedule is:
 
 | Effort | Transform selection | AQ updates |

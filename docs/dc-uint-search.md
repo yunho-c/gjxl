@@ -1,5 +1,9 @@
 # E4 DC integer-mapping search
 
+This policy is part of the [adopted encoding defaults](entropy-defaults.md),
+including integration with current main's zero-AQ effort-4 frontend. The
+measurements below retain the original one-AQ qualification scope.
+
 The balanced serializer now has a DC-only search over HybridUint mappings
 `(4,2,0)`, `(4,1,2)`, `(0,0,0)` and `(2,0,1)`. Prediction-aware DC quantization
 at e4 produces structured residuals whose low bits can be represented more
@@ -110,11 +114,12 @@ These are observations on an AC-powered Apple M4 Pro, not isolated latency
 qualification. Other codec work was active in 22/34 sampled process snapshots,
 including Butteraugli and quality scoring. Small deltas and the apparent
 speedup on one input should not be interpreted as precise speed claims. An
-uncontended run remains necessary for a firm latency qualification before
-main-branch promotion.
+uncontended run is necessary to interpret those original timing differences.
+The [default-policy adoption report](entropy-defaults.md) records the separate
+check against current main.
 
 [The committed results](dc-uint-search-results.json) include all 65 per-image
 BD comparisons, the 12 timing summaries and paired ratios, validation counts,
 tested source hashes and artifact provenance. All 1,517 final qualification
-commands succeeded. The scoped e4 policy is enabled on `feat/dc-uint-search`;
-this work does not merge or publish it to main.
+commands succeeded. That original qualification was performed on
+`feat/dc-uint-search`; subsequent default-policy adoption is recorded separately.
