@@ -518,7 +518,12 @@ mod tests {
         assert!(encoded.starts_with(&[0xff, 0x0a]));
 
         let mut padded = vec![0u8; 8 * 40];
-        for (source, destination) in pixels.chunks_exact(32).zip(padded.chunks_exact_mut(40)) {
+        for (source, destination) in pixels
+            .as_chunks::<32>()
+            .0
+            .iter()
+            .zip(padded.as_chunks_mut::<40>().0)
+        {
             destination[..32].copy_from_slice(source);
         }
         let padded = ImageView::rgba8(8, 8, 40, &padded).unwrap();
