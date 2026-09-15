@@ -224,6 +224,8 @@ Status Optimize(const EntropyOptimizationStorageOptions &o,
   case kDeferredAnsFromPrefix:
     return PrepareAnsEntropyCodeWithPreparedClusters(views, prefix, prepared,
                                                      &out->deferred);
+  case kDeferredRateOptimizedAns:
+    return PrepareRateOptimizedAnsEntropyCode(views, input_options, &out->deferred);
   }
   return Status::Internal("Test policy invalid");
 }
@@ -349,13 +351,13 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
     population.maximum_symbol =
         std::max(population.maximum_symbol, token.symbol);
   }
-  for (size_t variant = 0; variant < 11; ++variant) {
+  for (size_t variant = 0; variant < 12; ++variant) {
     const std::array policies{kFastPrefix,     kPrefix,
                               kPrefix,         kBalancedAns,
                               kHighDensityAns, kAnsFromPrefix,
                               kAnsFromPrefix,  kDeferredAnsFromPrefix,
                               kBalancedAns,    kRateOptimizedAns,
-                              kRateOptimizedAns};
+                              kRateOptimizedAns, kDeferredRateOptimizedAns};
     EntropyOptimizationStorageOptions o{
         .policy = policies[variant],
         .tokens = n,
@@ -402,7 +404,7 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
     }
     if (!output.Owned().Matches(budget, plan.output.retained_bytes))
       return false;
-    if (variant == 7) {
+    if (variant == 7 || variant == 11) {
       std::vector<uint64_t> measured(sections *
                                      output.deferred.candidates.size());
       for (size_t s = 0; s < sections; ++s) {
@@ -446,12 +448,12 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
           return false;
       }
       Result immediate;
-      o.policy = kAnsFromPrefix;
+      o.policy = variant == 11 ? kRateOptimizedAns : kAnsFromPrefix;
       if (!Ok(run(&immediate)) ||
           !Check(output == immediate,
                  "Deferred finalization differs from immediate ANS"))
         return false;
-      o.policy = kDeferredAnsFromPrefix;
+      o.policy = policies[variant];
     }
     if (!Check(budget.snapshot().peak_backing_bytes <= plan.working.peak_bytes,
                "Optimizer exceeded working bound"))
@@ -717,7 +719,8 @@ bool InvalidAndLarge() {
   ArmManagedHostAllocationFailureAfterForTest(0);
   bool good = true;
   for (auto policy : {kFastPrefix, kPrefix, kBalancedAns, kHighDensityAns,
-                      kRateOptimizedAns, kAnsFromPrefix, kDeferredAnsFromPrefix}) {
+                      kRateOptimizedAns, kAnsFromPrefix, kDeferredAnsFromPrefix,
+                      kDeferredRateOptimizedAns}) {
     good &= ComputeEntropyOptimizationStoragePlan(
                 {.policy = policy,
                  .tokens = size_t{1} << 32,

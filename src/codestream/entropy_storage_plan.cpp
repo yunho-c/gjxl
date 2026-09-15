@@ -155,6 +155,7 @@ Status ComputeEntropyOptimizationStoragePlan(
   case kBalancedAns:
   case kHighDensityAns:
   case kRateOptimizedAns:
+  case kDeferredRateOptimizedAns:
   case kAnsFromPrefix:
   case kDeferredAnsFromPrefix:
     if (options.retain_prepared_clusters ||

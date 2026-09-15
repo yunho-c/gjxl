@@ -71,6 +71,7 @@ enum class EntropyStoragePolicy {
   kRateOptimizedAns,
   kAnsFromPrefix,
   kDeferredAnsFromPrefix,
+  kDeferredRateOptimizedAns,
 };
 
 struct EntropyOptimizationStorageOptions {

@@ -3045,6 +3045,31 @@ Status codestream_internal::OptimizeDirectAnsEntropyCode(
     code, cost, nullptr, profile);
 }
 
+Status codestream_internal::PrepareRateOptimizedAnsEntropyCode(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCodeOptions& options,
+  PreparedAnsEntropyCode* deferred,
+  EntropyWorkProfile* profile) {
+  if (deferred == nullptr) {
+    return Status::InvalidArgument("Prepared direct ANS output is null");
+  }
+  EntropyCode partition;
+  PreparedEntropyClusters prepared;
+  Status status = PrepareDirectAnsPartition(
+    section_tokens, options, DirectAnsEntropyMode::kRateOptimized, {},
+    &partition, &prepared, profile);
+  if (!status.ok()) return status;
+  const AnsOptimizationPolicy policy{
+    .uint_configs = HighDensityAnsUintConfigs(),
+    .histogram_search = AnsHistogramSearch::kPrecise,
+    .smallest_alphabet_width = false,
+    .optimize_config_histograms = true,
+  };
+  return OptimizeAnsEntropyCodeImpl(
+    section_tokens, partition, &prepared, policy,
+    nullptr, nullptr, deferred, profile);
+}
+
 Status codestream_internal::OptimizeDirectAnsEntropyCodeWithFixedPopulations(
   std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCodeOptions& options,
@@ -3180,7 +3205,7 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
   using enum EntropyStoragePolicy;
   using enum resource_budget_internal::VectorCapacityPolicy;
   const bool direct = o.policy == kBalancedAns || o.policy == kHighDensityAns ||
-                      o.policy == kRateOptimizedAns;
+                      o.policy == kRateOptimizedAns || o.policy == kDeferredRateOptimizedAns;
   if (out == nullptr || o.contexts == 0 || o.contexts > UINT32_MAX ||
       o.initial_histograms > 256 || o.retain_prepared_clusters ||
       (!direct && o.policy != kAnsFromPrefix && o.policy != kDeferredAnsFromPrefix) ||
@@ -3189,7 +3214,8 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
       (o.policy == kDeferredAnsFromPrefix && !o.borrow_prepared_clusters))
     return Status::InvalidArgument("ANS optimization plan is invalid");
   const bool balanced = o.policy == kBalancedAns;
-  const bool deferred = o.policy == kDeferredAnsFromPrefix;
+  const bool deferred = o.policy == kDeferredAnsFromPrefix ||
+                        o.policy == kDeferredRateOptimizedAns;
   const size_t histograms = o.initial_histograms == 0
     ? o.contexts : o.initial_histograms;
   EntropyOptimizationStoragePlan plan;
@@ -3197,7 +3223,8 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
     direct ? o.maximum_ans_clusters : kMaximumPrefixClusters, histograms);
   const size_t configs = balanced ? 1 : (direct
     ? kHighDensityAnsUintConfigs.size() : kAnsUintConfigs.size());
-  const size_t widths = direct && o.policy != kRateOptimizedAns
+  const size_t widths = direct && o.policy != kRateOptimizedAns &&
+                                 o.policy != kDeferredRateOptimizedAns
     ? 1 : kAnsAlphabetWidthCount;
   const auto overflow = [] {
     return Status::OutOfMemory("ANS optimization storage overflows");

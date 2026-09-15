@@ -134,6 +134,14 @@ DirectAnsHistogramPrecisionShifts(DirectAnsEntropyMode mode) noexcept;
   EntropyCodeCost* cost = nullptr,
   EntropyWorkProfile* profile = nullptr);
 
+/// Rate-optimized direct models with exact width selection deferred until the
+/// caller measures each section. Uses the same partition/configuration search.
+[[nodiscard]] Status PrepareRateOptimizedAnsEntropyCode(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCodeOptions& options,
+  PreparedAnsEntropyCode* deferred,
+  EntropyWorkProfile* profile = nullptr);
+
 /// Balanced direct-ANS construction from already encoded per-context symbol
 /// populations. Ordered streams remain authoritative for final token cost and
 /// emission, but are not traversed to rebuild the same histograms.

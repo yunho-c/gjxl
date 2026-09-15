@@ -1192,6 +1192,33 @@ bool CheckRateOptimizedAns() {
     }
     improved |= wide_cost.model_bits + wide_cost.token_bits <
                   narrow_cost.model_bits + narrow_cost.token_bits;
+    PreparedAnsEntropyCode deferred;
+    if (!PrepareRateOptimizedAnsEntropyCode(views, {.context_count = 3}, &deferred).ok())
+      return false;
+    const size_t widths = deferred.candidates.size();
+    std::vector<uint64_t> section_bits(views.size() * widths);
+    // Reverse the measurement order: independent sections must choose the same
+    // exact winner and deterministic ties as the ordered serial optimizer.
+    for (size_t s = views.size(); s-- > 0;) {
+      std::vector<uint32_t> values;
+      std::vector<uint16_t> contexts;
+      for (const auto& token : sections[s]) {
+        values.push_back(token.value);
+        contexts.push_back(static_cast<uint16_t>(token.context));
+      }
+      if (!MeasurePreparedAnsEntropyCodeSection(
+          EntropyTokenStreamView::Split(values, contexts), deferred,
+          std::span<uint64_t>(section_bits).subspan(s * widths, widths)).ok())
+        return false;
+    }
+    EntropyCode deferred_code;
+    EntropyCodeCost deferred_cost;
+    if (!FinalizePreparedAnsEntropyCode(&deferred, section_bits,
+          &deferred_code, &deferred_cost).ok() ||
+        deferred_code != wide || deferred_cost != wide_cost) {
+      std::cerr << "Deferred rate-optimized ANS differs from serial search\n";
+      return false;
+    }
     reduced_histogram_work |= profile.ans_histogram_candidate_count <
       narrow_profile.ans_histogram_candidate_count;
     BitWriter model;

@@ -75,7 +75,8 @@ Status ComputeTaskStoragePlan(size_t tokens, size_t contexts, size_t sections,
                      ? (deferred ? EntropyStoragePolicy::kDeferredAnsFromPrefix
                                  : EntropyStoragePolicy::kAnsFromPrefix)
                      : (behavior == VarDctEntropyBehavior::kRateOptimized
-                            ? EntropyStoragePolicy::kRateOptimizedAns
+                            ? (deferred ? EntropyStoragePolicy::kDeferredRateOptimizedAns
+                                        : EntropyStoragePolicy::kRateOptimizedAns)
                             : (behavior == VarDctEntropyBehavior::kHighDensity
                                    ? EntropyStoragePolicy::kHighDensityAns
                                    : EntropyStoragePolicy::kBalancedAns)),
@@ -234,7 +235,8 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
   }
   status = ComputeTaskStoragePlan(plan.maximum_ac_tokens,
                                   maps.maximum_ac_contexts, g, behavior,
-                                  exhaustive, headers.ac_model, &ac_task,
+                                  exhaustive || behavior == VarDctEntropyBehavior::kRateOptimized,
+                                  headers.ac_model, &ac_task,
                                   maximum_ac_ans_clusters);
   if (!status.ok())
     return status;
@@ -344,8 +346,9 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
       !work.Add(plan.output))
     return Overflow();
   if (behavior == VarDctEntropyBehavior::kRateOptimized) {
-    // Balanced runs first. Its published bytes survive the expanded search;
-    // all other backing from that invocation has already been released.
+    // Balanced runs first. Its published bytes survive the expanded search.
+    // Shared token/representation backing is already included in this pass;
+    // balanced models and fixed populations are released before expansion.
     auto fallback_options = options;
     fallback_options.coding.entropy_behavior = VarDctEntropyBehavior::kBalanced;
     SerializerStoragePlan fallback;

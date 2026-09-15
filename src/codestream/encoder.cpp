@@ -247,6 +247,18 @@ struct AcEncodingCandidate {
   bool all_prefix_entropy = false;
 };
 
+// Token backing and representation metadata are independent of entropy policy.
+// Rate-optimized encoding shares them between its balanced and expanded search.
+struct PreparedVarDctRepresentation {
+  Storage<SimpleDcGroupTokenStreams> dc_groups;
+  Storage<Storage<EntropyToken>> dc_streams;
+  Storage<SimpleBlockContextMap> block_context_maps;
+  SimpleCoefficientOrders custom_orders;
+  Storage<EntropyToken> order_tokens;
+  Storage<AcEncodingCandidate> candidates;
+  std::array<Storage<SimpleAcGroupTokenTemplate>, 2> order_templates;
+};
+
 struct AnsSectionTask {
   size_t candidate_index = 0;
   size_t section_index = 0;
@@ -610,6 +622,29 @@ Status FinalizeAcCandidate(
   WorkEnd(
     profile != nullptr, selection_begin,
     profile == nullptr ? nullptr : &profile->selection_nanoseconds);
+  return Status::Ok();
+}
+
+Status PrepareRateAcCandidate(
+  AcEncodingCandidate* candidate,
+  const EntropyCodeOptions& options,
+  codestream_internal::EntropyWorkProfile* profile) {
+  EntropyCodingMode mode;
+  Status status = codestream_internal::SelectOrdinaryEntropyCodingMode(
+    candidate->streams, options, &mode);
+  if (!status.ok()) return status;
+  if (mode == EntropyCodingMode::kPrefix) {
+    return codestream_internal::OptimizeFastPrefixEntropyCode(
+      candidate->streams, options, &candidate->ac_code,
+      &candidate->ac_cost, profile);
+  }
+  status = codestream_internal::PrepareRateOptimizedAnsEntropyCode(
+    candidate->streams, options, &candidate->prepared_ans, profile);
+  if (!status.ok()) return status;
+  const size_t widths = candidate->prepared_ans.candidates.size();
+  if (widths == 0 || candidate->streams.size() >
+      std::numeric_limits<size_t>::max() / widths) return AllocationFailure();
+  candidate->ans_section_candidate_bits.resize(candidate->streams.size() * widths);
   return Status::Ok();
 }
 
@@ -1144,6 +1179,543 @@ Status AssembleCandidate(
   return Status::Ok();
 }
 
+Status EncodePreparedVarDctRepresentation(
+  const VarDctFrameView& frame,
+  VarDctCodestreamOptions options,
+  bool exhaustive_representation_search,
+  PreparedVarDctRepresentation& prepared,
+  const codestream_internal::DcContextTreeLayout& dc_layout,
+  codestream_internal::CodestreamBuffer* output,
+  codestream_internal::VarDctCodestreamProfile* profile) {
+
+  const auto total_begin = ProfileBegin(profile);
+  auto candidate_profile = profile == nullptr
+    ? codestream_internal::VarDctCodestreamProfile{} : *profile;
+  candidate_profile.entropy_behavior = options.entropy_behavior;
+  candidate_profile.coefficient_order_behavior = options.coefficient_order_behavior;
+  const auto& dc_groups = prepared.dc_groups;
+  const auto& dc_streams = prepared.dc_streams;
+  const auto& block_context_maps = prepared.block_context_maps;
+  const auto& custom_orders = prepared.custom_orders;
+  const auto& order_tokens = prepared.order_tokens;
+  auto& candidates = prepared.candidates;
+  const bool has_custom_orders = custom_orders.used_order_mask != 0;
+  const size_t candidates_per_map =
+    exhaustive_representation_search && has_custom_orders ? 2 : 1;
+  Status status;
+  const ProfileClock::time_point entropy_begin = ProfileBegin(profile);
+  EntropyCode dc_code;
+  EntropyCodeCost dc_cost;
+  EntropyCode prefix_dc_code;
+  EntropyCodeCost prefix_dc_cost;
+  EntropyCode order_code;
+  EntropyCodeCost order_cost;
+  EntropyCode prefix_order_code;
+  EntropyCodeCost prefix_order_cost;
+  const size_t order_task_count = has_custom_orders ? 1 : 0;
+  const size_t entropy_task_count = 1 + order_task_count + candidates.size();
+  Storage<codestream_internal::EntropyWorkProfile> entropy_profiles(
+    profile == nullptr ? 0 : entropy_task_count);
+  status = RunParallelSections(
+    entropy_task_count,
+    [&](size_t index) {
+      auto* entropy_profile =
+        profile == nullptr ? nullptr : &entropy_profiles[index];
+      if (index == 0) {
+        if (exhaustive_representation_search) {
+          return OptimizeBestEntropyCode(
+            dc_streams, {.context_count = dc_layout.context_count}, &dc_code,
+            &dc_cost, &prefix_dc_code, &prefix_dc_cost, entropy_profile);
+        }
+        if (options.entropy_behavior == VarDctEntropyBehavior::kBalanced) {
+          // Keep this work in the parallel entropy phase. Selection and ANS
+          // construction share populations instead of traversing DC twice.
+          Storage<EntropyTokenStreamView> dc_views;
+          dc_views.reserve(dc_streams.size());
+          for (const auto& stream : dc_streams) {
+            dc_views.push_back(EntropyTokenStreamView::Interleaved(stream));
+          }
+          Storage<codestream_internal::PreparedFixedAnsCluster> populations;
+          const auto population_begin = WorkBegin(entropy_profile != nullptr);
+          Status population_status =
+            codestream_internal::CollectDefaultEntropyPopulations(
+              dc_views, dc_layout.context_count, &populations);
+          WorkEnd(
+            entropy_profile != nullptr, population_begin,
+            entropy_profile == nullptr ? nullptr :
+              &entropy_profile->ans_histogram_build_nanoseconds);
+          if (!population_status.ok()) return population_status;
+          return OptimizeOrdinaryEntropyCode(
+            dc_views, {.context_count = dc_layout.context_count},
+            options.entropy_behavior, populations, true,
+            &dc_code, &dc_cost, entropy_profile);
+        }
+        return OptimizeOrdinaryEntropyCode(
+          dc_streams, {.context_count = dc_layout.context_count},
+          options.entropy_behavior, true,
+          &dc_code, &dc_cost, entropy_profile);
+      }
+      if (has_custom_orders && index == 1) {
+        const std::span<const Storage<EntropyToken>> order_streams(
+          &order_tokens, 1);
+        const EntropyCodeOptions order_options{
+          .context_count = kSimplePermutationContextCount,
+          .uint_config = {0, 0, 0},
+        };
+        if (exhaustive_representation_search) {
+          return OptimizeBestEntropyCode(
+            order_streams, order_options, &order_code, &order_cost,
+            &prefix_order_code, &prefix_order_cost, entropy_profile);
+        }
+        return OptimizeOrdinaryEntropyCode(
+          order_streams, order_options, options.entropy_behavior,
+          false, &order_code, &order_cost, entropy_profile);
+      }
+      AcEncodingCandidate& candidate =
+        candidates[index - 1 - order_task_count];
+      if (exhaustive_representation_search) {
+        return PrepareAcCandidate(&candidate, entropy_profile);
+      }
+      if (options.entropy_behavior == VarDctEntropyBehavior::kRateOptimized) {
+        return PrepareRateAcCandidate(&candidate,
+          {.context_count = static_cast<uint32_t>(
+             candidate.block_context_map.ac_context_count()),
+           .maximum_ans_clusters = codestream_internal::AcAnsClusterLimit(
+             frame.geometry().frame())}, entropy_profile);
+      }
+      return OptimizeOrdinaryEntropyCode(
+        candidate.streams,
+        {
+          .context_count = static_cast<uint32_t>(
+            candidate.block_context_map.ac_context_count()),
+          .maximum_ans_clusters = codestream_internal::AcAnsClusterLimit(
+            frame.geometry().frame()),
+        },
+        options.entropy_behavior, candidate.fixed_context_populations, true,
+        &candidate.ac_code, &candidate.ac_cost, entropy_profile);
+    });
+  if (!status.ok()) {
+    return status;
+  }
+
+  const bool deferred_rate_ac =
+    options.entropy_behavior == VarDctEntropyBehavior::kRateOptimized &&
+    !candidates.front().prepared_ans.candidates.empty();
+  if (exhaustive_representation_search || deferred_rate_ac) {
+    size_t ans_task_count = 0;
+    for (const AcEncodingCandidate& candidate : candidates) {
+      const size_t candidate_count = candidate.prepared_ans.candidates.size();
+      if (candidate_count == 0 ||
+          candidate.prepared_ans.section_count != candidate.streams.size() ||
+          candidate.streams.size() >
+            std::numeric_limits<size_t>::max() / candidate_count ||
+          candidate.ans_section_candidate_bits.size() !=
+            candidate.streams.size() * candidate_count) {
+        return Status::Internal("AC candidate section dimensions differ");
+      }
+      if (candidate.streams.size() >
+          std::numeric_limits<size_t>::max() - ans_task_count) {
+        return AllocationFailure();
+      }
+      ans_task_count += candidate.streams.size();
+    }
+    Storage<AnsSectionTask> ans_tasks;
+    ans_tasks.reserve(ans_task_count);
+    for (size_t candidate_index = 0; candidate_index < candidates.size();
+         ++candidate_index) {
+      for (size_t section_index = 0;
+           section_index < candidates[candidate_index].streams.size();
+           ++section_index) {
+        ans_tasks.push_back({candidate_index, section_index});
+      }
+    }
+    Storage<uint64_t> ans_task_work(
+      profile == nullptr ? 0 : ans_tasks.size());
+    status = RunParallelSections(
+      ans_tasks.size(),
+      [&](size_t task_index) {
+        const ProfileClock::time_point task_begin =
+          WorkBegin(profile != nullptr);
+        const AnsSectionTask task = ans_tasks[task_index];
+        AcEncodingCandidate& candidate = candidates[task.candidate_index];
+        const size_t candidate_count =
+          candidate.prepared_ans.candidates.size();
+        Status measure_status =
+          codestream_internal::MeasurePreparedAnsEntropyCodeSection(
+            candidate.streams[task.section_index], candidate.prepared_ans,
+            std::span<uint64_t>(candidate.ans_section_candidate_bits).subspan(
+              task.section_index * candidate_count, candidate_count));
+        WorkEnd(
+          profile != nullptr, task_begin,
+          profile == nullptr ? nullptr : &ans_task_work[task_index]);
+        return measure_status;
+      });
+    if (!status.ok()) {
+      return status;
+    }
+    if (profile != nullptr) {
+      for (const uint64_t work : ans_task_work) {
+        candidate_profile.entropy_work.ans_token_cost_nanoseconds += work;
+      }
+    }
+    status = RunParallelSections(
+      candidates.size(),
+      [&](size_t candidate_index) {
+        auto* entropy_profile = profile == nullptr
+          ? nullptr
+          : &entropy_profiles[1 + order_task_count + candidate_index];
+        if (deferred_rate_ac) {
+          auto& candidate = candidates[candidate_index];
+          const auto selection_begin = WorkBegin(entropy_profile != nullptr);
+          Status finalize_status = codestream_internal::FinalizePreparedAnsEntropyCode(
+            &candidate.prepared_ans, candidate.ans_section_candidate_bits,
+            &candidate.ac_code, &candidate.ac_cost);
+          WorkEnd(entropy_profile != nullptr, selection_begin,
+            entropy_profile == nullptr ? nullptr : &entropy_profile->selection_nanoseconds);
+          return finalize_status;
+        }
+        return FinalizeAcCandidate(
+          &candidates[candidate_index], entropy_profile);
+      });
+    if (!status.ok()) {
+      return status;
+    }
+  }
+  for (const auto& entropy_profile : entropy_profiles) {
+    codestream_internal::AccumulateEntropyWorkProfile(
+      entropy_profile, &candidate_profile.entropy_work);
+  }
+  ProfileEnd(
+    profile, entropy_begin,
+    &candidate_profile.entropy_optimization_nanoseconds);
+
+  uint64_t section_measurement_nanoseconds = 0;
+  size_t selected_index = 0;
+  if (exhaustive_representation_search) {
+    const ProfileClock::time_point section_measurement_begin =
+      ProfileBegin(profile);
+  constexpr size_t kMixedEntropy = 0;
+  constexpr size_t kPrefixEntropy = 1;
+  const size_t entropy_mode_count =
+    exhaustive_representation_search ? 2 : 1;
+  const std::array<const EntropyCode*, 2> dc_codes = {
+    &dc_code, &prefix_dc_code};
+  const std::array<const EntropyCodeCost*, 2> dc_costs = {
+    &dc_cost, &prefix_dc_cost};
+  std::array<Storage<uint64_t>, 2> dc_group_section_bits;
+  std::array<uint64_t, 2> dc_group_measurement_work{};
+  status = RunParallelSections(
+    entropy_mode_count,
+    [&](size_t mode) {
+      Status measure_status = MeasureDcGroupSections(
+        dc_groups, *dc_costs[mode],
+        &dc_group_section_bits[mode],
+        profile == nullptr ? nullptr : &dc_group_measurement_work[mode],
+        frame.profile().extra_dc_precision);
+      return measure_status;
+    });
+  if (!status.ok()) {
+    return status;
+  }
+
+  Storage<std::array<Storage<uint64_t>, 2>> common_section_bits(
+    block_context_maps.size());
+  if (block_context_maps.size() >
+      std::numeric_limits<size_t>::max() / entropy_mode_count) {
+    return AllocationFailure();
+  }
+  const size_t common_measurement_count =
+    block_context_maps.size() * entropy_mode_count;
+  Storage<uint64_t> common_measurement_work(common_measurement_count);
+  status = RunParallelSections(
+    common_measurement_count,
+    [&](size_t index) {
+      const size_t map_index = index / entropy_mode_count;
+      const size_t mode = index % entropy_mode_count;
+      const ProfileClock::time_point work_begin =
+        WorkBegin(profile != nullptr);
+      Status measure_status = MeasureCommonSections(
+          frame, dc_groups.size(), block_context_maps[map_index],
+          *dc_codes[mode], dc_group_section_bits[mode],
+          &common_section_bits[map_index][mode], dc_layout);
+      WorkEnd(
+        profile != nullptr, work_begin,
+        &common_measurement_work[index]);
+      return measure_status;
+    });
+  if (!status.ok()) {
+    return status;
+  }
+
+  Storage<uint64_t> candidate_measurement_work(candidates.size());
+  status = RunParallelSections(
+    candidates.size(),
+    [&](size_t index) {
+      AcEncodingCandidate& candidate = candidates[index];
+      const auto measure = [&](
+        size_t mode, size_t* complete_size, uint64_t* measurement_work) {
+        const bool all_prefix = mode == kPrefixEntropy;
+        const EntropyCodeCost& ac_cost = all_prefix
+          ? candidate.prefix_ac_cost
+          : candidate.ac_cost;
+        const EntropyCodeCost* selected_order_cost = candidate.custom_order
+          ? (all_prefix ? &prefix_order_cost : &order_cost)
+          : nullptr;
+        Storage<uint64_t> ac_section_bits;
+        Status measure_status = MeasureAcSections(
+          candidate, ac_cost, custom_orders,
+          selected_order_cost, &ac_section_bits, measurement_work);
+        if (!measure_status.ok()) {
+          return measure_status;
+        }
+        const ProfileClock::time_point size_begin =
+          WorkBegin(measurement_work != nullptr);
+        measure_status = MeasureCandidateSize(
+          frame,
+          common_section_bits[candidate.block_context_candidate_index][mode],
+          ac_section_bits, candidate.streams.size(), complete_size);
+        uint64_t size_work = 0;
+        WorkEnd(
+          measurement_work != nullptr, size_begin,
+          measurement_work == nullptr ? nullptr : &size_work);
+        if (measurement_work != nullptr &&
+            !AddMeasuredBits(size_work, measurement_work)) {
+          return Status::Internal(
+            "Candidate size measurement profile overflow");
+        }
+        return measure_status;
+      };
+
+      size_t mixed_size = 0;
+      uint64_t mixed_measurement_work = 0;
+      Status measure_status = measure(
+        kMixedEntropy, &mixed_size,
+        profile == nullptr ? nullptr : &mixed_measurement_work);
+      if (!measure_status.ok()) {
+        return measure_status;
+      }
+      candidate.complete_size = mixed_size;
+      if (exhaustive_representation_search) {
+        size_t prefix_size = 0;
+        uint64_t prefix_measurement_work = 0;
+        measure_status = measure(
+          kPrefixEntropy, &prefix_size,
+          profile == nullptr ? nullptr : &prefix_measurement_work);
+        if (!measure_status.ok()) {
+          return measure_status;
+        }
+        if (codestream_internal::PreferAllPrefixCandidate(
+              mixed_size, prefix_size)) {
+          candidate.complete_size = prefix_size;
+          candidate.all_prefix_entropy = true;
+        }
+        if (profile != nullptr && !AddMeasuredBits(
+              prefix_measurement_work, &mixed_measurement_work)) {
+          return Status::Internal(
+            "Candidate measurement profile overflow");
+        }
+      }
+      candidate_measurement_work[index] = mixed_measurement_work;
+      return Status::Ok();
+    });
+  if (!status.ok()) {
+    return status;
+  }
+  if (profile != nullptr) {
+    for (uint64_t work : dc_group_measurement_work) {
+      candidate_profile.section_writing_work.candidate_measure_nanoseconds +=
+        work;
+    }
+    for (uint64_t work : common_measurement_work) {
+      candidate_profile.section_writing_work.candidate_measure_nanoseconds +=
+        work;
+    }
+    for (uint64_t work : candidate_measurement_work) {
+      candidate_profile.section_writing_work.candidate_measure_nanoseconds +=
+        work;
+    }
+  }
+    ProfileEnd(
+      profile, section_measurement_begin, &section_measurement_nanoseconds);
+
+    const ProfileClock::time_point candidate_selection_begin =
+      WorkBegin(profile != nullptr);
+    for (size_t index = 1; index < candidates.size(); ++index) {
+      const AcEncodingCandidate& candidate = candidates[index];
+      const AcEncodingCandidate& selected = candidates[selected_index];
+      if (codestream_internal::PreferEncodingCandidate(
+            {
+              candidate.complete_size,
+              candidate.custom_order,
+              candidate.block_context_candidate_index,
+            },
+            {
+              selected.complete_size,
+              selected.custom_order,
+              selected.block_context_candidate_index,
+            })) {
+        selected_index = index;
+      }
+    }
+    WorkEnd(
+      profile != nullptr, candidate_selection_begin,
+      &candidate_profile.assembly.candidate_selection_nanoseconds);
+  }
+  AcEncodingCandidate& selected = candidates[selected_index];
+  const EntropyCode& selected_dc_code = selected.all_prefix_entropy
+    ? prefix_dc_code
+    : dc_code;
+  const EntropyCode& selected_ac_code = selected.all_prefix_entropy
+    ? selected.prefix_ac_code
+    : selected.ac_code;
+  const EntropyCode* selected_order_code = selected.custom_order
+    ? (selected.all_prefix_entropy ? &prefix_order_code : &order_code)
+    : nullptr;
+  const ProfileClock::time_point selected_write_begin = ProfileBegin(profile);
+  Storage<BitWriter> common_sections;
+  uint64_t written_dc_token_bits = 0;
+  codestream_internal::SectionWritingWorkProfile selected_write_profile;
+  status = WriteCommonSections(
+      frame, dc_groups, dc_streams, selected.block_context_map,
+      selected_dc_code, &common_sections,
+      exhaustive_representation_search ? nullptr : &written_dc_token_bits,
+      profile == nullptr ? nullptr : &selected_write_profile,
+      dc_layout);
+  if (!status.ok()) {
+    return status;
+  }
+  Storage<BitWriter> ac_sections;
+  uint64_t written_ac_token_bits = 0;
+  status = WriteAcSections(
+    selected, selected_ac_code, custom_orders, order_tokens,
+    selected_order_code, &ac_sections,
+    exhaustive_representation_search ? nullptr : &written_ac_token_bits,
+    profile == nullptr ? nullptr : &selected_write_profile);
+  if (!status.ok()) {
+    return status;
+  }
+  uint64_t selected_write_nanoseconds = 0;
+  ProfileEnd(profile, selected_write_begin, &selected_write_nanoseconds);
+  codestream_internal::AccumulateSectionWritingWorkProfile(
+    selected_write_profile, &candidate_profile.section_writing_work);
+  if (section_measurement_nanoseconds >
+      std::numeric_limits<uint64_t>::max() - selected_write_nanoseconds) {
+    return Status::Internal("Codestream section profile overflow");
+  }
+  candidate_profile.section_writing_nanoseconds =
+    section_measurement_nanoseconds + selected_write_nanoseconds;
+  if (!exhaustive_representation_search) {
+    dc_cost.token_bits = written_dc_token_bits;
+    selected.ac_cost.token_bits = written_ac_token_bits;
+  }
+
+  const ProfileClock::time_point assembly_begin = ProfileBegin(profile);
+  codestream_internal::CodestreamBuffer candidate_output;
+  status = AssembleCandidate(
+    frame, common_sections, ac_sections,
+    selected.streams.size(), &candidate_output,
+    profile == nullptr ? nullptr : &candidate_profile.assembly);
+  if (!status.ok()) {
+    return status;
+  }
+  if (exhaustive_representation_search &&
+      candidate_output.size() != selected.complete_size) {
+    return Status::Internal(
+      "Measured codestream candidate size differs from assembly");
+  }
+  selected.complete_size = candidate_output.size();
+  uint64_t assembly_write_nanoseconds = 0;
+  ProfileEnd(profile, assembly_begin, &assembly_write_nanoseconds);
+  if (candidate_profile.assembly.candidate_selection_nanoseconds >
+      std::numeric_limits<uint64_t>::max() - assembly_write_nanoseconds) {
+    return Status::Internal("Codestream assembly profile overflow");
+  }
+  candidate_profile.assembly_nanoseconds =
+    candidate_profile.assembly.candidate_selection_nanoseconds +
+    assembly_write_nanoseconds;
+
+  candidate_profile.natural_candidate_bytes =
+    exhaustive_representation_search
+      ? std::numeric_limits<size_t>::max()
+      : 0;
+  for (const AcEncodingCandidate& candidate : candidates) {
+    size_t& minimum = candidate.custom_order
+      ? candidate_profile.custom_order_candidate_bytes
+      : candidate_profile.natural_candidate_bytes;
+    if (minimum == 0 || candidate.complete_size < minimum) {
+      minimum = candidate.complete_size;
+    }
+  }
+  if (exhaustive_representation_search &&
+      candidate_profile.natural_candidate_bytes ==
+      std::numeric_limits<size_t>::max()) {
+    return Status::Internal("Natural codestream candidate is missing");
+  }
+  candidate_profile.selected_coefficient_order_mask =
+    selected.custom_order ? custom_orders.used_order_mask : 0;
+  candidate_profile.block_context_candidate_count = candidates_per_map == 0
+    ? 0
+    : candidates.size() / candidates_per_map;
+  const SimpleBlockContextMap compact_block_context_map =
+    DefaultSimpleBlockContextMap();
+  for (const AcEncodingCandidate& candidate : candidates) {
+    if (candidate.block_context_map == compact_block_context_map &&
+        (candidate_profile.compact_block_context_candidate_bytes == 0 ||
+         candidate.complete_size <
+           candidate_profile.compact_block_context_candidate_bytes)) {
+      candidate_profile.compact_block_context_candidate_bytes =
+        candidate.complete_size;
+    }
+  }
+  candidate_profile.selected_block_context_candidate_index =
+    selected.block_context_candidate_index;
+  candidate_profile.selected_block_context_count =
+    selected.block_context_map.num_contexts;
+  candidate_profile.selected_block_context_qf_threshold_count =
+    selected.block_context_map.qf_thresholds.size();
+  const EntropyCodeCost& selected_dc_cost = selected.all_prefix_entropy
+    ? prefix_dc_cost
+    : dc_cost;
+  const EntropyCodeCost& selected_order_cost = selected.all_prefix_entropy
+    ? prefix_order_cost
+    : order_cost;
+  const EntropyCodeCost& selected_ac_cost = selected.all_prefix_entropy
+    ? selected.prefix_ac_cost
+    : selected.ac_cost;
+  uint64_t model_bits = selected_dc_cost.model_bits;
+  uint64_t token_bits = selected_dc_cost.token_bits;
+  const auto add_cost = [&](const EntropyCodeCost& cost) {
+    if (model_bits > std::numeric_limits<uint64_t>::max() - cost.model_bits ||
+        token_bits > std::numeric_limits<uint64_t>::max() - cost.token_bits) {
+      return false;
+    }
+    model_bits += cost.model_bits;
+    token_bits += cost.token_bits;
+    return true;
+  };
+  if (!add_cost(selected_ac_cost) ||
+      (selected.custom_order && !add_cost(selected_order_cost))) {
+    return Status::InvalidArgument("Entropy profile bit count overflow");
+  }
+  candidate_profile.entropy_model_bits = model_bits;
+  candidate_profile.entropy_token_bits = token_bits;
+  candidate_profile.dc_entropy_clusters = selected_dc_cost.cluster_count;
+  candidate_profile.dc_entropy_is_ans =
+    !selected.all_prefix_entropy && dc_code.mode == EntropyCodingMode::kAns;
+  candidate_profile.ac_entropy_clusters = selected_ac_cost.cluster_count;
+  candidate_profile.ac_entropy_is_ans =
+    selected_ac_code.mode == EntropyCodingMode::kAns;
+  candidate_profile.coefficient_order_entropy_is_ans =
+    selected.custom_order && !selected.all_prefix_entropy &&
+    order_code.mode == EntropyCodingMode::kAns;
+  *output = std::move(candidate_output);
+  if (profile != nullptr) {
+    candidate_profile.total_nanoseconds = ElapsedNanoseconds(total_begin);
+    *profile = candidate_profile;
+  }
+  return Status::Ok();
+}
+
 Status EncodeVarDctCodestreamWithRepresentationPolicy(
   const VarDctFrameView& frame,
   VarDctCodestreamOptions options,
@@ -1206,9 +1778,13 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
   candidate_profile.dc_leaf_count = dc_layout.dc_leaf_count;
   candidate_profile.dc_context_count = dc_layout.context_count;
 
+  const bool rate_optimized =
+    options.entropy_behavior == VarDctEntropyBehavior::kRateOptimized;
   try {
+    PreparedVarDctRepresentation prepared;
+    if (rate_optimized) options.entropy_behavior = VarDctEntropyBehavior::kBalanced;
     const ProfileClock::time_point dc_tokenization_begin = ProfileBegin(profile);
-    Storage<SimpleDcGroupTokenStreams> dc_groups;
+    auto& dc_groups = prepared.dc_groups;
     Status status = codestream_internal::TokenizeSimpleDcGroupsForEncoder(
         frame, &dc_groups, options.dc_prediction);
     // Existing group-local predictors emit legacy context IDs. Translate both
@@ -1234,7 +1810,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
       return Status::Internal("Validated frame produced no codestream groups");
     }
 
-    Storage<Storage<EntropyToken>> dc_streams;
+    auto& dc_streams = prepared.dc_streams;
     if (dc_groups.size() > dc_streams.max_size() / 2) {
       return AllocationFailure();
     }
@@ -1245,8 +1821,8 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
     }
 
     const ProfileClock::time_point ac_tokenization_begin = ProfileBegin(profile);
-    Storage<SimpleBlockContextMap> block_context_maps;
-    SimpleCoefficientOrders custom_orders;
+    auto& block_context_maps = prepared.block_context_maps;
+    auto& custom_orders = prepared.custom_orders;
     const ProfileClock::time_point block_context_begin =
       WorkBegin(profile != nullptr);
     if (exhaustive_representation_search) {
@@ -1283,7 +1859,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
         "Validated frame produced no block-context candidates");
     }
 
-    Storage<EntropyToken> order_tokens;
+    auto& order_tokens = prepared.order_tokens;
     if (custom_orders.used_order_mask != 0) {
       const ProfileClock::time_point order_tokenization_begin =
         WorkBegin(profile != nullptr);
@@ -1302,7 +1878,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
         std::numeric_limits<size_t>::max() / candidates_per_map) {
       return AllocationFailure();
     }
-    Storage<AcEncodingCandidate> candidates;
+    auto& candidates = prepared.candidates;
     candidates.reserve(block_context_maps.size() * candidates_per_map);
     for (size_t map_index = 0; map_index < block_context_maps.size();
          ++map_index) {
@@ -1321,7 +1897,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
       }
     }
     const SimpleCoefficientOrders natural_orders;
-    std::array<Storage<SimpleAcGroupTokenTemplate>, 2> order_templates;
+    auto& order_templates = prepared.order_templates;
     const size_t ac_group_count = frame.ac_group_count();
     if (ac_group_count == 0) {
       return AllocationFailure();
@@ -1537,496 +2113,58 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
       return Status::Internal("Validated frame produced no AC candidates");
     }
 
-    const ProfileClock::time_point entropy_begin = ProfileBegin(profile);
-    EntropyCode dc_code;
-    EntropyCodeCost dc_cost;
-    EntropyCode prefix_dc_code;
-    EntropyCodeCost prefix_dc_cost;
-    EntropyCode order_code;
-    EntropyCodeCost order_cost;
-    EntropyCode prefix_order_code;
-    EntropyCodeCost prefix_order_cost;
-    const size_t order_task_count = has_custom_orders ? 1 : 0;
-    const size_t entropy_task_count = 1 + order_task_count + candidates.size();
-    Storage<codestream_internal::EntropyWorkProfile> entropy_profiles(
-      profile == nullptr ? 0 : entropy_task_count);
-    status = RunParallelSections(
-      entropy_task_count,
-      [&](size_t index) {
-        auto* entropy_profile =
-          profile == nullptr ? nullptr : &entropy_profiles[index];
-        if (index == 0) {
-          if (exhaustive_representation_search) {
-            return OptimizeBestEntropyCode(
-              dc_streams, {.context_count = dc_layout.context_count}, &dc_code,
-              &dc_cost, &prefix_dc_code, &prefix_dc_cost, entropy_profile);
-          }
-          if (options.entropy_behavior == VarDctEntropyBehavior::kBalanced) {
-            // Keep this work in the parallel entropy phase. Selection and ANS
-            // construction share populations instead of traversing DC twice.
-            Storage<EntropyTokenStreamView> dc_views;
-            dc_views.reserve(dc_streams.size());
-            for (const auto& stream : dc_streams) {
-              dc_views.push_back(EntropyTokenStreamView::Interleaved(stream));
-            }
-            Storage<codestream_internal::PreparedFixedAnsCluster> populations;
-            const auto population_begin = WorkBegin(entropy_profile != nullptr);
-            Status population_status =
-              codestream_internal::CollectDefaultEntropyPopulations(
-                dc_views, dc_layout.context_count, &populations);
-            WorkEnd(
-              entropy_profile != nullptr, population_begin,
-              entropy_profile == nullptr ? nullptr :
-                &entropy_profile->ans_histogram_build_nanoseconds);
-            if (!population_status.ok()) return population_status;
-            return OptimizeOrdinaryEntropyCode(
-              dc_views, {.context_count = dc_layout.context_count},
-              options.entropy_behavior, populations, true,
-              &dc_code, &dc_cost, entropy_profile);
-          }
-          return OptimizeOrdinaryEntropyCode(
-            dc_streams, {.context_count = dc_layout.context_count},
-            options.entropy_behavior, true,
-            &dc_code, &dc_cost, entropy_profile);
-        }
-        if (has_custom_orders && index == 1) {
-          const std::span<const Storage<EntropyToken>> order_streams(
-            &order_tokens, 1);
-          const EntropyCodeOptions order_options{
-            .context_count = kSimplePermutationContextCount,
-            .uint_config = {0, 0, 0},
-          };
-          if (exhaustive_representation_search) {
-            return OptimizeBestEntropyCode(
-              order_streams, order_options, &order_code, &order_cost,
-              &prefix_order_code, &prefix_order_cost, entropy_profile);
-          }
-          return OptimizeOrdinaryEntropyCode(
-            order_streams, order_options, options.entropy_behavior,
-            false, &order_code, &order_cost, entropy_profile);
-        }
-        AcEncodingCandidate& candidate =
-          candidates[index - 1 - order_task_count];
-        if (exhaustive_representation_search) {
-          return PrepareAcCandidate(&candidate, entropy_profile);
-        }
-        return OptimizeOrdinaryEntropyCode(
-          candidate.streams,
-          {
-            .context_count = static_cast<uint32_t>(
-              candidate.block_context_map.ac_context_count()),
-            .maximum_ans_clusters = codestream_internal::AcAnsClusterLimit(
-              frame.geometry().frame()),
-          },
-          options.entropy_behavior, candidate.fixed_context_populations, true,
-          &candidate.ac_code, &candidate.ac_cost, entropy_profile);
-      });
-    if (!status.ok()) {
+    if (!rate_optimized) {
+      status = EncodePreparedVarDctRepresentation(
+        frame, options, exhaustive_representation_search, prepared, dc_layout,
+        output, profile == nullptr ? nullptr : &candidate_profile);
+      if (status.ok() && profile != nullptr) {
+        candidate_profile.total_nanoseconds = ElapsedNanoseconds(total_begin);
+        *profile = candidate_profile;
+      }
       return status;
     }
 
-    if (exhaustive_representation_search) {
-      size_t ans_task_count = 0;
-      for (const AcEncodingCandidate& candidate : candidates) {
-        const size_t candidate_count = candidate.prepared_ans.candidates.size();
-        if (candidate_count == 0 ||
-            candidate.prepared_ans.section_count != candidate.streams.size() ||
-            candidate.streams.size() >
-              std::numeric_limits<size_t>::max() / candidate_count ||
-            candidate.ans_section_candidate_bits.size() !=
-              candidate.streams.size() * candidate_count) {
-          return Status::Internal("AC candidate section dimensions differ");
-        }
-        if (candidate.streams.size() >
-            std::numeric_limits<size_t>::max() - ans_task_count) {
-          return AllocationFailure();
-        }
-        ans_task_count += candidate.streams.size();
-      }
-      Storage<AnsSectionTask> ans_tasks;
-      ans_tasks.reserve(ans_task_count);
-      for (size_t candidate_index = 0; candidate_index < candidates.size();
-           ++candidate_index) {
-        for (size_t section_index = 0;
-             section_index < candidates[candidate_index].streams.size();
-             ++section_index) {
-          ans_tasks.push_back({candidate_index, section_index});
-        }
-      }
-      Storage<uint64_t> ans_task_work(
-        profile == nullptr ? 0 : ans_tasks.size());
-      status = RunParallelSections(
-        ans_tasks.size(),
-        [&](size_t task_index) {
-          const ProfileClock::time_point task_begin =
-            WorkBegin(profile != nullptr);
-          const AnsSectionTask task = ans_tasks[task_index];
-          AcEncodingCandidate& candidate = candidates[task.candidate_index];
-          const size_t candidate_count =
-            candidate.prepared_ans.candidates.size();
-          Status measure_status =
-            codestream_internal::MeasurePreparedAnsEntropyCodeSection(
-              candidate.streams[task.section_index], candidate.prepared_ans,
-              std::span<uint64_t>(candidate.ans_section_candidate_bits).subspan(
-                task.section_index * candidate_count, candidate_count));
-          WorkEnd(
-            profile != nullptr, task_begin,
-            profile == nullptr ? nullptr : &ans_task_work[task_index]);
-          return measure_status;
-        });
-      if (!status.ok()) {
-        return status;
-      }
-      if (profile != nullptr) {
-        for (const uint64_t work : ans_task_work) {
-          candidate_profile.entropy_work.ans_token_cost_nanoseconds += work;
-        }
-      }
-      status = RunParallelSections(
-        candidates.size(),
-        [&](size_t candidate_index) {
-          auto* entropy_profile = profile == nullptr
-            ? nullptr
-            : &entropy_profiles[1 + order_task_count + candidate_index];
-          return FinalizeAcCandidate(
-            &candidates[candidate_index], entropy_profile);
-        });
-      if (!status.ok()) {
-        return status;
-      }
-    }
-    for (const auto& entropy_profile : entropy_profiles) {
-      codestream_internal::AccumulateEntropyWorkProfile(
-        entropy_profile, &candidate_profile.entropy_work);
-    }
-    ProfileEnd(
-      profile, entropy_begin,
-      &candidate_profile.entropy_optimization_nanoseconds);
+    codestream_internal::CodestreamBuffer balanced, expanded;
+    auto balanced_profile = candidate_profile;
+    status = EncodePreparedVarDctRepresentation(
+      frame, options, false, prepared, dc_layout, &balanced,
+      profile == nullptr ? nullptr : &balanced_profile);
+    if (!status.ok()) return status;
 
-    uint64_t section_measurement_nanoseconds = 0;
-    size_t selected_index = 0;
-    if (exhaustive_representation_search) {
-      const ProfileClock::time_point section_measurement_begin =
-        ProfileBegin(profile);
-    constexpr size_t kMixedEntropy = 0;
-    constexpr size_t kPrefixEntropy = 1;
-    const size_t entropy_mode_count =
-      exhaustive_representation_search ? 2 : 1;
-    const std::array<const EntropyCode*, 2> dc_codes = {
-      &dc_code, &prefix_dc_code};
-    const std::array<const EntropyCodeCost*, 2> dc_costs = {
-      &dc_cost, &prefix_dc_cost};
-    std::array<Storage<uint64_t>, 2> dc_group_section_bits;
-    std::array<uint64_t, 2> dc_group_measurement_work{};
-    status = RunParallelSections(
-      entropy_mode_count,
-      [&](size_t mode) {
-        Status measure_status = MeasureDcGroupSections(
-          dc_groups, *dc_costs[mode],
-          &dc_group_section_bits[mode],
-          profile == nullptr ? nullptr : &dc_group_measurement_work[mode],
-          frame.profile().extra_dc_precision);
-        return measure_status;
-      });
-    if (!status.ok()) {
-      return status;
+    // Release the balanced model and fixed-config populations before expanded
+    // optimization. Only its complete output and shared preparation survive;
+    // the expanded pass owns the same token backing as an ordinary invocation.
+    for (auto& candidate : prepared.candidates) {
+      candidate.ac_code = {};
+      candidate.ac_cost = {};
+      Storage<codestream_internal::PreparedFixedAnsCluster>().swap(
+        candidate.fixed_context_populations);
     }
+    options.entropy_behavior = VarDctEntropyBehavior::kRateOptimized;
+    codestream_internal::VarDctCodestreamProfile expanded_profile;
+    expanded_profile.dc_sample_count = dc_samples;
+    expanded_profile.dc_leaf_count = dc_layout.dc_leaf_count;
+    expanded_profile.dc_context_count = dc_layout.context_count;
+    status = EncodePreparedVarDctRepresentation(
+      frame, options, false, prepared, dc_layout, &expanded,
+      profile == nullptr ? nullptr : &expanded_profile);
+    if (!status.ok()) return status;
 
-    Storage<std::array<Storage<uint64_t>, 2>> common_section_bits(
-      block_context_maps.size());
-    if (block_context_maps.size() >
-        std::numeric_limits<size_t>::max() / entropy_mode_count) {
-      return AllocationFailure();
-    }
-    const size_t common_measurement_count =
-      block_context_maps.size() * entropy_mode_count;
-    Storage<uint64_t> common_measurement_work(common_measurement_count);
-    status = RunParallelSections(
-      common_measurement_count,
-      [&](size_t index) {
-        const size_t map_index = index / entropy_mode_count;
-        const size_t mode = index % entropy_mode_count;
-        const ProfileClock::time_point work_begin =
-          WorkBegin(profile != nullptr);
-        Status measure_status = MeasureCommonSections(
-            frame, dc_groups.size(), block_context_maps[map_index],
-            *dc_codes[mode], dc_group_section_bits[mode],
-            &common_section_bits[map_index][mode], dc_layout);
-        WorkEnd(
-          profile != nullptr, work_begin,
-          &common_measurement_work[index]);
-        return measure_status;
-      });
-    if (!status.ok()) {
-      return status;
-    }
-
-    Storage<uint64_t> candidate_measurement_work(candidates.size());
-    status = RunParallelSections(
-      candidates.size(),
-      [&](size_t index) {
-        AcEncodingCandidate& candidate = candidates[index];
-        const auto measure = [&](
-          size_t mode, size_t* complete_size, uint64_t* measurement_work) {
-          const bool all_prefix = mode == kPrefixEntropy;
-          const EntropyCodeCost& ac_cost = all_prefix
-            ? candidate.prefix_ac_cost
-            : candidate.ac_cost;
-          const EntropyCodeCost* selected_order_cost = candidate.custom_order
-            ? (all_prefix ? &prefix_order_cost : &order_cost)
-            : nullptr;
-          Storage<uint64_t> ac_section_bits;
-          Status measure_status = MeasureAcSections(
-            candidate, ac_cost, custom_orders,
-            selected_order_cost, &ac_section_bits, measurement_work);
-          if (!measure_status.ok()) {
-            return measure_status;
-          }
-          const ProfileClock::time_point size_begin =
-            WorkBegin(measurement_work != nullptr);
-          measure_status = MeasureCandidateSize(
-            frame,
-            common_section_bits[candidate.block_context_candidate_index][mode],
-            ac_section_bits, candidate.streams.size(), complete_size);
-          uint64_t size_work = 0;
-          WorkEnd(
-            measurement_work != nullptr, size_begin,
-            measurement_work == nullptr ? nullptr : &size_work);
-          if (measurement_work != nullptr &&
-              !AddMeasuredBits(size_work, measurement_work)) {
-            return Status::Internal(
-              "Candidate size measurement profile overflow");
-          }
-          return measure_status;
-        };
-
-        size_t mixed_size = 0;
-        uint64_t mixed_measurement_work = 0;
-        Status measure_status = measure(
-          kMixedEntropy, &mixed_size,
-          profile == nullptr ? nullptr : &mixed_measurement_work);
-        if (!measure_status.ok()) {
-          return measure_status;
-        }
-        candidate.complete_size = mixed_size;
-        if (exhaustive_representation_search) {
-          size_t prefix_size = 0;
-          uint64_t prefix_measurement_work = 0;
-          measure_status = measure(
-            kPrefixEntropy, &prefix_size,
-            profile == nullptr ? nullptr : &prefix_measurement_work);
-          if (!measure_status.ok()) {
-            return measure_status;
-          }
-          if (codestream_internal::PreferAllPrefixCandidate(
-                mixed_size, prefix_size)) {
-            candidate.complete_size = prefix_size;
-            candidate.all_prefix_entropy = true;
-          }
-          if (profile != nullptr && !AddMeasuredBits(
-                prefix_measurement_work, &mixed_measurement_work)) {
-            return Status::Internal(
-              "Candidate measurement profile overflow");
-          }
-        }
-        candidate_measurement_work[index] = mixed_measurement_work;
-        return Status::Ok();
-      });
-    if (!status.ok()) {
-      return status;
-    }
+    // Compare complete files, including headers, padding and TOC. Equal sizes
+    // keep balanced bytes; either search failing still preserves caller output.
+    const bool use_balanced = balanced.size() <= expanded.size();
     if (profile != nullptr) {
-      for (uint64_t work : dc_group_measurement_work) {
-        candidate_profile.section_writing_work.candidate_measure_nanoseconds +=
-          work;
-      }
-      for (uint64_t work : common_measurement_work) {
-        candidate_profile.section_writing_work.candidate_measure_nanoseconds +=
-          work;
-      }
-      for (uint64_t work : candidate_measurement_work) {
-        candidate_profile.section_writing_work.candidate_measure_nanoseconds +=
-          work;
-      }
+      auto selected = use_balanced ? balanced_profile : expanded_profile;
+      codestream_internal::AccumulateCodestreamWorkProfile(
+        use_balanced ? expanded_profile : balanced_profile, &selected);
+      selected.entropy_behavior = VarDctEntropyBehavior::kRateOptimized;
+      selected.balanced_candidate_bytes = balanced.size();
+      selected.rate_candidate_bytes = expanded.size();
+      selected.selected_balanced_fallback = use_balanced;
+      selected.total_nanoseconds = ElapsedNanoseconds(total_begin);
+      *profile = selected;
     }
-      ProfileEnd(
-        profile, section_measurement_begin, &section_measurement_nanoseconds);
-
-      const ProfileClock::time_point candidate_selection_begin =
-        WorkBegin(profile != nullptr);
-      for (size_t index = 1; index < candidates.size(); ++index) {
-        const AcEncodingCandidate& candidate = candidates[index];
-        const AcEncodingCandidate& selected = candidates[selected_index];
-        if (codestream_internal::PreferEncodingCandidate(
-              {
-                candidate.complete_size,
-                candidate.custom_order,
-                candidate.block_context_candidate_index,
-              },
-              {
-                selected.complete_size,
-                selected.custom_order,
-                selected.block_context_candidate_index,
-              })) {
-          selected_index = index;
-        }
-      }
-      WorkEnd(
-        profile != nullptr, candidate_selection_begin,
-        &candidate_profile.assembly.candidate_selection_nanoseconds);
-    }
-    AcEncodingCandidate& selected = candidates[selected_index];
-    const EntropyCode& selected_dc_code = selected.all_prefix_entropy
-      ? prefix_dc_code
-      : dc_code;
-    const EntropyCode& selected_ac_code = selected.all_prefix_entropy
-      ? selected.prefix_ac_code
-      : selected.ac_code;
-    const EntropyCode* selected_order_code = selected.custom_order
-      ? (selected.all_prefix_entropy ? &prefix_order_code : &order_code)
-      : nullptr;
-    const ProfileClock::time_point selected_write_begin = ProfileBegin(profile);
-    Storage<BitWriter> common_sections;
-    uint64_t written_dc_token_bits = 0;
-    codestream_internal::SectionWritingWorkProfile selected_write_profile;
-    status = WriteCommonSections(
-        frame, dc_groups, dc_streams, selected.block_context_map,
-        selected_dc_code, &common_sections,
-        exhaustive_representation_search ? nullptr : &written_dc_token_bits,
-        profile == nullptr ? nullptr : &selected_write_profile,
-        dc_layout);
-    if (!status.ok()) {
-      return status;
-    }
-    Storage<BitWriter> ac_sections;
-    uint64_t written_ac_token_bits = 0;
-    status = WriteAcSections(
-      selected, selected_ac_code, custom_orders, order_tokens,
-      selected_order_code, &ac_sections,
-      exhaustive_representation_search ? nullptr : &written_ac_token_bits,
-      profile == nullptr ? nullptr : &selected_write_profile);
-    if (!status.ok()) {
-      return status;
-    }
-    uint64_t selected_write_nanoseconds = 0;
-    ProfileEnd(profile, selected_write_begin, &selected_write_nanoseconds);
-    codestream_internal::AccumulateSectionWritingWorkProfile(
-      selected_write_profile, &candidate_profile.section_writing_work);
-    if (section_measurement_nanoseconds >
-        std::numeric_limits<uint64_t>::max() - selected_write_nanoseconds) {
-      return Status::Internal("Codestream section profile overflow");
-    }
-    candidate_profile.section_writing_nanoseconds =
-      section_measurement_nanoseconds + selected_write_nanoseconds;
-    if (!exhaustive_representation_search) {
-      dc_cost.token_bits = written_dc_token_bits;
-      selected.ac_cost.token_bits = written_ac_token_bits;
-    }
-
-    const ProfileClock::time_point assembly_begin = ProfileBegin(profile);
-    codestream_internal::CodestreamBuffer candidate_output;
-    status = AssembleCandidate(
-      frame, common_sections, ac_sections,
-      selected.streams.size(), &candidate_output,
-      profile == nullptr ? nullptr : &candidate_profile.assembly);
-    if (!status.ok()) {
-      return status;
-    }
-    if (exhaustive_representation_search &&
-        candidate_output.size() != selected.complete_size) {
-      return Status::Internal(
-        "Measured codestream candidate size differs from assembly");
-    }
-    selected.complete_size = candidate_output.size();
-    uint64_t assembly_write_nanoseconds = 0;
-    ProfileEnd(profile, assembly_begin, &assembly_write_nanoseconds);
-    if (candidate_profile.assembly.candidate_selection_nanoseconds >
-        std::numeric_limits<uint64_t>::max() - assembly_write_nanoseconds) {
-      return Status::Internal("Codestream assembly profile overflow");
-    }
-    candidate_profile.assembly_nanoseconds =
-      candidate_profile.assembly.candidate_selection_nanoseconds +
-      assembly_write_nanoseconds;
-
-    candidate_profile.natural_candidate_bytes =
-      exhaustive_representation_search
-        ? std::numeric_limits<size_t>::max()
-        : 0;
-    for (const AcEncodingCandidate& candidate : candidates) {
-      size_t& minimum = candidate.custom_order
-        ? candidate_profile.custom_order_candidate_bytes
-        : candidate_profile.natural_candidate_bytes;
-      if (minimum == 0 || candidate.complete_size < minimum) {
-        minimum = candidate.complete_size;
-      }
-    }
-    if (exhaustive_representation_search &&
-        candidate_profile.natural_candidate_bytes ==
-        std::numeric_limits<size_t>::max()) {
-      return Status::Internal("Natural codestream candidate is missing");
-    }
-    candidate_profile.selected_coefficient_order_mask =
-      selected.custom_order ? custom_orders.used_order_mask : 0;
-    candidate_profile.block_context_candidate_count = candidates_per_map == 0
-      ? 0
-      : candidates.size() / candidates_per_map;
-    const SimpleBlockContextMap compact_block_context_map =
-      DefaultSimpleBlockContextMap();
-    for (const AcEncodingCandidate& candidate : candidates) {
-      if (candidate.block_context_map == compact_block_context_map &&
-          (candidate_profile.compact_block_context_candidate_bytes == 0 ||
-           candidate.complete_size <
-             candidate_profile.compact_block_context_candidate_bytes)) {
-        candidate_profile.compact_block_context_candidate_bytes =
-          candidate.complete_size;
-      }
-    }
-    candidate_profile.selected_block_context_candidate_index =
-      selected.block_context_candidate_index;
-    candidate_profile.selected_block_context_count =
-      selected.block_context_map.num_contexts;
-    candidate_profile.selected_block_context_qf_threshold_count =
-      selected.block_context_map.qf_thresholds.size();
-    const EntropyCodeCost& selected_dc_cost = selected.all_prefix_entropy
-      ? prefix_dc_cost
-      : dc_cost;
-    const EntropyCodeCost& selected_order_cost = selected.all_prefix_entropy
-      ? prefix_order_cost
-      : order_cost;
-    const EntropyCodeCost& selected_ac_cost = selected.all_prefix_entropy
-      ? selected.prefix_ac_cost
-      : selected.ac_cost;
-    uint64_t model_bits = selected_dc_cost.model_bits;
-    uint64_t token_bits = selected_dc_cost.token_bits;
-    const auto add_cost = [&](const EntropyCodeCost& cost) {
-      if (model_bits > std::numeric_limits<uint64_t>::max() - cost.model_bits ||
-          token_bits > std::numeric_limits<uint64_t>::max() - cost.token_bits) {
-        return false;
-      }
-      model_bits += cost.model_bits;
-      token_bits += cost.token_bits;
-      return true;
-    };
-    if (!add_cost(selected_ac_cost) ||
-        (selected.custom_order && !add_cost(selected_order_cost))) {
-      return Status::InvalidArgument("Entropy profile bit count overflow");
-    }
-    candidate_profile.entropy_model_bits = model_bits;
-    candidate_profile.entropy_token_bits = token_bits;
-    candidate_profile.dc_entropy_clusters = selected_dc_cost.cluster_count;
-    candidate_profile.dc_entropy_is_ans =
-      !selected.all_prefix_entropy && dc_code.mode == EntropyCodingMode::kAns;
-    candidate_profile.ac_entropy_clusters = selected_ac_cost.cluster_count;
-    candidate_profile.ac_entropy_is_ans =
-      selected_ac_code.mode == EntropyCodingMode::kAns;
-    candidate_profile.coefficient_order_entropy_is_ans =
-      selected.custom_order && !selected.all_prefix_entropy &&
-      order_code.mode == EntropyCodingMode::kAns;
-    *output = std::move(candidate_output);
-    if (profile != nullptr) {
-      candidate_profile.total_nanoseconds = ElapsedNanoseconds(total_begin);
-      *profile = candidate_profile;
-    }
+    *output = use_balanced ? std::move(balanced) : std::move(expanded);
     return Status::Ok();
   } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
     return error.status();
@@ -2057,44 +2195,6 @@ Status EncodeVarDctCodestreamSingleRepresentation(
     frame, options, false, output, profile);
 }
 
-Status EncodeVarDctCodestreamRateOptimized(
-  const VarDctFrameView& frame,
-  VarDctCodestreamOptions options,
-  codestream_internal::CodestreamBuffer* output,
-  codestream_internal::VarDctCodestreamProfile* profile) {
-  if (output == nullptr)
-    return Status::InvalidArgument("Codestream output is null");
-  const auto begin = ProfileBegin(profile);
-  codestream_internal::CodestreamBuffer balanced, expanded;
-  codestream_internal::VarDctCodestreamProfile balanced_profile, expanded_profile;
-  auto fallback_options = options;
-  fallback_options.entropy_behavior = VarDctEntropyBehavior::kBalanced;
-  Status status = EncodeVarDctCodestreamSingleRepresentation(
-    frame, fallback_options, &balanced, profile ? &balanced_profile : nullptr);
-  if (!status.ok()) return status;
-  status = EncodeVarDctCodestreamSingleRepresentation(
-    frame, options, &expanded, profile ? &expanded_profile : nullptr);
-  if (!status.ok()) return status;
-
-  // Compare physical codestream bytes, including headers, padding and TOC.
-  // Equal sizes preserve the established balanced encoding. Errors still fail
-  // atomically; this is a rate fallback, not suppression of resource failures.
-  const bool use_balanced = balanced.size() <= expanded.size();
-  if (profile != nullptr) {
-    auto selected = use_balanced ? balanced_profile : expanded_profile;
-    codestream_internal::AccumulateCodestreamWorkProfile(
-      use_balanced ? expanded_profile : balanced_profile, &selected);
-    selected.entropy_behavior = VarDctEntropyBehavior::kRateOptimized;
-    selected.balanced_candidate_bytes = balanced.size();
-    selected.rate_candidate_bytes = expanded.size();
-    selected.selected_balanced_fallback = use_balanced;
-    selected.total_nanoseconds = ElapsedNanoseconds(begin);
-    *profile = selected;
-  }
-  *output = use_balanced ? std::move(balanced) : std::move(expanded);
-  return Status::Ok();
-}
-
 Status EncodeVarDctCodestreamImpl(
   const VarDctFrameView& frame,
   VarDctCodestreamOptions options,
@@ -2103,8 +2203,6 @@ Status EncodeVarDctCodestreamImpl(
 
   const resource_budget_internal::ManagedHostScope managed_host(
     resource_budget_internal::ResourceClass::kSerializer);
-  if (options.entropy_behavior == VarDctEntropyBehavior::kRateOptimized)
-    return EncodeVarDctCodestreamRateOptimized(frame, options, output, profile);
   return options.entropy_behavior ==
       VarDctEntropyBehavior::kMaximumCompression
     ? EncodeVarDctCodestreamMaximumCompression(
@@ -2216,13 +2314,17 @@ Status codestream_internal::ComputeSerializerControlStorageBound(
        !work.AddVector<SectionWritingWorkProfile>(d + g, kFreshExact))) {
     return Status::OutOfMemory("Serializer profiling backing overflows");
   }
-  if (exhaustive) {
+  if (exhaustive || options.coding.entropy_behavior == VarDctEntropyBehavior::kRateOptimized) {
     if (!work.AddVector<AnsSectionTask>(group_tasks, kFreshExact) ||
-        // clear() after finalization does not free these per-candidate arrays.
         !work.AddVector<uint64_t>(g * kAnsAlphabetWidthCount, kFreshExact, candidates) ||
         (options.collect_profile &&
-         (!work.AddVector<uint64_t>(group_tasks, kFreshExact) ||
-          !work.AddVector<uint64_t>(d, kFreshExact, 2))) ||
+         !work.AddVector<uint64_t>(group_tasks, kFreshExact))) {
+      return Status::OutOfMemory("Serializer ANS measurement backing overflows");
+    }
+  }
+  if (exhaustive) {
+    if ((options.collect_profile &&
+         !work.AddVector<uint64_t>(d, kFreshExact, 2)) ||
         !work.AddVector<uint64_t>(d, kFreshExact, 2) ||
         !work.AddVector<std::array<Storage<uint64_t>, 2>>(maximum_maps, kFreshExact) ||
         !work.AddVector<uint64_t>(d + 1, kFreshExact, 2 * maximum_maps) ||

@@ -657,33 +657,45 @@ bool CheckRateOptimizedFallback() {
     if (!MakeFrame(extent.width, extent.height, {3541, 10}, {}, &frame,
                    extent.width == 1).ok())
       return false;
-    std::vector<uint8_t> baseline, candidate, bare;
-    VarDctCodestreamProfile baseline_profile, profile;
-    if (!EncodeVarDctCodestreamProfiled(frame, {}, &baseline, &baseline_profile).ok() ||
-        !EncodeVarDctCodestreamProfiled(frame,
-          {.entropy_behavior = VarDctEntropyBehavior::kRateOptimized},
-          &candidate, &profile).ok() ||
-        !EncodeVarDctCodestream(frame,
-          {.entropy_behavior = VarDctEntropyBehavior::kRateOptimized}, &bare).ok() ||
-        candidate != bare || profile.balanced_candidate_bytes != baseline.size() ||
-        candidate.size() != std::min(profile.balanced_candidate_bytes,
-                                     profile.rate_candidate_bytes) ||
-        profile.selected_balanced_fallback !=
-          (profile.balanced_candidate_bytes <= profile.rate_candidate_bytes) ||
-        profile.coefficient_tokenization_pass_count !=
-          2 * baseline_profile.coefficient_tokenization_pass_count) {
-      std::cerr << "Rate search lost whole-stream fallback or work accounting\n";
-      return false;
-    }
-    if (profile.selected_balanced_fallback) {
-      saw_fallback = true;
-      if (candidate != baseline ||
-          profile.entropy_model_bits != baseline_profile.entropy_model_bits ||
-          profile.entropy_token_bits != baseline_profile.entropy_token_bits ||
-          profile.ac_entropy_clusters != baseline_profile.ac_entropy_clusters)
-        return false;
-    } else {
-      saw_expanded = true;
+    for (auto order : {VarDctCoefficientOrderBehavior::kFull,
+                       VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled}) {
+      for (auto prediction : {VarDctDcPrediction::kGradient,
+                              VarDctDcPrediction::kWeighted}) {
+        const VarDctCodestreamOptions baseline_options{
+          .coefficient_order_behavior = order, .dc_prediction = prediction};
+        auto rate_options = baseline_options;
+        rate_options.entropy_behavior = VarDctEntropyBehavior::kRateOptimized;
+        std::vector<uint8_t> baseline, candidate, bare;
+        VarDctCodestreamProfile baseline_profile, profile;
+        if (!EncodeVarDctCodestreamProfiled(frame, baseline_options, &baseline, &baseline_profile).ok() ||
+            !EncodeVarDctCodestreamProfiled(frame, rate_options,
+              &candidate, &profile).ok() ||
+            !EncodeVarDctCodestream(frame, rate_options, &bare).ok() ||
+            candidate != bare || profile.balanced_candidate_bytes != baseline.size() ||
+            candidate.size() != std::min(profile.balanced_candidate_bytes,
+                                         profile.rate_candidate_bytes) ||
+            profile.selected_balanced_fallback !=
+              (profile.balanced_candidate_bytes <= profile.rate_candidate_bytes) ||
+            profile.coefficient_tokenization_pass_count !=
+              baseline_profile.coefficient_tokenization_pass_count ||
+            profile.coefficient_token_count != baseline_profile.coefficient_token_count ||
+            profile.dc_sample_count != baseline_profile.dc_sample_count ||
+            profile.dc_leaf_count != baseline_profile.dc_leaf_count ||
+            profile.coefficient_order_behavior != order) {
+          std::cerr << "Rate search lost whole-stream fallback or work accounting\n";
+          return false;
+        }
+        if (profile.selected_balanced_fallback) {
+          saw_fallback = true;
+          if (candidate != baseline ||
+              profile.entropy_model_bits != baseline_profile.entropy_model_bits ||
+              profile.entropy_token_bits != baseline_profile.entropy_token_bits ||
+              profile.ac_entropy_clusters != baseline_profile.ac_entropy_clusters)
+            return false;
+        } else {
+          saw_expanded = true;
+        }
+      }
     }
   }
   if (!saw_fallback || !saw_expanded)
