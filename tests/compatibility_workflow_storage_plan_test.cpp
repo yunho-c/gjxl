@@ -349,7 +349,7 @@ bool CheckRuntime(GpuBackend &gpu, bool large) {
        {Extent2D{1, 1}, {14, 15}, {15, 15}, {65, 63}, {257, 257}}) {
     auto image = MakeImage(extent);
     for (size_t mode = 0; mode < 5; ++mode)
-      for (int effort : {1, 7}) {
+      for (int effort : {1, 4, 7}) {
         auto o = Options(mode);
         o.encoding.effort = effort;
         o.encoding.cpu_thread_count = effort == 1 ? 1 : 4;
