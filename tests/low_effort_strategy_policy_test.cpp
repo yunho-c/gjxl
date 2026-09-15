@@ -23,7 +23,8 @@ bool Check(bool ok, const char* message) {
 }
 
 bool CheckPolicy() {
-  constexpr std::array<size_t, 10> updates{0, 0, 0, 1, 1, 1, 2, 3, 3, 4};
+  constexpr std::array<size_t, 10> updates{0, 0, 0, 0, 1, 1, 2, 3, 3, 4};
+  constexpr std::array<size_t, 10> error_updates{0, 0, 0, 1, 1, 1, 2, 3, 3, 4};
   for (int effort = 1; effort <= 10; ++effort) {
     for (auto density : {VarDctDensityMode::kDefault,
                          VarDctDensityMode::kHighDensity}) {
@@ -39,13 +40,15 @@ bool CheckPolicy() {
           o.rate_control_mode = rate;
           o.compression_mode = compression;
           const bool high = density == VarDctDensityMode::kHighDensity;
+          const auto& schedule = rate == VarDctRateControlMode::kMaximumError
+            ? error_updates : updates;
           if (!Check(UseFixedDct8Strategy(o) ==
                        (effort < 5 && !high &&
                         rate != VarDctRateControlMode::kMaximumError),
                      "Effort or override selected the wrong strategy policy") ||
               !Check(AdaptiveQuantizationIterations(o) ==
-                       (high ? 4 : updates[effort - 1]),
-                     "Transform policy changed the AQ update schedule"))
+                       (high ? 4 : schedule[effort - 1]),
+                     "Effort or override selected the wrong AQ update schedule"))
             return false;
         }
       }
@@ -154,8 +157,10 @@ bool CheckSearchStorage() {
   cpu.encoding.effort = 5;
   if (!Check(ComputeCpuWorkflowStoragePlan({257, 257}, cpu, &cpu_search).ok() &&
                cpu_fixed.frontend.peak_bytes < cpu_search.frontend.peak_bytes &&
-               cpu_fixed.aq == cpu_search.aq,
-             "CPU search storage was retained or AQ storage changed"))
+               cpu_fixed.score_count == 1 && cpu_search.score_count == 2 &&
+               cpu_fixed.aq.policy.evaluations == 1 &&
+               cpu_search.aq.policy.evaluations == 2,
+             "CPU low-effort search storage or AQ evaluation count is wrong"))
     return false;
   ResidentWorkflowStorageOptions metal;
   metal.encoding.backend = VarDctBackendPreference::kMetal;
@@ -167,8 +172,8 @@ bool CheckSearchStorage() {
   return Check(ComputeResidentWorkflowStoragePlan({257, 257}, metal, &search).ok() &&
                  fixed.device_bytes < search.device_bytes &&
                  fixed.frontend.peak_bytes < search.frontend.peak_bytes &&
-                 fixed.score_count == search.score_count,
-               "Resident search storage was retained or AQ count changed");
+                 fixed.score_count == 0 && search.score_count == 1,
+               "Resident low-effort search storage or AQ count is wrong");
 }
 }  // namespace
 

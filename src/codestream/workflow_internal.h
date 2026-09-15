@@ -34,6 +34,11 @@ namespace gjxl::codestream_internal {
   const VarDctEncodingOptions& options) noexcept {
   if (options.density_mode == VarDctDensityMode::kHighDensity) return 4;
   if (options.effort <= 3) return 0;
+  // Ordinary e4 skips perceptual refinement; explicit error/density recipes
+  // retain their existing update policy.
+  if (options.effort == 4 &&
+      options.density_mode == VarDctDensityMode::kDefault &&
+      options.rate_control_mode != VarDctRateControlMode::kMaximumError) return 0;
   if (options.effort <= 6) return 1;
   if (options.effort == 7) return 2;
   if (options.effort <= 9) return 3;
