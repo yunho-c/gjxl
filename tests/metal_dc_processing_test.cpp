@@ -39,8 +39,13 @@ struct MetalDcProcessingTestAccess {
       bind(invocation.resident, 5);
       const size_t groups = ((invocation.params.width + 255) / 256) *
                             ((invocation.params.height + 255) / 256);
-      DispatchMetalThreadgroups(encoder, MTL::Size(groups, 1, 1),
-        MTL::Size(std::min<size_t>(256, invocation.params.height), 1, 1));
+      const MTL::Size threads(std::min<size_t>(256, invocation.params.height), 1, 1);
+      uint32_t channel_base = 0;
+      encoder->setBytes(&channel_base, sizeof(channel_base), 6);
+      DispatchMetalThreadgroups(encoder, MTL::Size(groups, 2, 1), threads);
+      channel_base = 2;
+      encoder->setBytes(&channel_base, sizeof(channel_base), 6);
+      DispatchMetalThreadgroups(encoder, MTL::Size(groups, 1, 1), threads);
     }
     encoder->setComputePipelineState(backend.aq_pipelines_.dc_smooth.get());
     bind(invocation.dc, 0);

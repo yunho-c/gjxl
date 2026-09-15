@@ -224,9 +224,16 @@ void MetalPreparedAqEvaluation::EncodeDcQuantization(
   BindPlane(encoder, reconstruction_error_, 3);
   encoder->setBytes(&params, sizeof(params), 4);
   BindPlane(encoder, params.use_resident_quantizer ? resident_quantizer_params_ : raw_quant_, 5);
-  DispatchMetalThreadgroups(encoder,
-    MTL::Size(((block_extent_.width + 255) / 256) * ((block_extent_.height + 255) / 256), 1, 1),
-    MTL::Size(std::min<size_t>(256, block_extent_.height), 1, 1));
+  const size_t groups = ((block_extent_.width + 255) / 256) *
+                        ((block_extent_.height + 255) / 256);
+  const MTL::Size threads(std::min<size_t>(256, block_extent_.height), 1, 1);
+  uint32_t channel_base = 0;
+  encoder->setBytes(&channel_base, sizeof(channel_base), 6);
+  DispatchMetalThreadgroups(encoder, MTL::Size(groups, 2, 1), threads);
+  // B consumes the completed Y integers. Keep it in the following dispatch.
+  channel_base = 2;
+  encoder->setBytes(&channel_base, sizeof(channel_base), 6);
+  DispatchMetalThreadgroups(encoder, MTL::Size(groups, 1, 1), threads);
 }
 
 void MetalPreparedAqEvaluation::EncodeDcSmoothing(
@@ -629,12 +636,16 @@ void MetalPreparedAqEvaluation::EncodeFinalColorCorrelation(
   BindPlane(encoder, y_to_b_, 7);
   BindPlane(encoder, reconstruction_error_, 8);
   encoder->setBytes(&final_cfl_params_, sizeof(final_cfl_params_), 9);
+  const bool nonlinear = final_cfl_params_.nonlinear_iterations != 0u;
+  // Six derivative contributions and a two-channel validity mask per coefficient.
+  constexpr size_t kChunkScratchBytes = 128 * (6 * sizeof(float) + sizeof(uint32_t));
+  encoder->setThreadgroupMemoryLength(nonlinear ? kChunkScratchBytes : 0, 0);
   DispatchMetalThreadgroups(
       encoder,
       MTL::Size(static_cast<NS::UInteger>(
                     tile_extent_.width * tile_extent_.height),
                 1, 1),
-      MTL::Size(4, 1, 1));
+      MTL::Size(nonlinear ? 128 : 4, 1, 1));
 }
 
 void MetalPreparedAqEvaluation::EncodeQuantFieldAdjustmentSubmission(

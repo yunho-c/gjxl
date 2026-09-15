@@ -25,30 +25,39 @@ constant uint kDcReciprocal[64] = {
   294337, 289262, 284359, 279620, 275036, 270600, 266305, 262144,
 };
 
+// Four waves retain every predecessor of the x+2*y traversal. Each lane owns
+// one row; north-west is the oldest dependency, three waves behind. Keeping
+// these values in threadgroup memory avoids a device barrier at every wave.
+constant uint kDcWaveRows = 256u;
+constant uint kDcWaveValues = 4u * kDcWaveRows;
+
+inline uint DcWaveIndex(uint wave, uint row) {
+  return (wave & 3u) * kDcWaveRows + row;
+}
+
 // Store each sample's original four predictor errors and the signed error.
 // The serial predictor mutates its previous row when advancing west-to-east.
 // Recover that mutation from the current row's west/two-west samples instead,
 // making every dependency explicit for diagonal execution.
 struct AqDcWavefrontState {
-  device uint* errors;
+  threadgroup uint* errors;
   uint width;
-  uint area;
   long predictions[4];
   long prediction;
 
   long Predict(uint x, uint y, long n, long w, long ne) {
-    const uint index = y * width + x;
+    const uint wave = x + 2u * y;
     uint weights[4];
     uint weight_sum = 0;
     for (uint i = 0; i < 4; ++i) {
-      device const uint* plane = errors + i * area;
-      const uint north = (y ? plane[index - width] : 0u) +
-                         (x ? plane[index - 1u] : 0u);
+      threadgroup const uint* plane = errors + i * kDcWaveValues;
+      const uint north = (y ? plane[DcWaveIndex(wave - 2u, y - 1u)] : 0u) +
+                         (x ? plane[DcWaveIndex(wave - 1u, y)] : 0u);
       const uint northeast = x + 1u < width
-        ? (y ? plane[index - width + 1u] : 0u) : north;
+        ? (y ? plane[DcWaveIndex(wave - 1u, y - 1u)] : 0u) : north;
       const uint northwest = x
-        ? (y ? plane[index - width - 1u] : 0u) +
-          (x > 1u ? plane[index - 2u] : 0u) : north;
+        ? (y ? plane[DcWaveIndex(wave - 3u, y - 1u)] : 0u) +
+          (x > 1u ? plane[DcWaveIndex(wave - 2u, y)] : 0u) : north;
       const uint error = north + northeast + northwest;
       const uint bits = 64u - clz(ulong(error) + 1u);
       const uint shift = bits > 6u ? bits - 6u : 0u;
@@ -62,11 +71,12 @@ struct AqDcWavefrontState {
       weights[i] >>= log_weight - 4u;
       weight_sum += weights[i];
     }
-    device const int* plane = reinterpret_cast<device const int*>(errors + 4u * area);
-    const long ew = x ? plane[index - 1u] : 0;
-    const long en = y ? plane[index - width] : 0;
-    const long enw = x && y ? plane[index - width - 1u] : en;
-    const long ene = y && x + 1u < width ? plane[index - width + 1u] : en;
+    threadgroup const int* plane =
+      reinterpret_cast<threadgroup const int*>(errors + 4u * kDcWaveValues);
+    const long ew = x ? plane[DcWaveIndex(wave - 1u, y)] : 0;
+    const long en = y ? plane[DcWaveIndex(wave - 2u, y - 1u)] : 0;
+    const long enw = x && y ? plane[DcWaveIndex(wave - 3u, y - 1u)] : en;
+    const long ene = y && x + 1u < width ? plane[DcWaveIndex(wave - 1u, y - 1u)] : en;
     n *= 8; w *= 8; ne *= 8;
     predictions[0] = w + ne - n;
     predictions[1] = n - (((en + ew + ene) * 16) >> 5);
@@ -81,25 +91,26 @@ struct AqDcWavefrontState {
   }
 
   bool Update(int value, uint x, uint y) {
-    const uint index = y * width + x;
+    const uint index = DcWaveIndex(x + 2u * y, y);
     const long scaled = long(value) * 8;
     const long error = prediction - scaled;
     bool valid = error >= -2147483648l && error <= 2147483647l;
-    device int* plane = reinterpret_cast<device int*>(errors + 4u * area);
+    threadgroup int* plane =
+      reinterpret_cast<threadgroup int*>(errors + 4u * kDcWaveValues);
     plane[index] = valid ? int(error) : 0;
     for (uint i = 0; i < 4; ++i) {
       const ulong magnitude = (abs(predictions[i] - scaled) + 3u) >> 3u;
       valid = valid && magnitude <= 4294967295ul;
-      errors[i * area + index] = uint(magnitude);
+      errors[i * kDcWaveValues + index] = uint(magnitude);
     }
     return valid;
   }
 };
 
-// One threadgroup owns a DC group. Weighted dependencies precede x+2*y;
-// gradient dependencies precede x+y. Every wave ends with a device-memory
-// barrier, including lanes outside a partial group's active rows. Five full
-// error planes trade additional managed storage for parallel causal traversal.
+// One threadgroup owns one channel of a DC group. X and Y run independently
+// in the first dispatch; B runs after Y is complete in a second dispatch.
+// Weighted dependencies precede x+2*y; gradient dependencies precede x+y.
+// Every lane reaches the wave barrier, including partial-group inactive rows.
 kernel void gjxl_aq_dc_quantize(
   device float* dc [[buffer(0)]],
   device int* quantized [[buffer(1)]],
@@ -107,11 +118,18 @@ kernel void gjxl_aq_dc_quantize(
   device atomic_uint* error [[buffer(3)]],
   constant AqDcProcessingParams& params [[buffer(4)]],
   device const uint* resident_quantizer [[buffer(5)]],
-  uint group [[threadgroup_position_in_grid]],
+  constant uint& channel_base [[buffer(6)]],
+  uint3 position [[threadgroup_position_in_grid]],
   uint row_index [[thread_index_in_threadgroup]]) {
+  const uint group = position.x;
+  const uint c = channel_base + position.y;
   const uint groups_x = (params.width + 255u) / 256u;
   const uint groups_y = (params.height + 255u) / 256u;
   if (group >= groups_x * groups_y) return;
+  if (c >= 3u) {
+    atomic_fetch_or_explicit(error, 16u, memory_order_relaxed);
+    return;
+  }
   const uint gx = (group % groups_x) * 256u;
   const uint gy = (group / groups_x) * 256u;
   const uint width = min(256u, params.width - gx);
@@ -129,14 +147,14 @@ kernel void gjxl_aq_dc_quantize(
     inverse[c] = (factors[c] * scale * float(quant_dc)) * precision;
   }
   const bool weighted = params.quantization_mode == 1u && params.predictor == 1u;
+  threadgroup uint wave_errors[5u * kDcWaveValues];
+  threadgroup int wave_quantized[kDcWaveValues];
   AqDcWavefrontState state;
   state.width = width;
-  state.area = width * height;
-  state.errors = weighted
-    ? scratch + group * 5u * min(256u, params.width) * min(256u, params.height) : scratch;
+  state.errors = wave_errors;
   const uint row_step = weighted ? 2u : 1u;
   const uint waves = width + row_step * (height - 1u);
-  for (uint c : {1u, 0u, 2u}) {
+  {
     device int* plane = quantized + c * area;
     for (uint wave = 0; wave < waves; ++wave) {
       const int column = int(wave) - int(row_step * row_index);
@@ -151,13 +169,16 @@ kernel void gjxl_aq_dc_quantize(
         }
         long guess = 0;
         if (params.quantization_mode == 1u) {
-          const long w = x ? plane[index - 1u] : y ? plane[index - params.width] : 0;
-          const long n = y ? plane[index - params.width] : w;
+          const long w = x ? wave_quantized[DcWaveIndex(wave - 1u, y)]
+            : y ? wave_quantized[DcWaveIndex(wave - row_step, y - 1u)] : 0;
+          const long n = y ? wave_quantized[DcWaveIndex(wave - row_step, y - 1u)] : w;
           if (weighted) {
-            const long ne = y && x + 1u < width ? plane[index - params.width + 1u] : n;
+            const long ne = y && x + 1u < width
+              ? wave_quantized[DcWaveIndex(wave - 1u, y - 1u)] : n;
             guess = state.Predict(x, y, n, w, ne);
           } else {
-            const long nw = x && y ? plane[index - params.width - 1u] : w;
+            const long nw = x && y
+              ? wave_quantized[DcWaveIndex(wave - 2u, y - 1u)] : w;
             guess = clamp(n + w - nw, min(n, w), max(n, w));
           }
         }
@@ -175,13 +196,15 @@ kernel void gjxl_aq_dc_quantize(
         if (!in_range || !predictor_valid)
           atomic_fetch_or_explicit(error, 16u, memory_order_relaxed);
         plane[index] = q;
+        wave_quantized[DcWaveIndex(wave, y)] = q;
         float reconstructed = float(q) * steps[c];
         if (c == 2u)
           reconstructed = float(quantized[area + index]) * steps[1] + reconstructed;
         dc[c * area + index] = reconstructed;
       }
-      threadgroup_barrier(mem_flags::mem_device);
+      threadgroup_barrier(mem_flags::mem_threadgroup);
     }
+    threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
   }
 }
 

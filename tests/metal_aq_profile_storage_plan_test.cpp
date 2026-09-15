@@ -222,6 +222,36 @@ bool Failures() {
           !ComputeInitialQuantSortPlan(1, nullptr).ok(),
       "Invalid output shape accepted");
 }
+
+bool SplitDcDispatches() {
+  // No scored pass, the normal three-update path, and a scored final frame.
+  // Each scored reconstruction adds X/Y + B + seven LLF dispatches; an
+  // unscored final frame adds only X/Y + B.
+  struct Case { size_t iterations; bool final; size_t extra_dispatches; };
+  for (const auto test : {Case{0, false, 2}, {3, false, 29}, {4, true, 45}}) {
+    ResidentAqProfileInputOptions policy{
+      .iterations = test.iterations,
+      .evaluate_final_field = test.final,
+      .butteraugli_sinks = true,
+    };
+    ResidentAqProfileStoragePlan baseline, dc, smoothed;
+    if (!ComputeResidentAqProfileStoragePlan({64, 64}, {64, 64}, policy,
+          AqProfileFrameOutput::kCompleted, &baseline).ok()) return false;
+    policy.deferred_dc = true;
+    if (!Check(ComputeResidentAqProfileStoragePlan({64, 64}, {64, 64}, policy,
+                   AqProfileFrameOutput::kCompleted, &dc).ok() &&
+                 dc.maximum_dispatches == baseline.maximum_dispatches +
+                   test.extra_dispatches,
+               "Split DC dispatches exceed the profiling bound")) return false;
+    policy.adaptive_dc_smoothing = true;
+    if (!Check(ComputeResidentAqProfileStoragePlan({64, 64}, {64, 64}, policy,
+                   AqProfileFrameOutput::kCompleted, &smoothed).ok() &&
+                 smoothed.maximum_dispatches == dc.maximum_dispatches +
+                   test.iterations + size_t(test.final),
+               "DC smoothing dispatches differ from scored passes")) return false;
+  }
+  return true;
+}
 } // namespace
 
-int main() { return Counts() && Failures() ? EXIT_SUCCESS : EXIT_FAILURE; }
+int main() { return Counts() && SplitDcDispatches() && Failures() ? EXIT_SUCCESS : EXIT_FAILURE; }

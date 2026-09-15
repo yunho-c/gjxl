@@ -586,10 +586,10 @@ static float aq_cfl_derivative(float a, float residual) {
   float value = (2.0f / 3.0f) * a * (abs(residual) + 1.0f);
   return residual < 0.0f ? -value : value;
 }
-// Mirrors bounded fast/nonlinear CPU final CfL. Four threads preserve its
-// independent accumulation lanes and final pairwise reduction order. The
-// nonlinear branch is uniform for the entire threadgroup; all lanes reach
-// every barrier, including on flagged transform/quantization errors.
+// Nonlinear CfL evaluates 128 coefficients in parallel, then accumulates each
+// derivative in the reference's four lanes and original coefficient order.
+// All threads reach the chunk barriers, including on invalid coefficients.
+// Fast CfL retains the original four-thread path.
 kernel void gjxl_aq_final_cfl(
   device const AqColorTransformRecord* transforms [[buffer(0)]],
   device const uint* tile_offsets [[buffer(1)]],
@@ -601,10 +601,12 @@ kernel void gjxl_aq_final_cfl(
   device char* y_to_b [[buffer(7)]],
   device atomic_uint* error [[buffer(8)]],
   constant AqFinalCflParams& params [[buffer(9)]],
+  threadgroup float* chunk_storage [[threadgroup(0)]],
   uint tile_index [[threadgroup_position_in_grid]],
   uint lane [[thread_index_in_threadgroup]]) {
 
-  if (tile_index >= params.tile_width * params.tile_height || lane >= 4u) {
+  if (tile_index >= params.tile_width * params.tile_height ||
+      lane >= (params.nonlinear_iterations != 0u ? 128u : 4u)) {
     return;
   }
   const uint begin = tile_offsets[tile_index];
@@ -627,6 +629,10 @@ kernel void gjxl_aq_final_cfl(
     threadgroup float estimates[2];
     threadgroup uint done[2];
     threadgroup float derivative_lanes[6][4];
+    // Dynamic storage keeps the fast path's threadgroup footprint unchanged.
+    threadgroup float* chunk_derivatives = chunk_storage;
+    threadgroup uint* chunk_mask =
+      reinterpret_cast<threadgroup uint*>(chunk_storage + 6u * 128u);
     if (lane == 0u) {
       estimates[0] = 0.0f;
       estimates[1] = 0.0f;
@@ -635,7 +641,7 @@ kernel void gjxl_aq_final_cfl(
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
     for (uint iteration = 0u; iteration < params.nonlinear_iterations; ++iteration) {
-      float derivatives[6] = {0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+      float derivative = 0.0f;
       for (uint transform_index = begin; transform_index < end;
            ++transform_index) {
         const AqColorTransformRecord transform = transforms[transform_index];
@@ -660,56 +666,66 @@ kernel void gjxl_aq_final_cfl(
         const float quant_scale =
           (float(global_scale) * (1.0f / 65536.0f)) * 128.0f * float(raw);
         const uint2 table_offsets = aq_quant_table_offsets(transform.strategy);
-        const uint first =
-          (lane + 4u - (transform.tile_value_offset & 3u)) & 3u;
-        for (uint coefficient = first;
-             coefficient < transform.coefficient_count;
-             coefficient += 4u) {
-          const uint x = coefficient % coefficient_width;
-          const uint y = coefficient / coefficient_width;
-          if (x < low_frequency_width && y < low_frequency_height) {
-            continue;
+        for (uint chunk = 0u; chunk < transform.coefficient_count; chunk += 128u) {
+          const uint coefficient = chunk + lane;
+          uint mask = 0u;
+          if (coefficient < transform.coefficient_count &&
+              !(coefficient % coefficient_width < low_frequency_width &&
+                coefficient / coefficient_width < low_frequency_height)) {
+            const uint base = transform.coefficient_offset + coefficient;
+            const float coefficient_y =
+              forward_coefficients[base + transform.channel_stride];
+            const float coefficient_x = forward_coefficients[base];
+            const float coefficient_b =
+              forward_coefficients[base + 2u * transform.channel_stride];
+            const float value_y_x = coefficient_y *
+              quant_tables[table_offsets.y + coefficient] * quant_scale;
+            const float value_x = coefficient_x *
+              quant_tables[table_offsets.y + coefficient] * quant_scale;
+            const float value_y_b = coefficient_y *
+              quant_tables[
+                table_offsets.y + 2u * transform.coefficient_count + coefficient] *
+              quant_scale;
+            const float value_b = coefficient_b *
+              quant_tables[
+                table_offsets.y + 2u * transform.coefficient_count + coefficient] *
+              quant_scale;
+            const float a[2] = {value_y_x / 84.0f, value_y_b / 84.0f};
+            const float b[2] = {-value_x, value_y_b - value_b};
+            if (!isfinite(a[0]) || !isfinite(a[1]) ||
+                !isfinite(b[0]) || !isfinite(b[1])) {
+              atomic_fetch_or_explicit(error, 2097152u, memory_order_relaxed);
+            } else {
+              for (uint channel = 0u; channel < 2u; ++channel) {
+                if (done[channel]) continue;
+                const float center = fma(a[channel], estimates[channel], b[channel]);
+                // Center residual gates all three derivatives.
+                if (abs(center) >= 100.0f) continue;
+                mask |= 1u << channel;
+                chunk_derivatives[(3u * channel) * 128u + lane] =
+                  aq_cfl_derivative(a[channel], center);
+                chunk_derivatives[(3u * channel + 1u) * 128u + lane] = aq_cfl_derivative(a[channel],
+                  fma(a[channel], estimates[channel] + 100.0f, b[channel]));
+                chunk_derivatives[(3u * channel + 2u) * 128u + lane] = aq_cfl_derivative(a[channel],
+                  fma(a[channel], estimates[channel] - 100.0f, b[channel]));
+              }
+            }
           }
-          const uint base = transform.coefficient_offset + coefficient;
-          const float coefficient_y =
-            forward_coefficients[base + transform.channel_stride];
-          const float coefficient_x = forward_coefficients[base];
-          const float coefficient_b =
-            forward_coefficients[base + 2u * transform.channel_stride];
-          const float value_y_x = coefficient_y *
-            quant_tables[table_offsets.y + coefficient] * quant_scale;
-          const float value_x = coefficient_x *
-            quant_tables[table_offsets.y + coefficient] * quant_scale;
-          const float value_y_b = coefficient_y *
-            quant_tables[
-              table_offsets.y + 2u * transform.coefficient_count + coefficient] *
-            quant_scale;
-          const float value_b = coefficient_b *
-            quant_tables[
-              table_offsets.y + 2u * transform.coefficient_count + coefficient] *
-            quant_scale;
-
-          const float a[2] = {value_y_x / 84.0f, value_y_b / 84.0f};
-          const float b[2] = {-value_x, value_y_b - value_b};
-          if (!isfinite(a[0]) || !isfinite(a[1]) ||
-              !isfinite(b[0]) || !isfinite(b[1])) {
-            atomic_fetch_or_explicit(error, 2097152u, memory_order_relaxed);
-            continue;
+          chunk_mask[lane] = mask;
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+          if (lane < 24u) {
+            const uint component = lane / 4u;
+            const uint first = ((lane & 3u) + 4u -
+              ((transform.tile_value_offset + chunk) & 3u)) & 3u;
+            for (uint i = first; i < min(128u, transform.coefficient_count - chunk); i += 4u) {
+              if (chunk_mask[i] & (1u << (component / 3u)))
+                derivative += chunk_derivatives[component * 128u + i];
+            }
           }
-          for (uint channel = 0u; channel < 2u; ++channel) {
-            if (done[channel]) continue;
-            const float center = fma(a[channel], estimates[channel], b[channel]);
-            // Match the reference: center residual gates all three derivatives.
-            if (abs(center) >= 100.0f) continue;
-            derivatives[3u * channel] += aq_cfl_derivative(a[channel], center);
-            derivatives[3u * channel + 1u] += aq_cfl_derivative(a[channel],
-              fma(a[channel], estimates[channel] + 100.0f, b[channel]));
-            derivatives[3u * channel + 2u] += aq_cfl_derivative(a[channel],
-              fma(a[channel], estimates[channel] - 100.0f, b[channel]));
-          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
         }
       }
-      for (uint i = 0u; i < 6u; ++i) derivative_lanes[i][lane] = derivatives[i];
+      if (lane < 24u) derivative_lanes[lane / 4u][lane & 3u] = derivative;
       threadgroup_barrier(mem_flags::mem_threadgroup);
       if (lane == 0u) {
         for (uint channel = 0u; channel < 2u; ++channel) {
