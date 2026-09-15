@@ -53,10 +53,9 @@ struct Backings {
     Add(code.ans_histograms);
     for (const auto &h : code.ans_histograms) {
       Add(h.frequencies);
-      Add(h.reverse_maps);
+      Add(h.reverse_map);
+      Add(h.reverse_offsets);
       Add(h.reciprocal_frequencies);
-      for (const auto &reverse : h.reverse_maps)
-        Add(reverse);
     }
   }
   void Add(const PreparedEntropyClusters &p) {
@@ -658,11 +657,12 @@ bool FullAlphabetModels() {
         h.method = 12;
         h.frequencies.assign(256, 16);
         h.reciprocal_frequencies.assign(256, AnsFrequencyReciprocal(16));
-        h.reverse_maps.resize(256);
+        h.reverse_offsets.resize(256);
+        h.reverse_map.resize(4096);
         for (size_t s = 0; s < 256; ++s) {
-          h.reverse_maps[s].resize(16);
+          h.reverse_offsets[s] = s * 16;
           for (size_t i = 0; i < 16; ++i)
-            h.reverse_maps[s][i] = s * 16 + i;
+            h.reverse_map[s * 16 + i] = s * 16 + i;
         }
       }
     }

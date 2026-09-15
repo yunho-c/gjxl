@@ -28,9 +28,9 @@ EntropyCode Model(HybridUintConfig config, bool mapped) {
     histogram.frequencies.push_back(16);
     histogram.reciprocal_frequencies.push_back(
       codestream_internal::AnsFrequencyReciprocal(16));
-    auto& reverse = histogram.reverse_maps.emplace_back();
+    histogram.reverse_offsets.push_back(static_cast<uint16_t>(symbol * 16));
     for (uint32_t i = 0; i < 16; ++i)
-      reverse.push_back(static_cast<uint16_t>(symbol * 16 + i));
+      histogram.reverse_map.push_back(static_cast<uint16_t>(symbol * 16 + i));
   }
   EntropyCode code;
   code.mode = EntropyCodingMode::kAns;
@@ -60,7 +60,7 @@ void Reference(std::span<const EntropyToken> tokens, const EntropyCode& code,
       chunks.push_back({state & 65535u, 16});
       state /= 65536u;
     }
-    state = (state / frequency) * 4096u + histogram.reverse_maps[encoded.symbol][state % frequency];
+    state = (state / frequency) * 4096u + histogram.reverse_map[histogram.reverse_offsets[encoded.symbol] + state % frequency];
   }
   // Independent ordinary division recurrence and deliberately unbatched writes.
   Check(writer->WriteBits(32, state));

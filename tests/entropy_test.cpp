@@ -786,7 +786,7 @@ bool WriteReferenceAnsTokens(
       state /= 65536u;
     }
     state = (state / frequency) * 4096u +
-      histogram.reverse_maps[encoded.symbol][state % frequency];
+      histogram.reverse_map[histogram.reverse_offsets[encoded.symbol] + state % frequency];
   }
   if (!writer->WriteBits(32, state).ok()) return false;
   for (auto it = chunks.rbegin(); it != chunks.rend(); ++it) {
@@ -885,12 +885,9 @@ bool CheckAnsRoundTripContract() {
   gjxl::EntropyCode malformed = ans;
   bool damaged = false;
   for (gjxl::AnsHistogram& histogram : malformed.ans_histograms) {
-    for (auto& reverse : histogram.reverse_maps) {
-      if (!reverse.empty()) {
-        reverse[0] = gjxl::kAnsTableSize;
-        damaged = true;
-        break;
-      }
+    if (!histogram.reverse_map.empty()) {
+      histogram.reverse_map[0] = gjxl::kAnsTableSize;
+      damaged = true;
     }
     if (damaged) break;
   }
@@ -902,6 +899,23 @@ bool CheckAnsRoundTripContract() {
       !HasBytes(atomic, std::array<uint8_t, 1>{5})) {
     std::cerr << "Malformed ANS lookup changed its destination\n";
     return false;
+  }
+
+  for (size_t fault = 0; fault < 4; ++fault) {
+    auto invalid = ans;
+    auto& histogram = invalid.ans_histograms.front();
+    if (fault == 0) histogram.reverse_offsets.clear();
+    else if (fault == 1) ++histogram.reverse_offsets.front();
+    else if (fault == 2) histogram.reverse_map.pop_back();
+    else histogram.reverse_map.push_back(0);
+    gjxl::BitWriter destination;
+    if (!destination.WriteBits(3, 5).ok() ||
+        gjxl::WriteTokenStream(sections[1], invalid, &destination).code() !=
+          gjxl::StatusCode::kInvalidArgument || destination.bits_written() != 3 ||
+        !HasBytes(destination, std::array<uint8_t, 1>{5})) {
+      std::cerr << "Malformed flat ANS table changed its destination\n";
+      return false;
+    }
   }
 
   const auto rejects_reciprocals = [&](bool remove) {
@@ -2148,6 +2162,28 @@ bool CheckSplitTokenStreamParity() {
         [](uint64_t value) { return value == 0xA5A5A5A5A5A5A5A5ull; })) {
     std::cerr << "Rejected prepared ANS section changed its output\n";
     return false;
+  }
+
+  // Configuration checks must survive hoisting out of the token loop, and
+  // a malformed survivor must not partially publish candidate bit counts.
+  for (size_t fault = 0; fault < 3; ++fault) {
+    auto malformed = deferred;
+    for (auto& candidate : malformed.candidates) {
+      if (!candidate.survives) continue;
+      auto& config = candidate.code.uint_configs[
+        candidate.code.context_map[split_sections[1][0].context]];
+      if (fault == 0) config.split_exponent = 16;
+      else if (fault == 1) config.msb_in_token = config.split_exponent + 1;
+      else config.lsb_in_token = config.split_exponent - config.msb_in_token + 1;
+    }
+    if (gjxl::codestream_internal::MeasurePreparedAnsEntropyCodeSection(
+          split_sections[1], malformed, unchanged_deferred_bits).code() !=
+          gjxl::StatusCode::kInvalidArgument ||
+        !std::ranges::all_of(unchanged_deferred_bits,
+          [](uint64_t value) { return value == 0xA5A5A5A5A5A5A5A5ull; })) {
+      std::cerr << "Invalid prepared ANS configuration changed its output\n";
+      return false;
+    }
   }
 
   for (size_t section_index = 0; section_index < sections.size();

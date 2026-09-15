@@ -163,11 +163,12 @@ bool HasSameConfigPopulation(
   std::span<const codestream_internal::WeightedValue> values,
   HybridUintConfig config,
   const std::array<uint64_t, kMaximumAnsAlphabetSize>& counts) {
+  if (!config.valid()) return false;
   std::array<uint64_t, kMaximumAnsAlphabetSize> previous{};
   for (const auto& value : values) {
-    HybridUintToken encoded;
-    if (!EncodeHybridUint(value.value, config, &encoded).ok() ||
-        encoded.symbol >= previous.size() ||
+    const HybridUintToken encoded =
+      codestream_internal::EncodeHybridUintValidated(value.value, config);
+    if (encoded.symbol >= previous.size() ||
         previous[encoded.symbol] > UINT64_MAX - value.count) return false;
     previous[encoded.symbol] += value.count;
   }
@@ -665,47 +666,52 @@ Status InitializeAliasTable(
 Status BuildAnsEncoderTables(
   std::span<const uint16_t> frequencies,
   size_t log_alpha_size,
-  Storage<Storage<uint16_t>>* reverse_maps,
+  Storage<uint16_t>* reverse_map,
+  Storage<uint16_t>* reverse_offsets,
   Storage<uint64_t>* reciprocal_frequencies) {
 
-  if (reverse_maps == nullptr || reciprocal_frequencies == nullptr) {
+  if (reverse_map == nullptr || reverse_offsets == nullptr ||
+      reciprocal_frequencies == nullptr) {
     return Status::InvalidArgument("ANS encoder-table output is null");
   }
-  Storage<Storage<uint16_t>> candidate_reverse_maps(
-    frequencies.size());
+  Storage<uint16_t> candidate_offsets(frequencies.size());
   Storage<uint64_t> candidate_reciprocals(frequencies.size());
+  size_t total = 0;
   for (size_t symbol = 0; symbol < frequencies.size(); ++symbol) {
-    candidate_reverse_maps[symbol].resize(frequencies[symbol]);
+    candidate_offsets[symbol] = static_cast<uint16_t>(total);
+    if (frequencies[symbol] > kAnsTableSize - total) {
+      return Status::InvalidArgument("ANS histogram total is invalid");
+    }
+    total += frequencies[symbol];
     candidate_reciprocals[symbol] =
       codestream_internal::AnsFrequencyReciprocal(frequencies[symbol]);
   }
-  if (frequencies.empty()) {
-    *reverse_maps = std::move(candidate_reverse_maps);
-    *reciprocal_frequencies = std::move(candidate_reciprocals);
-    return Status::Ok();
-  }
-  Storage<AliasEntry> table;
-  if (Status status = InitializeAliasTable(
-        frequencies, log_alpha_size, &table);
-      !status.ok()) {
-    return status;
-  }
-  const size_t log_entry_size = kAnsLogTableSize - log_alpha_size;
-  const size_t entry_mask = (size_t{1} << log_entry_size) - 1;
-  for (size_t value = 0; value < kAnsTableSize; ++value) {
-    const size_t table_index = value >> log_entry_size;
-    const size_t position = value & entry_mask;
-    const AliasEntry& entry = table[table_index];
-    const bool right = position >= entry.cutoff;
-    const size_t symbol = right ? entry.right_value : table_index;
-    const size_t offset = (right ? entry.offsets1 : 0) + position;
-    if (symbol >= candidate_reverse_maps.size() ||
-        offset >= candidate_reverse_maps[symbol].size()) {
-      return Status::Internal("ANS reverse-map construction failed");
+  Storage<uint16_t> candidate_reverse_map(total);
+  if (!frequencies.empty()) {
+    Storage<AliasEntry> table;
+    if (Status status = InitializeAliasTable(
+          frequencies, log_alpha_size, &table);
+        !status.ok()) {
+      return status;
     }
-    candidate_reverse_maps[symbol][offset] = static_cast<uint16_t>(value);
+    const size_t log_entry_size = kAnsLogTableSize - log_alpha_size;
+    const size_t entry_mask = (size_t{1} << log_entry_size) - 1;
+    for (size_t value = 0; value < kAnsTableSize; ++value) {
+      const size_t table_index = value >> log_entry_size;
+      const size_t position = value & entry_mask;
+      const AliasEntry& entry = table[table_index];
+      const bool right = position >= entry.cutoff;
+      const size_t symbol = right ? entry.right_value : table_index;
+      const size_t offset = (right ? entry.offsets1 : 0) + position;
+      if (symbol >= frequencies.size() || offset >= frequencies[symbol]) {
+        return Status::Internal("ANS reverse-map construction failed");
+      }
+      candidate_reverse_map[candidate_offsets[symbol] + offset] =
+        static_cast<uint16_t>(value);
+    }
   }
-  *reverse_maps = std::move(candidate_reverse_maps);
+  *reverse_map = std::move(candidate_reverse_map);
+  *reverse_offsets = std::move(candidate_offsets);
   *reciprocal_frequencies = std::move(candidate_reciprocals);
   return Status::Ok();
 }
@@ -1689,6 +1695,7 @@ const char* AdvanceAnsState(
 
   if (state == nullptr || encoded.symbol >= histogram.frequencies.size() ||
       encoded.symbol >= histogram.reciprocal_frequencies.size() ||
+      encoded.symbol >= histogram.reverse_offsets.size() ||
       histogram.frequencies[encoded.symbol] == 0 ||
       histogram.reciprocal_frequencies[encoded.symbol] == 0) {
     return "ANS token symbol is absent";
@@ -1708,12 +1715,12 @@ const char* AdvanceAnsState(
     codestream_internal::DivideAnsStateByReciprocal(
       *state, histogram.reciprocal_frequencies[encoded.symbol]);
   const uint32_t remainder = *state - quotient * frequency;
-  const Storage<uint16_t>& reverse =
-    histogram.reverse_maps[encoded.symbol];
-  if (remainder >= reverse.size() || reverse[remainder] >= kAnsTableSize) {
+  const size_t index = histogram.reverse_offsets[encoded.symbol] + remainder;
+  if (remainder >= frequency || index >= histogram.reverse_map.size() ||
+      histogram.reverse_map[index] >= kAnsTableSize) {
     return "ANS reverse-map entry is invalid";
   }
-  *state = (quotient << kAnsLogTableSize) + reverse[remainder];
+  *state = (quotient << kAnsLogTableSize) + histogram.reverse_map[index];
   return nullptr;
 }
 
@@ -1843,8 +1850,10 @@ bool HasEquivalentAnsTokenCoding(
     return false;
   }
   for (size_t cluster = 0; cluster < left.ans_histograms.size(); ++cluster) {
-    if (left.ans_histograms[cluster].reverse_maps !=
-        right.ans_histograms[cluster].reverse_maps) {
+    if (left.ans_histograms[cluster].reverse_map !=
+          right.ans_histograms[cluster].reverse_map ||
+        left.ans_histograms[cluster].reverse_offsets !=
+          right.ans_histograms[cluster].reverse_offsets) {
       return false;
     }
   }
@@ -1886,6 +1895,13 @@ Status MeasureAnsCodes(
   std::array<uint32_t, kAnsAlphabetWidthCount> states{};
   std::array<uint64_t, kAnsAlphabetWidthCount> section_bits{};
   const EntropyCode& reference = *codes[0];
+  // Compatible candidates share these immutable configurations. Validate once
+  // before the token loop, as the single-state writer already does.
+  for (HybridUintConfig config : reference.uint_configs) {
+    if (!config.valid()) {
+      return Status::InvalidArgument("Invalid HybridUint configuration");
+    }
+  }
   for (size_t section_index = 0; section_index < section_tokens.size();
        ++section_index) {
     const EntropyTokenStreamView section = section_tokens[section_index];
@@ -1906,12 +1922,9 @@ Status MeasureAnsCodes(
         return Status::InvalidArgument("ANS token context is out of range");
       }
       const size_t cluster = reference.context_map[token.context];
-      HybridUintToken encoded;
-      if (Status status = EncodeHybridUint(
-            token.value, reference.uint_configs[cluster], &encoded);
-          !status.ok()) {
-        return status;
-      }
+      const HybridUintToken encoded =
+        codestream_internal::EncodeHybridUintValidated(
+          token.value, reference.uint_configs[cluster]);
       for (size_t candidate = 0; candidate < codes.size(); ++candidate) {
         const auto count_chunk = [&section_bits, candidate](
                                    uint32_t, uint8_t chunk_bits) {
@@ -2059,7 +2072,7 @@ Status codestream_internal::ValidateAnsEntropyCode(const EntropyCode& code) {
     }
     const AnsHistogram& histogram = code.ans_histograms[cluster];
     if (histogram.frequencies.size() > alphabet_limit ||
-        histogram.reverse_maps.size() != histogram.frequencies.size() ||
+        histogram.reverse_offsets.size() != histogram.frequencies.size() ||
         histogram.reciprocal_frequencies.size() !=
           histogram.frequencies.size() ||
         (!histogram.frequencies.empty() &&
@@ -2071,23 +2084,27 @@ Status codestream_internal::ValidateAnsEntropyCode(const EntropyCode& code) {
     std::array<bool, kAnsTableSize> seen{};
     for (size_t symbol = 0; symbol < histogram.frequencies.size(); ++symbol) {
       const uint16_t frequency = histogram.frequencies[symbol];
-      total += frequency;
-      populated += frequency != 0 ? 1 : 0;
-      if (histogram.reverse_maps[symbol].size() != frequency) {
+      if (histogram.reverse_offsets[symbol] != total ||
+          total > histogram.reverse_map.size() ||
+          frequency > histogram.reverse_map.size() - total) {
         return Status::InvalidArgument("ANS reverse map is invalid");
       }
+      total += frequency;
+      populated += frequency != 0 ? 1 : 0;
       if (histogram.reciprocal_frequencies[symbol] !=
           codestream_internal::AnsFrequencyReciprocal(frequency)) {
         return Status::InvalidArgument("ANS frequency reciprocal is invalid");
       }
-      for (uint16_t value : histogram.reverse_maps[symbol]) {
+      for (size_t index = total - frequency; index < total; ++index) {
+        const uint16_t value = histogram.reverse_map[index];
         if (value >= kAnsTableSize || seen[value]) {
           return Status::InvalidArgument("ANS reverse-map entry is invalid");
         }
         seen[value] = true;
       }
     }
-    if (total != 0 && total != kAnsTableSize) {
+    if (total != histogram.reverse_map.size() ||
+        (total != 0 && total != kAnsTableSize)) {
       return Status::InvalidArgument("ANS histogram total is invalid");
     }
     if (histogram.method > kAnsLogTableSize) {
@@ -2426,6 +2443,9 @@ Status OptimizeAnsEntropyCodeImpl(
         cluster_values = weighted_values;
       }
       for (HybridUintConfig config : policy.uint_configs) {
+        if (!config.valid()) {
+          return Status::InvalidArgument("Invalid HybridUint configuration");
+        }
         if (cluster_profile != nullptr) {
           ++cluster_profile->ans_uint_config_candidate_count;
         }
@@ -2448,12 +2468,9 @@ Status OptimizeAnsEntropyCodeImpl(
         } else {
           for (const codestream_internal::WeightedValue& weighted_value :
                cluster_values) {
-            HybridUintToken encoded;
-            if (Status status = EncodeHybridUint(
-                  weighted_value.value, config, &encoded);
-                !status.ok()) {
-              return status;
-            }
+            const HybridUintToken encoded =
+              codestream_internal::EncodeHybridUintValidated(
+                weighted_value.value, config);
             if (encoded.symbol >= kMaximumAnsAlphabetSize ||
                 counts[encoded.symbol] >
                   std::numeric_limits<uint64_t>::max() -
@@ -2664,7 +2681,8 @@ Status OptimizeAnsEntropyCodeImpl(
         if (Status status = BuildAnsEncoderTables(
               candidate.ans_histograms[cluster].frequencies,
               log_alpha_size,
-              &candidate.ans_histograms[cluster].reverse_maps,
+              &candidate.ans_histograms[cluster].reverse_map,
+              &candidate.ans_histograms[cluster].reverse_offsets,
               &candidate.ans_histograms[cluster].reciprocal_frequencies);
             !status.ok()) {
           return status;
@@ -2882,6 +2900,13 @@ Status codestream_internal::MeasurePreparedAnsEntropyCodeSection(
         reference.ans_histograms.empty()) {
       return Status::InvalidArgument("Prepared ANS candidate is invalid");
     }
+    // Every candidate in this group has the same configurations. This keeps
+    // malformed prepared models out of the unchecked per-token conversion.
+    for (HybridUintConfig config : reference.uint_configs) {
+      if (!config.valid()) {
+        return Status::InvalidArgument("Invalid HybridUint configuration");
+      }
+    }
     MeasurementGroup& group = groups[group_count++];
     group.reference = &reference;
     for (size_t candidate_index = group_seed;
@@ -2922,12 +2947,9 @@ Status codestream_internal::MeasurePreparedAnsEntropyCodeSection(
       if (cluster >= reference.uint_configs.size()) {
         return Status::InvalidArgument("ANS cluster index is invalid");
       }
-      HybridUintToken encoded;
-      if (Status status = EncodeHybridUint(
-            value, reference.uint_configs[cluster], &encoded);
-          !status.ok()) {
-        return status;
-      }
+      const HybridUintToken encoded =
+        codestream_internal::EncodeHybridUintValidated(
+          value, reference.uint_configs[cluster]);
       for (size_t lane = 0; lane < group.candidate_count; ++lane) {
         const size_t candidate_index = group.candidate_indexes[lane];
         const EntropyCode& candidate =
