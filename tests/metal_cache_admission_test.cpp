@@ -12,6 +12,24 @@
 
 namespace gjxl::metal_internal {
 struct MetalCacheAdmissionTestAccess {
+  static size_t ProcessBytes() {
+    return MetalBackend::idle_preparation_bytes_.load(std::memory_order_relaxed);
+  }
+  static size_t AccountedBytes(MetalBackend& gpu) {
+    std::lock_guard lock(gpu.preparation_cache_mutex_);
+    return gpu.preparation_cache_bytes_;
+  }
+  // Occupy most of the real process allowance without allocating several GiB
+  // on test devices. Actual Metal pool returns compete for the remaining 1 KiB.
+  struct ProcessCredit {
+    static constexpr size_t bytes = MetalBackend::kPreparationProcessCacheLimit - 1024;
+    ProcessCredit() {
+      if (MetalBackend::idle_preparation_bytes_.fetch_add(bytes) != 0) std::abort();
+    }
+    ~ProcessCredit() { MetalBackend::idle_preparation_bytes_.fetch_sub(bytes); }
+    ProcessCredit(const ProcessCredit&) = delete;
+    ProcessCredit& operator=(const ProcessCredit&) = delete;
+  };
   struct FrameLease {
     std::unique_ptr<DeviceBuffer> buffer;
     std::weak_ptr<MetalBackendRegistry> registry;
@@ -103,9 +121,11 @@ struct Arenas {
     return Ok(Access::AcquireButteraugli(gpu, bytes, &butter, &generation));
   }
   void Release(MetalBackend &gpu) {
-    for (size_t i = 0; i < aq.size(); ++i)
+    for (size_t i = 0; i < aq.size(); ++i) {
       Access::ReleaseAq(gpu, static_cast<MetalAqScratchArena>(i),
                         std::move(aq[i]));
+      aq[i] = DeviceScratchArena{};
+    }
     Access::ReleaseButteraugli(gpu, std::move(butter), generation);
   }
 };
@@ -119,6 +139,74 @@ bool Cache(MetalBackend &gpu, ResourceBudget &budget) {
     return false;
   arenas.Release(gpu);
   return true;
+}
+
+bool CheckAggregateBackendLimit() {
+  for (size_t limit : {size_t{0}, size_t{1024}}) {
+    std::unique_ptr<GpuBackend> owner;
+    if (!Ok(CreateMetalBackend(GJXL_METALLIB_PATH,
+          {.preparation_cache_bytes = limit}, &owner))) return false;
+    auto& gpu = Metal(owner);
+    Arenas arenas;
+    Access::FrameLease frame;
+    if (!arenas.Acquire(gpu) || !Ok(Access::AcquireFrame(gpu, 256, &frame)))
+      return false;
+    arenas.Release(gpu);
+    Access::ReleaseFrame(std::move(frame));
+    if (!Check(gpu.PreparationCacheBytesForTesting() == limit &&
+                   Access::AccountedBytes(gpu) == limit &&
+                   Access::FrameBytes(gpu) == 0 && Access::ProcessBytes() == limit,
+               "Aggregate backend limit did not include all five pools"))
+      return false;
+    if (!Ok(gpu.TrimPreparationCache()) || !arenas.Acquire(gpu) ||
+        !Ok(Access::AcquireFrame(gpu, 256, &frame)) ||
+        !Ok(gpu.TrimPreparationCache())) return false;
+    arenas.Release(gpu);
+    Access::ReleaseFrame(std::move(frame));
+    if (!Check(gpu.PreparationCacheBytesForTesting() == 0 &&
+                   Access::AccountedBytes(gpu) == 0 && Access::ProcessBytes() == 0,
+               "Trimmed leases refilled the aggregate cache allowance")) return false;
+  }
+  return Empty(DefaultResourceBudget());
+}
+
+bool CheckAggregateProcessLimit() {
+  if (!Check(Access::ProcessBytes() == 0, "Previous test leaked process cache credit"))
+    return false;
+  {
+    Access::ProcessCredit occupied;
+    std::array<std::unique_ptr<GpuBackend>, 3> owners;
+    std::array<Arenas, 3> arenas;
+    std::array<Access::FrameLease, 3> frames;
+    for (size_t i = 0; i < owners.size(); ++i) {
+      if (!Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &owners[i])) ||
+          !arenas[i].Acquire(Metal(owners[i])) ||
+          !Ok(Access::AcquireFrame(Metal(owners[i]), 256, &frames[i]))) return false;
+    }
+    std::array<std::jthread, 3> returning;
+    for (size_t i = 0; i < owners.size(); ++i)
+      returning[i] = std::jthread([&, i] {
+        // Vary return order so AQ, Butteraugli, and frame pools all compete.
+        if (i == 0) Access::ReleaseFrame(std::move(frames[i]));
+        arenas[i].Release(Metal(owners[i]));
+        if (i != 0) Access::ReleaseFrame(std::move(frames[i]));
+      });
+    for (auto& thread : returning) thread.join();
+    size_t retained = 0;
+    for (auto& owner : owners) {
+      const size_t bytes = Metal(owner).PreparationCacheBytesForTesting();
+      if (!Check(bytes == Access::AccountedBytes(Metal(owner)),
+                 "Aggregate counter differs from actual idle pool capacity")) return false;
+      retained += bytes;
+    }
+    if (!Check(retained == 1024 && Access::ProcessBytes() == occupied.bytes + retained,
+               "Concurrent pool returns exceeded the shared process allowance")) return false;
+    for (auto& owner : owners) owner.reset();
+    if (!Check(Access::ProcessBytes() == occupied.bytes,
+               "Backend teardown leaked aggregate cache credit")) return false;
+  }
+  return Check(Access::ProcessBytes() == 0, "Process cache allowance did not recover") &&
+         Empty(DefaultResourceBudget());
 }
 Status Evict(void *opaque) {
   return TrimMetalPreparationCachesForDomain(
@@ -420,10 +508,12 @@ bool CheckFrameProcessLimitAndTeardown() {
 } // namespace
 
 int main() {
-  return CheckDomainEviction() && CheckActiveReturn() &&
+  return CheckAggregateBackendLimit() && CheckAggregateProcessLimit() &&
+                 CheckDomainEviction() && CheckActiveReturn() &&
                  CheckOversizedButteraugli() && CheckRegistryLifetime() &&
                  CheckFrameCache() && CheckFrameDomains() &&
-                 CheckFrameQueuedAdmission() && CheckFrameProcessLimitAndTeardown()
+                 CheckFrameQueuedAdmission() && CheckFrameProcessLimitAndTeardown() &&
+                 Check(Access::ProcessBytes() == 0, "Cache test leaked process allowance")
              ? EXIT_SUCCESS
              : EXIT_FAILURE;
 }

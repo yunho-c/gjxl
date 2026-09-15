@@ -97,10 +97,16 @@ struct MetalBackendOptions {
   MetalAcResidualInverseMode ac_residual_inverse =
     MetalAcResidualInverseMode::kFusedTuned;
 
-  // One idle Butteraugli allocation, made volatile while idle. Zero disables
-  // this cache. The process-wide sum across all Metal backends is additionally
-  // capped at 1 GiB. Active encodes and the existing AQ pools are not counted.
-  size_t butteraugli_cache_bytes = size_t{1024} * 1024 * 1024;
+  // Aggregate idle capacity across the AQ, input, Butteraugli, and completed
+  // frame pools. Zero disables all preparation caching. The backend also caps
+  // retention at one third of Metal's recommended working set; all backends
+  // together retain at most 6 GiB. Idle storage is volatile and remains charged
+  // to its resource domain. Active leases are outside this cache-only limit.
+  size_t preparation_cache_bytes = size_t{6} * 1024 * 1024 * 1024;
+
+  // One idle Butteraugli allocation, subject to the aggregate limit above.
+  // Zero disables this pool independently of the other preparation caches.
+  size_t butteraugli_cache_bytes = size_t{6} * 1024 * 1024 * 1024;
 
   // One completed-frame allocation, returned only after its final owner dies.
   // Idle storage is volatile. Zero disables reuse; the process-wide sum is

@@ -328,6 +328,7 @@ public:
     ButteraugliPipelines butteraugli_pipelines,
     bool test_fail_submission,
     bool test_fail_completion,
+    size_t preparation_cache_bytes,
     size_t butteraugli_cache_bytes,
     size_t completed_frame_cache_bytes);
 
@@ -479,6 +480,10 @@ private:
     MetalAqScratchArena kind,
     DeviceScratchArena arena,
     bool reusable) noexcept;
+
+  void DropAqScratchArenaLocked(size_t index) noexcept;
+  bool ReservePreparationCacheBytesLocked(size_t bytes) noexcept;
+  void ReleasePreparationCacheBytesLocked(size_t bytes) noexcept;
 
   Status AcquireButteraugliArena(
     size_t required_capacity_bytes, DeviceScratchArena* arena,
@@ -717,6 +722,11 @@ private:
   std::atomic<bool> test_fail_next_completion_{false};
   std::atomic<bool> test_fail_next_allocation_{false};
   std::mutex preparation_cache_mutex_;
+  static constexpr size_t kPreparationProcessCacheLimit =
+    size_t{6} * 1024 * 1024 * 1024;
+  static std::atomic<size_t> idle_preparation_bytes_;
+  const size_t preparation_cache_limit_;
+  size_t preparation_cache_bytes_ = 0;
   std::array<
     std::optional<DeviceScratchArena>,
     static_cast<size_t>(MetalAqScratchArena::kCount)> idle_aq_scratch_;
