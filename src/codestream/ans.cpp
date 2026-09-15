@@ -1347,6 +1347,16 @@ Status RefineBestDirectAnsClusters(
     if (!merged.AddHistogram((*clustered)[right])) {
       return Status::InvalidArgument("Direct ANS histogram count overflow");
     }
+    // The integer Shannon bound supports at most 2^32-1 samples. Leave three
+    // whole bits of slack for the <=256-term double cost sums and pair-cost
+    // subtraction. A rejected pair cannot improve even before model bits;
+    // unsupported large populations retain the original construction path.
+    uint64_t entropy_bound = 0;
+    if (codestream_internal::AnsShannonLowerBound(merged.counts, &entropy_bound) &&
+        entropy_bound > 2 &&
+        static_cast<double>(entropy_bound - 2) > costs[left] + costs[right] + 1.0) {
+      return Status::Ok();
+    }
     double merged_cost = 0.0;
     if (Status status = DirectAnsPopulationCost(merged, &merged_cost);
         !status.ok()) {
