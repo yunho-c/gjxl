@@ -89,6 +89,7 @@ struct AnsOptimizationPolicy {
   std::span<const HybridUintConfig> uint_configs;
   AnsHistogramSearch histogram_search = AnsHistogramSearch::kPrecise;
   bool smallest_alphabet_width = false;
+  bool optimize_config_histograms = false;
 };
 
 constexpr AnsOptimizationPolicy kMaximumCompressionAnsPolicy{
@@ -147,9 +148,30 @@ struct ConfigCandidate {
   AnsHistogram histogram;
   size_t maximum_symbol = 0;
   uint64_t extra_bits = 0;
+  uint64_t population_fingerprint = 0;
+  double histogram_bits = 0.0;
   double estimated_bits = 0.0;
   std::array<ConfigWidthStats, kAnsAlphabetWidthCount> width_stats;
 };
+
+// Fingerprints only shortlist candidates. Re-encode the previously validated
+// values and compare every count before reusing a histogram; collisions cannot
+// change model selection. This needs fixed local scratch, not retained copies
+// of all 28 population arrays per cluster.
+bool HasSameConfigPopulation(
+  std::span<const codestream_internal::WeightedValue> values,
+  HybridUintConfig config,
+  const std::array<uint64_t, kMaximumAnsAlphabetSize>& counts) {
+  std::array<uint64_t, kMaximumAnsAlphabetSize> previous{};
+  for (const auto& value : values) {
+    HybridUintToken encoded;
+    if (!EncodeHybridUint(value.value, config, &encoded).ok() ||
+        encoded.symbol >= previous.size() ||
+        previous[encoded.symbol] > UINT64_MAX - value.count) return false;
+    previous[encoded.symbol] += value.count;
+  }
+  return previous == counts;
+}
 
 Status AllocationFailure() {
   return Status::OutOfMemory("ANS entropy allocation failed");
@@ -2436,10 +2458,70 @@ Status OptimizeAnsEntropyCodeImpl(
         option.config = config;
         option.maximum_symbol = maximum_symbol;
         option.extra_bits = extra_bits;
+        const auto config_bound_begin = ProfileBegin(profile);
+        const ConfigCandidate* reused_histogram = nullptr;
+        if (policy.optimize_config_histograms) {
+          uint64_t fingerprint = 1469598103934665603ull;
+          for (uint64_t count : counts)
+            fingerprint = (fingerprint ^ count) * 1099511628211ull;
+          option.population_fingerprint = fingerprint;
+          for (const auto& previous : options[cluster]) {
+            if (previous.population_fingerprint == fingerprint &&
+                HasSameConfigPopulation(cluster_values, previous.config, counts)) {
+              reused_histogram = &previous;
+              break;
+            }
+          }
+        }
+        for (size_t log_alpha_size = kMinimumLogAlphaSize;
+             log_alpha_size <= kMaximumLogAlphaSize; ++log_alpha_size) {
+          if (maximum_symbol >= (size_t{1} << log_alpha_size) ||
+              config.split_exponent >=
+                (size_t{1} << std::bit_width(log_alpha_size))) continue;
+          BitWriter config_writer;
+          if (Status status = WriteAnsUintConfig(config, log_alpha_size, &config_writer);
+              !status.ok()) return status;
+          auto& stats = option.width_stats[log_alpha_size - kMinimumLogAlphaSize];
+          stats.valid = true;
+          stats.config_bits = config_writer.bits_written();
+        }
+        uint64_t entropy_bound = 0;
+        if (policy.optimize_config_histograms && reused_histogram == nullptr &&
+            !options[cluster].empty() &&
+            codestream_internal::AnsShannonLowerBound(counts, &entropy_bound)) {
+          bool dominated = true;
+          for (size_t width = 0; width < kLogAlphaSizeCount; ++width) {
+            const auto& stats = option.width_stats[width];
+            if (!stats.valid) continue;
+            double incumbent = std::numeric_limits<double>::infinity();
+            for (const auto& previous : options[cluster]) {
+              if (previous.width_stats[width].valid)
+                incumbent = std::min(incumbent, previous.width_stats[width].estimated_bits);
+            }
+            // Every histogram signals at least two bits. Subtract one whole
+            // bit from the integer entropy bound to cover rounding in the
+            // incumbent's <=256-term double-precision cost accumulation.
+            const double lower = static_cast<double>(entropy_bound > 0 ? entropy_bound - 1 : 0) +
+              static_cast<double>(extra_bits) + 2.0 + static_cast<double>(stats.config_bits);
+            if (lower < incumbent) {
+              dominated = false;
+              break;
+            }
+          }
+          if (dominated) {
+            ProfileEnd(profile, config_bound_begin,
+                       &EntropyWorkProfile::ans_uint_config_nanoseconds);
+            continue;
+          }
+        }
+        ProfileEnd(profile, config_bound_begin,
+                   &EntropyWorkProfile::ans_uint_config_nanoseconds);
         const ProfileClock::time_point histogram_begin =
           ProfileBegin(profile);
         size_t histogram_candidate_count = 0;
-        if (Status status = BuildBestAnsHistogram(
+        if (reused_histogram != nullptr) {
+          option.histogram = reused_histogram->histogram;
+        } else if (Status status = BuildBestAnsHistogram(
               counts, policy.histogram_search, &option.histogram,
               &histogram_candidate_count);
             !status.ok()) {
@@ -2454,29 +2536,16 @@ Status OptimizeAnsEntropyCodeImpl(
           &EntropyWorkProfile::ans_histogram_build_nanoseconds);
         const ProfileClock::time_point config_cost_begin =
           ProfileBegin(profile);
-        if (Status status = EstimateAnsHistogramCost(
-              counts, option.histogram, &option.estimated_bits);
+        if (reused_histogram != nullptr) {
+          option.histogram_bits = reused_histogram->histogram_bits;
+        } else if (Status status = EstimateAnsHistogramCost(
+              counts, option.histogram, &option.histogram_bits);
             !status.ok()) {
           return status;
         }
-        option.estimated_bits += static_cast<double>(extra_bits);
-        for (size_t log_alpha_size = kMinimumLogAlphaSize;
-             log_alpha_size <= kMaximumLogAlphaSize; ++log_alpha_size) {
-          if (option.maximum_symbol >= (size_t{1} << log_alpha_size) ||
-              option.config.split_exponent >=
-                (size_t{1} << std::bit_width(log_alpha_size))) {
-            continue;
-          }
-          BitWriter config_writer;
-          if (Status status = WriteAnsUintConfig(
-                option.config, log_alpha_size, &config_writer);
-              !status.ok()) {
-            return status;
-          }
-          ConfigWidthStats& stats =
-            option.width_stats[log_alpha_size - kMinimumLogAlphaSize];
-          stats.valid = true;
-          stats.config_bits = config_writer.bits_written();
+        option.estimated_bits = option.histogram_bits + static_cast<double>(extra_bits);
+        for (ConfigWidthStats& stats : option.width_stats) {
+          if (!stats.valid) continue;
           stats.estimated_bits = option.estimated_bits +
             static_cast<double>(stats.config_bits);
         }
@@ -2969,6 +3038,7 @@ Status codestream_internal::OptimizeDirectAnsEntropyCode(
         .uint_configs = HighDensityAnsUintConfigs(),
         .histogram_search = AnsHistogramSearch::kPrecise,
         .smallest_alphabet_width = mode != DirectAnsEntropyMode::kRateOptimized,
+        .optimize_config_histograms = mode == DirectAnsEntropyMode::kRateOptimized,
       };
   return OptimizeAnsEntropyCodeImpl(
     section_tokens, partition, &prepared, policy,

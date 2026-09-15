@@ -6,6 +6,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
@@ -1098,10 +1099,59 @@ bool CheckAnsSmallHistograms() {
   return true;
 }
 
+bool CheckAnsShannonLowerBound() {
+  using gjxl::codestream_internal::AnsShannonLowerBound;
+  std::array<uint64_t, gjxl::kMaximumAnsAlphabetSize> counts{};
+  uint64_t bound = 99;
+  if (!AnsShannonLowerBound(counts, &bound) || bound != 0) return false;
+  for (uint32_t log_symbols = 0; log_symbols <= 8; ++log_symbols) {
+    for (uint64_t count : {1ull, 13ull, 1ull << 22}) {
+      counts.fill(0);
+      std::fill_n(counts.begin(), size_t{1} << log_symbols, count);
+      if (!AnsShannonLowerBound(counts, &bound) ||
+          bound != count * (uint64_t{1} << log_symbols) * log_symbols) return false;
+    }
+  }
+  uint32_t random = 12345;
+  for (size_t trial = 0; trial < 2048; ++trial) {
+    counts.fill(0);
+    uint64_t total = 0;
+    for (size_t i = 0; i <= trial % counts.size(); ++i) {
+      random = random * 1664525u + 1013904223u;
+      counts[i] = random % 10000001u;
+      total += counts[i];
+    }
+    long double expected = 0;
+    for (uint64_t count : counts) {
+      if (count != 0)
+        expected += count * std::log2(static_cast<long double>(total) / count);
+    }
+    if (!AnsShannonLowerBound(counts, &bound) ||
+        bound > expected + 1e-5L || expected - bound > total * 8e-6L + 2) {
+      std::cerr << "Invalid Shannon bound at trial " << trial << '\n';
+      return false;
+    }
+  }
+  counts.fill(0);
+  counts[0] = INT32_MAX;
+  counts[1] = 1;
+  if (!AnsShannonLowerBound(counts, &bound) || bound > 33) return false;
+  for (auto invalid : {uint64_t{INT32_MAX} + 1, uint64_t{UINT32_MAX}, UINT64_MAX}) {
+    counts[0] = invalid;
+    bound = 99;
+    if (AnsShannonLowerBound(counts, &bound) || bound != 99) return false;
+  }
+  counts[0] = counts[1] = INT32_MAX;
+  counts[2] = 2;
+  return !AnsShannonLowerBound(counts, &bound) && bound == 99 &&
+    !AnsShannonLowerBound(counts, nullptr);
+}
+
 bool CheckRateOptimizedAns() {
   using namespace gjxl;
   using namespace gjxl::codestream_internal;
   bool improved = false;
+  bool reduced_histogram_work = false;
   for (uint32_t scale : {16u, 64u, 256u, 1024u, 65536u}) {
     std::array<std::vector<EntropyToken>, 3> sections;
     uint32_t random = 12345;
@@ -1118,9 +1168,9 @@ bool CheckRateOptimizedAns() {
                            EntropyTokenStreamView::Interleaved(sections[2])};
     EntropyCode narrow, wide, no_cost;
     EntropyCodeCost narrow_cost, wide_cost;
-    EntropyWorkProfile profile;
+    EntropyWorkProfile profile, narrow_profile;
     if (!OptimizeDirectAnsEntropyCode(views, {.context_count = 3},
-          DirectAnsEntropyMode::kHighDensity, &narrow, &narrow_cost).ok() ||
+          DirectAnsEntropyMode::kHighDensity, &narrow, &narrow_cost, &narrow_profile).ok() ||
         !OptimizeDirectAnsEntropyCode(views, {.context_count = 3},
           DirectAnsEntropyMode::kRateOptimized, &wide, &wide_cost, &profile).ok() ||
         !OptimizeDirectAnsEntropyCode(views, {.context_count = 3},
@@ -1129,6 +1179,7 @@ bool CheckRateOptimizedAns() {
           (scale == 65536 ? 3 : 4) ||
         profile.ans_uint_config_candidate_count < 28 ||
         profile.ans_uint_config_candidate_count % 28 != 0 ||
+        profile.ans_histogram_candidate_count > narrow_profile.ans_histogram_candidate_count ||
         wide_cost.model_bits + wide_cost.token_bits >
           narrow_cost.model_bits + narrow_cost.token_bits) {
       std::cerr << "Full direct ANS search failed: scale=" << scale
@@ -1141,6 +1192,8 @@ bool CheckRateOptimizedAns() {
     }
     improved |= wide_cost.model_bits + wide_cost.token_bits <
                   narrow_cost.model_bits + narrow_cost.token_bits;
+    reduced_histogram_work |= profile.ans_histogram_candidate_count <
+      narrow_profile.ans_histogram_candidate_count;
     BitWriter model;
     if (!WriteEntropyCode(wide, &model).ok() ||
         model.bits_written() != wide_cost.model_bits) return false;
@@ -1154,7 +1207,7 @@ bool CheckRateOptimizedAns() {
     if (total != wide_cost.token_bits) return false;
   }
   if (!improved) std::cerr << "ANS width fixture no longer exercises a rate gain\n";
-  return improved;
+  return improved && reduced_histogram_work;
 }
 
 bool CheckAnsClusterLimits() {
@@ -2131,6 +2184,7 @@ int main() {
       !CheckSparseDirectAnsPopulations() ||
       !CheckBorrowedDirectAnsValidation() ||
       !CheckScannedDirectAnsLateSectionFailures() ||
+      !CheckAnsShannonLowerBound() ||
       !CheckRateOptimizedAns() ||
       !CheckAnsClusterLimits() ||
       !CheckDirectAnsOptimization() ||
