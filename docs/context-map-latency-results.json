@@ -1,0 +1,458 @@
+{
+  "analysis": {
+    "accepted_pairs": 96,
+    "accepted_processes": 192,
+    "block_medians": [
+      1.0013824825444888,
+      1.004121751294374
+    ],
+    "codestream_identities": 212,
+    "environment_snapshots": 2318,
+    "excluded_pairs": 10,
+    "images": [
+      {
+        "block_median_paired_ratios": [
+          1.0007717503554703,
+          1.0321599906019285
+        ],
+        "image_id": "kodak/01",
+        "median_ms": {
+          "baseline": 13.494083,
+          "candidate": 13.7389585
+        },
+        "median_paired_ratio": 1.0205622777563805,
+        "paired_ratios": [
+          0.8777863519134744,
+          1.0165910168159331,
+          1.0367328469087256,
+          0.9849524838950074,
+          1.0245335386968282,
+          1.0397864425070287,
+          1.040021437823722,
+          1.0114263539408066
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          1.0080247891279308,
+          1.0438088794662277
+        ],
+        "image_id": "kodak/17",
+        "median_ms": {
+          "baseline": 13.1703335,
+          "candidate": 13.721396
+        },
+        "median_paired_ratio": 1.0236508075017894,
+        "paired_ratios": [
+          1.2551214479840052,
+          1.0229682801772835,
+          0.9930812980785783,
+          0.9350386033163058,
+          1.0243333348262955,
+          1.0632844241061596,
+          0.8475378196563822,
+          1.199132803294546
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          1.0221004001389438,
+          1.0015426041347086
+        ],
+        "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+        "median_ms": {
+          "baseline": 48.6970625,
+          "candidate": 48.847583
+        },
+        "median_paired_ratio": 1.006561955014505,
+        "paired_ratios": [
+          1.022877204463958,
+          1.0384134835329757,
+          0.9997020320927553,
+          1.0213235958139295,
+          0.988338531948959,
+          1.00255211327474,
+          1.0005330949946774,
+          1.0105717967542702
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          1.001405206189148,
+          1.002439288498036
+        ],
+        "image_id": "clic2024_test/d1a9be98d1936065967adac50a6fb750",
+        "median_ms": {
+          "baseline": 39.9194165,
+          "candidate": 40.040583
+        },
+        "median_paired_ratio": 1.002439288498036,
+        "paired_ratios": [
+          1.0048482193941748,
+          1.0147846749506084,
+          0.9979621929841216,
+          0.9746229180175316,
+          1.0035509258207984,
+          0.9952673229114002,
+          1.0013276511752738,
+          1.0157455763055236
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          0.9826780842093221,
+          0.9992348132981165
+        ],
+        "image_id": "clic2024_test/b51d5fb537246482ef7a7ab63f093cab",
+        "median_ms": {
+          "baseline": 36.143979,
+          "candidate": 35.9753125
+        },
+        "median_paired_ratio": 0.9930184966840727,
+        "paired_ratios": [
+          0.9514015358468433,
+          0.9826732046899896,
+          0.9917150908016572,
+          0.9826829637286546,
+          0.9968000758109525,
+          1.0564739079905394,
+          0.9943219025664882,
+          1.0016695507852804
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          0.9949254731676118,
+          1.0311602895322873
+        ],
+        "image_id": "kodak/08",
+        "median_ms": {
+          "baseline": 13.6713335,
+          "candidate": 13.9539585
+        },
+        "median_paired_ratio": 1.0281843868547187,
+        "paired_ratios": [
+          0.9615060469339817,
+          0.9252133599339178,
+          1.028344899401242,
+          1.0510256338631432,
+          0.9614472071054976,
+          1.0342967047563794,
+          1.0280238743081953,
+          1.0764328994697223
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          1.029756869638736,
+          1.042556328424895
+        ],
+        "image_id": "kodak/13",
+        "median_ms": {
+          "baseline": 13.6304165,
+          "candidate": 13.9592915
+        },
+        "median_paired_ratio": 1.03505495280658,
+        "paired_ratios": [
+          1.0463429319621917,
+          1.0131708073152803,
+          1.2257067477519112,
+          0.8435633259047679,
+          0.9842312003819156,
+          1.0237669736509685,
+          1.061345683198822,
+          1.188446947105581
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          1.0013597588998295,
+          1.0142739638533247
+        ],
+        "image_id": "clic2024_test/28d24b9c83de066597ff96a68769884f",
+        "median_ms": {
+          "baseline": 41.646333,
+          "candidate": 42.167667
+        },
+        "median_paired_ratio": 1.0060351008191484,
+        "paired_ratios": [
+          1.0255166661407504,
+          0.9986898031019049,
+          1.0040297146977541,
+          0.9832435917190401,
+          0.9971196998637629,
+          1.0396920141667565,
+          1.0205074407661068,
+          1.0080404869405426
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          0.9943759088586048,
+          0.999470209874828
+        ],
+        "image_id": "unsplash/alpine_lake/24mp",
+        "median_ms": {
+          "baseline": 366.9317705,
+          "candidate": 364.0665835
+        },
+        "median_paired_ratio": 0.9945871585383206,
+        "paired_ratios": [
+          0.9998268655466103,
+          0.9949137273512383,
+          0.9938380903659714,
+          0.9745716380511145,
+          0.9942605897254028,
+          1.0046798300242532,
+          0.9923739929702537,
+          1.0074175087079638
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          1.0102892268102743,
+          1.0058042140907122
+        ],
+        "image_id": "unsplash/campus_interior/12mp",
+        "median_ms": {
+          "baseline": 181.729479,
+          "candidate": 183.1311455
+        },
+        "median_paired_ratio": 1.0058042140907122,
+        "paired_ratios": [
+          1.0205439271442656,
+          1.000034526476283,
+          0.9895166245142069,
+          1.0237196082273967,
+          1.0068790632729672,
+          1.0047293649084572,
+          1.0072131098064958,
+          1.0010041279746884
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          1.001161592691734,
+          0.9928336211676343
+        ],
+        "image_id": "unsplash/campus_interior/48mp",
+        "median_ms": {
+          "baseline": 828.466542,
+          "candidate": 827.4508125
+        },
+        "median_paired_ratio": 0.9961275837140651,
+        "paired_ratios": [
+          0.9989619352181833,
+          1.0098867952414166,
+          0.9785699381587418,
+          1.003361250165285,
+          0.992302839230881,
+          0.9932932322099468,
+          1.0016754257527605,
+          0.9923740101253218
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          1.0076835028457134,
+          0.9940135083587623
+        ],
+        "image_id": "unsplash/forest_stream/48mp",
+        "median_ms": {
+          "baseline": 845.768729,
+          "candidate": 843.5273955
+        },
+        "median_paired_ratio": 1.0007585530157204,
+        "paired_ratios": [
+          1.0058609145474444,
+          1.0095060911439824,
+          0.9805693805790263,
+          1.0097126234029736,
+          0.9956561914839962,
+          1.009351837462646,
+          0.9923708252335285,
+          0.9894543400348319
+        ]
+      }
+    ],
+    "limitation": "No contention detected under the declared sampled checks. Desktop applications remain open; this is local warm-call qualification, not hardware-wide or cold-start qualification.",
+    "measured_calls": 960,
+    "median_per_image_paired_ratio": 1.0059196574549303,
+    "per_image_ratio_range": [
+      0.9930184966840727,
+      1.03505495280658
+    ],
+    "protocol": {
+      "blocks": 2,
+      "boundary": "complete-encode-wall-time",
+      "cpu_measurement": "Process CPU-time deltas over at least 0.75 seconds; ps percent CPU for new processes and shorter intervals.",
+      "effort": 4,
+      "exclusion": "Reject the entire pair on observed competing codec/build work, CPU pressure above the declared limits, loss of AC power, thermal/performance warning, or monitoring failure.",
+      "maximum_aggregate_other_cpu_percent": 200,
+      "maximum_attempts_per_pair": 3,
+      "maximum_idle_wait_seconds": 600,
+      "maximum_other_process_cpu_percent": 80,
+      "monitor_interval_seconds": 1,
+      "order": "Alternate baseline/candidate order; rotate image order by pair index.",
+      "pairs_per_block": 4,
+      "quiet_seconds": 20,
+      "samples_per_process": 5,
+      "threads": 8,
+      "warmups": 2
+    },
+    "provenance": {
+      "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/context-map-latency-20260915/attempts.jsonl": "efca11ce51f4ca6bd14f2d1d5af93d1d74d848b998e4b3e25fef4ef5e6bcab81",
+      "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/context-map-latency-20260915/commands.jsonl": "065977537e86cbab93e8812b79da6b50a75f11dc04512d4fc5d013280d260b70",
+      "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/context-map-latency-20260915/environment.jsonl": "0bb34a1281e74fbe31d8d434761534e9e14ac4bcd7f31df3accccbdc1acae8e0",
+      "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/context-map-latency-20260915/manifest.json": "013a3a308b813f1fbc18040fb35d667c55e9c5de663e3f9568be27e3f8a7e913"
+    },
+    "status": "passed"
+  },
+  "artifact_sha256": {
+    "build/context-map-latency-20260915/analysis.json": "912ee85f41001718cb65950b90e9ecbd1486625fd0ff8880c7399bca6628c881",
+    "build/context-map-latency-20260915/attempts.jsonl": "efca11ce51f4ca6bd14f2d1d5af93d1d74d848b998e4b3e25fef4ef5e6bcab81",
+    "build/context-map-latency-20260915/audit.json": "9b0212e9a405b37e81007976cb0f30b8c8a74069bf0e7089df321d2d75ca02b3",
+    "build/context-map-latency-20260915/commands.jsonl": "065977537e86cbab93e8812b79da6b50a75f11dc04512d4fc5d013280d260b70",
+    "build/context-map-latency-20260915/environment.jsonl": "0bb34a1281e74fbe31d8d434761534e9e14ac4bcd7f31df3accccbdc1acae8e0",
+    "build/context-map-latency-20260915/export_results.py": "06e2ad530162dfa09771b81c64b1cd04e793ad210a29bd40f6a32913305b7b51",
+    "build/context-map-latency-20260915/manifest.json": "013a3a308b813f1fbc18040fb35d667c55e9c5de663e3f9568be27e3f8a7e913",
+    "build/context-map-latency-20260915/pause_suggestd.py": "e687cf5c55a420ab415eeec41b4f968eca5408f9552b8f692ad5bd17275671e4",
+    "build/context-map-latency-20260915/service-intervention.jsonl": "78ed465aae22340ae5c1680c7ee3033f58f95b81afe52cc46bcd351254a5c73c"
+  },
+  "audit": {
+    "accepted_background_cpu_percent": {
+      "maximum": 183.66245526987785,
+      "maximum_individual_process": 77.99158725205726,
+      "median": 68.350534459736
+    },
+    "accepted_environment_snapshots": 531,
+    "accepted_pairs": 96,
+    "excluded_attempts": [
+      {
+        "attempt": 0,
+        "image_id": "unsplash/campus_interior/48mp",
+        "issues": [
+          "aggregate other CPU pressure"
+        ],
+        "pair": 0
+      },
+      {
+        "attempt": 0,
+        "image_id": "unsplash/alpine_lake/24mp",
+        "issues": [
+          "aggregate other CPU pressure",
+          "other CPU pressure: 54597 86.6% /Applications/Orca.app/Contents/Frameworks/Orca Helper (Renderer).app/Contents/MacOS/Orca Helper (Renderer)"
+        ],
+        "pair": 1
+      },
+      {
+        "attempt": 1,
+        "image_id": "unsplash/alpine_lake/24mp",
+        "issues": [
+          "aggregate other CPU pressure",
+          "other CPU pressure: 49401 98.7% /System/Library/PrivateFrameworks/CoreSuggestions.framework/Versions/A/Support/suggestd",
+          "other CPU pressure: 49401 99.0% /System/Library/PrivateFrameworks/CoreSuggestions.framework/Versions/A/Support/suggestd",
+          "other CPU pressure: 49401 99.5% /System/Library/PrivateFrameworks/CoreSuggestions.framework/Versions/A/Support/suggestd"
+        ],
+        "pair": 1
+      },
+      {
+        "attempt": 0,
+        "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+        "issues": [
+          "other CPU pressure: 49401 96.1% /System/Library/PrivateFrameworks/CoreSuggestions.framework/Versions/A/Support/suggestd"
+        ],
+        "pair": 2
+      },
+      {
+        "attempt": 1,
+        "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+        "issues": [
+          "other CPU pressure: 27010 93.7% /opt/homebrew/Cellar/python@3.14/3.14.6/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
+        ],
+        "pair": 2
+      },
+      {
+        "attempt": 0,
+        "image_id": "clic2024_test/d1a9be98d1936065967adac50a6fb750",
+        "issues": [
+          "other CPU pressure: 49401 80.1% /System/Library/PrivateFrameworks/CoreSuggestions.framework/Versions/A/Support/suggestd"
+        ],
+        "pair": 2
+      },
+      {
+        "attempt": 0,
+        "image_id": "clic2024_test/d1a9be98d1936065967adac50a6fb750",
+        "issues": [
+          "other CPU pressure: 49401 86.1% /System/Library/PrivateFrameworks/CoreSuggestions.framework/Versions/A/Support/suggestd"
+        ],
+        "pair": 3
+      },
+      {
+        "attempt": 0,
+        "image_id": "unsplash/campus_interior/48mp",
+        "issues": [
+          "other CPU pressure: 49401 99.3% /System/Library/PrivateFrameworks/CoreSuggestions.framework/Versions/A/Support/suggestd",
+          "other CPU pressure: 49401 99.7% /System/Library/PrivateFrameworks/CoreSuggestions.framework/Versions/A/Support/suggestd",
+          "other CPU pressure: 49401 99.8% /System/Library/PrivateFrameworks/CoreSuggestions.framework/Versions/A/Support/suggestd"
+        ],
+        "pair": 4
+      },
+      {
+        "attempt": 0,
+        "image_id": "unsplash/forest_stream/48mp",
+        "issues": [
+          "other CPU pressure: 49401 100.1% /System/Library/PrivateFrameworks/CoreSuggestions.framework/Versions/A/Support/suggestd",
+          "other CPU pressure: 49401 97.9% /System/Library/PrivateFrameworks/CoreSuggestions.framework/Versions/A/Support/suggestd",
+          "other CPU pressure: 49401 98.0% /System/Library/PrivateFrameworks/CoreSuggestions.framework/Versions/A/Support/suggestd",
+          "other CPU pressure: 49401 98.4% /System/Library/PrivateFrameworks/CoreSuggestions.framework/Versions/A/Support/suggestd",
+          "other CPU pressure: 49401 98.7% /System/Library/PrivateFrameworks/CoreSuggestions.framework/Versions/A/Support/suggestd"
+        ],
+        "pair": 4
+      },
+      {
+        "attempt": 0,
+        "image_id": "unsplash/forest_stream/48mp",
+        "issues": [
+          "aggregate other CPU pressure",
+          "other CPU pressure: 325 175.2% /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd",
+          "other CPU pressure: 325 179.3% /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd",
+          "other CPU pressure: 325 190.9% /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd",
+          "other CPU pressure: 325 197.4% /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/FSEvents.framework/Versions/A/Support/fseventsd"
+        ],
+        "pair": 5
+      }
+    ],
+    "maximum_monitor_gap_seconds": 1.0969951152801514,
+    "service_intervention": {
+      "duration_seconds": 108.42735815048218,
+      "pairs_by_condition": {
+        "ordinary_services": 66,
+        "suggestd_suspended": 30
+      },
+      "pairs_straddling_intervention": 0,
+      "resumed": true,
+      "service": "suggestd",
+      "user_authorized": true
+    },
+    "status": "passed"
+  },
+  "baseline_commit": "e8abc3486266952d7c4da0ec51952cee00585e8f",
+  "binary_sha256": {
+    "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/context-map-native/gjxl_quality_benchmark": "092c420f4ccfa90d55aa4265aac090f814deafa2f67d5b82d3df27fd6703d626",
+    "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/dc-uint-fast-candidate/gjxl_quality_benchmark": "35e6f2078a3a0eb696cf92c9893321d17e3c0597bacf000d193929340d437ec6"
+  },
+  "candidate_commit": "4f4fd27cd36072eade1956ea576ea94350aee0cc",
+  "date": "2026-09-15",
+  "feature": "Native context-map compression latency qualification",
+  "hardware": "Mac16,7\n51539607552\n14\nApple M4 Pro\n",
+  "reference_manifest": {
+    "path": "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/context-map-qualification-20260914/manifest.json",
+    "sha256": "1179a580484367d3c696878bf27c6250bca87b69a0f62a4abbfc8ee00b995609"
+  },
+  "system": "Darwin mac.lan 24.6.0 Darwin Kernel Version 24.6.0: Mon Jul 14 11:30:40 PDT 2025; root:xnu-11417.140.69~1/RELEASE_ARM64_T6041 arm64\n",
+  "tool_sha256": {
+    "tools/context_map/latency.py": "408e50a472d3150f971aec05fd17cd8ff723e296965f863f5af95dbc7a8be9fe",
+    "tools/dc_uint_search/qualify.py": "9811cfaf3ba5aa5311f352e15a4de3fe3779b00666ec8c16978df4cef1f44c11"
+  }
+}

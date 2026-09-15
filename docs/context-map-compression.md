@@ -66,7 +66,7 @@ subset consists of three scenes at three resolutions. The result supports
 context-map compression as a concrete improvement; it does not establish
 parity at every quality, effort or content distribution.
 
-## Timing observation and limits
+## Original timing observation and subsequent qualification
 
 The separate timing run uses the 12 declared diagnostic images at their
 original Q80 distances, eight participating CPU threads, four alternating
@@ -80,8 +80,14 @@ provisional: another checkout's codec work appears in 7/34 sampled process
 snapshots, and compiler processes appear in 4/34. The AC-powered Apple M4 Pro
 was idle of other codec processes at the initial check, but concurrent work
 started during collection. These data do not qualify isolated latency or
-establish a speedup on the faster-looking inputs. A clean paired measurement
-remains necessary before making a firm latency claim.
+establish a speedup on the faster-looking inputs.
+
+The separate [September 15 latency qualification](context-map-latency.md) now
+passes its declared environment checks: 96 accepted pairs, 192 processes and
+960 measured calls. It observes +0.59% median paired time, with per-image
+changes from −0.70% to +3.51%. Ten contaminated pairs are excluded and retained.
+The report records the user-authorized temporary `suggestd` suspension, its
+verified resumption and the limits of this local warm-call comparison.
 
 ## Correctness and regression checks
 
