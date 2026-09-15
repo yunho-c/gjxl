@@ -53,6 +53,7 @@ set(GJXL_PUBLIC_CXX_HEADERS
   codestream/dc_prediction.h
   codestream/encoder.h
   codestream/entropy.h
+  codestream/context_map_internal.h
   codestream/entropy_behavior.h
   codestream/headers.h
   codestream/huffman.h

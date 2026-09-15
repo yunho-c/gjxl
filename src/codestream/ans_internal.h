@@ -48,6 +48,14 @@ inline constexpr size_t kAnsAlphabetWidthCount = 4;
 
 [[nodiscard]] Status ValidateAnsEntropyCode(const EntropyCode& code);
 
+/// One pre-encoded context-map alphabet, optionally followed by an implicit
+/// singleton distance-zero histogram. RLE distance reads consume no bits and
+/// leave the ANS state unchanged, so tokens contains only literals and lengths.
+/// The caller writes the LZ77 fields and (for RLE) the two-entry context map.
+[[nodiscard]] Status WriteContextMapAns(
+  std::span<const HybridUintToken> tokens, HybridUintConfig config, bool rle,
+  BitWriter* writer);
+
 struct PreparedAnsEntropyCandidate {
   EntropyCode code;
   uint64_t model_bits = 0;

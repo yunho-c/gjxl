@@ -63,6 +63,20 @@ ComputeEntropyTokenEmissionStoragePlan(EntropyCodingMode mode, size_t tokens,
 [[nodiscard]] Status ComputeEntropyWriterStorageBound(size_t maximum_bits,
                                                       HostStorageBound *out);
 
+struct ContextMapStoragePlan {
+  size_t maximum_bits = 0;
+  HostStorageBound owned;
+  // Complete search envelope including the resulting cache, excluding caller
+  // input and destination writers. The ANS helper's serial scratch is included.
+  HostStorageBound working;
+  bool operator==(const ContextMapStoragePlan&) const = default;
+};
+
+[[nodiscard]] Status ComputeContextMapStoragePlan(size_t entries,
+                                                 ContextMapStoragePlan* out);
+[[nodiscard]] Status ComputeContextMapAnsStorageBound(size_t tokens,
+                                                      HostStorageBound* out);
+
 enum class EntropyStoragePolicy {
   kFastPrefix,
   kPrefix,

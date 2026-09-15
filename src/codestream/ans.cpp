@@ -1901,6 +1901,64 @@ Status MeasureAnsCodes(
   return Status::Ok();
 }
 
+template <typename Process>
+Status WriteAnsStream(size_t token_count, Process&& process, BitWriter* writer) {
+  try {
+    size_t chunk_count = 0;
+    if (Status status = codestream_internal::ComputeAnsReverseChunkCount(token_count, &chunk_count);
+        !status.ok()) {
+      return status;
+    }
+    // Pack during reverse token processing. Every stored word contains 56
+    // bits; only the final pending word needs a separate logical width.
+    Storage<uint64_t> reverse_words;
+    reverse_words.reserve(chunk_count);
+    uint64_t pending = 0;
+    size_t pending_bits = 0;
+    const auto append_chunk = [&](uint32_t bits, uint8_t bit_count) {
+      if (pending_bits + bit_count >= BitWriter::kMaxBitsPerWrite) {
+        const size_t take = BitWriter::kMaxBitsPerWrite - pending_bits;
+        const size_t remaining = bit_count - take;
+        reverse_words.push_back((pending << take) | (uint64_t{bits} >> remaining));
+        pending = bits & ((uint64_t{1} << remaining) - 1);
+        pending_bits = remaining;
+      } else {
+        pending = (pending << bit_count) | bits;
+        pending_bits += bit_count;
+      }
+    };
+    uint32_t state = 0;
+    if (Status status = process(append_chunk, &state);
+        !status.ok()) {
+      return status;
+    }
+    // The checked token bound above also bounds this exact size calculation.
+    const size_t total_bits = 32 + pending_bits +
+      BitWriter::kMaxBitsPerWrite * reverse_words.size();
+    BitWriter temporary;
+    const auto write_words = [&]() -> Status {
+      if (Status write = temporary.WriteBits(32, state); !write.ok()) return write;
+      if (Status write = temporary.WriteBits(pending_bits, pending); !write.ok())
+        return write;
+      for (auto word = reverse_words.rbegin(); word != reverse_words.rend(); ++word) {
+        if (Status write = temporary.WriteBits(BitWriter::kMaxBitsPerWrite, *word);
+            !write.ok()) return write;
+      }
+      return Status::Ok();
+    };
+    // reference_wrapper keeps the synchronous callback allocation-free.
+    Status status = temporary.WithMaxBits(total_bits, std::cref(write_words));
+    if (!status.ok()) return status;
+    return writer->Append(temporary);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
+  }
+}
+
 }  // namespace
 
 Status codestream_internal::CountAnsTokenStreamBits(
@@ -2130,68 +2188,56 @@ Status codestream_internal::WriteAnsEntropyCodeModel(
 }
 
 Status codestream_internal::WriteAnsTokenStream(
-  EntropyTokenStreamView tokens,
-  const EntropyCode& code,
-  BitWriter* writer) {
-
-  if (writer == nullptr || !tokens.valid()) {
+  EntropyTokenStreamView tokens, const EntropyCode& code, BitWriter* writer) {
+  if (writer == nullptr || !tokens.valid())
     return Status::InvalidArgument("ANS token-stream output is null");
+  const auto process = [&](auto&& emit, uint32_t* state) {
+    return ProcessAnsTokenStream(tokens, code, emit, state);
+  };
+  return WriteAnsStream(tokens.size(), process, writer);
+}
+
+Status codestream_internal::WriteContextMapAns(
+  std::span<const HybridUintToken> tokens, HybridUintConfig config, bool rle,
+  BitWriter* writer) {
+  if (writer == nullptr || tokens.empty() || !config.valid())
+    return Status::InvalidArgument("Context-map ANS input is invalid");
+  std::array<uint64_t, kMaximumAnsAlphabetSize> counts{};
+  size_t maximum = 0;
+  for (const auto token : tokens) {
+    if (token.symbol >= counts.size() || token.extra_bit_count > 31)
+      return Status::InvalidArgument("Context-map ANS token is invalid");
+    ++counts[token.symbol];
+    maximum = std::max(maximum, size_t{token.symbol});
   }
-  try {
-    size_t chunk_count = 0;
-    if (Status status = ComputeAnsReverseChunkCount(tokens.size(), &chunk_count);
-        !status.ok()) {
-      return status;
-    }
-    // Pack during reverse token processing. Every stored word contains 56
-    // bits; only the final pending word needs a separate logical width.
-    Storage<uint64_t> reverse_words;
-    reverse_words.reserve(chunk_count);
-    uint64_t pending = 0;
-    size_t pending_bits = 0;
-    const auto append_chunk = [&](uint32_t bits, uint8_t bit_count) {
-      if (pending_bits + bit_count >= BitWriter::kMaxBitsPerWrite) {
-        const size_t take = BitWriter::kMaxBitsPerWrite - pending_bits;
-        const size_t remaining = bit_count - take;
-        reverse_words.push_back((pending << take) | (uint64_t{bits} >> remaining));
-        pending = bits & ((uint64_t{1} << remaining) - 1);
-        pending_bits = remaining;
-      } else {
-        pending = (pending << bit_count) | bits;
-        pending_bits += bit_count;
-      }
-    };
-    uint32_t state = 0;
-    if (Status status = ProcessAnsTokenStream(
-          tokens, code, append_chunk, &state);
-        !status.ok()) {
-      return status;
-    }
-    // The checked token bound above also bounds this exact size calculation.
-    const size_t total_bits = 32 + pending_bits +
-      BitWriter::kMaxBitsPerWrite * reverse_words.size();
-    BitWriter temporary;
-    const auto write_words = [&]() -> Status {
-      if (Status write = temporary.WriteBits(32, state); !write.ok()) return write;
-      if (Status write = temporary.WriteBits(pending_bits, pending); !write.ok())
-        return write;
-      for (auto word = reverse_words.rbegin(); word != reverse_words.rend(); ++word) {
-        if (Status write = temporary.WriteBits(BitWriter::kMaxBitsPerWrite, *word);
-            !write.ok()) return write;
-      }
-      return Status::Ok();
-    };
-    // reference_wrapper keeps the synchronous callback allocation-free.
-    Status status = temporary.WithMaxBits(total_bits, std::cref(write_words));
-    if (!status.ok()) return status;
-    return writer->Append(temporary);
-  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
-    return error.status();
-  } catch (const std::bad_alloc&) {
-    return AllocationFailure();
-  } catch (const std::length_error&) {
-    return AllocationFailure();
+  const size_t width = std::max(size_t{5}, static_cast<size_t>(std::bit_width(maximum)));
+  AnsHistogram histogram;
+  Status status = BuildBestAnsHistogram(counts, AnsHistogramSearch::kPrecise, &histogram);
+  if (!status.ok()) return status;
+  status = BuildAnsEncoderTables(histogram.frequencies, width,
+                                 &histogram.reverse_maps,
+                                 &histogram.reciprocal_frequencies);
+  if (!status.ok()) return status;
+  if (Status s = writer->WriteBits(3, (width - 5) << 1); !s.ok()) return s;
+  if (Status s = WriteAnsUintConfig(config, width, writer); !s.ok()) return s;
+  if (rle) {
+    if (Status s = WriteAnsUintConfig({0, 0, 0}, width, writer); !s.ok()) return s;
   }
+  if (Status s = WriteAnsHistogram(histogram, writer); !s.ok()) return s;
+  if (rle) {
+    AnsHistogram distance;
+    distance.frequencies = {kAnsTableSize};
+    if (Status s = WriteAnsHistogram(distance, writer); !s.ok()) return s;
+  }
+  const auto process = [&](auto&& emit, uint32_t* state) -> Status {
+    *state = kAnsSignature << 16;
+    for (size_t i = tokens.size(); i != 0; --i) {
+      if (const char* error = AdvanceAnsState(tokens[i - 1], histogram, emit, state))
+        return Status::InvalidArgument(error);
+    }
+    return Status::Ok();
+  };
+  return WriteAnsStream(tokens.size(), process, writer);
 }
 
 Status codestream_internal::WriteAnsTokenStream(
@@ -2583,6 +2629,8 @@ Status OptimizeAnsEntropyCodeImpl(
         continue;
       }
       BitWriter model;
+      if (Status status = codestream_internal::PrepareEntropyContextMap(&candidate);
+          !status.ok()) return status;
       if (Status status = WriteEntropyCode(candidate, &model); !status.ok()) {
         return status;
       }
@@ -3275,6 +3323,37 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
       return overflow();
   }
   *out = plan;
+  return Status::Ok();
+}
+
+Status codestream_internal::ComputeContextMapAnsStorageBound(
+  size_t tokens, resource_budget_internal::HostStorageBound* out) {
+  using enum resource_budget_internal::VectorCapacityPolicy;
+  if (out == nullptr || tokens == 0 || tokens > UINT32_MAX)
+    return Status::InvalidArgument("Context-map ANS bound is invalid");
+  resource_budget_internal::HostStorageBound bound;
+  // One normalized histogram and serial normalization/alias-table scratch.
+  // The implicit distance histogram has a single frequency and no tables.
+  if (!bound.AddVector<uint16_t>(kMaximumAnsAlphabetSize, kFreshExact, 4) ||
+      !bound.AddVector<Storage<uint16_t>>(kMaximumAnsAlphabetSize, kFreshExact) ||
+      !bound.AddVector<uint16_t>(kAnsTableSize, kFreshExact) ||
+      !bound.AddVector<uint64_t>(kMaximumAnsAlphabetSize, kFreshExact) ||
+      !bound.AddVector<Remainder>(kMaximumAnsAlphabetSize, kFreshExact) ||
+      !bound.AddVector<EntropyDelta>(kMaximumAnsAlphabetSize, kFreshExact) ||
+      !bound.AddVector<int32_t>(kMaximumAnsAlphabetSize, kFreshExact) ||
+      !bound.AddVector<AliasEntry>(kMaximumAnsAlphabetSize, kFreshExact) ||
+      !bound.AddVector<uint32_t>(kMaximumAnsAlphabetSize, kFreshExact, 2) ||
+      !bound.AddVector<uint32_t>(kMaximumAnsAlphabetSize, kGrowing, 2))
+    return Status::OutOfMemory("Context-map ANS bound overflows");
+  EntropyTokenEmissionStoragePlan emission;
+  Status status = ComputeEntropyTokenEmissionStoragePlan(EntropyCodingMode::kAns, tokens, &emission);
+  if (!status.ok()) return status;
+  resource_budget_internal::HostStorageBound writer;
+  status = ComputeEntropyWriterStorageBound(emission.maximum_bits, &writer);
+  if (!status.ok()) return status;
+  if (!bound.Add(emission.scratch) || !bound.Add(writer))
+    return Status::OutOfMemory("Context-map ANS emission bound overflows");
+  *out = bound;
   return Status::Ok();
 }
 

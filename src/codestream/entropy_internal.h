@@ -16,6 +16,10 @@ namespace gjxl::codestream_internal {
 
 struct EntropyWorkProfile;
 
+/// Eager cache preparation before model costing. Writers remain const and can
+/// safely share a prepared code; edited maps are detected by exact comparison.
+[[nodiscard]] Status PrepareEntropyContextMap(EntropyCode* code);
+
 /// Converts a value after the caller has established config.valid(). The
 /// value itself is unrestricted: every uint32_t has a HybridUint encoding.
 [[nodiscard]] constexpr HybridUintToken EncodeHybridUintValidated(

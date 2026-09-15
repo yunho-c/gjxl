@@ -46,6 +46,8 @@ struct Backings {
   }
   void Add(const EntropyCode &code) {
     Add(code.context_map);
+    Add(code.context_map_encoding.source());
+    Add(code.context_map_encoding.bytes());
     Add(code.uint_configs);
     Add(code.prefix_codes);
     Add(code.ans_histograms);

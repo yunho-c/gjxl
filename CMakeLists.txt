@@ -292,6 +292,7 @@ add_library(
   src/codestream/weighted_dc.cpp
   src/codestream/dc_context_tree.cpp
   src/codestream/entropy.cpp
+  src/codestream/context_map.cpp
   src/codestream/encoder.cpp
   src/codestream/headers.cpp
   src/codestream/huffman.cpp
@@ -1274,6 +1275,29 @@ if(GJXL_BUILD_TESTS)
     NAME entropy
     COMMAND gjxl_entropy_test
   )
+
+  add_executable(gjxl_context_map_test tests/context_map_test.cpp)
+  target_link_libraries(gjxl_context_map_test PRIVATE gjxl_codestream)
+  target_compile_definitions(gjxl_context_map_test PRIVATE
+    GJXL_CONTEXT_MAP_REFERENCE=$<BOOL:${GJXL_ENABLE_LIBJXL_REFERENCE}>)
+  if(GJXL_ENABLE_LIBJXL_REFERENCE)
+    # Test-only decoder oracle for native context-map representations.
+    target_sources(gjxl_context_map_test PRIVATE
+      third_party/libjxl/lib/jxl/dec_context_map.cc
+      third_party/libjxl/lib/jxl/dec_ans.cc
+      third_party/libjxl/lib/jxl/dec_bit_reader.cc
+      third_party/libjxl/lib/jxl/dec_huffman.cc
+      third_party/libjxl/lib/jxl/huffman_table.cc
+      third_party/libjxl/lib/jxl/ans_common.cc
+      third_party/libjxl/lib/jxl/fields.cc
+      third_party/libjxl/lib/jxl/simd_util.cc
+      third_party/libjxl/lib/jxl/memory_manager_internal.cc)
+    target_include_directories(gjxl_context_map_test PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl"
+      "${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/lib/include")
+    target_link_libraries(gjxl_context_map_test PRIVATE hwy)
+  endif()
+  add_test(NAME context_map COMMAND gjxl_context_map_test)
 
   add_executable(
     gjxl_sections_test

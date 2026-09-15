@@ -440,7 +440,8 @@ bool CheckDeterministicWorkflow() {
     return false;
   }
 
-  // Keep the original byte fixture as an explicit legacy-policy check.
+  // Keep the original DC policy as an explicit check. Context-map compression
+  // changes its bytes while preserving the decoded fixture exactly.
   std::vector<uint8_t> legacy_gradient;
   {
     gjxl::codestream_internal::ScopedDcTreePolicyForTesting legacy(
@@ -454,7 +455,7 @@ bool CheckDeterministicWorkflow() {
       &legacy_gradient);
   }
   const uint64_t hash = Fnv1a64(legacy_gradient);
-  constexpr uint64_t kExpectedHash = 6720271014152865219ull;
+  constexpr uint64_t kExpectedHash = 7805965943824091235ull;
   if (!status.ok() || hash != kExpectedHash) {
     std::cerr << "Legacy public workflow hash changed: " << hash << '\n';
     return false;

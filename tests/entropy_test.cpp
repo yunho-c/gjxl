@@ -466,11 +466,17 @@ bool CheckCountedPrefixOptimization() {
   };
   const std::vector<gjxl::HybridUintConfig> expected_configs = {
     {0, 0, 0}, {4, 2, 0}, {4, 1, 2}, {4, 2, 0}};
+  gjxl::BitWriter legacy_model;
+  if (!gjxl::codestream_internal::WriteLegacyContextMap(
+        code.context_map, &legacy_model).ok() ||
+      !gjxl::WritePrefixCodes(code.prefix_codes, code.uint_configs, &legacy_model).ok())
+    return false;
   if (!std::ranges::equal(code.context_map, std::array{0, 1, 2, 3}) ||
       !std::ranges::equal(code.uint_configs, expected_configs) ||
-      model.bits_written() != 144 ||
+      legacy_model.bits_written() != 144 ||
+      model.bits_written() > legacy_model.bits_written() ||
       payload.bits_written() != 166464 ||
-      hash(model.padded_bytes()) != 5815996224897546142ull ||
+      hash(legacy_model.padded_bytes()) != 5815996224897546142ull ||
       hash(payload.padded_bytes()) != 6576315826512740406ull) {
     std::cerr << "Counted prefix decision or serialized bytes changed\n";
     return false;
