@@ -23,7 +23,10 @@ on:
 jobs:
   test:
     name: macOS native wrapper
-    runs-on: macos-latest
+    runs-on: macos-26
+    env:
+      # Match the audited compiler/libc++ contract in docs/storage-toolchain.md.
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     defaults:
       run:
         working-directory: rust
@@ -39,6 +42,12 @@ jobs:
 
       - name: Install build tools
         run: brew install cmake ninja
+
+      - name: Report native toolchain
+        run: |
+          xcodebuild -version
+          xcrun clang++ --version
+          xcrun --show-sdk-version
 
       - name: Check formatting
         run: cargo fmt --all --check

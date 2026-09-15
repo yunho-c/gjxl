@@ -117,6 +117,7 @@ struct AqFinalCflParams {
   uint32_t tile_height;
   uint32_t color_stride;
   uint32_t transform_count;
+  uint32_t nonlinear_iterations; // Zero selects the established fast regression.
 };
 
 struct AqInitialQuantGradientParams {
@@ -351,7 +352,8 @@ public:
       ConstPlaneI8View y_to_b) override;
   Status PrepareInvariantColorCorrelationResident(
       ConstPlaneF32View quant_field,
-      float quant_dc) override;
+      float quant_dc,
+      uint32_t nonlinear_iterations = 0) override;
   Status AdjustQuantFieldResident(float butteraugli_target,
                                   ConstPlaneF32View input,
                                   PlaneF32View output) override;
@@ -403,6 +405,10 @@ public:
   Status RunQuantizationProbe(const MetalAqQuantizationProbeForTesting &probe,
                               std::vector<int32_t> *quantized,
                               std::vector<float> *dequantized);
+  Status RunFinalColorCorrelationProbe(
+    const prepared_coefficients_internal::PreparedForwardDctCoefficients& coefficients,
+    ConstPlaneI32View raw_quant, const Quantizer& quantizer,
+    uint32_t nonlinear_iterations, ColorCorrelationMap* output);
   Status RunAdjustmentProbe(
       const MetalAqAdjustmentProbeForTesting& probe,
       MetalAqAdjustmentResultForTesting* result);

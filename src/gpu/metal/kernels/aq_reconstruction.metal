@@ -218,7 +218,9 @@ struct AqFinalCflParams {
   uint tile_height;
   uint color_stride;
   uint transform_count;
+  uint nonlinear_iterations;
 };
+static_assert(sizeof(AqFinalCflParams) == 20, "Final CfL host/shader ABI");
 
 struct AqColorTransformRecord {
   uint coefficient_offset;
@@ -451,18 +453,15 @@ static char aq_quantize_initial_cfl(float value) {
   return char(clamp(round(value), -128.0f, 127.0f));
 }
 
-// The maximum-throughput encoder's initial CfL policy accumulates four CPU
-// SIMD lanes independently. One Metal thread owns a complete 64x64 tile and
-// preserves that order exactly; tiles remain independent and run in parallel.
-kernel void gjxl_aq_initial_cfl(
-  device const float* coding_x [[buffer(0)]],
-  device const float* coding_y [[buffer(1)]],
-  device const float* coding_b [[buffer(2)]],
-  device char* y_to_x [[buffer(3)]],
-  device char* y_to_b [[buffer(4)]],
-  device atomic_uint* error [[buffer(5)]],
-  constant AqInitialCflParams& params [[buffer(6)]],
-  uint tile_index [[thread_position_in_grid]]) {
+static void aq_initial_cfl_scalar(
+  device const float* coding_x,
+  device const float* coding_y,
+  device const float* coding_b,
+  device char* y_to_x,
+  device char* y_to_b,
+  device atomic_uint* error,
+  constant AqInitialCflParams& params,
+  uint tile_index) {
 
   const uint tile_count = params.tile_width * params.tile_height;
   if (tile_index >= tile_count) return;
@@ -534,6 +533,97 @@ kernel void gjxl_aq_initial_cfl(
   y_to_b[color_index] = aq_quantize_initial_cfl(-linear_b_sum / denominator);
 }
 
+static float aq_initial_cfl_sum4(float value, uint base) {
+  return (simd_shuffle(value, base) + simd_shuffle(value, base + 1u)) +
+    (simd_shuffle(value, base + 2u) + simd_shuffle(value, base + 3u));
+}
+
+// Each group of four threads retains the four original accumulation lanes.
+kernel void gjxl_aq_initial_cfl(
+  device const float* coding_x [[buffer(0)]],
+  device const float* coding_y [[buffer(1)]],
+  device const float* coding_b [[buffer(2)]],
+  device char* y_to_x [[buffer(3)]],
+  device char* y_to_b [[buffer(4)]],
+  device atomic_uint* error [[buffer(5)]],
+  constant AqInitialCflParams& params [[buffer(6)]],
+  uint index [[thread_position_in_grid]],
+  uint simd_lane [[thread_index_in_simdgroup]],
+  uint simd_width [[threads_per_simdgroup]]) {
+
+  const uint tile_index = index / 4u;
+  // The scalar path preserves support for execution widths that cannot keep
+  // each group of four accumulation lanes in one SIMD group.
+  if ((simd_width & 3u) != 0u) {
+    if ((index & 3u) == 0u) {
+      aq_initial_cfl_scalar(coding_x, coding_y, coding_b, y_to_x, y_to_b,
+                            error, params, tile_index);
+    }
+    return;
+  }
+  const uint lane = index & 3u;
+  const uint base = simd_lane & ~3u;
+  const uint tile_count = params.tile_width * params.tile_height;
+  if (tile_index >= tile_count) return;
+  const uint tile_x = tile_index % params.tile_width;
+  const uint tile_y = tile_index / params.tile_width;
+  const uint x_begin = tile_x * 64u;
+  const uint y_begin = tile_y * 64u;
+  const uint x_end = min(x_begin + 64u, params.width);
+  const uint y_end = min(y_begin + 64u, params.height);
+  const uint width = x_end - x_begin;
+  const uint count = width * (y_end - y_begin);
+  if (count == 0u) {
+    atomic_fetch_or_explicit(error, 1024u, memory_order_relaxed);
+    return;
+  }
+  float sum_y = 0.0f, sum_x = 0.0f, sum_b = 0.0f;
+  uint invalid = 0u;
+  for (uint y = y_begin; y < y_end; ++y) {
+    const uint row = y * params.coding_stride;
+    const uint first = (lane + 4u - (((y - y_begin) * width) & 3u)) & 3u;
+    for (uint x = x_begin + first; x < x_end; x += 4u) {
+      const float value_y = coding_y[row + x];
+      const float value_x = coding_x[row + x];
+      const float value_b = coding_b[row + x];
+      invalid |= uint(!isfinite(value_y) || !isfinite(value_x) || !isfinite(value_b));
+      sum_y += value_y;
+      sum_x += value_x;
+      sum_b += value_b;
+    }
+  }
+  invalid = simd_shuffle(invalid, base) | simd_shuffle(invalid, base + 1u) |
+    simd_shuffle(invalid, base + 2u) | simd_shuffle(invalid, base + 3u);
+  if (invalid != 0u) {
+    atomic_fetch_or_explicit(error, 1024u, memory_order_relaxed);
+    return;
+  }
+  const float sample_count = float(count);
+  const float mean_y = aq_initial_cfl_sum4(sum_y, base) / sample_count;
+  const float mean_x = aq_initial_cfl_sum4(sum_x, base) / sample_count;
+  const float mean_b = aq_initial_cfl_sum4(sum_b, base) / sample_count;
+  float quadratic = 0.0f, linear_x = 0.0f, linear_b = 0.0f;
+  for (uint y = y_begin; y < y_end; ++y) {
+    const uint row = y * params.coding_stride;
+    const uint first = (lane + 4u - (((y - y_begin) * width) & 3u)) & 3u;
+    for (uint x = x_begin + first; x < x_end; x += 4u) {
+      const float centered_y = coding_y[row + x] - mean_y;
+      const float a = centered_y * (1.0f / 84.0f);
+      quadratic = fma(a, a, quadratic);
+      linear_x = fma(a, -(coding_x[row + x] - mean_x), linear_x);
+      linear_b = fma(a, centered_y - (coding_b[row + x] - mean_b), linear_b);
+    }
+  }
+  const float quadratic_sum = aq_initial_cfl_sum4(quadratic, base);
+  const float linear_x_sum = aq_initial_cfl_sum4(linear_x, base);
+  const float linear_b_sum = aq_initial_cfl_sum4(linear_b, base);
+  if (lane != 0u) return;
+  const float denominator = quadratic_sum + sample_count * 5.0e-10f;
+  const uint color_index = tile_y * params.color_stride + tile_x;
+  y_to_x[color_index] = aq_quantize_initial_cfl(-linear_x_sum / denominator);
+  y_to_b[color_index] = aq_quantize_initial_cfl(-linear_b_sum / denominator);
+}
+
 static bool aq_final_cfl_layout(
   uint strategy,
   thread uint& coefficient_width,
@@ -579,9 +669,15 @@ static bool aq_final_cfl_layout(
   }
 }
 
-// Mirrors ComputeFinalColorCorrelationMapPrepared(..., fast=true). Four
-// threads preserve its four independent accumulation lanes and their final
-// pairwise reduction order.
+// Same nonlinear objective as CPU FindBestMultiplier(..., fast=false).
+static float aq_cfl_derivative(float a, float residual) {
+  float value = (2.0f / 3.0f) * a * (abs(residual) + 1.0f);
+  return residual < 0.0f ? -value : value;
+}
+// Nonlinear CfL evaluates 128 coefficients in parallel, then accumulates each
+// derivative in the reference's four lanes and original coefficient order.
+// All threads reach the chunk barriers, including on invalid coefficients.
+// Fast CfL retains the original four-thread path.
 kernel void gjxl_aq_final_cfl(
   device const AqColorTransformRecord* transforms [[buffer(0)]],
   device const uint* tile_offsets [[buffer(1)]],
@@ -593,10 +689,12 @@ kernel void gjxl_aq_final_cfl(
   device char* y_to_b [[buffer(7)]],
   device atomic_uint* error [[buffer(8)]],
   constant AqFinalCflParams& params [[buffer(9)]],
+  threadgroup float* chunk_storage [[threadgroup(0)]],
   uint tile_index [[threadgroup_position_in_grid]],
   uint lane [[thread_index_in_threadgroup]]) {
 
-  if (tile_index >= params.tile_width * params.tile_height || lane >= 4u) {
+  if (tile_index >= params.tile_width * params.tile_height ||
+      lane >= (params.nonlinear_iterations != 0u ? 128u : 4u)) {
     return;
   }
   const uint begin = tile_offsets[tile_index];
@@ -605,6 +703,154 @@ kernel void gjxl_aq_final_cfl(
     if (lane == 0u) {
       atomic_fetch_or_explicit(error, 2097152u, memory_order_relaxed);
     }
+    return;
+  }
+
+  if (params.nonlinear_iterations > 20u) {
+    if (lane == 0u) atomic_fetch_or_explicit(error, 2097152u, memory_order_relaxed);
+    return;
+  }
+  if (params.nonlinear_iterations != 0u) {
+    const uint global_scale = resident_quantizer[0];
+    const AqColorTransformRecord last = transforms[end - 1u];
+    const float sample_count = float(last.tile_value_offset + last.coefficient_count);
+    threadgroup float estimates[2];
+    threadgroup uint done[2];
+    threadgroup float derivative_lanes[6][4];
+    // Dynamic storage keeps the fast path's threadgroup footprint unchanged.
+    threadgroup float* chunk_derivatives = chunk_storage;
+    threadgroup uint* chunk_mask =
+      reinterpret_cast<threadgroup uint*>(chunk_storage + 6u * 128u);
+    if (lane == 0u) {
+      estimates[0] = 0.0f;
+      estimates[1] = 0.0f;
+      done[0] = 0u;
+      done[1] = 0u;
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint iteration = 0u; iteration < params.nonlinear_iterations; ++iteration) {
+      float derivative = 0.0f;
+      for (uint transform_index = begin; transform_index < end;
+           ++transform_index) {
+        const AqColorTransformRecord transform = transforms[transform_index];
+        uint coefficient_width = 0u;
+        uint coefficient_height = 0u;
+        uint low_frequency_width = 0u;
+        uint low_frequency_height = 0u;
+        if (!aq_final_cfl_layout(
+              transform.strategy, coefficient_width, coefficient_height,
+              low_frequency_width, low_frequency_height) ||
+            coefficient_width * coefficient_height !=
+              transform.coefficient_count) {
+          atomic_fetch_or_explicit(error, 2097152u, memory_order_relaxed);
+          continue;
+        }
+        const int raw = raw_quant[transform.raw_quant_index];
+        if (raw < 1 || raw > 256 || global_scale == 0u ||
+            global_scale > 32768u) {
+          atomic_fetch_or_explicit(error, 2097152u, memory_order_relaxed);
+          continue;
+        }
+        const float quant_scale =
+          (float(global_scale) * (1.0f / 65536.0f)) * 128.0f * float(raw);
+        const uint2 table_offsets = aq_quant_table_offsets(transform.strategy);
+        for (uint chunk = 0u; chunk < transform.coefficient_count; chunk += 128u) {
+          const uint coefficient = chunk + lane;
+          uint mask = 0u;
+          if (coefficient < transform.coefficient_count &&
+              !(coefficient % coefficient_width < low_frequency_width &&
+                coefficient / coefficient_width < low_frequency_height)) {
+            const uint base = transform.coefficient_offset + coefficient;
+            const float coefficient_y =
+              forward_coefficients[base + transform.channel_stride];
+            const float coefficient_x = forward_coefficients[base];
+            const float coefficient_b =
+              forward_coefficients[base + 2u * transform.channel_stride];
+            const float value_y_x = coefficient_y *
+              quant_tables[table_offsets.y + coefficient] * quant_scale;
+            const float value_x = coefficient_x *
+              quant_tables[table_offsets.y + coefficient] * quant_scale;
+            const float value_y_b = coefficient_y *
+              quant_tables[
+                table_offsets.y + 2u * transform.coefficient_count + coefficient] *
+              quant_scale;
+            const float value_b = coefficient_b *
+              quant_tables[
+                table_offsets.y + 2u * transform.coefficient_count + coefficient] *
+              quant_scale;
+            const float a[2] = {value_y_x / 84.0f, value_y_b / 84.0f};
+            const float b[2] = {-value_x, value_y_b - value_b};
+            if (!isfinite(a[0]) || !isfinite(a[1]) ||
+                !isfinite(b[0]) || !isfinite(b[1])) {
+              atomic_fetch_or_explicit(error, 2097152u, memory_order_relaxed);
+            } else {
+              for (uint channel = 0u; channel < 2u; ++channel) {
+                if (done[channel]) continue;
+                const float center = fma(a[channel], estimates[channel], b[channel]);
+                // Center residual gates all three derivatives.
+                if (abs(center) >= 100.0f) continue;
+                mask |= 1u << channel;
+                chunk_derivatives[(3u * channel) * 128u + lane] =
+                  aq_cfl_derivative(a[channel], center);
+                chunk_derivatives[(3u * channel + 1u) * 128u + lane] = aq_cfl_derivative(a[channel],
+                  fma(a[channel], estimates[channel] + 100.0f, b[channel]));
+                chunk_derivatives[(3u * channel + 2u) * 128u + lane] = aq_cfl_derivative(a[channel],
+                  fma(a[channel], estimates[channel] - 100.0f, b[channel]));
+              }
+            }
+          }
+          chunk_mask[lane] = mask;
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+          if (lane < 24u) {
+            const uint component = lane / 4u;
+            const uint first = ((lane & 3u) + 4u -
+              ((transform.tile_value_offset + chunk) & 3u)) & 3u;
+            for (uint i = first; i < min(128u, transform.coefficient_count - chunk); i += 4u) {
+              if (chunk_mask[i] & (1u << (component / 3u)))
+                derivative += chunk_derivatives[component * 128u + i];
+            }
+          }
+          threadgroup_barrier(mem_flags::mem_threadgroup);
+        }
+      }
+      if (lane < 24u) derivative_lanes[lane / 4u][lane & 3u] = derivative;
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      if (lane == 0u) {
+        for (uint channel = 0u; channel < 2u; ++channel) {
+          if (done[channel]) continue;
+          float d[3];
+          for (uint i = 0u; i < 3u; ++i) {
+            const uint k = 3u * channel + i;
+            const float offset = i == 0u ? 0.0f : i == 1u ? 100.0f : -100.0f;
+            d[i] = ((2.0f * 1.0e-9f) * sample_count) * (estimates[channel] + offset);
+            d[i] += (derivative_lanes[k][0] + derivative_lanes[k][1]) +
+                    (derivative_lanes[k][2] + derivative_lanes[k][3]);
+          }
+          const float second = (d[1] - d[2]) / 200.0f;
+          const float step = d[0] / (second + 0.85f);
+          // Metal clamp may turn NaN into a finite bound. Flag it before
+          // clamping, while keeping every lane on the barrier path.
+          if (!isfinite(step)) {
+            atomic_fetch_or_explicit(error, 2097152u, memory_order_relaxed);
+            done[channel] = 1u;
+            continue;
+          }
+          estimates[channel] -= clamp(step, -20.0f, 20.0f);
+          if (abs(step) < 3.0e-3f) done[channel] = 1u;
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      if (done[0] && done[1]) break;
+    }
+    if (lane != 0u) return;
+    if (!isfinite(estimates[0]) || !isfinite(estimates[1])) {
+      atomic_fetch_or_explicit(error, 2097152u, memory_order_relaxed);
+      return;
+    }
+    const uint color_index =
+      (tile_index / params.tile_width) * params.color_stride + tile_index % params.tile_width;
+    y_to_x[color_index] = aq_quantize_initial_cfl(estimates[0]);
+    y_to_b[color_index] = aq_quantize_initial_cfl(estimates[1]);
     return;
   }
 
@@ -1333,6 +1579,108 @@ kernel void gjxl_aq_resident_quant_finalize_quantizer(
   }
 }
 
+
+// Exact four-byte radix selection for small resident quant fields.
+// All median and MAD rounds share one group; no numerical approximation.
+kernel void
+gjxl_aq_resident_quant_small(device const float *quant_field [[buffer(0)]],
+                             device float *statistics [[buffer(1)]],
+                             device uint *quantizer_params [[buffer(2)]],
+                             device atomic_uint *error [[buffer(3)]],
+                             constant AqInitialQuantSelectionParams &params
+                             [[buffer(4)]],
+                             device uint *final_state [[buffer(5)]],
+                             device atomic_uint *device_histogram [[buffer(6)]],
+                             uint lane [[thread_index_in_threadgroup]]) {
+  // One histogram per SIMD group limits contention for repeated field values.
+  // Dispatch exactly 256 threads on a pipeline with 32-thread SIMD groups.
+  threadgroup atomic_uint histogram[8 * 256];
+  threadgroup uint group_counts[8];
+  threadgroup uint state[3];
+  threadgroup float selected[2];
+  for (uint deviation = 0u; deviation < 2u; ++deviation) {
+    if (lane == 0u) {
+      state[0] = 0u;
+      state[1] = 0u;
+      state[2] = params.median_index;
+    }
+    for (int shift = 24; shift >= 0; shift -= 8) {
+      for (uint group = 0u; group < 8u; ++group)
+        atomic_store_explicit(histogram + group * 256u + lane, 0u,
+                              memory_order_relaxed);
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      for (uint index = lane; index < params.value_count; index += 256u) {
+        const uint y = index / params.quant_width;
+        const uint x = index - y * params.quant_width;
+        float value = quant_field[y * params.quant_stride + x];
+        if (deviation != 0u)
+          value = abs(value - selected[0]);
+        const uint bits = as_type<uint>(value);
+        if ((bits & state[1]) == state[0]) {
+          atomic_fetch_add_explicit(histogram + (lane / 32u) * 256u +
+                                        ((bits >> uint(shift)) & 255u),
+                                    1u, memory_order_relaxed);
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      uint count = 0u;
+      for (uint group = 0u; group < 8u; ++group) {
+        count += atomic_load_explicit(histogram + group * 256u + lane,
+                                      memory_order_relaxed);
+      }
+      uint inclusive = count;
+      for (uint offset = 1u; offset < 32u; offset *= 2u) {
+        const uint previous = simd_shuffle_up(inclusive, offset);
+        if ((lane & 31u) >= offset)
+          inclusive += previous;
+      }
+      if ((lane & 31u) == 31u)
+        group_counts[lane / 32u] = inclusive;
+      // Capture the common rank before any winning bucket updates shared state.
+      const uint rank = state[2];
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      uint prefix_count = inclusive - count;
+      for (uint group = 0u; group < lane / 32u; ++group)
+        prefix_count += group_counts[group];
+      if (rank >= prefix_count && rank < prefix_count + count) {
+        state[0] |= lane << uint(shift);
+        state[1] |= 255u << uint(shift);
+        state[2] = rank - prefix_count;
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    if (lane == 0u)
+      selected[deviation] = as_type<float>(state[0]);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  atomic_store_explicit(device_histogram + lane, 0u, memory_order_relaxed);
+  if (lane == 0u) {
+    for (uint i = 0u; i < 3u; ++i)
+      final_state[i] = state[i];
+    statistics[0] = selected[0];
+    statistics[1] = selected[1];
+    const float median_value = selected[0];
+    const float deviation = selected[1];
+    float scale = 65536.0f * (median_value - deviation) / 5.0f;
+    scale = clamp(scale, 1.0f, 32768.0f);
+    uint global_scale = uint(scale);
+    if (global_scale > params.scaled_quant_dc) {
+      global_scale = max(1u, params.scaled_quant_dc);
+    }
+    const float inverse_global_scale = 65536.0f / float(global_scale);
+    const float quant_dc =
+        min(65536.0f, params.quant_dc * inverse_global_scale + 0.5f);
+    quantizer_params[0] = global_scale;
+    quantizer_params[1] = uint(quant_dc);
+    if (!isfinite(median_value) || median_value <= 0.0f ||
+        !isfinite(deviation) || deviation < 0.0f || global_scale == 0u ||
+        global_scale > 32768u || quantizer_params[1] == 0u ||
+        quantizer_params[1] > 65536u) {
+      atomic_fetch_or_explicit(error, 524288u, memory_order_relaxed);
+    }
+  }
+}
+
 kernel void gjxl_aq_resident_policy_initialize(
   device const float* quant_field [[buffer(0)]],
   device float* initial_quant_field [[buffer(1)]],
@@ -1526,12 +1874,53 @@ kernel void gjxl_aq_select_adjusted_quantization(
   const uint global_scale = params.use_resident_quantizer != 0u
     ? resident_quantizer[0]
     : params.global_scale;
-  const AqAdjustedQuantization decision = aq_select_adjusted_quantization(
+  const AqAdjustedQuantization decision = aq_select_adjusted_quantization_serial(
     forward_coefficients + transform_offset, quant_tables,
     params.coefficient_count, group_channel_stride,
     coefficient_width, coefficient_height, params.strategy,
     global_scale, raw_quant[raw_index], params.x_matrix_multiplier,
     params.b_matrix_multiplier, error);
+  raw_quant[raw_index] = decision.raw_quant;
+  const uint threshold_offset =
+    params.coefficient_offset + 4u * anchor_index;
+  for (uint quadrant = 0u; quadrant < 4u; ++quadrant) {
+    adjustment_thresholds[threshold_offset + quadrant] =
+      decision.y_thresholds[quadrant];
+  }
+}
+
+kernel void gjxl_aq_select_adjusted_quantization_parallel(
+  device const uint2* anchors [[buffer(0)]],
+  device const float* quant_tables [[buffer(1)]],
+  device int* raw_quant [[buffer(2)]],
+  device const float* forward_coefficients [[buffer(3)]],
+  device float* adjustment_thresholds [[buffer(4)]],
+  device atomic_uint* error [[buffer(5)]],
+  constant AqReconstructionParams& params [[buffer(6)]],
+  device const uint* resident_quantizer [[buffer(7)]],
+  uint anchor_index [[threadgroup_position_in_grid]],
+  uint lane [[thread_index_in_threadgroup]]) {
+
+  if (anchor_index >= params.anchor_count) return;
+  const uint2 anchor = anchors[params.anchor_offset + anchor_index];
+  const uint group_channel_stride =
+    params.anchor_count * params.coefficient_count;
+  const uint transform_offset =
+    params.coefficient_offset + anchor_index * params.coefficient_count;
+  const uint coefficient_width = max(params.pixel_width, params.pixel_height);
+  const uint coefficient_height = min(params.pixel_width, params.pixel_height);
+  const uint raw_index = anchor.y * params.raw_quant_stride + anchor.x;
+  const uint global_scale = params.use_resident_quantizer != 0u
+    ? resident_quantizer[0]
+    : params.global_scale;
+  threadgroup float scratch[kAqAdjustmentScratchFloats];
+  const AqAdjustedQuantization decision = aq_select_adjusted_quantization_parallel(
+    forward_coefficients + transform_offset, quant_tables,
+    params.coefficient_count, group_channel_stride,
+    coefficient_width, coefficient_height, params.strategy,
+    global_scale, raw_quant[raw_index], params.x_matrix_multiplier,
+    params.b_matrix_multiplier, error, scratch, lane);
+  if (lane != 0u) return;
   raw_quant[raw_index] = decision.raw_quant;
   const uint threshold_offset =
     params.coefficient_offset + 4u * anchor_index;
@@ -2079,23 +2468,26 @@ kernel void gjxl_aq_adjustment_probe(
   device float* adjusted_y_thresholds [[buffer(4)]],
   device atomic_uint* error [[buffer(5)]],
   constant AqAdjustmentProbeParams& params [[buffer(6)]],
-  uint index [[thread_position_in_grid]]) {
+  uint lane [[thread_index_in_threadgroup]],
+  uint group_size [[threads_per_threadgroup]]) {
 
-  if (index != 0u) return;
-  const AqAdjustedQuantization decision = aq_select_adjusted_quantization(
+  threadgroup float scratch[kAqAdjustmentScratchFloats];
+  const AqAdjustedQuantization decision = aq_select_adjusted_quantization_parallel(
     coefficients, quant_tables, params.coefficient_count,
     params.coefficient_count,
     params.coefficient_width, params.coefficient_height, params.strategy,
     params.global_scale, params.initial_raw_quant,
-    params.x_matrix_multiplier, params.b_matrix_multiplier, error);
-  adjusted_raw_quant[0] = decision.raw_quant;
-  for (uint quadrant = 0u; quadrant < 4u; ++quadrant) {
-    adjusted_y_thresholds[quadrant] = decision.y_thresholds[quadrant];
+    params.x_matrix_multiplier, params.b_matrix_multiplier, error, scratch, lane);
+  if (lane == 0u) {
+    adjusted_raw_quant[0] = decision.raw_quant;
+    for (uint quadrant = 0u; quadrant < 4u; ++quadrant) {
+      adjusted_y_thresholds[quadrant] = decision.y_thresholds[quadrant];
+    }
   }
 
   const uint2 table_offsets = aq_quant_table_offsets(params.strategy);
-  for (uint coefficient = 0u;
-       coefficient < params.coefficient_count; ++coefficient) {
+  for (uint coefficient = lane;
+       coefficient < params.coefficient_count; coefficient += group_size) {
     const uint x = coefficient % params.coefficient_width;
     const uint y = coefficient / params.coefficient_width;
     const uint quadrant = uint(y >= params.coefficient_height / 2u) * 2u +

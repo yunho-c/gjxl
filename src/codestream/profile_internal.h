@@ -13,7 +13,8 @@ namespace gjxl::codestream_internal {
 /// These counters are intentionally work, not wall-clock phase durations:
 /// overlapping DC, coefficient-order, and AC-candidate tasks are summed. The
 /// enclosing VarDctCodestreamProfile::entropy_optimization_nanoseconds remains
-/// the authoritative elapsed time for the complete parallel phase.
+/// elapsed phase time. Overlapping rate searches assign wall intervals to
+/// entropy before section writing and assembly; worker counters retain all work.
 struct EntropyWorkProfile {
   uint64_t prefix_histogram_build_nanoseconds = 0;
   uint64_t prefix_histogram_cost_nanoseconds = 0;

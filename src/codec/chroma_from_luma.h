@@ -33,7 +33,8 @@ namespace chroma_from_luma_internal {
   ConstPlaneI32View,
   const Quantizer&,
   bool,
-  ColorCorrelationMap*);
+  ColorCorrelationMap*,
+  uint32_t);
 }  // namespace chroma_from_luma_internal
 
 inline constexpr size_t kColorTileDimension = 64;
@@ -70,7 +71,8 @@ private:
     ConstPlaneI32View,
     const Quantizer&,
     bool,
-    ColorCorrelationMap*);
+    ColorCorrelationMap*,
+    uint32_t);
   friend Status chroma_from_luma_internal::CreateColorCorrelationMap(
     ConstPlaneI8View,
     ConstPlaneI8View,
@@ -81,7 +83,8 @@ private:
       ConstPlaneI32View,
       const Quantizer&,
       bool,
-      ColorCorrelationMap*);
+      ColorCorrelationMap*,
+      uint32_t);
 
   Extent2D tile_extent_;
   resource_budget_internal::ManagedVector<int8_t> y_to_x_;
@@ -98,12 +101,14 @@ private:
   ColorCorrelationMap* out);
 
 /// Recomputes CfL after strategy selection and raw-quant finalization.
+/// Nonlinear iteration limits are in [1, 20]; fast regression ignores the limit.
 [[nodiscard]] Status ComputeFinalColorCorrelationMap(
   ConstImage3FView opsin,
   const AcStrategyGrid& strategies,
   ConstPlaneI32View raw_quant_field,
   const Quantizer& quantizer,
   bool fast,
-  ColorCorrelationMap* out);
+  ColorCorrelationMap* out,
+  uint32_t nonlinear_iterations = 20);
 
 }  // namespace gjxl

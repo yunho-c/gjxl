@@ -239,6 +239,7 @@ bool CheckParity(Extent2D extent) {
   std::vector<uint8_t> retained;
   for (auto entropy :
        {VarDctEntropyBehavior::kBalanced, VarDctEntropyBehavior::kHighDensity,
+        VarDctEntropyBehavior::kRateOptimized,
         VarDctEntropyBehavior::kMaximumCompression}) {
     for (auto order : {VarDctCoefficientOrderBehavior::kFull,
                        VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled}) {

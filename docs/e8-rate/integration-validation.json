@@ -1,0 +1,194 @@
+{
+  "state": "complete",
+  "scope": "effort8 full native HybridUint/ANS width search integration",
+  "base_revision": "b1fbfc15f32a3c3ac3d1d2b5b7983d0ced22a00f",
+  "production_sources_match_build": true,
+  "full_corpus_points": 390,
+  "exact_decoded_points": 390,
+  "exact_prototype_bytes": 390,
+  "no_larger_than_baseline": 390,
+  "bd_rate": {
+    "baseline": {
+      "pchip": -1.0202306689699578,
+      "akima": -1.0188066125092388
+    },
+    "libjxl": {
+      "pchip": -0.8618532487767366,
+      "akima": -0.8585423259857029
+    }
+  },
+  "ctest": {
+    "passed": 137,
+    "total": 138,
+    "failure": "quantization_pipeline",
+    "unchanged_baseline_reproduced": true
+  },
+  "final_rebuilt_tests": {
+    "passed": 3,
+    "total": 3
+  },
+  "conformance_exact_pixels": [
+    {
+      "fixture": "hard-edge",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/hard-edge/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/hard-edge/balanced.pfm",
+      "decoded_sha256": "08c1945c712de467e256dc3d0a99bd613f854bbf40f9e56a49064677bf4a251b"
+    },
+    {
+      "fixture": "mixed-strategy-random",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/mixed-strategy-random/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/mixed-strategy-random/balanced.pfm",
+      "decoded_sha256": "e8dd7853997b7c54915d39cf898810d3e74f7bf2a4d688d56ed50b353545f58e"
+    },
+    {
+      "fixture": "large-signed-tokens",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/large-signed-tokens/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/large-signed-tokens/balanced.pfm",
+      "decoded_sha256": "b75920c395d0155b825a1f85fba2c181584311868e4b7ce1642dc8cb1c21166a"
+    },
+    {
+      "fixture": "odd-gradient",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/odd-gradient/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/odd-gradient/balanced.pfm",
+      "decoded_sha256": "197c42c1096fe0a78e675db3870cfd76bd932f4045154385cf1c8f4f20277d7f"
+    },
+    {
+      "fixture": "DCT32x32",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/DCT32x32/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/DCT32x32/balanced.pfm",
+      "decoded_sha256": "851f0777640c6224fe775466067202548163e8ec9a0355d47dccb881e4231680"
+    },
+    {
+      "fixture": "DCT16x32",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/DCT16x32/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/DCT16x32/balanced.pfm",
+      "decoded_sha256": "22d57e70b38f4469f7f0af8e6b70f2fb5bd1ecc624de6265971b15c07af19458"
+    },
+    {
+      "fixture": "saturated-primary",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/saturated-primary/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/saturated-primary/balanced.pfm",
+      "decoded_sha256": "e88c10756440b9881183ce40bc8457795a9eb5be8a9bddcb8588b08e137fb3f9"
+    },
+    {
+      "fixture": "raw-quant-one",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/raw-quant-one/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/raw-quant-one/balanced.pfm",
+      "decoded_sha256": "97486131ae8300266f9b7169d275ecd25b48ac60d9a5909a6978db83e1af0dc7"
+    },
+    {
+      "fixture": "DCT16x16",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/DCT16x16/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/DCT16x16/balanced.pfm",
+      "decoded_sha256": "5f5127ccc4dee2954dbe4b36e5151e2cc55e410adaa14faf589b03f7b467a838"
+    },
+    {
+      "fixture": "DCT8",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/DCT8/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/DCT8/balanced.pfm",
+      "decoded_sha256": "b6fb97ad50050cfd90fd1900f75b8d00bd91484ed69134d23275c7c93c99e1ad"
+    },
+    {
+      "fixture": "DCT32x16",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/DCT32x16/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/DCT32x16/balanced.pfm",
+      "decoded_sha256": "0093b194e60a8b6e560fb0329793fbed592083a52fe45bc02e40a04b18d1d98f"
+    },
+    {
+      "fixture": "ac-boundary",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/ac-boundary/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/ac-boundary/balanced.pfm",
+      "decoded_sha256": "fd9fc4b2607abee69f917bcb2e02fe68c1dc445e621df8ec26404257698e21b5"
+    },
+    {
+      "fixture": "one-pixel-flat",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/one-pixel-flat/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/one-pixel-flat/balanced.pfm",
+      "decoded_sha256": "1fc8791c536cbc424c3e400116fbb628e92049bb46e9660bf8e8e83ee4bf67fe"
+    },
+    {
+      "fixture": "DCT16x8",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/DCT16x8/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/DCT16x8/balanced.pfm",
+      "decoded_sha256": "e50d9fd35233f1d2cd582473389a127450c0c5af5eebedf8f04345cad8e472cf"
+    },
+    {
+      "fixture": "dc-boundary",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/dc-boundary/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/dc-boundary/balanced.pfm",
+      "decoded_sha256": "794b9cfbd130e885c96450970c9253585b43d02fe6a5340e573b5b6042795550"
+    },
+    {
+      "fixture": "ac-edge",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/ac-edge/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/ac-edge/balanced.pfm",
+      "decoded_sha256": "dd2aeedf18d3fcc093974572306e77aed9cdc4530e7e8635fabaaaf5443fe30c"
+    },
+    {
+      "fixture": "raw-quant-256",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/raw-quant-256/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/raw-quant-256/balanced.pfm",
+      "decoded_sha256": "4d7429c26a875175fd73210e8fb3f9cefe057401d914b56cb4d5e31400af2358"
+    },
+    {
+      "fixture": "DCT8x16",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/DCT8x16/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/DCT8x16/balanced.pfm",
+      "decoded_sha256": "7a3d82cd3e6738d3c8044b0d7c464a20cd3c0c48077eb521a48303dfac07f721"
+    },
+    {
+      "fixture": "texture",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/texture/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/texture/balanced.pfm",
+      "decoded_sha256": "034d5cd476c3103abcc05e6c4f05807cb242d61bedc9018fd764046489b42506"
+    },
+    {
+      "fixture": "no-gaborish-odd",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/no-gaborish-odd/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/no-gaborish-odd/balanced.pfm",
+      "decoded_sha256": "86ef71df00a5919b1216a7e5a9fb0a45fe58f92bdc2d912ab3e6f5bdf98a10c9"
+    },
+    {
+      "fixture": "random",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/random/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/random/balanced.pfm",
+      "decoded_sha256": "ce793eac031a540b11142f089033ed0570c7e676e53eed22f48d4a5eddb1218f"
+    },
+    {
+      "fixture": "dc-edge",
+      "rate_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/dc-edge/rate-optimized.pfm",
+      "balanced_path": "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/pinned-conformance/run-39508/dc-edge/balanced.pfm",
+      "decoded_sha256": "3079a20e2753356b05894ade6a58326eed214d984a6f516a2378307881042a34"
+    }
+  ],
+  "other_efforts_exact_bytes": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    9,
+    10
+  ],
+  "runtime_qualified": false,
+  "staged": false,
+  "committed": false,
+  "artifacts": {
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated-validation/source-manifest.json": "721a7ab1a901a25bdb8820c0dfa190b534c85fead81b41f4f0f1224efb5383db",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated/build.json": "9367ab4e807068f21e96684db92d113586a967225121148725602a6b29f74e47",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated-rate/manifest.json": "56a55698c3f49dffe8e691d0ceede51bae088d1982521d3c858fff52b7776225",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated-rate/results.jsonl": "cce7dcfaeb798fb29f781a27609cd156c8001301b20da1f07bb4dedce3c59f6c",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated-rate/status.json": "50d5560f4fae2a4315845cbbae92a90d4b6ff8177c4b53e982dd2c49706f86ec",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/docs/e8-rate/integrated-rate.json": "0325347b35f1eb24b105d67c17778527847d7b4739c28a0c31900a75bfdfce5c",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated-other-efforts/results.json": "11ea89bc9934dce8d5cfaeacb39d3429f33fed75631fa70ed3fd0f4335c4946a",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated-baseline-check/build.json": "7beaa005f4de26ea0d11178a727434115f363259e5df2b8b7945b95eea76196d",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated-validation/configure.log": "1d0fd59a5664d20aaac44013a79587a3f08c55450c62ad713bca8f27f04583c0",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated-validation/final-tests.log": "4e32351ee635c9751b43db78df4588037827066a60a897d649f1a7e8de2948ec",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated-validation/ctest.log": "a584673125c8a6cbeac0fcbc2bf8db9224b5f49552c233f356a9eb23168df330",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated-validation/conformance.log": "de0f141e6927a4d6094e5415f9b707bf945887dc86dd51c705628bb7b1817466",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated-validation/build.log": "cf2a23760090c0e4fa9c979aa318819406ed0fd7c619642eb0f632a12219abff",
+    "/Users/yunhocho/GitHub/gjxl-e8-rate/build/e8-integrated-baseline-check/result.log": "7ce432a751482953a717004e4f9f85c3b89415f8e24be37783cd954a8a947882"
+  }
+}

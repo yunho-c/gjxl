@@ -292,6 +292,28 @@ bool CheckPinnedFinalMap() {
     return false;
   }
 
+  for (uint32_t iterations : {1u, 8u, 20u}) {
+    if (!gjxl::ComputeFinalColorCorrelationMap(
+          opsin, strategies, raw_const, quantizer, false, &map, iterations).ok() ||
+        !gjxl::chroma_from_luma_internal::ComputeFinalColorCorrelationMapPrepared(
+          prepared, raw_const, quantizer, false, &prepared_map, iterations).ok() ||
+        map.y_to_x_map().Row(0)[0] != prepared_map.y_to_x_map().Row(0)[0] ||
+        map.y_to_b_map().Row(0)[0] != prepared_map.y_to_b_map().Row(0)[0]) {
+      std::cerr << "Bounded direct/prepared final CfL mismatch\n";
+      return false;
+    }
+  }
+  for (uint32_t invalid : {0u, 21u, UINT32_MAX}) {
+    const auto x = map.y_to_x_map().Row(0)[0];
+    const auto b = map.y_to_b_map().Row(0)[0];
+    if (gjxl::ComputeFinalColorCorrelationMap(
+          opsin, strategies, raw_const, quantizer, false, &map, invalid).ok() ||
+        gjxl::chroma_from_luma_internal::ComputeFinalColorCorrelationMapPrepared(
+          prepared, raw_const, quantizer, false, &prepared_map, invalid).ok() ||
+        map.y_to_x_map().Row(0)[0] != x || map.y_to_b_map().Row(0)[0] != b ||
+        prepared_map.y_to_x_map().Row(0)[0] != x || prepared_map.y_to_b_map().Row(0)[0] != b)
+      return false;
+  }
   raw_quant[15] = 0;
   const int8_t original_x = map.y_to_x_map().Row(0)[0];
   const int8_t original_b = map.y_to_b_map().Row(0)[0];

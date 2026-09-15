@@ -1168,59 +1168,62 @@ bool CheckAdjustmentProbe(const HostImage& image,
       }
     }
     for (AdjustmentPattern pattern : kPatterns) {
-      const int32_t raw_quant = pattern == AdjustmentPattern::kQuantLimit
-        ? gjxl::kMaxRawQuant
-        : 37;
-      std::array<std::vector<float>, 3> coefficients;
-      std::array<std::span<const float>, 3> coefficient_views;
-      for (size_t channel = 0; channel < 3; ++channel) {
-        coefficients[channel].resize(matrices[channel].dequant.size());
-        FillAdjustmentCoefficients(
-          pattern, channel, raw_quant, matrix_multipliers[channel], quantizer,
-          matrices[channel], &coefficients[channel]);
-        coefficient_views[channel] = coefficients[channel];
-      }
-      gjxl::AdjustedAcQuantization expected;
-      std::vector<int32_t> expected_y(coefficients[1].size());
-      if (!CheckStatus(gjxl::SelectAdjustedAcQuantization(
-            strategy, quantizer, raw_quant, matrix_multipliers,
-            coefficient_views, &expected), "CPU adjustment probe") ||
-          !CheckStatus(gjxl::QuantizeAdjustedYAcBlock(
-            strategy, quantizer, expected, coefficients[1], expected_y),
-            "CPU adjusted-Y probe")) {
-        return false;
-      }
-      gjxl::metal_internal::MetalAqAdjustmentResultForTesting actual;
-      if (!CheckStatus(
-            gjxl::metal_internal::RunMetalAqAdjustmentProbeForTesting(
-              *prepared,
-              {
-                .strategy = strategy,
-                .initial_raw_quant = raw_quant,
-                .quantizer = params,
-                .matrix_multipliers = matrix_multipliers,
-                .coefficients = coefficient_views,
-              },
-              &actual),
-            "Metal adjustment probe") ||
-          actual.decision.raw_quant != expected.raw_quant ||
-          actual.quantized_y != expected_y) {
-        std::cerr << "Adjusted Metal decision differs for strategy "
-                  << static_cast<int>(strategy) << ", pattern "
-                  << static_cast<int>(pattern) << ": raw="
-                  << actual.decision.raw_quant << ", expected="
-                  << expected.raw_quant << '\n';
-        return false;
-      }
-      for (size_t quadrant = 0; quadrant < 4; ++quadrant) {
-        if (!Near(actual.decision.y_thresholds[quadrant],
-                  expected.y_thresholds[quadrant], 2.0e-6, 2.0e-6)) {
-          std::cerr << "Adjusted Y threshold differs for quadrant "
-                    << quadrant << '\n';
+      // Exercise low, middle and saturated quantizers across 64..1024 values,
+      // including the sparse, threshold-tie and high-frequency-border cases.
+      for (int32_t raw_quant : {1, 37, 128, gjxl::kMaxRawQuant}) {
+        if (pattern == AdjustmentPattern::kQuantLimit &&
+            raw_quant != gjxl::kMaxRawQuant) continue;
+        std::array<std::vector<float>, 3> coefficients;
+        std::array<std::span<const float>, 3> coefficient_views;
+        for (size_t channel = 0; channel < 3; ++channel) {
+          coefficients[channel].resize(matrices[channel].dequant.size());
+          FillAdjustmentCoefficients(
+            pattern, channel, raw_quant, matrix_multipliers[channel], quantizer,
+            matrices[channel], &coefficients[channel]);
+          coefficient_views[channel] = coefficients[channel];
+        }
+        gjxl::AdjustedAcQuantization expected;
+        std::vector<int32_t> expected_y(coefficients[1].size());
+        if (!CheckStatus(gjxl::SelectAdjustedAcQuantization(
+              strategy, quantizer, raw_quant, matrix_multipliers,
+              coefficient_views, &expected), "CPU adjustment probe") ||
+            !CheckStatus(gjxl::QuantizeAdjustedYAcBlock(
+              strategy, quantizer, expected, coefficients[1], expected_y),
+              "CPU adjusted-Y probe")) {
           return false;
         }
+        gjxl::metal_internal::MetalAqAdjustmentResultForTesting actual;
+        if (!CheckStatus(
+              gjxl::metal_internal::RunMetalAqAdjustmentProbeForTesting(
+                *prepared,
+                {
+                  .strategy = strategy,
+                  .initial_raw_quant = raw_quant,
+                  .quantizer = params,
+                  .matrix_multipliers = matrix_multipliers,
+                  .coefficients = coefficient_views,
+                },
+                &actual),
+              "Metal adjustment probe") ||
+            actual.decision.raw_quant != expected.raw_quant ||
+            actual.quantized_y != expected_y) {
+          std::cerr << "Adjusted Metal decision differs for strategy "
+                    << static_cast<int>(strategy) << ", pattern "
+                    << static_cast<int>(pattern) << ": raw="
+                    << actual.decision.raw_quant << ", expected="
+                    << expected.raw_quant << '\n';
+          return false;
+        }
+        for (size_t quadrant = 0; quadrant < 4; ++quadrant) {
+          if (!Near(actual.decision.y_thresholds[quadrant],
+                    expected.y_thresholds[quadrant], 2.0e-6, 2.0e-6)) {
+            std::cerr << "Adjusted Y threshold differs for quadrant "
+                      << quadrant << '\n';
+            return false;
+          }
+        }
+        ++probe_count;
       }
-      ++probe_count;
     }
   }
   const gjxl::GpuBackendStats after = gpu->stats();
@@ -1668,6 +1671,148 @@ bool CheckResidentInitialQuantization(const HostImage& image) {
   return true;
 }
 
+bool CheckFinalColorCorrelation(const HostImage& image) {
+  using namespace gjxl;
+  using namespace prepared_coefficients_internal;
+  AcStrategyGrid strategies;
+  if (!AcStrategyGrid::Create(kBlockExtent, &strategies).ok()) return false;
+  for (auto strategy : {AcStrategyType::kDct32x32, AcStrategyType::kDct32x16,
+                        AcStrategyType::kDct16x32, AcStrategyType::kDct16x16,
+                        AcStrategyType::kDct16x8, AcStrategyType::kDct8x16}) {
+    const auto size = GetAcStrategyInfo(strategy)->covered_blocks;
+    bool placed = false;
+    for (size_t y = 0; !placed && y + size.height <= kBlockExtent.height; ++y)
+      for (size_t x = 0; !placed && x + size.width <= kBlockExtent.width; ++x)
+        if (x % 8 + size.width <= 8 && y % 8 + size.height <= 8 &&
+            strategies.Set(x, y, strategy).ok()) placed = true;
+    if (!placed) return false;
+  }
+  strategies.fill_empty_dct8();
+  std::unique_ptr<GpuBackend> gpu;
+  if (!CheckStatus(CreateMetalBackend(GJXL_METALLIB_PATH, &gpu), "final CfL backend"))
+    return false;
+  const size_t blocks = kBlockExtent.width * kBlockExtent.height;
+  std::vector<uint8_t> sharpness(blocks, 4);
+  auto options = Options();
+  options.metric = AqEvaluationMetric::kMaximumError;
+  options.maximum_error = {1, 1, 1};
+  const auto prepare = [&](std::unique_ptr<PreparedAqEvaluation>* destination) {
+    return CheckStatus(PrepareAqEvaluation(*gpu,
+      {.original_linear_rgb = image.View(), .coding_opsin = image.View(),
+       .strategies = &strategies,
+       .epf_sharpness = {sharpness.data(), kBlockExtent, kBlockExtent.width},
+       .options = options, .resident_quantization = true,
+       .coefficient_decision_mode = AcCoefficientDecisionMode::kAdjustedSharedQuant}, destination),
+       "final CfL preparation");
+  };
+  std::unique_ptr<PreparedAqEvaluation> prepared;
+  if (!prepare(&prepared)) return false;
+  PreparedForwardDctCoefficients original;
+  if (!CheckStatus(PrepareForwardDctCoefficients(image.View(), strategies, &original),
+                   "final CfL shared coefficients")) return false;
+  size_t cases = 0;
+  bool saw_clamp = false, saw_nonzero = false;
+  for (uint32_t scale : {1u, 3541u, 32768u}) {
+    Quantizer quantizer;
+    if (!Quantizer::Create({scale, 10}, &quantizer).ok()) return false;
+    std::vector<int32_t> raw(blocks);
+    for (size_t i = 0; i < blocks; ++i) raw[i] = 1 + (i * 37) % 256;
+    ConstPlaneI32View raw_view{raw.data(), kBlockExtent, kBlockExtent.width};
+    for (size_t pattern = 0; pattern < 12; ++pattern) {
+      auto coefficients = original;
+      if (pattern != 0) {
+        for (const auto& transform : coefficients.transforms) {
+          QuantizationMatrixView mx, mb;
+          if (!GetDefaultQuantizationMatrix(transform.strategy, XybChannel::kX, &mx).ok() ||
+              !GetDefaultQuantizationMatrix(transform.strategy, XybChannel::kB, &mb).ok())
+            return false;
+          const float q = quantizer.scale() * 128.0f *
+            raw_view.Row(transform.block_y)[transform.block_x];
+          for (size_t i = 0; i < transform.coefficient_count; ++i) {
+            const size_t k = transform.coefficient_offset + i;
+            // Flat, center-mask boundaries, sparse inputs, and integer-factor
+            // thresholds share the exact stored forward coefficients on CPU/GPU.
+            float y = pattern == 1 ? 0.0f :
+              pattern == 2 ? 84.0f : 0.01f * float(1 + i % 13);
+            const float factor = pattern == 3 ? 600.0f :
+              pattern == 4 ? -600.0f :
+              (pattern & 1 ? -1.0f : 1.0f) * (float(pattern) + 3.1f);
+            float x = y * (factor / 84.0f);
+            float b = y * (1.0f - factor / 84.0f);
+            if (pattern == 2) {
+              constexpr float boundaries[] = {99.99999f, 100.0f, 100.00001f,
+                                               -99.99999f, -100.0f, -100.00001f};
+              x = boundaries[i % 6]; b = y + boundaries[(i + 3) % 6];
+            }
+            if (pattern >= 8 && i % 5 != 0) y = x = b = 0.0f;
+            coefficients.coefficients[0][k] = x / (mx.inverse_dequant[i] * q);
+            coefficients.coefficients[1][k] = y / (mx.inverse_dequant[i] * q);
+            coefficients.coefficients[2][k] = b / (mb.inverse_dequant[i] * q);
+          }
+        }
+      }
+      for (uint32_t iterations : {0u, 1u, 8u, 20u}) {
+        ColorCorrelationMap expected, actual;
+        if (!CheckStatus(chroma_from_luma_internal::ComputeFinalColorCorrelationMapPrepared(
+              coefficients, raw_view, quantizer, iterations == 0, &expected,
+              iterations == 0 ? 20 : iterations), "CPU final CfL oracle") ||
+            !CheckStatus(metal_internal::RunMetalAqFinalColorCorrelationForTesting(
+              *prepared, coefficients, raw_view, quantizer, iterations, &actual),
+              "resident final CfL probe")) return false;
+        for (size_t y = 0; y < expected.tile_extent().height; ++y)
+          for (size_t x = 0; x < expected.tile_extent().width; ++x) {
+            const int ex = expected.y_to_x_map().Row(y)[x];
+            const int eb = expected.y_to_b_map().Row(y)[x];
+            const int ax = actual.y_to_x_map().Row(y)[x];
+            const int ab = actual.y_to_b_map().Row(y)[x];
+            if (ex != ax || eb != ab) {
+              std::cerr << "Final CfL factor mismatch scale=" << scale
+                        << " pattern=" << pattern << " iterations=" << iterations
+                        << " tile=" << x << ',' << y << " expected=" << ex << ',' << eb
+                        << " actual=" << ax << ',' << ab << '\n';
+              return false;
+            }
+            saw_clamp |= ex == -128 || ex == 127 || eb == -128 || eb == 127;
+            saw_nonzero |= ex != 0 || eb != 0;
+          }
+        ++cases;
+      }
+    }
+  }
+  std::vector<float> field(blocks, 1.0f);
+  if (!ExpectCode(prepared->PrepareInvariantColorCorrelationResident(
+        {field.data(), kBlockExtent, kBlockExtent.width}, 10, 21),
+        StatusCode::kInvalidArgument, "invalid CfL steps") ||
+      !CheckStatus(prepared->PrepareInvariantColorCorrelationResident(
+        {field.data(), kBlockExtent, kBlockExtent.width}, 10, 8),
+        "ready after invalid CfL steps")) return false;
+  // Bad raw quantization reaches the kernel's existing error flag and leaves
+  // the caller's previously valid map intact.
+  std::vector<int32_t> raw(blocks, 0);
+  Quantizer quantizer;
+  ColorCorrelationMap sentinel;
+  if (!Quantizer::Create({3541, 10}, &quantizer).ok() ||
+      !ComputeInitialColorCorrelationMap(image.View(), &sentinel).ok()) return false;
+  const auto before_x = sentinel.y_to_x_map().Row(0)[0];
+  const auto before_b = sentinel.y_to_b_map().Row(0)[0];
+  if (!ExpectCode(metal_internal::RunMetalAqFinalColorCorrelationForTesting(
+        *prepared, original, {raw.data(), kBlockExtent, kBlockExtent.width},
+        quantizer, 8, &sentinel), StatusCode::kDeviceError, "invalid final CfL quant") ||
+      sentinel.y_to_x_map().Row(0)[0] != before_x ||
+      sentinel.y_to_b_map().Row(0)[0] != before_b) return false;
+  if (!prepare(&prepared)) return false;
+  std::fill(raw.begin(), raw.end(), 1);
+  auto invalid_coefficients = original;
+  invalid_coefficients.coefficients[0][9] = std::numeric_limits<float>::quiet_NaN();
+  if (!ExpectCode(metal_internal::RunMetalAqFinalColorCorrelationForTesting(
+        *prepared, invalid_coefficients, {raw.data(), kBlockExtent, kBlockExtent.width},
+        quantizer, 8, &sentinel), StatusCode::kDeviceError, "non-finite final CfL") ||
+      sentinel.y_to_x_map().Row(0)[0] != before_x ||
+      sentinel.y_to_b_map().Row(0)[0] != before_b) return false;
+  std::cout << cases << " exact final CfL CPU/Metal cases passed\n";
+  return saw_clamp && saw_nonzero;
+}
+
 bool CheckResidentQuantizationPreparation(
     const HostImage& image, const gjxl::AcStrategyGrid& strategies) {
   std::unique_ptr<gjxl::GpuBackend> gpu;
@@ -1895,6 +2040,7 @@ int main() {
       !CheckResidentInitialCfl(flat, strategies) ||
       !CheckResidentInitialQuantization(structured) ||
       !CheckResidentInitialQuantization(flat) ||
+      !CheckFinalColorCorrelation(structured) ||
       !CheckResidentQuantizationPreparation(structured, strategies) ||
       !CheckConcurrentReconstruction(structured, strategies)) {
     return EXIT_FAILURE;

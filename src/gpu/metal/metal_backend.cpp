@@ -661,13 +661,11 @@ std::shared_ptr<MetalBackendRegistry> PreparationCacheRegistry() {
   return registry;
 }
 
-// Limits only the additional Butteraugli capacity cache, including every
-// simultaneously alive backend. Active leases are never purgeable/counted.
-constexpr size_t kButteraugliProcessCacheLimit = size_t{1024} * 1024 * 1024;
-std::atomic<size_t> idle_butteraugli_bytes{0};
-
 constexpr size_t kCompletedFrameProcessCacheLimit = size_t{256} * 1024 * 1024;
 std::atomic<size_t> idle_completed_frame_bytes{0};
+// Kept separately for the Butteraugli diagnostic API; admission uses the
+// aggregate preparation-cache counter shared by all five pools.
+std::atomic<size_t> idle_butteraugli_bytes{0};
 
 bool ReserveCompletedFrameCacheBytes(size_t bytes) noexcept {
   size_t current = idle_completed_frame_bytes.load(std::memory_order_relaxed);
@@ -678,23 +676,9 @@ bool ReserveCompletedFrameCacheBytes(size_t bytes) noexcept {
   return false;
 }
 
-bool ReserveButteraugliCacheBytes(size_t bytes) noexcept {
-  size_t current = idle_butteraugli_bytes.load(std::memory_order_relaxed);
-  while (bytes <= kButteraugliProcessCacheLimit - current) {
-    if (idle_butteraugli_bytes.compare_exchange_weak(
-          current, current + bytes, std::memory_order_relaxed)) return true;
-  }
-  return false;
-}
-
-// One idle arena of each class is enough to accelerate sequential encodes
-// without multiplying the retained capacity by the number of concurrent
-// callers. Larger forced-Metal workloads remain supported, but their arenas
-// are released instead of becoming a permanent backend high-water mark.
-constexpr size_t kMaximumRetainedAqScratchArenaBytes =
-  size_t{1024} * 1024 * 1024;
-
 }  // namespace
+
+std::atomic<size_t> MetalBackend::idle_preparation_bytes_{0};
 
 MetalBackend::MetalBackend(
   NS::SharedPtr<MTL::Device> device,
@@ -708,6 +692,7 @@ MetalBackend::MetalBackend(
   ButteraugliPipelines butteraugli_pipelines,
   bool test_fail_submission,
   bool test_fail_completion,
+  size_t preparation_cache_bytes,
   size_t butteraugli_cache_bytes,
   size_t completed_frame_cache_bytes)
   : device_(std::move(device)),
@@ -721,8 +706,11 @@ MetalBackend::MetalBackend(
     butteraugli_pipelines_(std::move(butteraugli_pipelines)),
     test_fail_submission_(test_fail_submission),
     test_fail_completion_(test_fail_completion),
+    preparation_cache_limit_(std::min({
+      preparation_cache_bytes, kPreparationProcessCacheLimit,
+      static_cast<size_t>(device_->recommendedMaxWorkingSetSize() / 3)})),
     butteraugli_cache_limit_(std::min(
-      butteraugli_cache_bytes, kButteraugliProcessCacheLimit)),
+      butteraugli_cache_bytes, preparation_cache_limit_)),
     completed_frame_cache_limit_(std::min(
       completed_frame_cache_bytes, kCompletedFrameProcessCacheLimit)) {
 
@@ -752,6 +740,9 @@ MetalBackend::~MetalBackend() {
   // All prepared operations must already be destroyed by the backend contract.
   DropButteraugliCacheLocked();
   DropCompletedFrameCacheLocked();
+  for (size_t i = 0; i < idle_aq_scratch_.size(); ++i)
+    DropAqScratchArenaLocked(i);
+  assert(preparation_cache_bytes_ == 0);
 }
 
 Status TrimMetalPreparationCachesForDomain(
@@ -774,8 +765,8 @@ Status MetalBackend::TrimPreparationCacheForDomain(
     return buffer != nullptr && buffer->allocation().SharesDomain(budget);
   };
   if (matches(idle_butteraugli_scratch_)) DropButteraugliCacheLocked();
-  for (auto& arena : idle_aq_scratch_)
-    if (matches(arena)) arena.reset();
+  for (size_t i = 0; i < idle_aq_scratch_.size(); ++i)
+    if (matches(idle_aq_scratch_[i])) DropAqScratchArenaLocked(i);
   if (idle_completed_frame_ &&
       AsMetalBuffer(*idle_completed_frame_)->allocation().SharesDomain(budget))
     DropCompletedFrameCacheLocked();
@@ -790,6 +781,36 @@ void MetalBackend::DropButteraugliCacheLocked() noexcept {
   const size_t bytes = idle_butteraugli_scratch_->capacity_bytes();
   idle_butteraugli_scratch_.reset();
   idle_butteraugli_bytes.fetch_sub(bytes, std::memory_order_relaxed);
+  ReleasePreparationCacheBytesLocked(bytes);
+}
+
+bool MetalBackend::ReservePreparationCacheBytesLocked(size_t bytes) noexcept {
+  if (bytes > preparation_cache_limit_ - preparation_cache_bytes_) return false;
+  size_t current = idle_preparation_bytes_.load(std::memory_order_relaxed);
+  while (bytes <= kPreparationProcessCacheLimit - current) {
+    if (idle_preparation_bytes_.compare_exchange_weak(
+          current, current + bytes, std::memory_order_relaxed)) {
+      preparation_cache_bytes_ += bytes;
+      return true;
+    }
+  }
+  return false;
+}
+
+void MetalBackend::ReleasePreparationCacheBytesLocked(size_t bytes) noexcept {
+  assert(bytes <= preparation_cache_bytes_);
+  preparation_cache_bytes_ -= bytes;
+  [[maybe_unused]] const size_t previous =
+    idle_preparation_bytes_.fetch_sub(bytes, std::memory_order_relaxed);
+  assert(bytes <= previous);
+}
+
+void MetalBackend::DropAqScratchArenaLocked(size_t index) noexcept {
+  auto& arena = idle_aq_scratch_[index];
+  if (!arena) return;
+  const size_t bytes = arena->capacity_bytes();
+  arena.reset();
+  ReleasePreparationCacheBytesLocked(bytes);
 }
 
 Status MetalBackend::TrimPreparationCache() {
@@ -797,7 +818,8 @@ Status MetalBackend::TrimPreparationCache() {
   ++preparation_cache_generation_;
   DropButteraugliCacheLocked();
   DropCompletedFrameCacheLocked();
-  for (auto& arena : idle_aq_scratch_) arena.reset();
+  for (size_t i = 0; i < idle_aq_scratch_.size(); ++i)
+    DropAqScratchArenaLocked(i);
   return Status::Ok();
 }
 
@@ -819,6 +841,7 @@ Status MetalBackend::AcquireButteraugliArena(
       idle_butteraugli_scratch_.reset();
       idle_butteraugli_bytes.fetch_sub(
         candidate.capacity_bytes(), std::memory_order_relaxed);
+      ReleasePreparationCacheBytesLocked(candidate.capacity_bytes());
     }
   }
   const size_t capacity = candidate.capacity_bytes();
@@ -863,7 +886,8 @@ void MetalBackend::ReleaseButteraugliArena(
     // This method is called only after all submissions using the arena finish.
     (void)buffer->handle()->setPurgeableState(MTL::PurgeableStateVolatile);
     if (!buffer->allocation().MakeIdle().ok()) return;
-    if (!ReserveButteraugliCacheBytes(bytes)) return;
+    if (!ReservePreparationCacheBytesLocked(bytes)) return;
+    idle_butteraugli_bytes.fetch_add(bytes, std::memory_order_relaxed);
     idle_butteraugli_scratch_.emplace(std::move(arena));
   } catch (...) {
     // Opportunistic pooling must not throw from prepared-object destruction.
@@ -902,6 +926,7 @@ void MetalBackend::DropCompletedFrameCacheLocked() noexcept {
   const size_t bytes = idle_completed_frame_->size_bytes();
   idle_completed_frame_.reset();
   idle_completed_frame_bytes.fetch_sub(bytes, std::memory_order_relaxed);
+  ReleasePreparationCacheBytesLocked(bytes);
 }
 
 Status MetalBackend::AcquireCompletedFrameAllocation(
@@ -916,9 +941,11 @@ Status MetalBackend::AcquireCompletedFrameAllocation(
     std::lock_guard lock(preparation_cache_mutex_);
     generation = preparation_cache_generation_;
     candidate = std::move(idle_completed_frame_);
-    if (candidate)
+    if (candidate) {
       idle_completed_frame_bytes.fetch_sub(candidate->size_bytes(),
                                             std::memory_order_relaxed);
+      ReleasePreparationCacheBytesLocked(candidate->size_bytes());
+    }
   }
   // The storage planner rounds complete-frame capacities into size classes,
   // so exact matching also preserves the admitted job's capacity bound.
@@ -956,6 +983,10 @@ void MetalBackend::ReleaseCompletedFrameAllocation(
     (void)buffer->handle()->setPurgeableState(MTL::PurgeableStateVolatile);
     if (!buffer->allocation().MakeIdle().ok()) return;
     if (!ReserveCompletedFrameCacheBytes(bytes)) return;
+    if (!ReservePreparationCacheBytesLocked(bytes)) {
+      idle_completed_frame_bytes.fetch_sub(bytes, std::memory_order_relaxed);
+      return;
+    }
     idle_completed_frame_ = std::move(allocation);
   } catch (...) {
     // Returning an optional cache lease must never throw during destruction.
@@ -1056,6 +1087,7 @@ Status MetalBackend::AcquireAqScratchArena(
     if (idle.has_value()) {
       candidate = std::move(*idle);
       idle.reset();
+      ReleasePreparationCacheBytesLocked(candidate.capacity_bytes());
     }
   }
   if (candidate.capacity_bytes() != 0 &&
@@ -1091,7 +1123,7 @@ void MetalBackend::ReleaseAqScratchArena(
   const size_t index = static_cast<size_t>(kind);
   if (!reusable || index >= idle_aq_scratch_.size() ||
       arena.capacity_bytes() == 0 ||
-      arena.capacity_bytes() > kMaximumRetainedAqScratchArenaBytes) {
+      arena.capacity_bytes() > preparation_cache_limit_) {
     return;
   }
   arena.ResetLayout();
@@ -1109,6 +1141,8 @@ void MetalBackend::ReleaseAqScratchArena(
     if (!idle.has_value() ||
         arena.capacity_bytes() < idle->capacity_bytes()) {
       if (!buffer->allocation().MakeIdle().ok()) return;
+      DropAqScratchArenaLocked(index);
+      if (!ReservePreparationCacheBytesLocked(arena.capacity_bytes())) return;
       idle = std::move(arena);
     }
   } catch (...) {
@@ -1751,6 +1785,7 @@ Status CreateMetalBackendImpl(
       std::move(butteraugli_pipelines),
       options.test_fail_submission,
       options.test_fail_completion,
+      options.preparation_cache_bytes,
       options.butteraugli_cache_bytes,
       options.completed_frame_cache_bytes));
 

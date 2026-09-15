@@ -888,7 +888,7 @@ Status EvaluateQuantization(
         {raw_quant.data(), block_extent, block_extent.width},
         quantizer,
         options.fast_color_correlation,
-        &color_correlation);
+        &color_correlation, options.color_correlation_iterations);
       if (!field_status.ok()) {
         return field_status;
       }
@@ -1238,6 +1238,9 @@ Status ValidateAdaptiveQuantizationPolicyInputs(
       "Adaptive-quantization padding exceeds one partial block");
   }
 
+  if (options.color_correlation_iterations == 0 ||
+      options.color_correlation_iterations > 20)
+    return Status::InvalidArgument("Final CfL iteration limit is invalid");
   if (!options.profile.valid() ||
       !IsValidDcQuantization({options.dc_quantization, options.dc_prediction,
                               options.profile.extra_dc_precision})) {
@@ -1301,6 +1304,9 @@ Status ValidateResidentAdaptiveQuantizationPolicyInputs(
     return Status::InvalidArgument(
       "Resident adaptive-quantization padding exceeds one partial block");
   }
+  if (options.color_correlation_iterations == 0 ||
+      options.color_correlation_iterations > 20)
+    return Status::InvalidArgument("Final CfL iteration limit is invalid");
   if (!options.profile.valid() ||
       !IsValidDcQuantization({options.dc_quantization, options.dc_prediction,
                               options.profile.extra_dc_precision})) {

@@ -937,10 +937,11 @@ bool RunFixture(
     return false;
   }
 
-  const std::array<std::pair<gjxl::VarDctEntropyBehavior, std::string_view>, 2>
+  const std::array<std::pair<gjxl::VarDctEntropyBehavior, std::string_view>, 3>
     ordinary_behaviors = {{
       {gjxl::VarDctEntropyBehavior::kBalanced, "balanced"},
       {gjxl::VarDctEntropyBehavior::kHighDensity, "high-density"},
+      {gjxl::VarDctEntropyBehavior::kRateOptimized, "rate-optimized"},
     }};
   for (const auto& [behavior, name] : ordinary_behaviors) {
     std::vector<uint8_t> first;

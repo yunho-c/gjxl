@@ -51,9 +51,9 @@ struct Backings {
     Add(code.ans_histograms);
     for (const auto& histogram : code.ans_histograms) {
       Add(histogram.frequencies);
-      Add(histogram.reverse_maps);
+      Add(histogram.reverse_map);
+      Add(histogram.reverse_offsets);
       Add(histogram.reciprocal_frequencies);
-      for (const auto& reverse : histogram.reverse_maps) Add(reverse);
     }
     Add(cost.section_token_bits);
   }

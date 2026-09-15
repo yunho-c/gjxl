@@ -21,6 +21,8 @@ enum class VarDctEntropyBehavior {
   kHighDensity,
   /// Exhaustive historical GJXL serializer search.
   kMaximumCompression,
+  /// Full direct HybridUint/alphabet search with balanced whole-stream fallback.
+  kRateOptimized,
 };
 
 } // namespace gjxl

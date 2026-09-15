@@ -545,7 +545,8 @@ bool CheckProfileInputs(GpuBackend &gpu) {
   }
   size_t cases = 0;
   for (const Extent2D extent : {Extent2D{1, 1}, {8, 8}, {14, 15}, {15, 15},
-                                {89, 57}, {257, 257}, {2049, 2049}, {14, 4682}}) {
+                                {89, 57}, {257, 257}, {512, 1024}, {512, 1025},
+                                {2049, 2049}, {14, 4682}}) {
     Fixture f(extent);
     if (!f.Init()) return false;
     size_t anchors = 0;
@@ -565,7 +566,7 @@ bool CheckProfileInputs(GpuBackend &gpu) {
         for (size_t iterations = 0; iterations <= 4; ++iterations)
           for (bool final : {false, true}) {
             if (iterations == 0 && !final) continue;
-            if (extent.height > 1024 && (gaborish || epf != 0 || iterations != 0))
+            if (extent.height >= 1024 && (gaborish || epf != 0 || iterations != 0))
               continue;
             auto preparation = f.Preparation(1);
             preparation.strategies = &f.mixed;
@@ -583,7 +584,7 @@ bool CheckProfileInputs(GpuBackend &gpu) {
                          &setup)) &&
                      Ok(owner->PrepareInvariantColorCorrelationResident(
                          {f.adjusted.data(), f.blocks, f.blocks.width},
-                         setup.quant_dc));
+                         setup.quant_dc, iterations % 2 == 0 ? 8u : 0u));
             };
             if (!prepare(reference) || !prepare(measured)) return false;
             const AqResidentButteraugliPolicyInput input{
@@ -633,12 +634,35 @@ bool CheckProfileInputs(GpuBackend &gpu) {
                   (stage.stage_id == "butteraugli.score_reduction" &&
                    !Check(stage.dispatches.size() == ButteraugliReductionDispatchCount(
                               extent.width * extent.height),
-                          "Complete-map score reduction depth differs")) ||
-                  ((stage.stage_id == "aq.reconstruction.quantizer" ||
-                    stage.stage_id == "aq.final_frame.quantizer") &&
-                   !Check(stage.dispatches.size() == 20,
-                          "Resident radix quantizer dispatch count differs")))
+                          "Complete-map score reduction depth differs")))
                 return false;
+              if (stage.stage_id == "aq.reconstruction.quantizer" ||
+                  stage.stage_id == "aq.final_frame.quantizer") {
+                if (!Check(!stage.dispatches.empty(),
+                           "Resident quantizer has no dispatches")) return false;
+                const bool small = stage.dispatches[0].kernel_id ==
+                                   "gjxl_aq_resident_quant_small";
+                if (!Check(stage.dispatches.size() == (small ? 2u : 20u) &&
+                           stage.dispatches[stage.dispatches.size() - 1].kernel_id ==
+                               "gjxl_aq_initial_quant_raw_quant",
+                           "Resident quantizer dispatch sequence differs"))
+                  return false;
+                if (small) {
+                  if (!Check(f.blocks.width * f.blocks.height <= 8192 &&
+                             stage.dispatches[0].kind == GpuDispatchKind::kThreadgroups &&
+                             stage.dispatches[0].grid == GpuExtent3D{1, 1, 1} &&
+                             stage.dispatches[0].threads_per_threadgroup ==
+                                 GpuExtent3D{256, 1, 1},
+                             "Small quantizer exceeds its field or group bounds"))
+                    return false;
+                } else if (!Check(stage.dispatches[0].kernel_id ==
+                                      "gjxl_aq_resident_quant_select_initialize" &&
+                                  stage.dispatches[18].kernel_id ==
+                                      "gjxl_aq_resident_quant_finalize_quantizer",
+                                  "Parallel quantizer fallback differs")) {
+                  return false;
+                }
+              }
               shape.dispatches += stage.dispatches.size();
               shape.maximum_stage_id_length =
                   std::max(shape.maximum_stage_id_length, stage.stage_id.size());

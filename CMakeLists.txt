@@ -2785,6 +2785,16 @@ if(GJXL_BUILD_TESTS)
   add_test(NAME metal_aq_host_storage_plan COMMAND gjxl_metal_aq_host_storage_plan_test)
   set_tests_properties(metal_aq_host_storage_plan PROPERTIES TIMEOUT 180)
 
+  add_executable(gjxl_metal_quantizer_selection_test tests/metal_quantizer_selection_test.cpp)
+  target_link_libraries(gjxl_metal_quantizer_selection_test PRIVATE
+    metal_cpp ${METAL_FRAMEWORK} ${FOUNDATION_FRAMEWORK})
+  target_compile_options(gjxl_metal_quantizer_selection_test PRIVATE -ffp-contract=off)
+  target_compile_definitions(gjxl_metal_quantizer_selection_test PRIVATE
+    GJXL_METALLIB_PATH="${GJXL_METALLIB}")
+  add_dependencies(gjxl_metal_quantizer_selection_test gjxl_metal_shaders)
+  add_test(NAME metal_quantizer_selection COMMAND gjxl_metal_quantizer_selection_test)
+  set_tests_properties(metal_quantizer_selection PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
+
   add_executable(gjxl_metal_submission_storage_plan_test tests/metal_submission_storage_plan_test.cpp)
   add_executable(gjxl_metal_dc_processing_test tests/metal_dc_processing_test.cpp)
   target_link_libraries(gjxl_metal_dc_processing_test PRIVATE gjxl_metal gjxl_codec)

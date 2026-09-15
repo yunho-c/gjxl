@@ -130,7 +130,9 @@ enum class EntropyCodingMode : uint8_t {
 /// One normalized 12-bit ANS population and its encoder lookup tables.
 struct AnsHistogram {
   codestream_internal::Storage<uint16_t> frequencies;
-  codestream_internal::Storage<codestream_internal::Storage<uint16_t>> reverse_maps;
+  /// Concatenated per-symbol maps; offsets are frequency prefix sums.
+  codestream_internal::Storage<uint16_t> reverse_map;
+  codestream_internal::Storage<uint16_t> reverse_offsets;
   /// Exact ceil(2^44 / frequency) encoder divisors; zero for absent symbols.
   codestream_internal::Storage<uint64_t> reciprocal_frequencies;
 

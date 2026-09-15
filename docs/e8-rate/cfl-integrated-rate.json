@@ -1,0 +1,1402 @@
+{
+  "quality_range": [
+    75,
+    85
+  ],
+  "image_count": 65,
+  "points": 390,
+  "exact_control_pixels": 390,
+  "exact_combined_bytes": 390,
+  "summary": {
+    "writer": {
+      "ready_images": 65,
+      "images": 65,
+      "pchip": -0.5200574755339918,
+      "akima": -0.5290359081855064,
+      "improved_images": 48
+    },
+    "original": {
+      "ready_images": 65,
+      "images": 65,
+      "pchip": -1.5351354227520162,
+      "akima": -1.5425733874645269,
+      "improved_images": 64
+    },
+    "libjxl": {
+      "ready_images": 65,
+      "images": 65,
+      "pchip": -1.389240696052598,
+      "akima": -1.395296725071967,
+      "improved_images": 55
+    }
+  },
+  "rates": [
+    {
+      "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "anchor": "writer",
+      "pchip": -0.1341828110201751,
+      "akima": -0.12069018259514101,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "anchor": "original",
+      "pchip": -0.8710822584992108,
+      "akima": -0.8530539516690043,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "anchor": "libjxl",
+      "pchip": -3.699770472218125,
+      "akima": -3.171651656903155,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/0c49a5cce349020bbba2f97ae41e90ba",
+      "anchor": "writer",
+      "pchip": -7.585513819369308,
+      "akima": -7.676811755696265,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/0c49a5cce349020bbba2f97ae41e90ba",
+      "anchor": "original",
+      "pchip": -8.572969093221444,
+      "akima": -8.664472252296394,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/0c49a5cce349020bbba2f97ae41e90ba",
+      "anchor": "libjxl",
+      "pchip": -0.15615036203742164,
+      "akima": -0.14939144780988547,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/100a02c269c5948392f283b2aa3bb4da",
+      "anchor": "writer",
+      "pchip": 0.07647160195281671,
+      "akima": 0.08200940863728487,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/100a02c269c5948392f283b2aa3bb4da",
+      "anchor": "original",
+      "pchip": -2.0897995597177985,
+      "akima": -2.0535241902133268,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/100a02c269c5948392f283b2aa3bb4da",
+      "anchor": "libjxl",
+      "pchip": -2.2955206217764887,
+      "akima": -2.2754523956791477,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/100f17892cf7bb12beb12479641fcc4c",
+      "anchor": "writer",
+      "pchip": -0.019429020675521096,
+      "akima": -0.028955940705990384,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/100f17892cf7bb12beb12479641fcc4c",
+      "anchor": "original",
+      "pchip": -0.6355342671677058,
+      "akima": -0.6429484353606691,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/100f17892cf7bb12beb12479641fcc4c",
+      "anchor": "libjxl",
+      "pchip": -2.3217164835178936,
+      "akima": -2.28765758996062,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/11f2b039b293758398b1a7a8afa64bb2",
+      "anchor": "writer",
+      "pchip": -0.0931983603110696,
+      "akima": -0.0019413165956314827,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/11f2b039b293758398b1a7a8afa64bb2",
+      "anchor": "original",
+      "pchip": -0.9325532016078999,
+      "akima": -0.8416639288313235,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/11f2b039b293758398b1a7a8afa64bb2",
+      "anchor": "libjxl",
+      "pchip": -2.0875467873187934,
+      "akima": -2.2546551799096917,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/14ab4af28901fbeb1356b06d2d08ae06",
+      "anchor": "writer",
+      "pchip": -0.2524121980864714,
+      "akima": -0.2125363671817611,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/14ab4af28901fbeb1356b06d2d08ae06",
+      "anchor": "original",
+      "pchip": -1.1657081505352946,
+      "akima": -1.1247560946357096,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/14ab4af28901fbeb1356b06d2d08ae06",
+      "anchor": "libjxl",
+      "pchip": -0.5345451086400588,
+      "akima": -0.39918912523894784,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/1e2f9d41529197f10d32bfa68a1e0bcc",
+      "anchor": "writer",
+      "pchip": -1.5628063503067946,
+      "akima": -1.5433313312111254,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/1e2f9d41529197f10d32bfa68a1e0bcc",
+      "anchor": "original",
+      "pchip": -2.593784735584332,
+      "akima": -2.573372737730033,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/1e2f9d41529197f10d32bfa68a1e0bcc",
+      "anchor": "libjxl",
+      "pchip": -0.016217528705013987,
+      "akima": -0.01816730735103006,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/22ea12c903e41583b7c469cb86040157",
+      "anchor": "writer",
+      "pchip": -0.3292214372584096,
+      "akima": -0.34187458554150096,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/22ea12c903e41583b7c469cb86040157",
+      "anchor": "original",
+      "pchip": -1.1887300044743683,
+      "akima": -1.2002813764205775,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/22ea12c903e41583b7c469cb86040157",
+      "anchor": "libjxl",
+      "pchip": -1.9249421670976368,
+      "akima": -1.8709383839210645,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/28d24b9c83de066597ff96a68769884f",
+      "anchor": "writer",
+      "pchip": 0.08161407757917671,
+      "akima": 0.08916697249931035,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/28d24b9c83de066597ff96a68769884f",
+      "anchor": "original",
+      "pchip": -1.2139349087363858,
+      "akima": -1.2060943601859477,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/28d24b9c83de066597ff96a68769884f",
+      "anchor": "libjxl",
+      "pchip": -2.0701303831998823,
+      "akima": -2.060009294367635,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/2a2420f929cd47122eae364a2bc27710",
+      "anchor": "writer",
+      "pchip": 0.03128443239353862,
+      "akima": 0.0396478053400833,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/2a2420f929cd47122eae364a2bc27710",
+      "anchor": "original",
+      "pchip": -1.1654246677699893,
+      "akima": -1.1602025023586637,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/2a2420f929cd47122eae364a2bc27710",
+      "anchor": "libjxl",
+      "pchip": -2.842740776429741,
+      "akima": -2.9419622640224605,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/2c1f84548ef99faec2b4f9bf12227c83",
+      "anchor": "writer",
+      "pchip": 0.0303862224864622,
+      "akima": 0.052306849630079484,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/2c1f84548ef99faec2b4f9bf12227c83",
+      "anchor": "original",
+      "pchip": -1.411715863377702,
+      "akima": -1.3830981980001198,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/2c1f84548ef99faec2b4f9bf12227c83",
+      "anchor": "libjxl",
+      "pchip": -1.9859398737075005,
+      "akima": -1.893521185207878,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/3140d643a1f57e80ff265507984d95a0",
+      "anchor": "writer",
+      "pchip": -0.08837875533172536,
+      "akima": -0.053253810194444924,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/3140d643a1f57e80ff265507984d95a0",
+      "anchor": "original",
+      "pchip": -1.35537539168489,
+      "akima": -1.3228227005811424,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/3140d643a1f57e80ff265507984d95a0",
+      "anchor": "libjxl",
+      "pchip": -3.548133520886955,
+      "akima": -3.604170885623211,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/4a18abf66d65ad1a95ce455c8b6cd8de",
+      "anchor": "writer",
+      "pchip": -0.5195057243675323,
+      "akima": -0.5038490751816327,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/4a18abf66d65ad1a95ce455c8b6cd8de",
+      "anchor": "original",
+      "pchip": -1.3110940941662064,
+      "akima": -1.2924279019247695,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/4a18abf66d65ad1a95ce455c8b6cd8de",
+      "anchor": "libjxl",
+      "pchip": 0.3963258893255763,
+      "akima": 0.39766239771152595,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/4cd6910a0b7b39365fda5df87618d091",
+      "anchor": "writer",
+      "pchip": -5.671849864899498,
+      "akima": -5.620562913730452,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/4cd6910a0b7b39365fda5df87618d091",
+      "anchor": "original",
+      "pchip": -6.650533469432728,
+      "akima": -6.607937919924916,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/4cd6910a0b7b39365fda5df87618d091",
+      "anchor": "libjxl",
+      "pchip": -11.976737279288194,
+      "akima": -11.909467994216568,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/5dbdb989cf026f7ab3dd7167d7fc0fe2",
+      "anchor": "writer",
+      "pchip": -0.15757558453226744,
+      "akima": -0.07493319917023439,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/5dbdb989cf026f7ab3dd7167d7fc0fe2",
+      "anchor": "original",
+      "pchip": -1.055474835348284,
+      "akima": -0.965021835125948,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/5dbdb989cf026f7ab3dd7167d7fc0fe2",
+      "anchor": "libjxl",
+      "pchip": -0.17801995924172231,
+      "akima": -0.4062078653385296,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/5e5ce43575fa67fdc0dd37146d7f479e",
+      "anchor": "writer",
+      "pchip": -0.3768662437965488,
+      "akima": -0.3761193764671103,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/5e5ce43575fa67fdc0dd37146d7f479e",
+      "anchor": "original",
+      "pchip": -0.7862651390913683,
+      "akima": -0.782933005924808,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/5e5ce43575fa67fdc0dd37146d7f479e",
+      "anchor": "libjxl",
+      "pchip": 0.004675743451096629,
+      "akima": -0.06208398174867307,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "anchor": "writer",
+      "pchip": -0.26267739153306013,
+      "akima": -0.3932540050065228,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "anchor": "original",
+      "pchip": -1.6858275120830064,
+      "akima": -1.8354577036899338,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "anchor": "libjxl",
+      "pchip": -4.8970135838085955,
+      "akima": -4.812837134014113,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/7e499613c3e376ea93afb3649719abeb",
+      "anchor": "writer",
+      "pchip": -0.20407365338683142,
+      "akima": -0.27171250908258743,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/7e499613c3e376ea93afb3649719abeb",
+      "anchor": "original",
+      "pchip": -1.301604150587826,
+      "akima": -1.3665772441809658,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/7e499613c3e376ea93afb3649719abeb",
+      "anchor": "libjxl",
+      "pchip": -2.4945316679842646,
+      "akima": -2.6625503282799823,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/870516c65d81fb9267de6865964083a9",
+      "anchor": "writer",
+      "pchip": -0.24340930702078015,
+      "akima": -0.2465584797689436,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/870516c65d81fb9267de6865964083a9",
+      "anchor": "original",
+      "pchip": -1.2241582404801892,
+      "akima": -1.2309119591445106,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/870516c65d81fb9267de6865964083a9",
+      "anchor": "libjxl",
+      "pchip": -0.09727661943279425,
+      "akima": -0.12007518517156324,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/8bb119b8ca17492392e1e3ea4b811b32",
+      "anchor": "writer",
+      "pchip": -0.35712569014363893,
+      "akima": -0.3756241191465802,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/8bb119b8ca17492392e1e3ea4b811b32",
+      "anchor": "original",
+      "pchip": -1.2321095617190243,
+      "akima": -1.2485715697909592,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/8bb119b8ca17492392e1e3ea4b811b32",
+      "anchor": "libjxl",
+      "pchip": -1.3897034467856735,
+      "akima": -1.3844701100380645,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/9466a908d088d32ee73f04116c40e48c",
+      "anchor": "writer",
+      "pchip": -0.0885836604882227,
+      "akima": -0.09719167701659812,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/9466a908d088d32ee73f04116c40e48c",
+      "anchor": "original",
+      "pchip": -1.1900606783075294,
+      "akima": -1.1966004741830742,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/9466a908d088d32ee73f04116c40e48c",
+      "anchor": "libjxl",
+      "pchip": -3.645651466766385,
+      "akima": -3.6540634519455453,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/a10ae819a2d24873079c93346200cab3",
+      "anchor": "writer",
+      "pchip": 0.07710561969631628,
+      "akima": 0.07294435245475792,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/a10ae819a2d24873079c93346200cab3",
+      "anchor": "original",
+      "pchip": -1.6058315194803223,
+      "akima": -1.6091188038614936,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/a10ae819a2d24873079c93346200cab3",
+      "anchor": "libjxl",
+      "pchip": -2.5049246983040856,
+      "akima": -2.5386405542304376,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/a36713f1943dac6bc74dea50cadaee6f",
+      "anchor": "writer",
+      "pchip": -2.1895434540071306,
+      "akima": -2.1822832365649507,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/a36713f1943dac6bc74dea50cadaee6f",
+      "anchor": "original",
+      "pchip": -3.020510999273967,
+      "akima": -3.013957125032073,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/a36713f1943dac6bc74dea50cadaee6f",
+      "anchor": "libjxl",
+      "pchip": 3.5081394566222377,
+      "akima": 3.425809254268952,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/aed95e005df28e790519eefb6eb1e565",
+      "anchor": "writer",
+      "pchip": -0.5291829829400095,
+      "akima": -0.5445187245148053,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/aed95e005df28e790519eefb6eb1e565",
+      "anchor": "original",
+      "pchip": -1.2931875164494933,
+      "akima": -1.308052610156681,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/aed95e005df28e790519eefb6eb1e565",
+      "anchor": "libjxl",
+      "pchip": -2.3853150086008004,
+      "akima": -2.4755137928842545,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/afe3676bbfcf7183d697ff7b5d5bd45b",
+      "anchor": "writer",
+      "pchip": 0.1791967586400727,
+      "akima": 0.14400503786476546,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/afe3676bbfcf7183d697ff7b5d5bd45b",
+      "anchor": "original",
+      "pchip": -1.7312918102962787,
+      "akima": -1.7646771796878853,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/afe3676bbfcf7183d697ff7b5d5bd45b",
+      "anchor": "libjxl",
+      "pchip": -2.157482511288847,
+      "akima": -2.2205130346062076,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/b51d5fb537246482ef7a7ab63f093cab",
+      "anchor": "writer",
+      "pchip": 0.044884584227418686,
+      "akima": 0.04569827984372212,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/b51d5fb537246482ef7a7ab63f093cab",
+      "anchor": "original",
+      "pchip": -0.9812095445432872,
+      "akima": -0.9808411570075898,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/b51d5fb537246482ef7a7ab63f093cab",
+      "anchor": "libjxl",
+      "pchip": -4.06701323632231,
+      "akima": -4.020528994883687,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/b939ac34faa94b5d0e753d570edc7048",
+      "anchor": "writer",
+      "pchip": -2.4172475955358474,
+      "akima": -2.621147858347477,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/b939ac34faa94b5d0e753d570edc7048",
+      "anchor": "original",
+      "pchip": -3.5165257324817665,
+      "akima": -3.71978936523795,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/b939ac34faa94b5d0e753d570edc7048",
+      "anchor": "libjxl",
+      "pchip": 3.4899428900458282,
+      "akima": 3.5094928469745406,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/c80999cd5533e448167cd9b3ccfa2a37",
+      "anchor": "writer",
+      "pchip": -0.4462658100695767,
+      "akima": -0.5156645965995793,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/c80999cd5533e448167cd9b3ccfa2a37",
+      "anchor": "original",
+      "pchip": -1.6418362354596352,
+      "akima": -1.7091241717871755,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/c80999cd5533e448167cd9b3ccfa2a37",
+      "anchor": "libjxl",
+      "pchip": -0.9573655939030864,
+      "akima": -0.9897439086574674,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/d1a9be98d1936065967adac50a6fb750",
+      "anchor": "writer",
+      "pchip": -0.331432962165101,
+      "akima": -0.2643302996028579,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/d1a9be98d1936065967adac50a6fb750",
+      "anchor": "original",
+      "pchip": -1.6980915975403812,
+      "akima": -1.6312283622575257,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/d1a9be98d1936065967adac50a6fb750",
+      "anchor": "libjxl",
+      "pchip": -2.3768310133679638,
+      "akima": -2.442766579923755,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/d79d465ac77c36518e0f0d626bf97ec4",
+      "anchor": "writer",
+      "pchip": -0.14520053480829492,
+      "akima": -0.09132201337149336,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/d79d465ac77c36518e0f0d626bf97ec4",
+      "anchor": "original",
+      "pchip": -0.6708196233104525,
+      "akima": -0.604583896671465,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/d79d465ac77c36518e0f0d626bf97ec4",
+      "anchor": "libjxl",
+      "pchip": 1.5944176079129468,
+      "akima": 1.5812494330276101,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/ddcd24d99f48eaa369207882a6f37831",
+      "anchor": "writer",
+      "pchip": -0.9257678774552287,
+      "akima": -0.8859145396946192,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/ddcd24d99f48eaa369207882a6f37831",
+      "anchor": "original",
+      "pchip": -1.9461745832655035,
+      "akima": -1.9081152666044654,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/ddcd24d99f48eaa369207882a6f37831",
+      "anchor": "libjxl",
+      "pchip": -1.1372074185670002,
+      "akima": -1.2966108111511423,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "anchor": "writer",
+      "pchip": -0.5914770535239315,
+      "akima": -0.6211148276196894,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "anchor": "original",
+      "pchip": -1.6586577987259692,
+      "akima": -1.6749892162828401,
+      "status": "supported"
+    },
+    {
+      "image_id": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "anchor": "libjxl",
+      "pchip": -3.282812791583297,
+      "akima": -3.1616918786320807,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/01",
+      "anchor": "writer",
+      "pchip": -0.23460193301092988,
+      "akima": -0.3305054986971333,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/01",
+      "anchor": "original",
+      "pchip": -0.9378528496263006,
+      "akima": -1.0313227551374151,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/01",
+      "anchor": "libjxl",
+      "pchip": -0.5206062310961158,
+      "akima": -0.5786715206042999,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/02",
+      "anchor": "writer",
+      "pchip": -0.5604788064854167,
+      "akima": -0.5507550370163063,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/02",
+      "anchor": "original",
+      "pchip": -1.2776392537146772,
+      "akima": -1.270974203023427,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/02",
+      "anchor": "libjxl",
+      "pchip": 0.09452974229955602,
+      "akima": 0.03367775156662905,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/03",
+      "anchor": "writer",
+      "pchip": -0.670415432060409,
+      "akima": -0.6537474189138788,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/03",
+      "anchor": "original",
+      "pchip": -1.6717118297801887,
+      "akima": -1.649706278086431,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/03",
+      "anchor": "libjxl",
+      "pchip": -1.3984835850016653,
+      "akima": -1.3789658329693522,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/04",
+      "anchor": "writer",
+      "pchip": 0.22638471585714415,
+      "akima": 0.2273112042316137,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/04",
+      "anchor": "original",
+      "pchip": -0.7219884781087152,
+      "akima": -0.7106545144113882,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/04",
+      "anchor": "libjxl",
+      "pchip": -1.1523685933344323,
+      "akima": -1.0926258930401989,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/05",
+      "anchor": "writer",
+      "pchip": -1.2745044660507998,
+      "akima": -1.2304402837107618,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/05",
+      "anchor": "original",
+      "pchip": -2.2122961255185767,
+      "akima": -2.166966844140517,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/05",
+      "anchor": "libjxl",
+      "pchip": -0.07253733091208144,
+      "akima": -0.058424709127708516,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/06",
+      "anchor": "writer",
+      "pchip": 0.1503687614939536,
+      "akima": 0.18765763359971346,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/06",
+      "anchor": "original",
+      "pchip": -0.579386078896533,
+      "akima": -0.5499001015692456,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/06",
+      "anchor": "libjxl",
+      "pchip": -1.1144482954209618,
+      "akima": -1.1461974048762031,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/07",
+      "anchor": "writer",
+      "pchip": -0.3382235913344468,
+      "akima": -0.3479671422098967,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/07",
+      "anchor": "original",
+      "pchip": -1.5041845945206713,
+      "akima": -1.511177591653783,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/07",
+      "anchor": "libjxl",
+      "pchip": -2.4950607078291394,
+      "akima": -2.5145289304914464,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/08",
+      "anchor": "writer",
+      "pchip": 0.031435519081425,
+      "akima": 0.05524171878351478,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/08",
+      "anchor": "original",
+      "pchip": -0.7384152412624148,
+      "akima": -0.7177193255990836,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/08",
+      "anchor": "libjxl",
+      "pchip": -0.22017447174866914,
+      "akima": -0.23203459467012674,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/09",
+      "anchor": "writer",
+      "pchip": -1.000205878382261,
+      "akima": -0.9441442033418845,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/09",
+      "anchor": "original",
+      "pchip": -1.8639281012854547,
+      "akima": -1.8052371539865861,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/09",
+      "anchor": "libjxl",
+      "pchip": -3.420849051022175,
+      "akima": -3.495794072137829,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/10",
+      "anchor": "writer",
+      "pchip": 0.276793938564183,
+      "akima": 0.24954701333940657,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/10",
+      "anchor": "original",
+      "pchip": -0.6594855495723475,
+      "akima": -0.6859757576415824,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/10",
+      "anchor": "libjxl",
+      "pchip": 0.3281552362292108,
+      "akima": 0.3447361074212656,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/11",
+      "anchor": "writer",
+      "pchip": -0.7030686352903484,
+      "akima": -0.6089550587446387,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/11",
+      "anchor": "original",
+      "pchip": -1.4704538787950563,
+      "akima": -1.3816872398498963,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/11",
+      "anchor": "libjxl",
+      "pchip": -0.09390723178104915,
+      "akima": 0.11796891652710237,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/12",
+      "anchor": "writer",
+      "pchip": 0.25071591329498505,
+      "akima": 0.35337778063179315,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/12",
+      "anchor": "original",
+      "pchip": -0.5563863285370384,
+      "akima": -0.4554232423565108,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/12",
+      "anchor": "libjxl",
+      "pchip": -0.5884864213207643,
+      "akima": -0.46343753337679194,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/13",
+      "anchor": "writer",
+      "pchip": -0.5385413225494569,
+      "akima": -0.5977567101562892,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/13",
+      "anchor": "original",
+      "pchip": -1.1594672777546164,
+      "akima": -1.2209803346447548,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/13",
+      "anchor": "libjxl",
+      "pchip": -1.2714370393359025,
+      "akima": -1.1985667640319977,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/14",
+      "anchor": "writer",
+      "pchip": -0.16678510095461954,
+      "akima": -0.27845883615315226,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/14",
+      "anchor": "original",
+      "pchip": -1.0703893025833797,
+      "akima": -1.179245338963013,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/14",
+      "anchor": "libjxl",
+      "pchip": -1.2129737528014435,
+      "akima": -1.1549340148632337,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/15",
+      "anchor": "writer",
+      "pchip": -0.07612714208818137,
+      "akima": -0.22745891198366164,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/15",
+      "anchor": "original",
+      "pchip": -1.0194910792068932,
+      "akima": -1.1687490383783063,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/15",
+      "anchor": "libjxl",
+      "pchip": -1.7977797640769642,
+      "akima": -1.692345238137274,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/16",
+      "anchor": "writer",
+      "pchip": 0.06218055465809313,
+      "akima": 0.0172469164799186,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/16",
+      "anchor": "original",
+      "pchip": -0.7531988584421082,
+      "akima": -0.8059507249340572,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/16",
+      "anchor": "libjxl",
+      "pchip": -1.206373307066973,
+      "akima": -1.156440639136493,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/17",
+      "anchor": "writer",
+      "pchip": -0.04069762494415812,
+      "akima": -0.18514652726287212,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/17",
+      "anchor": "original",
+      "pchip": -1.0453206218420767,
+      "akima": -1.1814633784544468,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/17",
+      "anchor": "libjxl",
+      "pchip": 0.0029455805982474895,
+      "akima": -0.05960371712722806,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/18",
+      "anchor": "writer",
+      "pchip": -0.6615752576800812,
+      "akima": -0.7008185285560529,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/18",
+      "anchor": "original",
+      "pchip": -1.5348974572536627,
+      "akima": -1.5751313913733163,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/18",
+      "anchor": "libjxl",
+      "pchip": 0.9639519072457369,
+      "akima": 0.9691641890250577,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/19",
+      "anchor": "writer",
+      "pchip": -0.33296006542775525,
+      "akima": -0.34322447510241466,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/19",
+      "anchor": "original",
+      "pchip": -1.186048080546064,
+      "akima": -1.187443100098205,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/19",
+      "anchor": "libjxl",
+      "pchip": -2.1975066365876437,
+      "akima": -2.3639289843883047,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/20",
+      "anchor": "writer",
+      "pchip": 0.8773991355190149,
+      "akima": 0.839836518700811,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/20",
+      "anchor": "original",
+      "pchip": 0.09530734695621151,
+      "akima": 0.06368337890783984,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/20",
+      "anchor": "libjxl",
+      "pchip": -0.5916435223133545,
+      "akima": -0.47942609422778026,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/21",
+      "anchor": "writer",
+      "pchip": 0.173455770092462,
+      "akima": 0.2461594026915439,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/21",
+      "anchor": "original",
+      "pchip": -0.5239092739254672,
+      "akima": -0.45013118955223713,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/21",
+      "anchor": "libjxl",
+      "pchip": -1.9549603703771543,
+      "akima": -2.068016301909742,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/22",
+      "anchor": "writer",
+      "pchip": -0.4957273629742775,
+      "akima": -0.5676346532575889,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/22",
+      "anchor": "original",
+      "pchip": -1.3485736460254945,
+      "akima": -1.4183879470456449,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/22",
+      "anchor": "libjxl",
+      "pchip": -1.3683519753242388,
+      "akima": -1.5949059859854249,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/23",
+      "anchor": "writer",
+      "pchip": -0.1330762919339135,
+      "akima": -0.14906494748923277,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/23",
+      "anchor": "original",
+      "pchip": -1.396976008851515,
+      "akima": -1.413991612489175,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/23",
+      "anchor": "libjxl",
+      "pchip": -2.4346158461032172,
+      "akima": -2.492014874872831,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/24",
+      "anchor": "writer",
+      "pchip": -1.652712304950536,
+      "akima": -1.664781561840727,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/24",
+      "anchor": "original",
+      "pchip": -2.454736668268487,
+      "akima": -2.4651436072974473,
+      "status": "supported"
+    },
+    {
+      "image_id": "kodak/24",
+      "anchor": "libjxl",
+      "pchip": -0.8717885319568236,
+      "akima": -0.7623382321173505,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/alpine_lake/12mp",
+      "anchor": "writer",
+      "pchip": -0.05665860086435952,
+      "akima": -0.16879650337115673,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/alpine_lake/12mp",
+      "anchor": "original",
+      "pchip": -1.0224279928685591,
+      "akima": -1.1317575513807463,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/alpine_lake/12mp",
+      "anchor": "libjxl",
+      "pchip": -1.3667606548526618,
+      "akima": -1.4385443648416805,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/alpine_lake/24mp",
+      "anchor": "writer",
+      "pchip": -1.1163367781499933,
+      "akima": -1.1193581357440963,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/alpine_lake/24mp",
+      "anchor": "original",
+      "pchip": -2.1074554164251413,
+      "akima": -2.107498306165495,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/alpine_lake/24mp",
+      "anchor": "libjxl",
+      "pchip": -1.3909900834834268,
+      "akima": -1.5197157176698461,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/alpine_lake/48mp",
+      "anchor": "writer",
+      "pchip": -0.34421343516677916,
+      "akima": -0.2959745194565861,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/alpine_lake/48mp",
+      "anchor": "original",
+      "pchip": -1.4178226645467236,
+      "akima": -1.3673746456704716,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/alpine_lake/48mp",
+      "anchor": "libjxl",
+      "pchip": -1.8064099433098395,
+      "akima": -1.8013123875607346,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/campus_interior/12mp",
+      "anchor": "writer",
+      "pchip": 0.05998460554320677,
+      "akima": 0.0692669843237177,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/campus_interior/12mp",
+      "anchor": "original",
+      "pchip": -0.858073957035538,
+      "akima": -0.8486423372655385,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/campus_interior/12mp",
+      "anchor": "libjxl",
+      "pchip": 1.5908428580661362,
+      "akima": 1.5419427655590439,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/campus_interior/24mp",
+      "anchor": "writer",
+      "pchip": -0.024156311593832153,
+      "akima": -0.017490788827231558,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/campus_interior/24mp",
+      "anchor": "original",
+      "pchip": -0.9637334734010041,
+      "akima": -0.9551588782619509,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/campus_interior/24mp",
+      "anchor": "libjxl",
+      "pchip": -0.0957552415263309,
+      "akima": -0.11718965061221934,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/campus_interior/48mp",
+      "anchor": "writer",
+      "pchip": 0.07640508336320075,
+      "akima": 0.06619473777793375,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/campus_interior/48mp",
+      "anchor": "original",
+      "pchip": -0.932708245899631,
+      "akima": -0.9423023249042274,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/campus_interior/48mp",
+      "anchor": "libjxl",
+      "pchip": -1.9650494197636683,
+      "akima": -2.0096055994084376,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/forest_stream/12mp",
+      "anchor": "writer",
+      "pchip": -0.2875088521016941,
+      "akima": -0.2954208798888242,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/forest_stream/12mp",
+      "anchor": "original",
+      "pchip": -1.5673299029474448,
+      "akima": -1.5712812697569676,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/forest_stream/12mp",
+      "anchor": "libjxl",
+      "pchip": -0.6615164815043961,
+      "akima": -0.6288261674661695,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/forest_stream/24mp",
+      "anchor": "writer",
+      "pchip": -0.17453286402062995,
+      "akima": -0.17954479641639212,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/forest_stream/24mp",
+      "anchor": "original",
+      "pchip": -1.8145248248324541,
+      "akima": -1.8179312779087045,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/forest_stream/24mp",
+      "anchor": "libjxl",
+      "pchip": -1.1081938692636784,
+      "akima": -1.1362614333495367,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/forest_stream/48mp",
+      "anchor": "writer",
+      "pchip": -0.10376700310508541,
+      "akima": -0.10201049013911108,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/forest_stream/48mp",
+      "anchor": "original",
+      "pchip": -2.1104200191427847,
+      "akima": -2.10843680534157,
+      "status": "supported"
+    },
+    {
+      "image_id": "unsplash/forest_stream/48mp",
+      "anchor": "libjxl",
+      "pchip": -0.8643034153201399,
+      "akima": -0.8968018110425401,
+      "status": "supported"
+    }
+  ],
+  "manifest_sha256": "35c58ba00c94358bde29a731b944b738aa0b06fe6f054a60d281aa5e85c8ca5a",
+  "results_sha256": "06076ddc1bdae7979443d9ccc129637ffaf85254d37de0461a5bb571a6be6fa6"
+}

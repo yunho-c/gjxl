@@ -110,6 +110,9 @@ struct VarDctCodestreamProfile {
   size_t coefficient_token_count = 0;
   size_t coefficient_context_materialization_count = 0;
   size_t coefficient_materialized_token_count = 0;
+  /// Elapsed phase time. When rate searches overlap, intervals belong to
+  /// entropy first, then section writing, then assembly, without double counting.
+  /// The separate work counters retain both searches' full worker durations.
   uint64_t entropy_optimization_nanoseconds = 0;
   EntropyWorkProfile entropy_work;
   uint64_t entropy_model_bits = 0;
@@ -122,6 +125,10 @@ struct VarDctCodestreamProfile {
   /// Exact complete-codestream sizes considered by one serializer call.
   size_t natural_candidate_bytes = 0;
   size_t custom_order_candidate_bytes = 0;
+  /// Complete bytes compared by kRateOptimized; zero for other policies.
+  size_t balanced_candidate_bytes = 0;
+  size_t rate_candidate_bytes = 0;
+  bool selected_balanced_fallback = false;
   /// Zero when natural order wins; otherwise the selected on-wire family mask.
   uint16_t selected_coefficient_order_mask = 0;
   /// Number of distinct block-map candidates measured by the serializer.
@@ -138,6 +145,11 @@ struct VarDctCodestreamProfile {
 
   bool operator==(const VarDctCodestreamProfile&) const = default;
 };
+
+/// Adds actual work from another attempt without changing selected-stream data.
+void AccumulateCodestreamWorkProfile(
+  const VarDctCodestreamProfile& source,
+  VarDctCodestreamProfile* destination) noexcept;
 
 /// Synchronously serializes a borrowed completed frame, including validation.
 /// All parallel workers finish before return; neither the view nor its backing

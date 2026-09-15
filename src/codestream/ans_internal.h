@@ -4,8 +4,10 @@
 #pragma once
 
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -26,6 +28,49 @@ namespace gjxl::codestream_internal {
 
 inline constexpr uint32_t kAnsReciprocalPrecision = 44;
 inline constexpr size_t kAnsAlphabetWidthCount = 4;
+// Shared by the rate-search dispatcher and its managed-storage bound.
+inline constexpr size_t kMaximumAnsConfigWorkers = 8;
+
+/// Integer lower bound on sum(count * log2(total/count)), without libm rounding.
+/// Unsupported large populations return false so normal validation still runs.
+[[nodiscard]] inline bool AnsShannonLowerBound(
+  const std::array<uint64_t, kMaximumAnsAlphabetSize>& counts,
+  uint64_t* bits) noexcept {
+  if (bits == nullptr) return false;
+  uint64_t total = 0;
+  for (uint64_t count : counts) {
+    if (count > static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) ||
+        count > std::numeric_limits<uint32_t>::max() - total) return false;
+    total += count;
+  }
+  constexpr uint32_t kFractionBits = 24;
+  uint64_t entropy = 0;
+  for (uint64_t count : counts) {
+    if (count == 0) continue;
+    uint32_t integer = std::bit_width(total) - std::bit_width(count);
+    uint64_t scaled = count << integer;
+    if (scaled > total) {
+      --integer;
+      scaled >>= 1;
+    }
+    // total/scaled is in [1,2). With z=(x-1)/(x+1),
+    // log2(x) = (2/ln(2)) * (z + z^3/3 + z^5/5 + ...).
+    // Every omitted term is positive; every fixed-point operation rounds
+    // down. 288539/100000 is strictly less than 2/ln(2).
+    const uint64_t z = ((total - scaled) << kFractionBits) / (total + scaled);
+    const uint64_t z2 = (z * z) >> kFractionBits;
+    uint64_t power = z, sum = z;
+    for (uint32_t divisor = 3; divisor <= 9; divisor += 2) {
+      power = (power * z2) >> kFractionBits;
+      sum += power / divisor;
+    }
+    const uint64_t fraction = sum * 288539 / 100000;
+    entropy += count * ((uint64_t{integer} << kFractionBits) + fraction);
+  }
+  // total <= 2^32-1 and each log bound <= 32, so accumulation uses < 61 bits.
+  *bits = entropy >> kFractionBits;
+  return true;
+}
 
 /// Returns ceil(2^44 / frequency), or zero for an absent symbol.
 [[nodiscard]] constexpr uint64_t AnsFrequencyReciprocal(
@@ -72,6 +117,8 @@ struct PreparedAnsEntropyCode {
 enum class DirectAnsEntropyMode {
   kBalanced,
   kHighDensity,
+  /// High-density partition/config search, comparing every alphabet width.
+  kRateOptimized,
 };
 
 inline constexpr size_t kAnsHistogramPrecisionShiftCount = 12;
@@ -87,13 +134,22 @@ DirectAnsHistogramPrecisionShifts(DirectAnsEntropyMode mode) noexcept;
 
 /// Builds one ANS model directly from the requested contexts. Unlike the
 /// maximum-compression path, this does not derive the partition from an
-/// optimized Prefix model or compete across alphabet widths exactly.
+/// optimized Prefix model. kRateOptimized compares all alphabet widths using
+/// exact model and ordered token costs, even when cost is null.
 [[nodiscard]] Status OptimizeDirectAnsEntropyCode(
   std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCodeOptions& options,
   DirectAnsEntropyMode mode,
   EntropyCode* code,
   EntropyCodeCost* cost = nullptr,
+  EntropyWorkProfile* profile = nullptr);
+
+/// Rate-optimized direct models with exact width selection deferred until the
+/// caller measures each section. Uses the same partition/configuration search.
+[[nodiscard]] Status PrepareRateOptimizedAnsEntropyCode(
+  std::span<const EntropyTokenStreamView> section_tokens,
+  const EntropyCodeOptions& options,
+  PreparedAnsEntropyCode* deferred,
   EntropyWorkProfile* profile = nullptr);
 
 /// Balanced direct-ANS construction from already encoded per-context symbol

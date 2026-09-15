@@ -12,6 +12,8 @@
 
 #include "codestream/ans_internal.h"
 #include "codestream/huffman.h"
+#include "codestream/profile_internal.h"
+#include "core/thread_budget.h"
 
 namespace {
 using namespace gjxl;
@@ -53,10 +55,9 @@ struct Backings {
     Add(code.ans_histograms);
     for (const auto &h : code.ans_histograms) {
       Add(h.frequencies);
-      Add(h.reverse_maps);
+      Add(h.reverse_map);
+      Add(h.reverse_offsets);
       Add(h.reciprocal_frequencies);
-      for (const auto &reverse : h.reverse_maps)
-        Add(reverse);
     }
   }
   void Add(const PreparedEntropyClusters &p) {
@@ -197,7 +198,8 @@ Status Optimize(const EntropyOptimizationStorageOptions &o,
                 std::span<const EntropyTokenStreamView> views,
                 const EntropyCodeOptions &input_options,
                 const EntropyCode &prefix,
-                const PreparedEntropyClusters &prepared, Result *out) {
+                const PreparedEntropyClusters &prepared, Result *out,
+                EntropyWorkProfile* profile = nullptr) {
   auto *cost = o.return_cost ? &out->cost : nullptr;
   switch (o.policy) {
   case kFastPrefix:
@@ -210,14 +212,17 @@ Status Optimize(const EntropyOptimizationStorageOptions &o,
     return OptimizeEntropyCode(views, input_options, &out->code, cost);
   case kBalancedAns:
   case kHighDensityAns:
+  case kRateOptimizedAns:
     return OptimizeDirectAnsEntropyCode(
         views, input_options,
-        o.policy == kBalancedAns ? DirectAnsEntropyMode::kBalanced
-                                 : DirectAnsEntropyMode::kHighDensity,
-        &out->code, cost);
+        o.policy == kBalancedAns
+          ? DirectAnsEntropyMode::kBalanced
+          : (o.policy == kRateOptimizedAns ? DirectAnsEntropyMode::kRateOptimized
+                                            : DirectAnsEntropyMode::kHighDensity),
+        &out->code, cost, profile);
   case kBalancedDcAns:
     return OptimizeDirectAnsEntropyCodeWithFixedPopulations(
-      views, input_options, {}, &out->code, cost, nullptr, true);
+      views, input_options, {}, &out->code, cost, profile, true);
   case kAnsFromPrefix:
     if (o.borrow_prepared_clusters)
       return OptimizeAnsEntropyCodeWithPreparedClusters(views, prefix, prepared,
@@ -226,6 +231,8 @@ Status Optimize(const EntropyOptimizationStorageOptions &o,
   case kDeferredAnsFromPrefix:
     return PrepareAnsEntropyCodeWithPreparedClusters(views, prefix, prepared,
                                                      &out->deferred);
+  case kDeferredRateOptimizedAns:
+    return PrepareRateOptimizedAnsEntropyCode(views, input_options, &out->deferred, profile);
   }
   return Status::Internal("Test policy invalid");
 }
@@ -351,31 +358,34 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
     population.maximum_symbol =
         std::max(population.maximum_symbol, token.symbol);
   }
-  for (size_t variant = 0; variant < 11; ++variant) {
+  for (size_t variant = 0; variant < 14; ++variant) {
     const std::array policies{kFastPrefix,     kPrefix,
                               kPrefix,         kBalancedAns,
                               kHighDensityAns, kAnsFromPrefix,
                               kAnsFromPrefix,  kDeferredAnsFromPrefix,
-                              kBalancedAns, kBalancedDcAns, kBalancedDcAns};
+                              kBalancedAns,    kRateOptimizedAns,
+                              kRateOptimizedAns, kDeferredRateOptimizedAns,
+                              kBalancedDcAns, kBalancedDcAns};
     EntropyOptimizationStorageOptions o{
         .policy = policies[variant],
         .tokens = n,
         .contexts = contexts,
         .sections = sections,
         .initial_histograms = initial_map ? 17ul : 0ul,
-        .return_cost = pattern != 0 || variant == 2,
+        .return_cost = variant != 9 && variant != 12 &&
+                       (pattern != 0 || variant == 2),
         .retain_prepared_clusters = variant == 2,
         .borrow_prepared_clusters = variant == 6 || variant == 7,
         .maximum_ans_clusters = maximum_ans_clusters,
     };
-    const auto run = [&](Result *out) {
+    const auto run = [&](Result *out, EntropyWorkProfile* profile = nullptr) {
       // Exercise the borrowed, unmapped source as well as the owning merge
       // fallback under the same reservation and allocation-failure sweep.
-      if ((variant == 3 && initial_map) || variant == 8 || variant == 10)
+      if ((variant == 3 && initial_map) || variant == 8 || variant == 13)
         return OptimizeDirectAnsEntropyCodeWithFixedPopulations(
             views, input, fixed, &out->code,
-            o.return_cost ? &out->cost : nullptr, nullptr, variant == 10);
-      return Optimize(o, views, input, prefix, prepared, out);
+            o.return_cost ? &out->cost : nullptr, profile, variant == 13);
+      return Optimize(o, views, input, prefix, prepared, out, profile);
     };
     EntropyOptimizationStoragePlan plan;
     Result oracle;
@@ -397,13 +407,20 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
     Result output;
     {
       ResourceContextScope context({&job, ResourceClass::kPreparation});
-      if (!Ok(run(&output)) ||
+      // Retained ownership and peak bounds must also cover worker scratch and
+      // per-cluster profiling with the allocator context propagated to workers.
+      thread_budget_internal::CpuExecutionScope cpu;
+      if ((o.policy == kRateOptimizedAns || o.policy == kDeferredRateOptimizedAns) &&
+          !Ok(cpu.Start({}, 8))) return false;
+      thread_budget_internal::EncodeScope threads(8);
+      EntropyWorkProfile profile;
+      if (!Ok(run(&output, &profile)) ||
           !Check(output == oracle, "Optimizer parity failed"))
         return false;
     }
     if (!output.Owned().Matches(budget, plan.output.retained_bytes))
       return false;
-    if (variant == 7) {
+    if (variant == 7 || variant == 11) {
       std::vector<uint64_t> measured(sections *
                                      output.deferred.candidates.size());
       for (size_t s = 0; s < sections; ++s) {
@@ -447,12 +464,12 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
           return false;
       }
       Result immediate;
-      o.policy = kAnsFromPrefix;
+      o.policy = variant == 11 ? kRateOptimizedAns : kAnsFromPrefix;
       if (!Ok(run(&immediate)) ||
           !Check(output == immediate,
                  "Deferred finalization differs from immediate ANS"))
         return false;
-      o.policy = kDeferredAnsFromPrefix;
+      o.policy = policies[variant];
     }
     if (!Check(budget.snapshot().peak_backing_bytes <= plan.working.peak_bytes,
                "Optimizer exceeded working bound"))
@@ -647,11 +664,12 @@ bool FullAlphabetModels() {
         h.method = 12;
         h.frequencies.assign(256, 16);
         h.reciprocal_frequencies.assign(256, AnsFrequencyReciprocal(16));
-        h.reverse_maps.resize(256);
+        h.reverse_offsets.resize(256);
+        h.reverse_map.resize(4096);
         for (size_t s = 0; s < 256; ++s) {
-          h.reverse_maps[s].resize(16);
+          h.reverse_offsets[s] = s * 16;
           for (size_t i = 0; i < 16; ++i)
-            h.reverse_maps[s][i] = s * 16 + i;
+            h.reverse_map[s * 16 + i] = s * 16 + i;
         }
       }
     }
@@ -718,7 +736,8 @@ bool InvalidAndLarge() {
   ArmManagedHostAllocationFailureAfterForTest(0);
   bool good = true;
   for (auto policy : {kFastPrefix, kPrefix, kBalancedAns, kBalancedDcAns, kHighDensityAns,
-                      kAnsFromPrefix, kDeferredAnsFromPrefix}) {
+                      kRateOptimizedAns, kAnsFromPrefix, kDeferredAnsFromPrefix,
+                      kDeferredRateOptimizedAns}) {
     good &= ComputeEntropyOptimizationStoragePlan(
                 {.policy = policy,
                  .tokens = size_t{1} << 32,
@@ -739,6 +758,7 @@ bool InvalidAndLarge() {
 int main() {
   if (!Empty(DefaultResourceBudget()) || !InvalidAndLarge() || !Aggregation() ||
       !FullAlphabetModels() || !RefinementQueue() ||
+      !OptimizationCase(3, size_t{1} << 16, 5, 1, false) ||
       !OptimizationCase(96, 96 * 256, 3, 4, false, false, 64) ||
       !OptimizationCase(2, 96, 3, 2, false, true) ||
       !OptimizationCase(7, 0, 3, 0, false))
@@ -750,7 +770,7 @@ int main() {
         if (!OptimizationCase(contexts, pattern == 0 ? 0 : 4097,
                               pattern == 0 ? 0 : 5, pattern, initial))
           return EXIT_FAILURE;
-        cases += 8;
+        cases += 12;
       }
     }
   }

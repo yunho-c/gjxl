@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <span>
 #include <vector>
 
@@ -24,6 +25,7 @@
 #include "core/image.h"
 #include "core/quantizer.h"
 #include "core/thread_budget.h"
+#include "core/worker_launch_internal.h"
 
 namespace {
 
@@ -55,7 +57,7 @@ struct ImageStorage {
 gjxl::Status MakeFrame(
   size_t width, size_t height, gjxl::QuantizerParams quantizer_params,
   gjxl::SimpleVarDctCodestreamProfile profile,
-  gjxl::VarDctEncoderFrame* frame) {
+  gjxl::VarDctEncoderFrame* frame, bool flat = false) {
 
   gjxl::FrameGeometry geometry;
   gjxl::Status status =
@@ -69,7 +71,7 @@ gjxl::Status MakeFrame(
     for (size_t x = 0; x < opsin.extent.width; ++x) {
       const size_t index = y * opsin.extent.width + x;
       const float value =
-        static_cast<float>((x * 17 + y * 11 + 5) % 97) * 0.002f;
+        flat ? 0.0f : static_cast<float>((x * 17 + y * 11 + 5) % 97) * 0.002f;
       opsin.plane[0][index] = value - 0.01f;
       opsin.plane[1][index] = value + 0.02f;
       opsin.plane[2][index] = 1.2f * value - 0.03f;
@@ -463,6 +465,7 @@ bool CheckEntropyBehaviorPlumbing() {
   for (const gjxl::VarDctEntropyBehavior behavior : {
          gjxl::VarDctEntropyBehavior::kBalanced,
          gjxl::VarDctEntropyBehavior::kHighDensity,
+         gjxl::VarDctEntropyBehavior::kRateOptimized,
          gjxl::VarDctEntropyBehavior::kMaximumCompression}) {
     std::vector<uint8_t> output;
     gjxl::codestream_internal::VarDctCodestreamProfile profile;
@@ -648,6 +651,61 @@ bool CheckDeferredCandidatePrimitives() {
   return true;
 }
 
+bool CheckRateOptimizedFallback() {
+  using namespace gjxl;
+  using namespace gjxl::codestream_internal;
+  bool saw_fallback = false, saw_expanded = false;
+  for (auto extent : {Extent2D{1, 1}, {8, 8}, {64, 9}, {129, 97}, {257, 259}}) {
+    VarDctEncoderFrame frame;
+    if (!MakeFrame(extent.width, extent.height, {3541, 10}, {}, &frame,
+                   extent.width == 1).ok())
+      return false;
+    for (auto order : {VarDctCoefficientOrderBehavior::kFull,
+                       VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled}) {
+      for (auto prediction : {VarDctDcPrediction::kGradient,
+                              VarDctDcPrediction::kWeighted}) {
+        const VarDctCodestreamOptions baseline_options{
+          .coefficient_order_behavior = order, .dc_prediction = prediction};
+        auto rate_options = baseline_options;
+        rate_options.entropy_behavior = VarDctEntropyBehavior::kRateOptimized;
+        std::vector<uint8_t> baseline, candidate, bare;
+        VarDctCodestreamProfile baseline_profile, profile;
+        if (!EncodeVarDctCodestreamProfiled(frame, baseline_options, &baseline, &baseline_profile).ok() ||
+            !EncodeVarDctCodestreamProfiled(frame, rate_options,
+              &candidate, &profile).ok() ||
+            !EncodeVarDctCodestream(frame, rate_options, &bare).ok() ||
+            candidate != bare || profile.balanced_candidate_bytes != baseline.size() ||
+            candidate.size() != std::min(profile.balanced_candidate_bytes,
+                                         profile.rate_candidate_bytes) ||
+            profile.selected_balanced_fallback !=
+              (profile.balanced_candidate_bytes <= profile.rate_candidate_bytes) ||
+            profile.coefficient_tokenization_pass_count !=
+              baseline_profile.coefficient_tokenization_pass_count ||
+            profile.coefficient_token_count != baseline_profile.coefficient_token_count ||
+            profile.dc_sample_count != baseline_profile.dc_sample_count ||
+            profile.dc_leaf_count != baseline_profile.dc_leaf_count ||
+            profile.coefficient_order_behavior != order) {
+          std::cerr << "Rate search lost whole-stream fallback or work accounting\n";
+          return false;
+        }
+        if (profile.selected_balanced_fallback) {
+          saw_fallback = true;
+          if (candidate != baseline ||
+              profile.entropy_model_bits != baseline_profile.entropy_model_bits ||
+              profile.entropy_token_bits != baseline_profile.entropy_token_bits ||
+              profile.ac_entropy_clusters != baseline_profile.ac_entropy_clusters)
+            return false;
+        } else {
+          saw_expanded = true;
+        }
+      }
+    }
+  }
+  if (!saw_fallback || !saw_expanded)
+    std::cerr << "Rate fallback fixture did not exercise both selections\n";
+  return saw_fallback && saw_expanded;
+}
+
 bool CheckManagedSerializerStorage() {
   using namespace gjxl;
   using namespace resource_budget_internal;
@@ -656,6 +714,7 @@ bool CheckManagedSerializerStorage() {
   if (!prepared.ok()) return false;
   for (auto behavior : {VarDctEntropyBehavior::kBalanced,
                         VarDctEntropyBehavior::kHighDensity,
+                        VarDctEntropyBehavior::kRateOptimized,
                         VarDctEntropyBehavior::kMaximumCompression}) {
     std::vector<uint8_t> expected;
     {
@@ -703,6 +762,110 @@ bool CheckManagedSerializerStorage() {
     if (!EncodeVarDctCodestream(frame, {.entropy_behavior = behavior}, &encoded).ok() ||
         encoded != expected) return false;
   }
+  return true;
+}
+
+bool CheckAdmittedRateFallback() {
+  using namespace gjxl;
+  using namespace gjxl::codestream_internal;
+  using namespace gjxl::thread_budget_internal;
+  const VarDctCodestreamOptions options{
+    .entropy_behavior = VarDctEntropyBehavior::kRateOptimized};
+  bool saw_balanced = false, saw_expanded = false;
+  size_t checked = 0;
+  for (const auto extent : {Extent2D{1, 1}, {8, 8}, {64, 9},
+                            {129, 97}, {257, 259}}) {
+    VarDctEncoderFrame frame;
+    if (!MakeFrame(extent.width, extent.height, {3541, 10}, {}, &frame,
+                   extent.width == 1).ok()) return false;
+    std::vector<uint8_t> expected;
+    VarDctCodestreamProfile expected_profile;
+    {
+      EncodeScope serial(1);
+      if (!EncodeVarDctCodestreamProfiled(
+            frame, options, &expected, &expected_profile).ok()) return false;
+    }
+    saw_balanced |= expected_profile.selected_balanced_fallback;
+    saw_expanded |= !expected_profile.selected_balanced_fallback;
+    for (size_t limit : {1, 2, 4, 8}) {
+      for (size_t requested : {0, 1, 2, 8}) {
+        std::shared_ptr<const ExecutionDomain> domain;
+        if (!ExecutionDomain::Create({0, limit}, &domain).ok()) return false;
+        CpuParticipantTracker tracker;
+        std::vector<uint8_t> actual;
+        VarDctCodestreamProfile profile;
+        {
+          CpuExecutionScope execution;
+          if (!execution.Start(domain, requested).ok()) return false;
+          EncodeScope threads(requested, &tracker);
+          if (!EncodeVarDctCodestreamProfiled(
+                frame, options, &actual, &profile).ok()) return false;
+        }
+        const auto snapshot = domain->snapshot();
+        const size_t cap = requested == 0 ? limit : std::min(limit, requested);
+        if (actual != expected || tracker.peak() == 0 || tracker.peak() > cap ||
+            tracker.active() != 0 || snapshot.active_cpu_participants != 0 ||
+            snapshot.reserved_cpu_workers != 0 ||
+            snapshot.suspended_cpu_workers != 0 ||
+            snapshot.waiting_cpu_callers != 0 ||
+            snapshot.peak_cpu_protected_slots > cap ||
+            profile.balanced_candidate_bytes != expected_profile.balanced_candidate_bytes ||
+            profile.rate_candidate_bytes != expected_profile.rate_candidate_bytes ||
+            profile.selected_balanced_fallback != expected_profile.selected_balanced_fallback ||
+            profile.entropy_model_bits != expected_profile.entropy_model_bits ||
+            profile.entropy_token_bits != expected_profile.entropy_token_bits ||
+            profile.coefficient_token_count != expected_profile.coefficient_token_count ||
+            profile.coefficient_tokenization_pass_count != 1 ||
+            profile.entropy_optimization_nanoseconds + profile.section_writing_nanoseconds +
+              profile.assembly_nanoseconds > profile.total_nanoseconds) {
+          std::cerr << "Admitted rate search changed bytes, accounting or CPU limits\n";
+          return false;
+        }
+        ++checked;
+      }
+    }
+  }
+  // A one-block frame has no parallel tokenization. Its first serializer
+  // worker is the new policy dispatcher; failing that launch must be atomic.
+  VarDctEncoderFrame frame;
+  if (!MakeFrame(1, 1, {3541, 10}, {}, &frame, true).ok()) return false;
+  for (auto kind : {WorkerLaunchFailureKind::kSystemError,
+                    WorkerLaunchFailureKind::kBadAlloc}) {
+    std::shared_ptr<const ExecutionDomain> domain;
+    if (!ExecutionDomain::Create({0, 4}, &domain).ok()) return false;
+    const std::vector<uint8_t> sentinel{17, 19};
+    auto output = sentinel;
+    VarDctCodestreamProfile profile;
+    profile.total_nanoseconds = 123;
+    profile.balanced_candidate_bytes = 456;
+    profile.rate_candidate_bytes = 789;
+    WorkerLaunchFaultForTesting fault{
+      WorkerLaunchSite::kSerializerSections, 0, kind};
+    Status status;
+    {
+      CpuExecutionScope execution;
+      if (!execution.Start(domain, 4).ok()) return false;
+      EncodeScope threads(4);
+      WorkerLaunchFaultScopeForTesting failure(&fault);
+      status = EncodeVarDctCodestreamProfiled(frame, options, &output, &profile);
+    }
+    const auto snapshot = domain->snapshot();
+    const auto expected_code = kind == WorkerLaunchFailureKind::kBadAlloc
+      ? StatusCode::kOutOfMemory : StatusCode::kInternal;
+    if (!fault.triggered || status.code() != expected_code || output != sentinel ||
+        profile.total_nanoseconds != 123 || profile.balanced_candidate_bytes != 456 ||
+        profile.rate_candidate_bytes != 789 || snapshot.active_cpu_participants != 0 ||
+        snapshot.reserved_cpu_workers != 0 || snapshot.suspended_cpu_workers != 0) {
+      std::cerr << "Rate policy launch failure changed output or leaked CPU capacity\n";
+      return false;
+    }
+  }
+  if (!saw_balanced || !saw_expanded) {
+    std::cerr << "Admitted rate fixtures must exercise both whole-file selections\n";
+    return false;
+  }
+  std::cout << "Admitted rate fallback cases: " << checked
+            << "; atomic policy launch failures: 2\n";
   return true;
 }
 
@@ -755,6 +918,7 @@ bool CheckAdaptiveDcTrees() {
             before_dc.plane[c].Row(y) + before_dc.plane[c].extent.width);
     for (auto prediction : {VarDctDcPrediction::kGradient, VarDctDcPrediction::kWeighted})
       for (auto behavior : {VarDctEntropyBehavior::kBalanced, VarDctEntropyBehavior::kHighDensity,
+                            VarDctEntropyBehavior::kRateOptimized,
                             VarDctEntropyBehavior::kMaximumCompression}) {
         VarDctCodestreamOptions options{.entropy_behavior = behavior, .dc_prediction = prediction};
         std::vector<uint8_t> legacy, adaptive, repeated, profiled;
@@ -791,7 +955,8 @@ int main() {
   if (!CheckCodestreamAndFrameHeaders() || !CheckQuantizerSelectors() ||
       !CheckAssemblyAndDeterminism() || !CheckAdaptiveBlockContextSelection() ||
       !CheckEntropyBehaviorPlumbing() || !CheckAtomicRejections() ||
-      !CheckDeferredCandidatePrimitives() || !CheckManagedSerializerStorage() ||
+      !CheckRateOptimizedFallback() || !CheckDeferredCandidatePrimitives() ||
+      !CheckManagedSerializerStorage() || !CheckAdmittedRateFallback() ||
       !CheckDefaultDcPolicy() || !CheckAdaptiveDcTrees()) {
     return EXIT_FAILURE;
   }

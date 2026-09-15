@@ -734,8 +734,8 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
   return true;
 }
 
-[[nodiscard]] bool CheckProcessCapacityBudget() {
-  constexpr size_t limit = size_t{1024} * 1024 * 1024;
+[[nodiscard]] bool CheckProcessCapacityAccounting() {
+  constexpr size_t limit = gjxl::MetalBackendOptions{}.preparation_cache_bytes;
   if (gjxl::MetalButteraugliProcessCacheBytesForTesting() != 0) return false;
   std::array<std::unique_ptr<gjxl::GpuBackend>, 3> backends;
   std::array<DeviceImage, 3> references;
@@ -751,9 +751,10 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
           {references[index].View(), {}}, &prepared[index]).ok()) return false;
     bytes = prepared[index]->memory_stats().prepared_allocation_bytes;
   }
-  if (bytes * 2 > limit || bytes * 3 <= limit ||
+  if (bytes * 3 > limit ||
       gjxl::MetalButteraugliProcessCacheBytesForTesting() != 0) return false;
-  // Concurrent returns race for one process-wide budget, never one per backend.
+  // Concurrent returns update shared accounting. The aggregate process limit
+  // across all five cache pools is exercised by metal_cache_admission_test.
   std::array<std::thread, 3> threads;
   for (size_t i = 0; i < 3; ++i)
     threads[i] = std::thread([&, i] { prepared[i].reset(); });
@@ -764,7 +765,7 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
     retained += idle;
     rejected += idle == 0;
   }
-  if (retained != 2 * bytes || rejected != 1 ||
+  if (retained != 3 * bytes || rejected != 0 ||
       gjxl::MetalButteraugliProcessCacheBytesForTesting() != retained)
     return false;
   for (size_t i = 0; i < 3; ++i) {
@@ -777,7 +778,7 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
 }  // namespace
 
 int main() {
-  if (!CheckCapacityCache() || !CheckProcessCapacityBudget()) {
+  if (!CheckCapacityCache() || !CheckProcessCapacityAccounting()) {
     std::cerr << "Metal Butteraugli capacity-cache lifecycle check failed\n";
     return EXIT_FAILURE;
   }

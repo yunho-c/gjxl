@@ -7,6 +7,7 @@
 #include <array>
 #include <functional>
 #include <limits>
+#include <thread>
 
 #include "codec/vardct_frame.h"
 #include "codestream/ans_internal.h"
@@ -75,11 +76,14 @@ Status ComputeTaskStoragePlan(size_t tokens, size_t contexts, size_t sections,
       {.policy = exhaustive
                      ? (deferred ? EntropyStoragePolicy::kDeferredAnsFromPrefix
                                  : EntropyStoragePolicy::kAnsFromPrefix)
-                     : (behavior == VarDctEntropyBehavior::kHighDensity
-                            ? EntropyStoragePolicy::kHighDensityAns
-                            : dc_uint_search
-                                ? EntropyStoragePolicy::kBalancedDcAns
-                                : EntropyStoragePolicy::kBalancedAns),
+                     : (behavior == VarDctEntropyBehavior::kRateOptimized
+                            ? (deferred ? EntropyStoragePolicy::kDeferredRateOptimizedAns
+                                        : EntropyStoragePolicy::kRateOptimizedAns)
+                            : (behavior == VarDctEntropyBehavior::kHighDensity
+                                   ? EntropyStoragePolicy::kHighDensityAns
+                                   : (dc_uint_search
+                                        ? EntropyStoragePolicy::kBalancedDcAns
+                                        : EntropyStoragePolicy::kBalancedAns))),
        .tokens = tokens,
        .contexts = contexts,
        .sections = sections,
@@ -146,6 +150,7 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
   const auto behavior = options.coding.entropy_behavior;
   if (behavior != VarDctEntropyBehavior::kBalanced &&
       behavior != VarDctEntropyBehavior::kHighDensity &&
+      behavior != VarDctEntropyBehavior::kRateOptimized &&
       behavior != VarDctEntropyBehavior::kMaximumCompression)
     return Status::InvalidArgument(
         "Serializer plan entropy behavior is invalid");
@@ -235,7 +240,8 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
   }
   status = ComputeTaskStoragePlan(plan.maximum_ac_tokens,
                                   maps.maximum_ac_contexts, g, behavior,
-                                  exhaustive, headers.ac_model, &ac_task,
+                                  exhaustive || behavior == VarDctEntropyBehavior::kRateOptimized,
+                                  headers.ac_model, &ac_task,
                                   maximum_ac_ans_clusters);
   if (!status.ok())
     return status;
@@ -344,6 +350,29 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
       (g == 1 && !AddWriter(padded_payload_bits, &work)) ||
       !work.Add(plan.output))
     return Overflow();
+  if (behavior == VarDctEntropyBehavior::kRateOptimized) {
+    // Sum both complete envelopes for admitted parallel searches. Shared
+    // preparation is conservatively counted twice, covering the second set of
+    // candidate/map/stream views. Add the outer dispatcher explicitly. Direct
+    // calls without CPU admission also fit this conservative envelope.
+    // A single participant retains the sequential envelope.
+    auto fallback_options = options;
+    fallback_options.coding.entropy_behavior = VarDctEntropyBehavior::kBalanced;
+    SerializerStoragePlan fallback;
+    status = ComputeSerializerStoragePlan(frame_extent, fallback_options, &fallback);
+    if (!status.ok()) return status;
+    if (workers > 1) {
+      if (!work.Add(fallback.working) ||
+          !work.AddVector<Status>(2, kFreshExact) ||
+          !work.AddVector<std::thread>(2, kFreshExact)) return Overflow();
+    } else {
+      if (!work.Add(fallback.output)) return Overflow();
+      work = Either(work, fallback.working);
+    }
+    plan.output = Either(plan.output, fallback.output);
+    plan.maximum_output_bytes =
+      std::max(plan.maximum_output_bytes, fallback.maximum_output_bytes);
+  }
   *out = plan;
   return Status::Ok();
 }

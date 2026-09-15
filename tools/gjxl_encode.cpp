@@ -607,7 +607,10 @@ int main(int argc, char** argv) {
                   : (summary.entropy_behavior ==
                            gjxl::VarDctEntropyBehavior::kHighDensity
                        ? "high-density entropy"
-                       : "balanced entropy"))
+                       : (summary.entropy_behavior ==
+                                gjxl::VarDctEntropyBehavior::kRateOptimized
+                            ? "rate-optimized entropy"
+                            : "balanced entropy")))
             << ".\nStrategies:";
   for (size_t index = 0; index < summary.strategy_counts.size(); ++index) {
     if (summary.strategy_counts[index] == 0) {

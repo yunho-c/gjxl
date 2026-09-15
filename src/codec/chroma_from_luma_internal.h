@@ -27,6 +27,7 @@ namespace gjxl::chroma_from_luma_internal {
   ConstPlaneI32View raw_quant_field,
   const Quantizer& quantizer,
   bool fast,
-  ColorCorrelationMap* out);
+  ColorCorrelationMap* out,
+  uint32_t nonlinear_iterations = 20);
 
 }  // namespace gjxl::chroma_from_luma_internal

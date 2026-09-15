@@ -1845,10 +1845,16 @@ Status OptimizeEntropyCodeImpl(
       }
       EntropyCode candidate;
       EntropyCodeCost candidate_cost;
-      if (Status status = BuildEntropyCodeForPartition(
-            section_tokens, options, clustered_map, histograms,
-            clustered_histograms.size(), false, &candidate,
-            &candidate_cost, nullptr, profile); !status.ok()) {
+      // The fixed configuration already has exact clustered symbol counts and
+      // extra-bit totals. Building from them preserves the Huffman decisions
+      // without materializing and aggregating every raw value a second time.
+      if (Status status = profile_call(
+            &EntropyWorkProfile::prefix_code_build_nanoseconds,
+            [&] {
+              return BuildFixedEntropyCodeForPartition(
+                options, clustered_map, clustered_histograms, fixed_extra_bits,
+                &candidate, &candidate_cost);
+            }); !status.ok()) {
         return status;
       }
       if (cost != nullptr) {
@@ -2398,6 +2404,12 @@ Status codestream_internal::ComputePrefixOptimizationStoragePlan(
   status = ComputeEntropyWriterStorageBound(model.maximum_bits, &writer);
   if (!status.ok()) return status;
   if (!work.Add(writer)) return overflow();
+  if (fast) {
+    // Fast Prefix uses the fixed-config clustered histograms directly. It owns
+    // no per-token value buffer, aggregation scratch or configuration search.
+    *out = plan;
+    return Status::Ok();
+  }
   EntropyAggregationStoragePlan aggregate;
   status = ComputeEntropyAggregationStoragePlan(o.tokens, &aggregate);
   if (!status.ok()) return status;

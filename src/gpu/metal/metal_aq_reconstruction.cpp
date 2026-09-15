@@ -217,16 +217,27 @@ void MetalPreparedAqEvaluation::EncodeDcQuantization(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
   if (!DeferredDc() || exact_coefficient_reconstruction_ || exact_linear_reconstruction_) return;
   const auto params = DcProcessingParams();
-  encoder->setComputePipelineState(backend.aq_pipelines_.dc_quantize.get());
+  const bool simd_wave = params.quantization_mode == 1u && params.predictor == 1u &&
+    backend.aq_pipelines_.dc_quantize_simd_wave->threadExecutionWidth() == 32;
+  encoder->setComputePipelineState(simd_wave
+    ? backend.aq_pipelines_.dc_quantize_simd_wave.get()
+    : backend.aq_pipelines_.dc_quantize.get());
   BindPlane(encoder, dc_, 0);
   BindPlane(encoder, quantized_dc_, 1);
   BindPlane(encoder, dc_predictor_scratch_.buffer ? dc_predictor_scratch_ : raw_quant_, 2);
   BindPlane(encoder, reconstruction_error_, 3);
   encoder->setBytes(&params, sizeof(params), 4);
   BindPlane(encoder, params.use_resident_quantizer ? resident_quantizer_params_ : raw_quant_, 5);
-  DispatchMetalThreadgroups(encoder,
-    MTL::Size(((block_extent_.width + 255) / 256) * ((block_extent_.height + 255) / 256), 1, 1),
-    MTL::Size(std::min<size_t>(256, block_extent_.height), 1, 1));
+  const size_t groups = ((block_extent_.width + 255) / 256) *
+                        ((block_extent_.height + 255) / 256);
+  const MTL::Size threads(simd_wave ? std::min<size_t>(256, (block_extent_.height + 31) / 32 * 32) : std::min<size_t>(256, block_extent_.height), 1, 1);
+  uint32_t channel_base = 0;
+  encoder->setBytes(&channel_base, sizeof(channel_base), 6);
+  DispatchMetalThreadgroups(encoder, MTL::Size(groups, 2, 1), threads);
+  // B consumes the completed Y integers. Keep it in the following dispatch.
+  channel_base = 2;
+  encoder->setBytes(&channel_base, sizeof(channel_base), 6);
+  DispatchMetalThreadgroups(encoder, MTL::Size(groups, 1, 1), threads);
 }
 
 void MetalPreparedAqEvaluation::EncodeDcSmoothing(
@@ -455,8 +466,13 @@ void MetalPreparedAqEvaluation::EncodeAdjustedQuantizationBatch(
   if (batch.anchor_count == 0) return;
   const AqReconstructionParams& params = reconstruction_params_[batch_index];
   if (params.adjust_ac_quant == 0u) return;
-  encoder->setComputePipelineState(
-      backend.aq_pipelines_.select_adjusted_quantization.get());
+  // The scalar kernel packs 256 independent transforms into a threadgroup.
+  // Parallel coefficient scans expose more work when a larger-transform batch
+  // fits in that single group; dense batches favor the scalar scan's throughput.
+  const bool parallel = batch.coefficient_count >= 128 && batch.anchor_count <= 256;
+  encoder->setComputePipelineState(parallel
+    ? backend.aq_pipelines_.select_adjusted_quantization_parallel.get()
+    : backend.aq_pipelines_.select_adjusted_quantization.get());
   BindPlane(encoder, anchors_, 0);
   BindPlane(encoder, quant_tables_, 1);
   BindPlane(encoder, raw_quant_, 2);
@@ -469,7 +485,12 @@ void MetalPreparedAqEvaluation::EncodeAdjustedQuantizationBatch(
               ? resident_quantizer_params_
               : raw_quant_,
             7);
-  DispatchThreads1d(encoder, batch.anchor_count);
+  if (parallel) {
+    DispatchMetalThreadgroups(encoder, MTL::Size(batch.anchor_count, 1, 1),
+      MTL::Size(128, 1, 1));
+  } else {
+    DispatchThreads1d(encoder, batch.anchor_count);
+  }
 }
 
 void MetalPreparedAqEvaluation::EncodeReconstructionBatch(
@@ -549,61 +570,80 @@ void MetalPreparedAqEvaluation::EncodeReconstructionScatterBatch(
 }
 
 void MetalPreparedAqEvaluation::EncodeResidentQuantizer(
-    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
+    MetalBackend &backend, MTL::ComputeCommandEncoder *encoder) const {
 
-  encoder->setComputePipelineState(
-      backend.aq_pipelines_.resident_quant_select_initialize.get());
-  BindPlane(encoder, resident_quant_selection_state_, 0);
-  BindPlane(encoder, resident_quant_histogram_, 1);
-  encoder->setBytes(&resident_quant_selection_params_,
-                    sizeof(resident_quant_selection_params_), 2);
-  DispatchThreads1d(encoder, 256);
+  // A single group saves 18 dispatches, but loses parallelism on larger fields.
+  // Keep a conservative cutoff below the measured repetitive-field crossover.
+  constexpr size_t kMaxSmallQuantizerBlocks = 8192;
+  auto *small_pipeline = backend.aq_pipelines_.resident_quant_small.get();
+  if (block_count_ <= kMaxSmallQuantizerBlocks &&
+      small_pipeline->threadExecutionWidth() == 32u &&
+      small_pipeline->maxTotalThreadsPerThreadgroup() >= 256u) {
+    encoder->setComputePipelineState(small_pipeline);
+    BindPlane(encoder, resident_quant_field_, 0);
+    BindPlane(encoder, resident_quant_statistics_, 1);
+    BindPlane(encoder, resident_quantizer_params_, 2);
+    BindPlane(encoder, reconstruction_error_, 3);
+    encoder->setBytes(&resident_quant_selection_params_,
+                      sizeof(resident_quant_selection_params_), 4);
+    BindPlane(encoder, resident_quant_selection_state_, 5);
+    BindPlane(encoder, resident_quant_histogram_, 6);
+    DispatchMetalThreadgroups(encoder, MTL::Size(1, 1, 1),
+                              MTL::Size(256, 1, 1));
+  } else {
+    encoder->setComputePipelineState(
+        backend.aq_pipelines_.resident_quant_select_initialize.get());
+    BindPlane(encoder, resident_quant_selection_state_, 0);
+    BindPlane(encoder, resident_quant_histogram_, 1);
+    encoder->setBytes(&resident_quant_selection_params_,
+                      sizeof(resident_quant_selection_params_), 2);
+    DispatchThreads1d(encoder, 256);
 
-  const auto encode_selection = [&](bool deviation) {
-    if (deviation) {
-      encoder->setComputePipelineState(
-          backend.aq_pipelines_.resident_quant_select_initialize.get());
-      BindPlane(encoder, resident_quant_selection_state_, 0);
-      BindPlane(encoder, resident_quant_histogram_, 1);
-      encoder->setBytes(&resident_quant_selection_params_,
-                        sizeof(resident_quant_selection_params_), 2);
-      DispatchThreads1d(encoder, 256);
-    }
-    constexpr std::array<uint32_t, 4> kShifts = {24, 16, 8, 0};
-    for (uint32_t shift : kShifts) {
-      const AqResidentQuantSelectionPass pass{
-          shift, deviation ? 1u : 0u};
-      encoder->setComputePipelineState(
-          backend.aq_pipelines_.resident_quant_histogram.get());
-      BindPlane(encoder, resident_quant_field_, 0);
-      BindPlane(encoder, resident_quant_statistics_, 1);
-      BindPlane(encoder, resident_quant_histogram_, 2);
-      BindPlane(encoder, resident_quant_selection_state_, 3);
-      encoder->setBytes(&resident_quant_selection_params_,
-                        sizeof(resident_quant_selection_params_), 4);
-      encoder->setBytes(&pass, sizeof(pass), 5);
-      DispatchThreads1d(encoder, block_count_);
+    const auto encode_selection = [&](bool deviation) {
+      if (deviation) {
+        encoder->setComputePipelineState(
+            backend.aq_pipelines_.resident_quant_select_initialize.get());
+        BindPlane(encoder, resident_quant_selection_state_, 0);
+        BindPlane(encoder, resident_quant_histogram_, 1);
+        encoder->setBytes(&resident_quant_selection_params_,
+                          sizeof(resident_quant_selection_params_), 2);
+        DispatchThreads1d(encoder, 256);
+      }
+      constexpr std::array<uint32_t, 4> kShifts = {24, 16, 8, 0};
+      for (uint32_t shift : kShifts) {
+        const AqResidentQuantSelectionPass pass{shift, deviation ? 1u : 0u};
+        encoder->setComputePipelineState(
+            backend.aq_pipelines_.resident_quant_histogram.get());
+        BindPlane(encoder, resident_quant_field_, 0);
+        BindPlane(encoder, resident_quant_statistics_, 1);
+        BindPlane(encoder, resident_quant_histogram_, 2);
+        BindPlane(encoder, resident_quant_selection_state_, 3);
+        encoder->setBytes(&resident_quant_selection_params_,
+                          sizeof(resident_quant_selection_params_), 4);
+        encoder->setBytes(&pass, sizeof(pass), 5);
+        DispatchThreads1d(encoder, block_count_);
 
-      encoder->setComputePipelineState(
-          backend.aq_pipelines_.resident_quant_select_bucket.get());
-      BindPlane(encoder, resident_quant_histogram_, 0);
-      BindPlane(encoder, resident_quant_selection_state_, 1);
-      BindPlane(encoder, resident_quant_statistics_, 2);
-      encoder->setBytes(&pass, sizeof(pass), 3);
-      DispatchThreads1d(encoder, 256);
-    }
-  };
-  encode_selection(false);
-  encode_selection(true);
+        encoder->setComputePipelineState(
+            backend.aq_pipelines_.resident_quant_select_bucket.get());
+        BindPlane(encoder, resident_quant_histogram_, 0);
+        BindPlane(encoder, resident_quant_selection_state_, 1);
+        BindPlane(encoder, resident_quant_statistics_, 2);
+        encoder->setBytes(&pass, sizeof(pass), 3);
+        DispatchThreads1d(encoder, 256);
+      }
+    };
+    encode_selection(false);
+    encode_selection(true);
 
-  encoder->setComputePipelineState(
-      backend.aq_pipelines_.resident_quant_finalize_quantizer.get());
-  BindPlane(encoder, resident_quant_statistics_, 0);
-  BindPlane(encoder, resident_quantizer_params_, 1);
-  BindPlane(encoder, reconstruction_error_, 2);
-  encoder->setBytes(&resident_quant_selection_params_,
-                    sizeof(resident_quant_selection_params_), 3);
-  DispatchThreads1d(encoder, 1);
+    encoder->setComputePipelineState(
+        backend.aq_pipelines_.resident_quant_finalize_quantizer.get());
+    BindPlane(encoder, resident_quant_statistics_, 0);
+    BindPlane(encoder, resident_quantizer_params_, 1);
+    BindPlane(encoder, reconstruction_error_, 2);
+    encoder->setBytes(&resident_quant_selection_params_,
+                      sizeof(resident_quant_selection_params_), 3);
+    DispatchThreads1d(encoder, 1);
+  }
 
   encoder->setComputePipelineState(
       backend.aq_pipelines_.initial_quant_raw_quant.get());
@@ -629,12 +669,17 @@ void MetalPreparedAqEvaluation::EncodeFinalColorCorrelation(
   BindPlane(encoder, y_to_b_, 7);
   BindPlane(encoder, reconstruction_error_, 8);
   encoder->setBytes(&final_cfl_params_, sizeof(final_cfl_params_), 9);
+  const bool nonlinear = final_cfl_params_.nonlinear_iterations != 0u;
+  // Six derivative contributions and a two-channel validity mask per coefficient.
+  constexpr size_t kChunkScratchBytes = 128 * (6 * sizeof(float) + sizeof(uint32_t));
+  // Metal validation requires a bound slot even when linear CfL does not read it.
+  encoder->setThreadgroupMemoryLength(nonlinear ? kChunkScratchBytes : 16, 0);
   DispatchMetalThreadgroups(
       encoder,
       MTL::Size(static_cast<NS::UInteger>(
                     tile_extent_.width * tile_extent_.height),
                 1, 1),
-      MTL::Size(4, 1, 1));
+      MTL::Size(nonlinear ? 128 : 4, 1, 1));
 }
 
 void MetalPreparedAqEvaluation::EncodeQuantFieldAdjustmentSubmission(
@@ -690,7 +735,7 @@ void MetalPreparedAqEvaluation::EncodeFrameSubmission(
     BindPlane(encoder, self.reconstruction_error_, 5);
     encoder->setBytes(&self.initial_cfl_params_,
                       sizeof(self.initial_cfl_params_), 6);
-    DispatchThreads1d(encoder, self.tile_extent_.width *
+    DispatchThreads1d(encoder, 4 * self.tile_extent_.width *
                                    self.tile_extent_.height);
   }
 
@@ -828,7 +873,7 @@ void MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission(
     encoder->setBytes(&self.initial_cfl_params_,
                       sizeof(self.initial_cfl_params_), 6);
     DispatchThreads1d(
-      encoder, self.tile_extent_.width * self.tile_extent_.height);
+      encoder, 4 * self.tile_extent_.width * self.tile_extent_.height);
   }
 
   if (self.uniform_initial_quant_ > 0.0f) {
@@ -1791,6 +1836,90 @@ void MetalPreparedAqEvaluation::EncodeQuantizationProbeSubmission(
   DispatchThreads1d(encoder, self.quant_probe_params_.coefficient_count);
 }
 
+Status MetalPreparedAqEvaluation::RunFinalColorCorrelationProbe(
+    const prepared_coefficients_internal::PreparedForwardDctCoefficients& coefficients,
+    ConstPlaneI32View raw_quant, const Quantizer& quantizer,
+    uint32_t nonlinear_iterations, ColorCorrelationMap* output) {
+  if (output == nullptr || !coefficients.valid() || !quantizer.valid() ||
+      coefficients.block_extent != block_extent_ || !raw_quant.valid() ||
+      raw_quant.extent != block_extent_ || nonlinear_iterations > 20 ||
+      coefficients.transforms.size() != row_major_anchors_.size())
+    return Status::InvalidArgument("Final CfL probe inputs are invalid");
+  if (!resident_quantization_ || final_transform_metadata_pending_)
+    return Status::FailedPrecondition("Final CfL probe requires resident metadata");
+  for (size_t i = 0; i < row_major_anchors_.size(); ++i) {
+    const auto& anchor = row_major_anchors_[i];
+    const auto& transform = coefficients.transforms[i];
+    if (anchor.block_x != transform.block_x || anchor.block_y != transform.block_y ||
+        anchor.strategy != transform.strategy)
+      return Status::InvalidArgument("Final CfL probe transform layout differs");
+  }
+  Status status = BeginOperation();
+  if (!status.ok()) return status;
+  const uint32_t previous_iterations = final_cfl_params_.nonlinear_iterations;
+  final_cfl_params_.nonlinear_iterations = nonlinear_iterations;
+  // Diagnostics replace resident data, so it must not be reused as a cache.
+  resident_forward_coefficients_ready_ = false;
+  invariant_color_correlation_ready_ = false;
+  resident_color_correlation_pending_ = false;
+  for (size_t i = 0; status.ok() && i < row_major_anchors_.size(); ++i) {
+    const auto& anchor = row_major_anchors_[i];
+    const auto& batch = batches_[anchor.batch_index];
+    const auto& transform = coefficients.transforms[i];
+    for (size_t channel = 0; status.ok() && channel < 3; ++channel) {
+      const size_t offset = batch.coefficient_offset +
+        channel * batch.anchor_count * batch.coefficient_count +
+        anchor.index_in_batch * batch.coefficient_count;
+      status = backend_->CopyHostToDevice(*forward_coefficients_.buffer,
+        coefficients.coefficients[channel].data() + transform.coefficient_offset,
+        transform.coefficient_count * sizeof(float),
+        forward_coefficients_.offset_bytes + offset * sizeof(float));
+    }
+  }
+  for (size_t y = 0; status.ok() && y < block_extent_.height; ++y)
+    status = backend_->CopyHostToDevice(*raw_quant_.buffer, raw_quant.Row(y),
+      block_extent_.width * sizeof(int32_t),
+      raw_quant_.offset_bytes + y * raw_quant_.row_stride * sizeof(int32_t));
+  const auto q = quantizer.params();
+  if (status.ok()) status = backend_->CopyHostToDevice(
+    *resident_quantizer_params_.buffer, &q.global_scale, sizeof(q.global_scale),
+    resident_quantizer_params_.offset_bytes);
+  const uint32_t zero = 0;
+  if (status.ok()) status = backend_->CopyHostToDevice(
+    *reconstruction_error_.buffer, &zero, sizeof(zero), reconstruction_error_.offset_bytes);
+  std::unique_ptr<GpuSubmission> submission;
+  if (status.ok()) status = backend_->SubmitCompute("gjxl final CfL probe",
+    [](MetalBackend& backend, MTL::ComputeCommandEncoder* encoder, const void* context) {
+      static_cast<const MetalPreparedAqEvaluation*>(context)->
+        EncodeFinalColorCorrelation(backend, encoder);
+    }, this, &submission);
+  if (!status.ok() || submission == nullptr) {
+    Invalidate();
+    return status.ok() ? Status::Internal("Final CfL probe has no submission") : status;
+  }
+  {
+    std::lock_guard lock(mutex_);
+    submission_ = std::move(submission);
+  }
+  status = WaitForOperation();
+  if (!status.ok()) return status;
+  uint32_t error = 0;
+  status = CopyReadback(*backend_, reconstruction_error_, &error, sizeof(error));
+  if (status.ok() && error != 0)
+    status = Status::DeviceError("Final CfL probe detected invalid numeric input");
+  if (status.ok()) status = ReadbackColorCorrelation();
+  if (!status.ok()) {
+    Invalidate();
+    return status;
+  }
+  status = chroma_from_luma_internal::CreateColorCorrelationMap(
+    {last_y_to_x_.data(), tile_extent_, tile_extent_.width},
+    {last_y_to_b_.data(), tile_extent_, tile_extent_.width}, output);
+  final_cfl_params_.nonlinear_iterations = previous_iterations;
+  CompleteOperation();
+  return status;
+}
+
 Status MetalPreparedAqEvaluation::RunQuantizationProbe(
     const MetalAqQuantizationProbeForTesting &probe,
     std::vector<int32_t> *quantized, std::vector<float> *dequantized) {
@@ -1929,7 +2058,8 @@ void MetalPreparedAqEvaluation::EncodeAdjustmentProbeSubmission(
   BindPlane(encoder, self.reconstruction_error_, 5);
   encoder->setBytes(
       &self.adjustment_probe_params_, sizeof(self.adjustment_probe_params_), 6);
-  DispatchThreads1d(encoder, 1);
+  DispatchMetalThreadgroups(encoder, MTL::Size(1, 1, 1),
+    MTL::Size(std::min<size_t>(128, self.adjustment_probe_params_.coefficient_count), 1, 1));
 }
 
 Status MetalPreparedAqEvaluation::RunAdjustmentProbe(
@@ -2124,6 +2254,18 @@ Status RunMetalAqReconstructionForTesting(
         "AQ reconstruction requires a Metal prepared evaluation");
   }
   return metal->RunReconstruction(input, snapshot);
+}
+
+Status RunMetalAqFinalColorCorrelationForTesting(
+    PreparedAqEvaluation& prepared,
+    const prepared_coefficients_internal::PreparedForwardDctCoefficients& coefficients,
+    ConstPlaneI32View raw_quant, const Quantizer& quantizer,
+    uint32_t nonlinear_iterations, ColorCorrelationMap* output) {
+  auto* metal = AsMetalPrepared(prepared);
+  if (metal == nullptr)
+    return Status::InvalidArgument("Final CfL probe requires Metal preparation");
+  return metal->RunFinalColorCorrelationProbe(
+    coefficients, raw_quant, quantizer, nonlinear_iterations, output);
 }
 
 Status RunMetalAqQuantizationProbeForTesting(

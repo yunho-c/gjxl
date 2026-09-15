@@ -83,8 +83,10 @@ enum class EntropyStoragePolicy {
   kBalancedAns,
   kBalancedDcAns,
   kHighDensityAns,
+  kRateOptimizedAns,
   kAnsFromPrefix,
   kDeferredAnsFromPrefix,
+  kDeferredRateOptimizedAns,
 };
 
 struct EntropyOptimizationStorageOptions {

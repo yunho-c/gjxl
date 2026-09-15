@@ -113,7 +113,8 @@ int8_t FindBestMultiplier(
   std::span<const float> luma,
   std::span<const float> chroma,
   float base,
-  bool fast) {
+  bool fast,
+  uint32_t nonlinear_iterations = 20) {
 
   if (luma.empty()) {
     return 0;
@@ -141,7 +142,7 @@ int8_t FindBestMultiplier(
     constexpr float kEpsilon = 100.0f;
     constexpr float kStepClamp = 20.0f;
     constexpr float kStabilizer = 0.85f;
-    for (size_t iteration = 0; iteration < 20; ++iteration) {
+    for (size_t iteration = 0; iteration < nonlinear_iterations; ++iteration) {
       const Derivatives derivatives = CflDerivatives(
         luma,
         chroma,
@@ -545,7 +546,11 @@ Status ComputeFinalColorCorrelationMap(
   ConstPlaneI32View raw_quant_field,
   const Quantizer& quantizer,
   bool fast,
-  ColorCorrelationMap* out) {
+  ColorCorrelationMap* out,
+  uint32_t nonlinear_iterations) {
+
+  if (nonlinear_iterations == 0 || nonlinear_iterations > 20)
+    return Status::InvalidArgument("Final CfL iteration limit is invalid");
 
   if (out == nullptr) {
     return Status::InvalidArgument(
@@ -644,9 +649,9 @@ Status ComputeFinalColorCorrelationMap(
 
         const size_t tile_index = tile_y * tile_extent.width + tile_x;
         result.y_to_x_[tile_index] = FindBestMultiplier(
-          values[0], values[1], kBaseCorrelationX, fast);
+          values[0], values[1], kBaseCorrelationX, fast, nonlinear_iterations);
         result.y_to_b_[tile_index] = FindBestMultiplier(
-          values[2], values[3], kBaseCorrelationB, fast);
+          values[2], values[3], kBaseCorrelationB, fast, nonlinear_iterations);
       }
     }
     *out = std::move(result);
@@ -668,7 +673,11 @@ Status chroma_from_luma_internal::ComputeFinalColorCorrelationMapPrepared(
   ConstPlaneI32View raw_quant_field,
   const Quantizer& quantizer,
   bool fast,
-  ColorCorrelationMap* out) {
+  ColorCorrelationMap* out,
+  uint32_t nonlinear_iterations) {
+
+  if (nonlinear_iterations == 0 || nonlinear_iterations > 20)
+    return Status::InvalidArgument("Final CfL iteration limit is invalid");
 
   if (out == nullptr || !prepared.valid() || !raw_quant_field.valid() ||
       raw_quant_field.extent != prepared.block_extent || !quantizer.valid()) {
@@ -765,9 +774,9 @@ Status chroma_from_luma_internal::ComputeFinalColorCorrelationMapPrepared(
         }
       }
       result.y_to_x_[tile_index] = FindBestMultiplier(
-        values[0], values[1], kBaseCorrelationX, fast);
+        values[0], values[1], kBaseCorrelationX, fast, nonlinear_iterations);
       result.y_to_b_[tile_index] = FindBestMultiplier(
-        values[2], values[3], kBaseCorrelationB, fast);
+        values[2], values[3], kBaseCorrelationB, fast, nonlinear_iterations);
     }
     *out = std::move(result);
     return Status::Ok();

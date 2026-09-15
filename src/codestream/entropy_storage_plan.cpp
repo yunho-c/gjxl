@@ -113,8 +113,7 @@ Status ComputeEntropyModelStoragePlan(EntropyCodingMode mode, size_t contexts,
   } else {
     HostStorageBound histogram;
     if (!histogram.AddVector<uint16_t>(kMaximumAnsAlphabetSize, kFreshExact) ||
-        !histogram.AddVector<Storage<uint16_t>>(kMaximumAnsAlphabetSize,
-                                                kFreshExact) ||
+        !histogram.AddVector<uint16_t>(kMaximumAnsAlphabetSize, kFreshExact) ||
         !histogram.AddVector<uint16_t>(kAnsTableSize, kFreshExact) ||
         !histogram.AddVector<uint64_t>(kMaximumAnsAlphabetSize, kFreshExact) ||
         !plan.owned.AddVector<AnsHistogram>(clusters, kFreshExact) ||
@@ -160,6 +159,8 @@ Status ComputeEntropyOptimizationStoragePlan(
   case kBalancedAns:
   case kBalancedDcAns:
   case kHighDensityAns:
+  case kRateOptimizedAns:
+  case kDeferredRateOptimizedAns:
   case kAnsFromPrefix:
   case kDeferredAnsFromPrefix:
     if (options.retain_prepared_clusters ||

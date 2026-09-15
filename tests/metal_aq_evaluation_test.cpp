@@ -1660,7 +1660,7 @@ bool CheckResidentButteraugliPolicy(
   }
 
   if (!CheckStatus(fused->PrepareInvariantColorCorrelationResident(
-          {initial.data(), blocks, blocks.width}, setup.quant_dc),
+          {initial.data(), blocks, blocks.width}, setup.quant_dc, 8),
           "profiled resident final CfL preparation")) {
     return false;
   }

@@ -4,12 +4,17 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <barrier>
 #include <cstddef>
 #include <cstdint>
+#include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <span>
+#include <thread>
 #include <vector>
 
 #include "codestream/ans_internal.h"
@@ -18,6 +23,8 @@
 #include "codestream/entropy_internal.h"
 #include "codestream/huffman.h"
 #include "codestream/profile_internal.h"
+#include "core/thread_budget.h"
+#include "core/worker_launch_internal.h"
 
 namespace {
 
@@ -785,7 +792,7 @@ bool WriteReferenceAnsTokens(
       state /= 65536u;
     }
     state = (state / frequency) * 4096u +
-      histogram.reverse_maps[encoded.symbol][state % frequency];
+      histogram.reverse_map[histogram.reverse_offsets[encoded.symbol] + state % frequency];
   }
   if (!writer->WriteBits(32, state).ok()) return false;
   for (auto it = chunks.rbegin(); it != chunks.rend(); ++it) {
@@ -884,12 +891,9 @@ bool CheckAnsRoundTripContract() {
   gjxl::EntropyCode malformed = ans;
   bool damaged = false;
   for (gjxl::AnsHistogram& histogram : malformed.ans_histograms) {
-    for (auto& reverse : histogram.reverse_maps) {
-      if (!reverse.empty()) {
-        reverse[0] = gjxl::kAnsTableSize;
-        damaged = true;
-        break;
-      }
+    if (!histogram.reverse_map.empty()) {
+      histogram.reverse_map[0] = gjxl::kAnsTableSize;
+      damaged = true;
     }
     if (damaged) break;
   }
@@ -901,6 +905,23 @@ bool CheckAnsRoundTripContract() {
       !HasBytes(atomic, std::array<uint8_t, 1>{5})) {
     std::cerr << "Malformed ANS lookup changed its destination\n";
     return false;
+  }
+
+  for (size_t fault = 0; fault < 4; ++fault) {
+    auto invalid = ans;
+    auto& histogram = invalid.ans_histograms.front();
+    if (fault == 0) histogram.reverse_offsets.clear();
+    else if (fault == 1) ++histogram.reverse_offsets.front();
+    else if (fault == 2) histogram.reverse_map.pop_back();
+    else histogram.reverse_map.push_back(0);
+    gjxl::BitWriter destination;
+    if (!destination.WriteBits(3, 5).ok() ||
+        gjxl::WriteTokenStream(sections[1], invalid, &destination).code() !=
+          gjxl::StatusCode::kInvalidArgument || destination.bits_written() != 3 ||
+        !HasBytes(destination, std::array<uint8_t, 1>{5})) {
+      std::cerr << "Malformed flat ANS table changed its destination\n";
+      return false;
+    }
   }
 
   const auto rejects_reciprocals = [&](bool remove) {
@@ -1102,6 +1123,302 @@ bool CheckAnsSmallHistograms() {
     }
   }
   return true;
+}
+
+bool CheckAnsShannonLowerBound() {
+  using gjxl::codestream_internal::AnsShannonLowerBound;
+  std::array<uint64_t, gjxl::kMaximumAnsAlphabetSize> counts{};
+  uint64_t bound = 99;
+  if (!AnsShannonLowerBound(counts, &bound) || bound != 0) return false;
+  for (uint32_t log_symbols = 0; log_symbols <= 8; ++log_symbols) {
+    for (uint64_t count : {1ull, 13ull, 1ull << 22}) {
+      counts.fill(0);
+      std::fill_n(counts.begin(), size_t{1} << log_symbols, count);
+      if (!AnsShannonLowerBound(counts, &bound) ||
+          bound != count * (uint64_t{1} << log_symbols) * log_symbols) return false;
+    }
+  }
+  uint32_t random = 12345;
+  for (size_t trial = 0; trial < 2048; ++trial) {
+    counts.fill(0);
+    uint64_t total = 0;
+    for (size_t i = 0; i <= trial % counts.size(); ++i) {
+      random = random * 1664525u + 1013904223u;
+      counts[i] = random % 10000001u;
+      total += counts[i];
+    }
+    long double expected = 0;
+    for (uint64_t count : counts) {
+      if (count != 0)
+        expected += count * std::log2(static_cast<long double>(total) / count);
+    }
+    if (!AnsShannonLowerBound(counts, &bound) ||
+        bound > expected + 1e-5L || expected - bound > total * 8e-6L + 2) {
+      std::cerr << "Invalid Shannon bound at trial " << trial << '\n';
+      return false;
+    }
+  }
+  counts.fill(0);
+  counts[0] = INT32_MAX;
+  counts[1] = 1;
+  if (!AnsShannonLowerBound(counts, &bound) || bound > 33) return false;
+  for (auto invalid : {uint64_t{INT32_MAX} + 1, uint64_t{UINT32_MAX}, UINT64_MAX}) {
+    counts[0] = invalid;
+    bound = 99;
+    if (AnsShannonLowerBound(counts, &bound) || bound != 99) return false;
+  }
+  counts[0] = counts[1] = INT32_MAX;
+  counts[2] = 2;
+  return !AnsShannonLowerBound(counts, &bound) && bound == 99 &&
+    !AnsShannonLowerBound(counts, nullptr);
+}
+
+bool CheckRateOptimizedAns() {
+  using namespace gjxl;
+  using namespace gjxl::codestream_internal;
+  bool improved = false;
+  bool reduced_histogram_work = false;
+  for (uint32_t scale : {16u, 64u, 256u, 1024u, 65536u}) {
+    std::array<std::vector<EntropyToken>, 3> sections;
+    uint32_t random = 12345;
+    for (size_t s = 0; s < sections.size(); ++s) {
+      for (size_t i = 0; i < 4096; ++i) {
+        random = random * 1664525u + 1013904223u;
+        sections[s].push_back({static_cast<uint32_t>(i % 3),
+          scale == 65536 && i % 7 == 0 ? random : (random >> 16) % scale});
+      }
+    }
+    if (scale == 65536) sections[0].push_back({0, UINT32_MAX});
+    const std::array views{EntropyTokenStreamView::Interleaved(sections[0]),
+                           EntropyTokenStreamView::Interleaved(sections[1]),
+                           EntropyTokenStreamView::Interleaved(sections[2])};
+    EntropyCode narrow, wide, no_cost;
+    EntropyCodeCost narrow_cost, wide_cost;
+    EntropyWorkProfile profile, narrow_profile;
+    if (!OptimizeDirectAnsEntropyCode(views, {.context_count = 3},
+          DirectAnsEntropyMode::kHighDensity, &narrow, &narrow_cost, &narrow_profile).ok() ||
+        !OptimizeDirectAnsEntropyCode(views, {.context_count = 3},
+          DirectAnsEntropyMode::kRateOptimized, &wide, &wide_cost, &profile).ok() ||
+        !OptimizeDirectAnsEntropyCode(views, {.context_count = 3},
+          DirectAnsEntropyMode::kRateOptimized, &no_cost).ok() ||
+        wide != no_cost || profile.ans_alphabet_width_candidate_count !=
+          (scale == 65536 ? 3 : 4) ||
+        profile.ans_uint_config_candidate_count < 28 ||
+        profile.ans_uint_config_candidate_count % 28 != 0 ||
+        profile.ans_histogram_candidate_count > narrow_profile.ans_histogram_candidate_count ||
+        wide_cost.model_bits + wide_cost.token_bits >
+          narrow_cost.model_bits + narrow_cost.token_bits) {
+      std::cerr << "Full direct ANS search failed: scale=" << scale
+                << " widths=" << profile.ans_alphabet_width_candidate_count
+                << " configs=" << profile.ans_uint_config_candidate_count
+                << " cost=" << narrow_cost.model_bits + narrow_cost.token_bits
+                << '/' << wide_cost.model_bits + wide_cost.token_bits
+                << " no_cost_equal=" << (wide == no_cost) << '\n';
+      return false;
+    }
+    improved |= wide_cost.model_bits + wide_cost.token_bits <
+                  narrow_cost.model_bits + narrow_cost.token_bits;
+    PreparedAnsEntropyCode deferred;
+    if (!PrepareRateOptimizedAnsEntropyCode(views, {.context_count = 3}, &deferred).ok())
+      return false;
+    const size_t widths = deferred.candidates.size();
+    std::vector<uint64_t> section_bits(views.size() * widths);
+    // Reverse the measurement order: independent sections must choose the same
+    // exact winner and deterministic ties as the ordered serial optimizer.
+    for (size_t s = views.size(); s-- > 0;) {
+      std::vector<uint32_t> values;
+      std::vector<uint16_t> contexts;
+      for (const auto& token : sections[s]) {
+        values.push_back(token.value);
+        contexts.push_back(static_cast<uint16_t>(token.context));
+      }
+      if (!MeasurePreparedAnsEntropyCodeSection(
+          EntropyTokenStreamView::Split(values, contexts), deferred,
+          std::span<uint64_t>(section_bits).subspan(s * widths, widths)).ok())
+        return false;
+    }
+    EntropyCode deferred_code;
+    EntropyCodeCost deferred_cost;
+    if (!FinalizePreparedAnsEntropyCode(&deferred, section_bits,
+          &deferred_code, &deferred_cost).ok() ||
+        deferred_code != wide || deferred_cost != wide_cost) {
+      std::cerr << "Deferred rate-optimized ANS differs from serial search\n";
+      return false;
+    }
+    reduced_histogram_work |= profile.ans_histogram_candidate_count <
+      narrow_profile.ans_histogram_candidate_count;
+    BitWriter model;
+    if (!WriteEntropyCode(wide, &model).ok() ||
+        model.bits_written() != wide_cost.model_bits) return false;
+    uint64_t total = 0;
+    for (size_t s = 0; s < sections.size(); ++s) {
+      BitWriter tokens;
+      if (!WriteTokenStream(sections[s], wide, &tokens).ok() ||
+          tokens.bits_written() != wide_cost.section_token_bits[s]) return false;
+      total += tokens.bits_written();
+    }
+    if (total != wide_cost.token_bits) return false;
+  }
+  if (!improved) std::cerr << "ANS width fixture no longer exercises a rate gain\n";
+  return improved && reduced_histogram_work;
+}
+
+bool CheckParallelRateAns() {
+  using namespace gjxl;
+  using namespace gjxl::codestream_internal;
+  using namespace gjxl::thread_budget_internal;
+  const auto check = [](bool good, const char* message) {
+    if (!good) std::cerr << message << '\n';
+    return good;
+  };
+  // Distinct, populated contexts retain enough clusters to exercise partial
+  // launches, nested dispatch and every participant count. Include empty
+  // sections and full-width input without sharing writable token backing.
+  std::vector<uint32_t> values;
+  std::vector<uint16_t> contexts;
+  for (uint16_t c = 0; c < 32; ++c) {
+    for (size_t i = 0; i < 512; ++i) {
+      values.push_back((4u + c % 4) << (3 * (c / 4)));
+      contexts.push_back(c);
+    }
+  }
+  values.back() = UINT32_MAX;
+  const std::array views{EntropyTokenStreamView::Split({}, {}),
+    EntropyTokenStreamView::Split(values, contexts),
+    EntropyTokenStreamView::Split({}, {})};
+  const EntropyCodeOptions options{.context_count = 32};
+  EntropyCode oracle;
+  EntropyCodeCost oracle_cost;
+  EntropyWorkProfile oracle_profile;
+  if (!OptimizeDirectAnsEntropyCode(views, options, DirectAnsEntropyMode::kRateOptimized,
+        &oracle, &oracle_cost, &oracle_profile).ok() ||
+      !check(oracle.ans_histograms.size() >= 8, "Parallel ANS fixture lost its clusters"))
+    return false;
+  const auto run = [&](bool deferred, EntropyCode* code, EntropyCodeCost* cost,
+                       EntropyWorkProfile* profile = nullptr) {
+    if (!deferred) return OptimizeDirectAnsEntropyCode(
+      views, options, DirectAnsEntropyMode::kRateOptimized, code, cost, profile);
+    PreparedAnsEntropyCode prepared;
+    Status status = PrepareRateOptimizedAnsEntropyCode(views, options, &prepared, profile);
+    if (!status.ok()) return status;
+    const size_t widths = prepared.candidates.size();
+    std::vector<uint64_t> bits(views.size() * widths);
+    for (size_t s = views.size(); s-- > 0;) {
+      status = MeasurePreparedAnsEntropyCodeSection(views[s], prepared,
+        std::span<uint64_t>(bits).subspan(s * widths, widths));
+      if (!status.ok()) return status;
+    }
+    return FinalizePreparedAnsEntropyCode(&prepared, bits, code, cost);
+  };
+  const auto empty = [&](const ExecutionDomain& domain) {
+    const auto s = domain.snapshot();
+    return check(s.active_cpu_participants == 0 && s.reserved_cpu_workers == 0 &&
+      s.suspended_cpu_workers == 0 && s.waiting_cpu_callers == 0 &&
+      s.peak_cpu_protected_slots <= s.effective_cpu_participant_limit,
+      "ANS search leaked or exceeded CPU capacity");
+  };
+  // A legacy component call without admitted CPU participation stays serial.
+  {
+    EncodeScope scope(8);
+    WorkerLaunchFaultForTesting fault{WorkerLaunchSite::kAnsConfigSearch};
+    WorkerLaunchFaultScopeForTesting inject(&fault);
+    EntropyCode code;
+    EntropyCodeCost cost;
+    if (!run(false, &code, &cost).ok() || fault.triggered ||
+        code != oracle || cost != oracle_cost) return false;
+  }
+  for (size_t limit : {1ul, 2ul, 4ul, 8ul}) {
+    for (bool deferred : {false, true}) {
+      for (bool nested : {false, true}) {
+        for (bool domain_limited : {false, true}) {
+          std::shared_ptr<const ExecutionDomain> domain;
+          if (!ExecutionDomain::Create({0, domain_limited ? limit : 8}, &domain).ok())
+            return false;
+          CpuParticipantTracker tracker;
+          {
+            CpuExecutionScope cpu;
+            if (!cpu.Start(domain, domain_limited ? 8 : limit).ok()) return false;
+            // Automatic/explicit requests must both obey the admitted quota.
+            EncodeScope scope(domain_limited ? 0 : limit, &tracker);
+            std::optional<ParallelScope> outer;
+            if (nested) outer.emplace(CpuThreadCount(), &tracker,
+              resource_budget_internal::CurrentResourceContext());
+            WorkerLaunchFaultForTesting observed{
+              WorkerLaunchSite::kAnsConfigSearch, SIZE_MAX};
+            WorkerLaunchFaultScopeForTesting observe(&observed);
+            EntropyCode code;
+            EntropyCodeCost cost;
+            EntropyWorkProfile profile;
+            if (!run(deferred, &code, &cost, &profile).ok() ||
+                !check(code == oracle && cost == oracle_cost,
+                       "Parallel ANS changed the selected model or exact costs") ||
+                !check(profile.ans_uint_config_candidate_count == oracle_profile.ans_uint_config_candidate_count &&
+                  profile.ans_histogram_candidate_count == oracle_profile.ans_histogram_candidate_count &&
+                  profile.ans_alphabet_width_candidate_count == oracle_profile.ans_alphabet_width_candidate_count,
+                  "Parallel ANS lost profile work") ||
+                !check(observed.launched_in_group == limit - 1 &&
+                  tracker.peak() <= limit && tracker.active() == 1,
+                  "ANS search lost nested parallelism or exceeded its quota")) return false;
+          }
+          if (!empty(*domain) || tracker.active() != 0) return false;
+        }
+      }
+    }
+  }
+  // Partial launch failures must join workers, release all reservations and
+  // preserve both output owners. The same domain must then support a retry.
+  for (bool deferred : {false, true}) {
+    for (auto kind : {WorkerLaunchFailureKind::kBadAlloc, WorkerLaunchFailureKind::kSystemError}) {
+      for (size_t before : {0ul, 1ul, 3ul}) {
+        std::shared_ptr<const ExecutionDomain> domain;
+        if (!ExecutionDomain::Create({0, 8}, &domain).ok()) return false;
+        {
+          CpuExecutionScope cpu;
+          if (!cpu.Start(domain, 8).ok()) return false;
+          EncodeScope scope(8);
+          EntropyCode code;
+          code.context_count = 77;
+          EntropyCodeCost cost;
+          cost.model_bits = 19;
+          const auto saved_code = code;
+          const auto saved_cost = cost;
+          WorkerLaunchFaultForTesting fault{WorkerLaunchSite::kAnsConfigSearch, before, kind};
+          Status status;
+          {
+            WorkerLaunchFaultScopeForTesting inject(&fault);
+            status = run(deferred, &code, &cost);
+          }
+          if (!check(fault.triggered && fault.launched_in_group == before &&
+                status.code() == (kind == WorkerLaunchFailureKind::kBadAlloc
+                  ? StatusCode::kOutOfMemory : StatusCode::kInternal) &&
+                code == saved_code && cost == saved_cost,
+                "ANS partial worker launch was not atomic")) return false;
+          const auto s = domain->snapshot();
+          if (s.active_cpu_participants != 1 || s.reserved_cpu_workers != 0 ||
+              s.suspended_cpu_workers != 0 || !run(deferred, &code, &cost).ok() ||
+              code != oracle || cost != oracle_cost) return false;
+        }
+        if (!empty(*domain)) return false;
+      }
+    }
+  }
+  // Two admitted jobs compete for the same domain's remaining workers.
+  std::shared_ptr<const ExecutionDomain> domain;
+  if (!ExecutionDomain::Create({0, 4}, &domain).ok()) return false;
+  std::barrier ready(2);
+  std::array<bool, 2> good{};
+  std::array<std::thread, 2> jobs;
+  for (size_t i = 0; i < jobs.size(); ++i) jobs[i] = std::thread([&, i] {
+    CpuExecutionScope cpu;
+    if (!cpu.Start(domain, 8).ok()) { ready.arrive_and_drop(); return; }
+    EncodeScope scope(8);
+    ready.arrive_and_wait();
+    EntropyCode code;
+    EntropyCodeCost cost;
+    good[i] = run(i != 0, &code, &cost).ok() && code == oracle && cost == oracle_cost;
+  });
+  for (auto& job : jobs) job.join();
+  return check(good[0] && good[1], "Contended ANS search changed output") && empty(*domain);
 }
 
 bool CheckAnsClusterLimits() {
@@ -1932,6 +2249,28 @@ bool CheckSplitTokenStreamParity() {
     return false;
   }
 
+  // Configuration checks must survive hoisting out of the token loop, and
+  // a malformed survivor must not partially publish candidate bit counts.
+  for (size_t fault = 0; fault < 3; ++fault) {
+    auto malformed = deferred;
+    for (auto& candidate : malformed.candidates) {
+      if (!candidate.survives) continue;
+      auto& config = candidate.code.uint_configs[
+        candidate.code.context_map[split_sections[1][0].context]];
+      if (fault == 0) config.split_exponent = 16;
+      else if (fault == 1) config.msb_in_token = config.split_exponent + 1;
+      else config.lsb_in_token = config.split_exponent - config.msb_in_token + 1;
+    }
+    if (gjxl::codestream_internal::MeasurePreparedAnsEntropyCodeSection(
+          split_sections[1], malformed, unchanged_deferred_bits).code() !=
+          gjxl::StatusCode::kInvalidArgument ||
+        !std::ranges::all_of(unchanged_deferred_bits,
+          [](uint64_t value) { return value == 0xA5A5A5A5A5A5A5A5ull; })) {
+      std::cerr << "Invalid prepared ANS configuration changed its output\n";
+      return false;
+    }
+  }
+
   for (size_t section_index = 0; section_index < sections.size();
        ++section_index) {
     if (!gjxl::codestream_internal::MeasurePreparedAnsEntropyCodeSection(
@@ -2157,6 +2496,9 @@ int main() {
       !CheckSparseDirectAnsPopulations() ||
       !CheckBorrowedDirectAnsValidation() ||
       !CheckScannedDirectAnsLateSectionFailures() ||
+      !CheckAnsShannonLowerBound() ||
+      !CheckRateOptimizedAns() ||
+      !CheckParallelRateAns() ||
       !CheckAnsClusterLimits() ||
       !CheckDirectAnsOptimization() ||
       !CheckSplitTokenStreamParity() ||

@@ -152,14 +152,17 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> resident_quant_histogram;
   NS::SharedPtr<MTL::ComputePipelineState> resident_quant_select_bucket;
   NS::SharedPtr<MTL::ComputePipelineState> resident_quant_finalize_quantizer;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_quant_small;
   NS::SharedPtr<MTL::ComputePipelineState> resident_policy_initialize;
   NS::SharedPtr<MTL::ComputePipelineState> resident_policy_update;
   NS::SharedPtr<MTL::ComputePipelineState> gather_transform_pixels;
   NS::SharedPtr<MTL::ComputePipelineState> select_adjusted_quantization;
+  NS::SharedPtr<MTL::ComputePipelineState> select_adjusted_quantization_parallel;
   NS::SharedPtr<MTL::ComputePipelineState> encode_reconstruction_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> encode_scored_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> encode_final_coefficients;
   NS::SharedPtr<MTL::ComputePipelineState> dc_quantize;
+  NS::SharedPtr<MTL::ComputePipelineState> dc_quantize_simd_wave;
   NS::SharedPtr<MTL::ComputePipelineState> dc_smooth;
   NS::SharedPtr<MTL::ComputePipelineState> dc_low_frequencies;
   NS::SharedPtr<MTL::ComputePipelineState> count_coefficient_zeros;
@@ -327,6 +330,7 @@ public:
     ButteraugliPipelines butteraugli_pipelines,
     bool test_fail_submission,
     bool test_fail_completion,
+    size_t preparation_cache_bytes,
     size_t butteraugli_cache_bytes,
     size_t completed_frame_cache_bytes);
 
@@ -478,6 +482,10 @@ private:
     MetalAqScratchArena kind,
     DeviceScratchArena arena,
     bool reusable) noexcept;
+
+  void DropAqScratchArenaLocked(size_t index) noexcept;
+  bool ReservePreparationCacheBytesLocked(size_t bytes) noexcept;
+  void ReleasePreparationCacheBytesLocked(size_t bytes) noexcept;
 
   Status AcquireButteraugliArena(
     size_t required_capacity_bytes, DeviceScratchArena* arena,
@@ -716,6 +724,11 @@ private:
   std::atomic<bool> test_fail_next_completion_{false};
   std::atomic<bool> test_fail_next_allocation_{false};
   std::mutex preparation_cache_mutex_;
+  static constexpr size_t kPreparationProcessCacheLimit =
+    size_t{6} * 1024 * 1024 * 1024;
+  static std::atomic<size_t> idle_preparation_bytes_;
+  const size_t preparation_cache_limit_;
+  size_t preparation_cache_bytes_ = 0;
   std::array<
     std::optional<DeviceScratchArena>,
     static_cast<size_t>(MetalAqScratchArena::kCount)> idle_aq_scratch_;

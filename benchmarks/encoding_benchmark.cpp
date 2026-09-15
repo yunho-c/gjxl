@@ -1201,7 +1201,10 @@ void WriteRawWorkflowSamples(
                      : sample.entropy_behavior ==
                            gjxl::VarDctEntropyBehavior::kHighDensity
                          ? "high-density"
-                         : "balanced")
+                         : sample.entropy_behavior ==
+                               gjxl::VarDctEntropyBehavior::kRateOptimized
+                             ? "rate-optimized"
+                             : "balanced")
                << "\", \"entropy_search\": {\"uint_configs\": "
                << sample.ans_uint_config_candidate_count
                << ", \"histograms\": "
