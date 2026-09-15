@@ -28,6 +28,8 @@ namespace gjxl::codestream_internal {
 
 inline constexpr uint32_t kAnsReciprocalPrecision = 44;
 inline constexpr size_t kAnsAlphabetWidthCount = 4;
+// Shared by the rate-search dispatcher and its managed-storage bound.
+inline constexpr size_t kMaximumAnsConfigWorkers = 8;
 
 /// Integer lower bound on sum(count * log2(total/count)), without libm rounding.
 /// Unsupported large populations return false so normal validation still runs.

@@ -4,13 +4,17 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <barrier>
 #include <cstddef>
 #include <cstdint>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <memory>
+#include <optional>
 #include <span>
+#include <thread>
 #include <vector>
 
 #include "codestream/ans_internal.h"
@@ -19,6 +23,8 @@
 #include "codestream/entropy_internal.h"
 #include "codestream/huffman.h"
 #include "codestream/profile_internal.h"
+#include "core/thread_budget.h"
+#include "core/worker_launch_internal.h"
 
 namespace {
 
@@ -1237,6 +1243,164 @@ bool CheckRateOptimizedAns() {
   return improved && reduced_histogram_work;
 }
 
+bool CheckParallelRateAns() {
+  using namespace gjxl;
+  using namespace gjxl::codestream_internal;
+  using namespace gjxl::thread_budget_internal;
+  const auto check = [](bool good, const char* message) {
+    if (!good) std::cerr << message << '\n';
+    return good;
+  };
+  // Distinct, populated contexts retain enough clusters to exercise partial
+  // launches, nested dispatch and every participant count. Include empty
+  // sections and full-width input without sharing writable token backing.
+  std::vector<uint32_t> values;
+  std::vector<uint16_t> contexts;
+  for (uint16_t c = 0; c < 32; ++c) {
+    for (size_t i = 0; i < 512; ++i) {
+      values.push_back((4u + c % 4) << (3 * (c / 4)));
+      contexts.push_back(c);
+    }
+  }
+  values.back() = UINT32_MAX;
+  const std::array views{EntropyTokenStreamView::Split({}, {}),
+    EntropyTokenStreamView::Split(values, contexts),
+    EntropyTokenStreamView::Split({}, {})};
+  const EntropyCodeOptions options{.context_count = 32};
+  EntropyCode oracle;
+  EntropyCodeCost oracle_cost;
+  EntropyWorkProfile oracle_profile;
+  if (!OptimizeDirectAnsEntropyCode(views, options, DirectAnsEntropyMode::kRateOptimized,
+        &oracle, &oracle_cost, &oracle_profile).ok() ||
+      !check(oracle.ans_histograms.size() >= 8, "Parallel ANS fixture lost its clusters"))
+    return false;
+  const auto run = [&](bool deferred, EntropyCode* code, EntropyCodeCost* cost,
+                       EntropyWorkProfile* profile = nullptr) {
+    if (!deferred) return OptimizeDirectAnsEntropyCode(
+      views, options, DirectAnsEntropyMode::kRateOptimized, code, cost, profile);
+    PreparedAnsEntropyCode prepared;
+    Status status = PrepareRateOptimizedAnsEntropyCode(views, options, &prepared, profile);
+    if (!status.ok()) return status;
+    const size_t widths = prepared.candidates.size();
+    std::vector<uint64_t> bits(views.size() * widths);
+    for (size_t s = views.size(); s-- > 0;) {
+      status = MeasurePreparedAnsEntropyCodeSection(views[s], prepared,
+        std::span<uint64_t>(bits).subspan(s * widths, widths));
+      if (!status.ok()) return status;
+    }
+    return FinalizePreparedAnsEntropyCode(&prepared, bits, code, cost);
+  };
+  const auto empty = [&](const ExecutionDomain& domain) {
+    const auto s = domain.snapshot();
+    return check(s.active_cpu_participants == 0 && s.reserved_cpu_workers == 0 &&
+      s.suspended_cpu_workers == 0 && s.waiting_cpu_callers == 0 &&
+      s.peak_cpu_protected_slots <= s.effective_cpu_participant_limit,
+      "ANS search leaked or exceeded CPU capacity");
+  };
+  // A legacy component call without admitted CPU participation stays serial.
+  {
+    EncodeScope scope(8);
+    WorkerLaunchFaultForTesting fault{WorkerLaunchSite::kAnsConfigSearch};
+    WorkerLaunchFaultScopeForTesting inject(&fault);
+    EntropyCode code;
+    EntropyCodeCost cost;
+    if (!run(false, &code, &cost).ok() || fault.triggered ||
+        code != oracle || cost != oracle_cost) return false;
+  }
+  for (size_t limit : {1ul, 2ul, 4ul, 8ul}) {
+    for (bool deferred : {false, true}) {
+      for (bool nested : {false, true}) {
+        for (bool domain_limited : {false, true}) {
+          std::shared_ptr<const ExecutionDomain> domain;
+          if (!ExecutionDomain::Create({0, domain_limited ? limit : 8}, &domain).ok())
+            return false;
+          CpuParticipantTracker tracker;
+          {
+            CpuExecutionScope cpu;
+            if (!cpu.Start(domain, domain_limited ? 8 : limit).ok()) return false;
+            // Automatic/explicit requests must both obey the admitted quota.
+            EncodeScope scope(domain_limited ? 0 : limit, &tracker);
+            std::optional<ParallelScope> outer;
+            if (nested) outer.emplace(CpuThreadCount(), &tracker,
+              resource_budget_internal::CurrentResourceContext());
+            WorkerLaunchFaultForTesting observed{
+              WorkerLaunchSite::kAnsConfigSearch, SIZE_MAX};
+            WorkerLaunchFaultScopeForTesting observe(&observed);
+            EntropyCode code;
+            EntropyCodeCost cost;
+            EntropyWorkProfile profile;
+            if (!run(deferred, &code, &cost, &profile).ok() ||
+                !check(code == oracle && cost == oracle_cost,
+                       "Parallel ANS changed the selected model or exact costs") ||
+                !check(profile.ans_uint_config_candidate_count == oracle_profile.ans_uint_config_candidate_count &&
+                  profile.ans_histogram_candidate_count == oracle_profile.ans_histogram_candidate_count &&
+                  profile.ans_alphabet_width_candidate_count == oracle_profile.ans_alphabet_width_candidate_count,
+                  "Parallel ANS lost profile work") ||
+                !check(observed.launched_in_group == limit - 1 &&
+                  tracker.peak() <= limit && tracker.active() == 1,
+                  "ANS search lost nested parallelism or exceeded its quota")) return false;
+          }
+          if (!empty(*domain) || tracker.active() != 0) return false;
+        }
+      }
+    }
+  }
+  // Partial launch failures must join workers, release all reservations and
+  // preserve both output owners. The same domain must then support a retry.
+  for (bool deferred : {false, true}) {
+    for (auto kind : {WorkerLaunchFailureKind::kBadAlloc, WorkerLaunchFailureKind::kSystemError}) {
+      for (size_t before : {0ul, 1ul, 3ul}) {
+        std::shared_ptr<const ExecutionDomain> domain;
+        if (!ExecutionDomain::Create({0, 8}, &domain).ok()) return false;
+        {
+          CpuExecutionScope cpu;
+          if (!cpu.Start(domain, 8).ok()) return false;
+          EncodeScope scope(8);
+          EntropyCode code;
+          code.context_count = 77;
+          EntropyCodeCost cost;
+          cost.model_bits = 19;
+          const auto saved_code = code;
+          const auto saved_cost = cost;
+          WorkerLaunchFaultForTesting fault{WorkerLaunchSite::kAnsConfigSearch, before, kind};
+          Status status;
+          {
+            WorkerLaunchFaultScopeForTesting inject(&fault);
+            status = run(deferred, &code, &cost);
+          }
+          if (!check(fault.triggered && fault.launched_in_group == before &&
+                status.code() == (kind == WorkerLaunchFailureKind::kBadAlloc
+                  ? StatusCode::kOutOfMemory : StatusCode::kInternal) &&
+                code == saved_code && cost == saved_cost,
+                "ANS partial worker launch was not atomic")) return false;
+          const auto s = domain->snapshot();
+          if (s.active_cpu_participants != 1 || s.reserved_cpu_workers != 0 ||
+              s.suspended_cpu_workers != 0 || !run(deferred, &code, &cost).ok() ||
+              code != oracle || cost != oracle_cost) return false;
+        }
+        if (!empty(*domain)) return false;
+      }
+    }
+  }
+  // Two admitted jobs compete for the same domain's remaining workers.
+  std::shared_ptr<const ExecutionDomain> domain;
+  if (!ExecutionDomain::Create({0, 4}, &domain).ok()) return false;
+  std::barrier ready(2);
+  std::array<bool, 2> good{};
+  std::array<std::thread, 2> jobs;
+  for (size_t i = 0; i < jobs.size(); ++i) jobs[i] = std::thread([&, i] {
+    CpuExecutionScope cpu;
+    if (!cpu.Start(domain, 8).ok()) { ready.arrive_and_drop(); return; }
+    EncodeScope scope(8);
+    ready.arrive_and_wait();
+    EntropyCode code;
+    EntropyCodeCost cost;
+    good[i] = run(i != 0, &code, &cost).ok() && code == oracle && cost == oracle_cost;
+  });
+  for (auto& job : jobs) job.join();
+  return check(good[0] && good[1], "Contended ANS search changed output") && empty(*domain);
+}
+
 bool CheckAnsClusterLimits() {
   using namespace gjxl;
   using namespace gjxl::codestream_internal;
@@ -2213,6 +2377,7 @@ int main() {
       !CheckScannedDirectAnsLateSectionFailures() ||
       !CheckAnsShannonLowerBound() ||
       !CheckRateOptimizedAns() ||
+      !CheckParallelRateAns() ||
       !CheckAnsClusterLimits() ||
       !CheckDirectAnsOptimization() ||
       !CheckSplitTokenStreamParity() ||

@@ -26,6 +26,7 @@
 
 #include "codestream/profile_internal.h"
 #include "codestream/entropy_storage_plan.h"
+#include "core/parallel_work_internal.h"
 
 namespace gjxl {
 using codestream_internal::Storage;
@@ -280,8 +281,9 @@ Status NormalizeHistogram(
     return Status::Ok();
   }
 
-  Storage<Remainder> remainders;
-  remainders.reserve(populated);
+  std::array<Remainder, kMaximumAnsAlphabetSize> remainder_storage;
+  std::span<Remainder> remainders(remainder_storage.data(), populated);
+  size_t remainder_count = 0;
   size_t normalized_total = 0;
   for (size_t symbol = 0; symbol < alphabet_size; ++symbol) {
     if (raw[symbol] == 0) {
@@ -295,7 +297,7 @@ Status NormalizeHistogram(
       std::max<uint64_t>(quotient, 1));
     (*frequencies)[symbol] = frequency;
     normalized_total += frequency;
-    remainders.push_back({symbol, remainder});
+    remainders[remainder_count++] = {symbol, remainder};
   }
   if (normalized_total < kAnsTableSize) {
     // Input symbols are ascending; make the stable tie order explicit without
@@ -416,7 +418,7 @@ bool RebalanceHistogram(
   uint16_t* omit_position) {
 
   if (frequencies == nullptr || omit_position == nullptr ||
-      alphabet_size == 0 || shift >= kAnsLogTableSize) {
+      alphabet_size == 0 || alphabet_size > raw.size() || shift >= kAnsLogTableSize) {
     return false;
   }
   uint64_t total = 0;
@@ -439,9 +441,9 @@ bool RebalanceHistogram(
   const auto& log2_table = PopulationLog2Table();
   const auto& allowed = GetAllowedPopulations().values[shift];
   const auto& allowed_index = GetAllowedPopulations().indexes[shift];
-  Storage<int32_t> counts(alphabet_size, 0);
-  Storage<EntropyDelta> bins;
-  bins.reserve(alphabet_size);
+  std::array<int32_t, kMaximumAnsAlphabetSize> counts{};
+  std::array<EntropyDelta, kMaximumAnsAlphabetSize> bin_storage;
+  size_t bin_count = 0;
   const double scale = static_cast<double>(kAnsTableSize) /
     static_cast<double>(total);
   size_t remainder_position = 0;
@@ -462,14 +464,15 @@ bool RebalanceHistogram(
     counts[symbol] = count;
     rest -= count;
     if (target > 1.0) {
-      bins.push_back({frequency, allowed_index[count], symbol});
+      bin_storage[bin_count++] = {frequency, allowed_index[count], symbol};
     }
   }
-  bins.erase(std::remove_if(
+  std::span<EntropyDelta> bins(bin_storage.data(), bin_count);
+  bins = bins.first(std::remove_if(
     bins.begin(), bins.end(),
     [remainder_position](const EntropyDelta& delta) {
       return delta.symbol == remainder_position;
-    }), bins.end());
+    }) - bins.begin());
   rest += counts[remainder_position];
 
   if (!bins.empty()) {
@@ -699,10 +702,11 @@ Status BuildAnsEncoderTables(
   return Status::Ok();
 }
 
+template <typename Writer>
 Status WriteAnsUintConfig(
   HybridUintConfig config,
   size_t log_alpha_size,
-  BitWriter* writer) {
+  Writer* writer) {
 
   if (writer == nullptr || !config.valid() || log_alpha_size < 5 ||
       log_alpha_size > 8 ||
@@ -960,8 +964,8 @@ Status BuildBestAnsHistogram(
   }
 
   double best_cost = std::numeric_limits<double>::infinity();
-  AnsHistogram best;
-  auto consider = [&](AnsHistogram candidate) -> Status {
+  AnsHistogram best, candidate;
+  auto consider = [&]() -> Status {
     if (candidate_count != nullptr) {
       ++*candidate_count;
     }
@@ -973,21 +977,22 @@ Status BuildBestAnsHistogram(
     }
     if (candidate_cost < best_cost) {
       best_cost = candidate_cost;
-      best = std::move(candidate);
+      // Recycle the previous incumbent's same-sized frequency backing for the
+      // next trial. Losing trials also retain their storage for reuse.
+      std::swap(best, candidate);
     }
     return Status::Ok();
   };
 
-  AnsHistogram flat;
-  flat.method = 0;
-  flat.omit_position = 0;
-  flat.frequencies.assign(
+  candidate.method = 0;
+  candidate.omit_position = 0;
+  candidate.frequencies.assign(
     alphabet_size,
     static_cast<uint16_t>(kAnsTableSize / alphabet_size));
   for (size_t symbol = 0; symbol < kAnsTableSize % alphabet_size; ++symbol) {
-    ++flat.frequencies[symbol];
+    ++candidate.frequencies[symbol];
   }
-  if (Status status = consider(std::move(flat)); !status.ok()) {
+  if (Status status = consider(); !status.ok()) {
     return status;
   }
   std::array<bool, kAnsLogTableSize> shifts{};
@@ -1005,14 +1010,13 @@ Status BuildBestAnsHistogram(
     if (!shifts[shift]) {
       continue;
     }
-    AnsHistogram candidate;
     candidate.method = static_cast<uint8_t>(shift + 1);
     if (!RebalanceHistogram(
           raw, alphabet_size, shift, &candidate.frequencies,
           &candidate.omit_position)) {
       return Status::Internal("ANS histogram rebalancing failed");
     }
-    if (Status status = consider(std::move(candidate)); !status.ok()) {
+    if (Status status = consider(); !status.ok()) {
       return status;
     }
   }
@@ -2381,7 +2385,8 @@ Status OptimizeAnsEntropyCodeImpl(
       kMaximumLogAlphaSize - kMinimumLogAlphaSize + 1;
     static_assert(kLogAlphaSizeCount == kAnsAlphabetWidthCount);
     Storage<Storage<ConfigCandidate>> options(cluster_count);
-    for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
+    const auto optimize_cluster = [&](size_t cluster,
+                                      EntropyWorkProfile* cluster_profile) -> Status {
       Storage<codestream_internal::WeightedValue> weighted_values;
       std::span<const codestream_internal::WeightedValue> cluster_values;
       if (prepared_fixed) {
@@ -2391,23 +2396,23 @@ Status OptimizeAnsEntropyCodeImpl(
         cluster_values = prepared->values[cluster];
       } else {
         const ProfileClock::time_point aggregation_begin =
-          ProfileBegin(profile);
+          ProfileBegin(cluster_profile);
         if (Status status = codestream_internal::AggregateEntropyValues(
               std::move(values[cluster]), &weighted_values);
             !status.ok()) {
           return status;
         }
         ProfileEnd(
-          profile, aggregation_begin,
+          cluster_profile, aggregation_begin,
           &EntropyWorkProfile::ans_value_aggregation_nanoseconds);
         cluster_values = weighted_values;
       }
       for (HybridUintConfig config : policy.uint_configs) {
-        if (profile != nullptr) {
-          ++profile->ans_uint_config_candidate_count;
+        if (cluster_profile != nullptr) {
+          ++cluster_profile->ans_uint_config_candidate_count;
         }
         const ProfileClock::time_point uint_config_begin =
-          ProfileBegin(profile);
+          ProfileBegin(cluster_profile);
         std::array<uint64_t, kMaximumAnsAlphabetSize> counts{};
         uint64_t extra_bits = 0;
         size_t maximum_symbol = 0;
@@ -2449,7 +2454,7 @@ Status OptimizeAnsEntropyCodeImpl(
           }
         }
         ProfileEnd(
-          profile, uint_config_begin,
+          cluster_profile, uint_config_begin,
           &EntropyWorkProfile::ans_uint_config_nanoseconds);
         if (!valid) {
           continue;
@@ -2458,7 +2463,7 @@ Status OptimizeAnsEntropyCodeImpl(
         option.config = config;
         option.maximum_symbol = maximum_symbol;
         option.extra_bits = extra_bits;
-        const auto config_bound_begin = ProfileBegin(profile);
+        const auto config_bound_begin = ProfileBegin(cluster_profile);
         const ConfigCandidate* reused_histogram = nullptr;
         if (policy.optimize_config_histograms) {
           uint64_t fingerprint = 1469598103934665603ull;
@@ -2478,7 +2483,7 @@ Status OptimizeAnsEntropyCodeImpl(
           if (maximum_symbol >= (size_t{1} << log_alpha_size) ||
               config.split_exponent >=
                 (size_t{1} << std::bit_width(log_alpha_size))) continue;
-          BitWriter config_writer;
+          BitCountWriter config_writer;
           if (Status status = WriteAnsUintConfig(config, log_alpha_size, &config_writer);
               !status.ok()) return status;
           auto& stats = option.width_stats[log_alpha_size - kMinimumLogAlphaSize];
@@ -2509,15 +2514,15 @@ Status OptimizeAnsEntropyCodeImpl(
             }
           }
           if (dominated) {
-            ProfileEnd(profile, config_bound_begin,
+            ProfileEnd(cluster_profile, config_bound_begin,
                        &EntropyWorkProfile::ans_uint_config_nanoseconds);
             continue;
           }
         }
-        ProfileEnd(profile, config_bound_begin,
+        ProfileEnd(cluster_profile, config_bound_begin,
                    &EntropyWorkProfile::ans_uint_config_nanoseconds);
         const ProfileClock::time_point histogram_begin =
-          ProfileBegin(profile);
+          ProfileBegin(cluster_profile);
         size_t histogram_candidate_count = 0;
         if (reused_histogram != nullptr) {
           option.histogram = reused_histogram->histogram;
@@ -2527,15 +2532,15 @@ Status OptimizeAnsEntropyCodeImpl(
             !status.ok()) {
           return status;
         }
-        if (profile != nullptr) {
-          profile->ans_histogram_candidate_count +=
+        if (cluster_profile != nullptr) {
+          cluster_profile->ans_histogram_candidate_count +=
             histogram_candidate_count;
         }
         ProfileEnd(
-          profile, histogram_begin,
+          cluster_profile, histogram_begin,
           &EntropyWorkProfile::ans_histogram_build_nanoseconds);
         const ProfileClock::time_point config_cost_begin =
-          ProfileBegin(profile);
+          ProfileBegin(cluster_profile);
         if (reused_histogram != nullptr) {
           option.histogram_bits = reused_histogram->histogram_bits;
         } else if (Status status = EstimateAnsHistogramCost(
@@ -2550,12 +2555,44 @@ Status OptimizeAnsEntropyCodeImpl(
             static_cast<double>(stats.config_bits);
         }
         ProfileEnd(
-          profile, config_cost_begin,
+          cluster_profile, config_cost_begin,
           &EntropyWorkProfile::ans_uint_config_nanoseconds);
         options[cluster].push_back(std::move(option));
       }
       if (options[cluster].empty()) {
         return Status::InvalidArgument("No valid ANS HybridUint config");
+      }
+      return Status::Ok();
+    };
+    {
+      using namespace thread_budget_internal;
+      // Only admitted rate searches may add nested workers. The cluster's
+      // configuration order and histogram reuse remain serial and unchanged.
+      const size_t requested = CpuThreadCount() == 0
+        ? codestream_internal::kMaximumAnsConfigWorkers : CpuThreadCount();
+      const size_t desired = policy.optimize_config_histograms && HasCpuParticipation()
+        ? std::min({cluster_count, requested,
+                    codestream_internal::kMaximumAnsConfigWorkers}) : 1;
+      CpuWorkerGroup group(desired);
+      if (group.participants() > 1) {
+        Storage<EntropyWorkProfile> cluster_profiles(profile == nullptr ? 0 : cluster_count);
+        const Status status = RunParallelWork<Storage>(
+          cluster_count, group, group.participants() - 1,
+          WorkerLaunchSite::kAnsConfigSearch,
+          {"ANS cluster search allocation failed", "ANS cluster search failed",
+           StatusCode::kOutOfMemory, "ANS cluster search storage overflow",
+           "ANS worker launch allocation failed", LaunchFailureAction::kReturnError,
+           "Unable to launch ANS cluster search worker"},
+          [&](size_t cluster, size_t) {
+            return optimize_cluster(cluster, profile == nullptr ? nullptr : &cluster_profiles[cluster]);
+          });
+        if (!status.ok()) return status;
+        for (const auto& cluster_profile : cluster_profiles)
+          codestream_internal::AccumulateEntropyWorkProfile(cluster_profile, profile);
+      } else {
+        for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
+          if (Status status = optimize_cluster(cluster, profile); !status.ok()) return status;
+        }
       }
     }
 
@@ -3213,6 +3250,7 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
                   o.maximum_ans_clusters > kMaximumAnsClusters)) ||
       (o.policy == kDeferredAnsFromPrefix && !o.borrow_prepared_clusters))
     return Status::InvalidArgument("ANS optimization plan is invalid");
+  const bool rate = o.policy == kRateOptimizedAns || o.policy == kDeferredRateOptimizedAns;
   const bool balanced = o.policy == kBalancedAns;
   const bool deferred = o.policy == kDeferredAnsFromPrefix ||
                         o.policy == kDeferredRateOptimizedAns;
@@ -3221,6 +3259,7 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
   EntropyOptimizationStoragePlan plan;
   const size_t k = plan.clusters = std::min(
     direct ? o.maximum_ans_clusters : kMaximumPrefixClusters, histograms);
+  const size_t cluster_workers = rate ? std::min(k, kMaximumAnsConfigWorkers) : 1;
   const size_t configs = balanced ? 1 : (direct
     ? kHighDensityAnsUintConfigs.size() : kAnsUintConfigs.size());
   const size_t widths = direct && o.policy != kRateOptimizedAns &&
@@ -3250,12 +3289,10 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
       !work.AddVector<ConfigCandidate>(configs, kGrowing, k) ||
       !work.AddVector<uint16_t>(kMaximumAnsAlphabetSize, kFreshExact,
                                configs * k) ||
-      // One BuildBestAnsHistogram: incumbent and current normalization plus
-      // either remainder sorting or precision-rebalancing scratch, serially.
-      !work.AddVector<uint16_t>(kMaximumAnsAlphabetSize, kFreshExact, 2) ||
-      !work.AddVector<Remainder>(kMaximumAnsAlphabetSize, kFreshExact) ||
-      !work.AddVector<EntropyDelta>(kMaximumAnsAlphabetSize, kFreshExact) ||
-      !work.AddVector<int32_t>(kMaximumAnsAlphabetSize, kFreshExact) ||
+      // Each simultaneous BuildBestAnsHistogram retains two same-sized frequency
+      // arrays. Bounded sorting/rebalancing scratch and bit counters are on the
+      // stack; full model writing remains serial.
+      !work.AddVector<uint16_t>(kMaximumAnsAlphabetSize, kFreshExact, 2 * cluster_workers) ||
       // One reverse-map construction: alias table, distribution, cutoffs and
       // two push/pop stacks. Each active index occurs in at most one stack.
       !work.AddVector<AliasEntry>(kMaximumAnsAlphabetSize, kFreshExact) ||
@@ -3267,9 +3304,11 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
   status = ComputeEntropyWriterStorageBound(model.maximum_bits, &writer);
   if (!status.ok()) return status;
   if (!work.Add(writer)) return overflow(); // Model destination.
-  status = ComputeEntropyWriterStorageBound(12, &writer);
-  if (!status.ok()) return status;
-  if (!work.Add(writer)) return overflow(); // One uint-config measurement.
+  if (cluster_workers > 1 &&
+      (!work.AddVector<Status>(k, kFreshExact) ||
+       !work.AddVector<std::thread>(cluster_workers - 1, kFreshExact) ||
+       !work.AddVector<EntropyWorkProfile>(k, kFreshExact)))
+    return overflow();
 
   if (!direct) {
     EntropyModelStoragePlan prefix;

@@ -12,6 +12,8 @@
 
 #include "codestream/ans_internal.h"
 #include "codestream/huffman.h"
+#include "codestream/profile_internal.h"
+#include "core/thread_budget.h"
 
 namespace {
 using namespace gjxl;
@@ -195,7 +197,8 @@ Status Optimize(const EntropyOptimizationStorageOptions &o,
                 std::span<const EntropyTokenStreamView> views,
                 const EntropyCodeOptions &input_options,
                 const EntropyCode &prefix,
-                const PreparedEntropyClusters &prepared, Result *out) {
+                const PreparedEntropyClusters &prepared, Result *out,
+                EntropyWorkProfile* profile = nullptr) {
   auto *cost = o.return_cost ? &out->cost : nullptr;
   switch (o.policy) {
   case kFastPrefix:
@@ -215,7 +218,7 @@ Status Optimize(const EntropyOptimizationStorageOptions &o,
           ? DirectAnsEntropyMode::kBalanced
           : (o.policy == kRateOptimizedAns ? DirectAnsEntropyMode::kRateOptimized
                                             : DirectAnsEntropyMode::kHighDensity),
-        &out->code, cost);
+        &out->code, cost, profile);
   case kAnsFromPrefix:
     if (o.borrow_prepared_clusters)
       return OptimizeAnsEntropyCodeWithPreparedClusters(views, prefix, prepared,
@@ -225,7 +228,7 @@ Status Optimize(const EntropyOptimizationStorageOptions &o,
     return PrepareAnsEntropyCodeWithPreparedClusters(views, prefix, prepared,
                                                      &out->deferred);
   case kDeferredRateOptimizedAns:
-    return PrepareRateOptimizedAnsEntropyCode(views, input_options, &out->deferred);
+    return PrepareRateOptimizedAnsEntropyCode(views, input_options, &out->deferred, profile);
   }
   return Status::Internal("Test policy invalid");
 }
@@ -369,14 +372,14 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
         .borrow_prepared_clusters = variant == 6 || variant == 7,
         .maximum_ans_clusters = maximum_ans_clusters,
     };
-    const auto run = [&](Result *out) {
+    const auto run = [&](Result *out, EntropyWorkProfile* profile = nullptr) {
       // Exercise the borrowed, unmapped source as well as the owning merge
       // fallback under the same reservation and allocation-failure sweep.
       if ((variant == 3 && initial_map) || variant == 8)
         return OptimizeDirectAnsEntropyCodeWithFixedPopulations(
             views, input, fixed, &out->code,
             o.return_cost ? &out->cost : nullptr);
-      return Optimize(o, views, input, prefix, prepared, out);
+      return Optimize(o, views, input, prefix, prepared, out, profile);
     };
     EntropyOptimizationStoragePlan plan;
     Result oracle;
@@ -398,7 +401,14 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
     Result output;
     {
       ResourceContextScope context({&job, ResourceClass::kPreparation});
-      if (!Ok(run(&output)) ||
+      // Retained ownership and peak bounds must also cover worker scratch and
+      // per-cluster profiling with the allocator context propagated to workers.
+      thread_budget_internal::CpuExecutionScope cpu;
+      if ((o.policy == kRateOptimizedAns || o.policy == kDeferredRateOptimizedAns) &&
+          !Ok(cpu.Start({}, 8))) return false;
+      thread_budget_internal::EncodeScope threads(8);
+      EntropyWorkProfile profile;
+      if (!Ok(run(&output, &profile)) ||
           !Check(output == oracle, "Optimizer parity failed"))
         return false;
     }
@@ -752,7 +762,7 @@ int main() {
         if (!OptimizationCase(contexts, pattern == 0 ? 0 : 4097,
                               pattern == 0 ? 0 : 5, pattern, initial))
           return EXIT_FAILURE;
-        cases += 11;
+        cases += 12;
       }
     }
   }
