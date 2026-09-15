@@ -17,6 +17,17 @@
 
 namespace gjxl::codestream_internal {
 
+/// Scope for modular DC mapping search. Keep explicit frontend and
+/// entropy modes, ordinary DC rounding, and other efforts on their own policy.
+[[nodiscard]] constexpr bool UseDcUintSearch(
+  const VarDctEncodingOptions& options) noexcept {
+  return options.effort == 4 &&
+    options.density_mode == VarDctDensityMode::kDefault &&
+    options.compression_mode == VarDctCompressionMode::kAutomatic &&
+    options.rate_control_mode != VarDctRateControlMode::kMaximumError &&
+    ResolveDcQuantization(options) == DcQuantizationMode::kPredictionAware;
+}
+
 /// Shared policy resolution for execution and whole-workflow storage planning.
 /// The caller validates effort and density mode before using this recipe.
 [[nodiscard]] constexpr size_t AdaptiveQuantizationIterations(

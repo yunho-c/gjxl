@@ -1,0 +1,710 @@
+{
+  "images": [
+    {
+      "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "vs_native_akima": -0.5389559478355792,
+      "vs_native_pchip": -0.5371017634018891,
+      "vs_stock_e4_akima": 2.0018263205736067,
+      "vs_stock_e4_pchip": 2.0077111602406226
+    },
+    {
+      "image_id": "clic2024_test/28d24b9c83de066597ff96a68769884f",
+      "vs_native_akima": -0.9983416416494577,
+      "vs_native_pchip": -0.99756005708142,
+      "vs_stock_e4_akima": 0.39260948317465544,
+      "vs_stock_e4_pchip": 0.34096882154470093
+    },
+    {
+      "image_id": "clic2024_test/b51d5fb537246482ef7a7ab63f093cab",
+      "vs_native_akima": -0.7219555696650487,
+      "vs_native_pchip": -0.7223535792647164,
+      "vs_stock_e4_akima": 4.675176217049231,
+      "vs_stock_e4_pchip": 4.514187069397431
+    },
+    {
+      "image_id": "clic2024_test/d1a9be98d1936065967adac50a6fb750",
+      "vs_native_akima": -1.003807041130644,
+      "vs_native_pchip": -1.0038151797462436,
+      "vs_stock_e4_akima": 0.3107520760105913,
+      "vs_stock_e4_pchip": 0.24114927080931284
+    },
+    {
+      "image_id": "kodak/01",
+      "vs_native_akima": -0.5793250632009138,
+      "vs_native_pchip": -0.5793354590187859,
+      "vs_stock_e4_akima": 0.05467657564816913,
+      "vs_stock_e4_pchip": -0.07979530857935607
+    },
+    {
+      "image_id": "kodak/08",
+      "vs_native_akima": -0.588554265712297,
+      "vs_native_pchip": -0.5899711416763267,
+      "vs_stock_e4_akima": -1.4459016410591483,
+      "vs_stock_e4_pchip": -1.3814386391684206
+    },
+    {
+      "image_id": "kodak/13",
+      "vs_native_akima": -0.503274016474165,
+      "vs_native_pchip": -0.5033730397125158,
+      "vs_stock_e4_akima": 1.0305985810227298,
+      "vs_stock_e4_pchip": 1.0282459948052498
+    },
+    {
+      "image_id": "kodak/17",
+      "vs_native_akima": -0.8285439870155047,
+      "vs_native_pchip": -0.8294742243048411,
+      "vs_stock_e4_akima": 2.720968077276657,
+      "vs_stock_e4_pchip": 2.739174178273391
+    },
+    {
+      "image_id": "unsplash/alpine_lake/24mp",
+      "vs_native_akima": -0.8474902693274347,
+      "vs_native_pchip": -0.8483751009887514,
+      "vs_stock_e4_akima": 1.8294261611309914,
+      "vs_stock_e4_pchip": 1.9075123067189257
+    },
+    {
+      "image_id": "unsplash/campus_interior/12mp",
+      "vs_native_akima": -0.8002655733506144,
+      "vs_native_pchip": -0.8002041103054334,
+      "vs_stock_e4_akima": -0.3900112509576664,
+      "vs_stock_e4_pchip": -0.42746172718868697
+    },
+    {
+      "image_id": "unsplash/campus_interior/48mp",
+      "vs_native_akima": -0.8430533269699626,
+      "vs_native_pchip": -0.8426044810875237,
+      "vs_stock_e4_akima": -0.26082777350289943,
+      "vs_stock_e4_pchip": -0.3431470515284954
+    },
+    {
+      "image_id": "unsplash/forest_stream/48mp",
+      "vs_native_akima": -1.59607207570439,
+      "vs_native_pchip": -1.597114334013033,
+      "vs_stock_e4_akima": -1.4947633635158841,
+      "vs_stock_e4_pchip": -1.5324341321900483
+    },
+    {
+      "image_id": "clic2024_test/0c49a5cce349020bbba2f97ae41e90ba",
+      "vs_native_akima": -0.8504832897220161,
+      "vs_native_pchip": -0.849141416061895,
+      "vs_stock_e4_akima": 2.1944278315454886,
+      "vs_stock_e4_pchip": 2.0630537286963477
+    },
+    {
+      "image_id": "clic2024_test/100a02c269c5948392f283b2aa3bb4da",
+      "vs_native_akima": -1.5340731019547214,
+      "vs_native_pchip": -1.5335986732054818,
+      "vs_stock_e4_akima": -0.25367748216551456,
+      "vs_stock_e4_pchip": -0.27375428792824136
+    },
+    {
+      "image_id": "clic2024_test/100f17892cf7bb12beb12479641fcc4c",
+      "vs_native_akima": -0.42988749633533696,
+      "vs_native_pchip": -0.43038321125321266,
+      "vs_stock_e4_akima": 2.112184959085308,
+      "vs_stock_e4_pchip": 1.9520009158033491
+    },
+    {
+      "image_id": "clic2024_test/11f2b039b293758398b1a7a8afa64bb2",
+      "vs_native_akima": -0.6453551082396042,
+      "vs_native_pchip": -0.6480677111008778,
+      "vs_stock_e4_akima": 0.129911472703527,
+      "vs_stock_e4_pchip": -0.10617777323714261
+    },
+    {
+      "image_id": "clic2024_test/14ab4af28901fbeb1356b06d2d08ae06",
+      "vs_native_akima": -0.7684155660445137,
+      "vs_native_pchip": -0.767634946686634,
+      "vs_stock_e4_akima": -0.08564203166918356,
+      "vs_stock_e4_pchip": -0.15143239438292727
+    },
+    {
+      "image_id": "clic2024_test/1e2f9d41529197f10d32bfa68a1e0bcc",
+      "vs_native_akima": -0.8222123625618685,
+      "vs_native_pchip": -0.8235071052160382,
+      "vs_stock_e4_akima": -1.1727174238220512,
+      "vs_stock_e4_pchip": -1.2935214287892631
+    },
+    {
+      "image_id": "clic2024_test/22ea12c903e41583b7c469cb86040157",
+      "vs_native_akima": -0.5543720491405653,
+      "vs_native_pchip": -0.5556225612111032,
+      "vs_stock_e4_akima": 1.386154371160567,
+      "vs_stock_e4_pchip": 1.2862958725074707
+    },
+    {
+      "image_id": "clic2024_test/2a2420f929cd47122eae364a2bc27710",
+      "vs_native_akima": -0.9897669752920456,
+      "vs_native_pchip": -0.9882932975922732,
+      "vs_stock_e4_akima": -0.31197416621864216,
+      "vs_stock_e4_pchip": -0.3463236787879763
+    },
+    {
+      "image_id": "clic2024_test/2c1f84548ef99faec2b4f9bf12227c83",
+      "vs_native_akima": -1.1257631369461307,
+      "vs_native_pchip": -1.1245876979768674,
+      "vs_stock_e4_akima": 1.6385873753558569,
+      "vs_stock_e4_pchip": 1.653154347172735
+    },
+    {
+      "image_id": "clic2024_test/3140d643a1f57e80ff265507984d95a0",
+      "vs_native_akima": -1.004804577417644,
+      "vs_native_pchip": -1.0044081946488055,
+      "vs_stock_e4_akima": -0.38986829714802385,
+      "vs_stock_e4_pchip": -0.42850420644111564
+    },
+    {
+      "image_id": "clic2024_test/4a18abf66d65ad1a95ce455c8b6cd8de",
+      "vs_native_akima": -0.6583883845904581,
+      "vs_native_pchip": -0.661013326031525,
+      "vs_stock_e4_akima": -1.13301692689195,
+      "vs_stock_e4_pchip": -1.3750252996254255
+    },
+    {
+      "image_id": "clic2024_test/4cd6910a0b7b39365fda5df87618d091",
+      "vs_native_akima": -0.637065887687767,
+      "vs_native_pchip": -0.6371210269338221,
+      "vs_stock_e4_akima": -0.6565235079667247,
+      "vs_stock_e4_pchip": -0.755436750917538
+    },
+    {
+      "image_id": "clic2024_test/5dbdb989cf026f7ab3dd7167d7fc0fe2",
+      "vs_native_akima": -0.757508126358349,
+      "vs_native_pchip": -0.759056611847352,
+      "vs_stock_e4_akima": -0.6415045752934669,
+      "vs_stock_e4_pchip": -0.6938866295045648
+    },
+    {
+      "image_id": "clic2024_test/5e5ce43575fa67fdc0dd37146d7f479e",
+      "vs_native_akima": -0.28426541510862813,
+      "vs_native_pchip": -0.28763582439367297,
+      "vs_stock_e4_akima": -1.736009942866689,
+      "vs_stock_e4_pchip": -2.242675198130018
+    },
+    {
+      "image_id": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "vs_native_akima": -0.9387717588253426,
+      "vs_native_pchip": -0.937546750904726,
+      "vs_stock_e4_akima": -0.7801387799766412,
+      "vs_stock_e4_pchip": -0.8551272691577744
+    },
+    {
+      "image_id": "clic2024_test/7e499613c3e376ea93afb3649719abeb",
+      "vs_native_akima": -0.853592913382468,
+      "vs_native_pchip": -0.8529252353274704,
+      "vs_stock_e4_akima": 0.4606607354651558,
+      "vs_stock_e4_pchip": 0.41610997035116165
+    },
+    {
+      "image_id": "clic2024_test/870516c65d81fb9267de6865964083a9",
+      "vs_native_akima": -0.8320738029731447,
+      "vs_native_pchip": -0.8307711223411831,
+      "vs_stock_e4_akima": -2.080396495937473,
+      "vs_stock_e4_pchip": -2.0670308535480904
+    },
+    {
+      "image_id": "clic2024_test/8bb119b8ca17492392e1e3ea4b811b32",
+      "vs_native_akima": -0.7579158938965912,
+      "vs_native_pchip": -0.7616596795572437,
+      "vs_stock_e4_akima": 0.14635608049660978,
+      "vs_stock_e4_pchip": -0.06940114223168767
+    },
+    {
+      "image_id": "clic2024_test/9466a908d088d32ee73f04116c40e48c",
+      "vs_native_akima": -0.9010385527334124,
+      "vs_native_pchip": -0.9009946054590199,
+      "vs_stock_e4_akima": 2.8079471856803484,
+      "vs_stock_e4_pchip": 2.7556635517412946
+    },
+    {
+      "image_id": "clic2024_test/a10ae819a2d24873079c93346200cab3",
+      "vs_native_akima": -1.4316126166966712,
+      "vs_native_pchip": -1.4317249000630277,
+      "vs_stock_e4_akima": -2.1413570130772426,
+      "vs_stock_e4_pchip": -2.186623754985026
+    },
+    {
+      "image_id": "clic2024_test/a36713f1943dac6bc74dea50cadaee6f",
+      "vs_native_akima": -0.7537459236378962,
+      "vs_native_pchip": -0.7567830497001685,
+      "vs_stock_e4_akima": -0.36820376589965287,
+      "vs_stock_e4_pchip": -0.4667616862335718
+    },
+    {
+      "image_id": "clic2024_test/aed95e005df28e790519eefb6eb1e565",
+      "vs_native_akima": -0.5798081540418526,
+      "vs_native_pchip": -0.5776091871196275,
+      "vs_stock_e4_akima": -1.9882779820834435,
+      "vs_stock_e4_pchip": -2.0267373799645787
+    },
+    {
+      "image_id": "clic2024_test/afe3676bbfcf7183d697ff7b5d5bd45b",
+      "vs_native_akima": -1.4649530932273314,
+      "vs_native_pchip": -1.4654702970023157,
+      "vs_stock_e4_akima": -1.5954191118532024,
+      "vs_stock_e4_pchip": -1.630484317039417
+    },
+    {
+      "image_id": "clic2024_test/b939ac34faa94b5d0e753d570edc7048",
+      "vs_native_akima": -0.9028868243228704,
+      "vs_native_pchip": -0.9036587913123442,
+      "vs_stock_e4_akima": -0.5476514099236821,
+      "vs_stock_e4_pchip": -0.6149779535461671
+    },
+    {
+      "image_id": "clic2024_test/c80999cd5533e448167cd9b3ccfa2a37",
+      "vs_native_akima": -1.0933862466715014,
+      "vs_native_pchip": -1.0919787286292966,
+      "vs_stock_e4_akima": -3.31899089775154,
+      "vs_stock_e4_pchip": -3.343655944485567
+    },
+    {
+      "image_id": "clic2024_test/d79d465ac77c36518e0f0d626bf97ec4",
+      "vs_native_akima": -0.3810448417679068,
+      "vs_native_pchip": -0.38437387971420983,
+      "vs_stock_e4_akima": 2.045205633558158,
+      "vs_stock_e4_pchip": 1.9884587305779207
+    },
+    {
+      "image_id": "clic2024_test/ddcd24d99f48eaa369207882a6f37831",
+      "vs_native_akima": -0.832560904857804,
+      "vs_native_pchip": -0.8311493077932419,
+      "vs_stock_e4_akima": -1.062765028031403,
+      "vs_stock_e4_pchip": -1.1003547237474471
+    },
+    {
+      "image_id": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "vs_native_akima": -0.9180085760910957,
+      "vs_native_pchip": -0.9197305821960778,
+      "vs_stock_e4_akima": -0.28282037553823774,
+      "vs_stock_e4_pchip": -0.3478443303403357
+    },
+    {
+      "image_id": "kodak/02",
+      "vs_native_akima": -0.5428140747630451,
+      "vs_native_pchip": -0.5389551746922991,
+      "vs_stock_e4_akima": 1.401060630615561,
+      "vs_stock_e4_pchip": 1.680000836993123
+    },
+    {
+      "image_id": "kodak/03",
+      "vs_native_akima": -0.8138701714066356,
+      "vs_native_pchip": -0.8130250222951595,
+      "vs_stock_e4_akima": -0.622295906043301,
+      "vs_stock_e4_pchip": -0.6841165749685149
+    },
+    {
+      "image_id": "kodak/04",
+      "vs_native_akima": -0.7542687915510095,
+      "vs_native_pchip": -0.7578772756514901,
+      "vs_stock_e4_akima": 1.1404707067361737,
+      "vs_stock_e4_pchip": 1.0622043037057292
+    },
+    {
+      "image_id": "kodak/05",
+      "vs_native_akima": -0.7875518698049286,
+      "vs_native_pchip": -0.7876756975928682,
+      "vs_stock_e4_akima": 0.21939510141765795,
+      "vs_stock_e4_pchip": 0.24883188344626497
+    },
+    {
+      "image_id": "kodak/06",
+      "vs_native_akima": -0.5292852186719458,
+      "vs_native_pchip": -0.5278300058233497,
+      "vs_stock_e4_akima": -0.4823898644517744,
+      "vs_stock_e4_pchip": -0.509887799719847
+    },
+    {
+      "image_id": "kodak/07",
+      "vs_native_akima": -0.8977621989597259,
+      "vs_native_pchip": -0.8986325257319915,
+      "vs_stock_e4_akima": -0.041613764400493865,
+      "vs_stock_e4_pchip": -0.00955160175072731
+    },
+    {
+      "image_id": "kodak/09",
+      "vs_native_akima": -0.6349284230078868,
+      "vs_native_pchip": -0.6369098405562171,
+      "vs_stock_e4_akima": 0.6748457850269525,
+      "vs_stock_e4_pchip": 0.5378079990340492
+    },
+    {
+      "image_id": "kodak/10",
+      "vs_native_akima": -0.7390440654112387,
+      "vs_native_pchip": -0.738159017754047,
+      "vs_stock_e4_akima": 0.04450474492391206,
+      "vs_stock_e4_pchip": 0.060251257777378546
+    },
+    {
+      "image_id": "kodak/11",
+      "vs_native_akima": -0.6021597507728463,
+      "vs_native_pchip": -0.5994149766362449,
+      "vs_stock_e4_akima": 0.025707250832813267,
+      "vs_stock_e4_pchip": -0.035181095057725154
+    },
+    {
+      "image_id": "kodak/12",
+      "vs_native_akima": -0.6140323667666008,
+      "vs_native_pchip": -0.6111090014010495,
+      "vs_stock_e4_akima": 0.8733407016065394,
+      "vs_stock_e4_pchip": 0.9917582289224675
+    },
+    {
+      "image_id": "kodak/14",
+      "vs_native_akima": -0.7933130267853009,
+      "vs_native_pchip": -0.7924664829859907,
+      "vs_stock_e4_akima": -0.5008648180121927,
+      "vs_stock_e4_pchip": -0.5603501584922229
+    },
+    {
+      "image_id": "kodak/15",
+      "vs_native_akima": -0.6859718748169771,
+      "vs_native_pchip": -0.6820681812767411,
+      "vs_stock_e4_akima": 0.34398038765488265,
+      "vs_stock_e4_pchip": 0.18208048614868455
+    },
+    {
+      "image_id": "kodak/16",
+      "vs_native_akima": -0.6225256603178426,
+      "vs_native_pchip": -0.6235305977601602,
+      "vs_stock_e4_akima": 0.21489274339481854,
+      "vs_stock_e4_pchip": 0.40036637494083777
+    },
+    {
+      "image_id": "kodak/18",
+      "vs_native_akima": -0.6739709712231026,
+      "vs_native_pchip": -0.6736280644681383,
+      "vs_stock_e4_akima": -0.6047961523761358,
+      "vs_stock_e4_pchip": -0.9821539507122303
+    },
+    {
+      "image_id": "kodak/19",
+      "vs_native_akima": -0.6360890371905694,
+      "vs_native_pchip": -0.636735753969551,
+      "vs_stock_e4_akima": -0.1412430959541282,
+      "vs_stock_e4_pchip": -0.030246297712039395
+    },
+    {
+      "image_id": "kodak/20",
+      "vs_native_akima": -0.55474656617977,
+      "vs_native_pchip": -0.5556083176646146,
+      "vs_stock_e4_akima": -1.304392643130297,
+      "vs_stock_e4_pchip": -1.2564000792089731
+    },
+    {
+      "image_id": "kodak/21",
+      "vs_native_akima": -0.5839739769724674,
+      "vs_native_pchip": -0.5812613688777317,
+      "vs_stock_e4_akima": -0.09396369530942175,
+      "vs_stock_e4_pchip": -0.22234892498102396
+    },
+    {
+      "image_id": "kodak/22",
+      "vs_native_akima": -0.6516166149190268,
+      "vs_native_pchip": -0.6564215365527272,
+      "vs_stock_e4_akima": 0.9200696323662774,
+      "vs_stock_e4_pchip": 0.8724120452772998
+    },
+    {
+      "image_id": "kodak/23",
+      "vs_native_akima": -1.0093026455100196,
+      "vs_native_pchip": -1.0070215441154946,
+      "vs_stock_e4_akima": 0.5272769402553734,
+      "vs_stock_e4_pchip": 0.4998090332997171
+    },
+    {
+      "image_id": "kodak/24",
+      "vs_native_akima": -0.6626930971615254,
+      "vs_native_pchip": -0.6624170740734137,
+      "vs_stock_e4_akima": 0.5980034362305076,
+      "vs_stock_e4_pchip": 0.6133726838961953
+    },
+    {
+      "image_id": "unsplash/alpine_lake/12mp",
+      "vs_native_akima": -0.81799640983655,
+      "vs_native_pchip": -0.8190412478173318,
+      "vs_stock_e4_akima": -0.1574123572300988,
+      "vs_stock_e4_pchip": 0.016446612542166294
+    },
+    {
+      "image_id": "unsplash/alpine_lake/48mp",
+      "vs_native_akima": -0.8985526558660812,
+      "vs_native_pchip": -0.8995496215454902,
+      "vs_stock_e4_akima": 0.154840183157986,
+      "vs_stock_e4_pchip": 0.1262022897143111
+    },
+    {
+      "image_id": "unsplash/campus_interior/24mp",
+      "vs_native_akima": -0.8165367569991144,
+      "vs_native_pchip": -0.8164491955639005,
+      "vs_stock_e4_akima": 0.0003258959885756306,
+      "vs_stock_e4_pchip": -0.057682316194197246
+    },
+    {
+      "image_id": "unsplash/forest_stream/12mp",
+      "vs_native_akima": -1.0954794055491819,
+      "vs_native_pchip": -1.0956405394487696,
+      "vs_stock_e4_akima": -0.6888985157319598,
+      "vs_stock_e4_pchip": -0.7418339681744066
+    },
+    {
+      "image_id": "unsplash/forest_stream/24mp",
+      "vs_native_akima": -1.3424597724206353,
+      "vs_native_pchip": -1.34256880301385,
+      "vs_stock_e4_akima": -1.1012517257323,
+      "vs_stock_e4_pchip": -1.1437429923060711
+    }
+  ],
+  "limits": [
+    "Original 65-image cohort, not held-out. Three scenes reused at 12/24/48 MP.",
+    "Arithmetic mean per-image BD percentages; no extrapolation over SSIMULACRA2 75-85.",
+    "All decoded linear-RGB float hashes match baseline; no new perceptual decisions."
+  ],
+  "provenance": {
+    "baseline_binary_sha256": "d66a659a69499bca6d9b76fddf1270180b5ed4bcbd466987ffa35b4d61372e7d",
+    "baseline_source_revision": "b1fbfc15f32a3c3ac3d1d2b5b7983d0ced22a00f",
+    "build_head": "6a8f8fdece98afe20755174bf4103a3bca4a8067",
+    "candidate_binary_sha256": "35e6f2078a3a0eb696cf92c9893321d17e3c0597bacf000d193929340d437ec6",
+    "candidate_source_patch_sha256": "782a45e2030ce40b5dfe0e7b522009639aea1d28cbb8cf88996f141f87289e81",
+    "commands_sha256": "40d642c88f5293c5ebe07dc1d494ff2852425e6e3b82d01205afea02854252dc",
+    "local_artifacts": "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/dc-uint-fast-qualification-20260914",
+    "manifest_sha256": "c2cbb0ae7ec02a42fe5ad3c89f412238421cc30fe758e844eb83d068cd207c3b",
+    "observations_sha256": "6f9fe0cc2fab351d0bed81af4384a3352a207e941a309c799680d11e6a59fd03",
+    "scope_sha256": "3d4e88187c02aae2b298246171dcceddb507f00b7848c930c13799e55fa2beba",
+    "source_snapshot_sha256": "5a79fd353bd394486c7ae6b3ddec629aeedd2eb8c00210fbfbbf8a2d1b3d4f85",
+    "tested_source_sha256": {
+      "src/codestream/ans.cpp": "d759d1a660d305c4b8d72cf5cf5eaa4ef7857b97f16d5e33334e31ac891e8ca2",
+      "src/codestream/ans_internal.h": "2108b31896567a1f70a9b0c373c1a3ddf44ef59a7452ee161ab3ca0dc29bfa1d",
+      "src/codestream/cpu_workflow_storage_plan.cpp": "bef4c424689b1f96e0093983a514dd5f6f267d76b051519bd960d1545c1ec47f",
+      "src/codestream/encoder.cpp": "18f0704e758a6c66f196604d900bc7607d34bad78d374c54ab8f6a576c74a3f0",
+      "src/codestream/encoder.h": "c2ccb3f4a417bea2935ee13e32f4052ed052089c40a5f25b2f19054f1bf824ff",
+      "src/codestream/entropy_storage_plan.cpp": "a1b23396bf63191f5d9e00d901c56de85ceea6c769e5567d8138220466b71d9c",
+      "src/codestream/entropy_storage_plan.h": "77a8e0063ead6c01ece183e8e4273a6b15b350f5e42339765e226d72948cce04",
+      "src/codestream/resident_workflow_storage_plan.cpp": "16786e558e0932c1ee80b3099bd2487799c6cc005f24f0f295327c38fc0e11ea",
+      "src/codestream/serializer_storage_plan.cpp": "6ee6f21b420350b136a90deff4e3bcaf800b6a6596d02f4f13dcde6dde6ef625",
+      "src/codestream/workflow.cpp": "e68f243119e002322e5f48c58033c7b4fed15135876d31317ca4b3d3793165d2",
+      "src/codestream/workflow_internal.h": "0100edaa96ec1a9834f0ba9fa0ac23c8e02b5b90e44b9b43f24a64e739649809",
+      "tests/dc_policy_test.cpp": "22e8f2e9c72b46ece0f53edf9d08020bc5ac8ffbb77f377e7662b2ba462d30cb",
+      "tests/entropy_storage_plan_test.cpp": "984f028d3141ae8ef7dcd28c824a000f1a9618ff7a0a7455751eb4003414e1c5",
+      "tests/entropy_test.cpp": "0084d2e32c4dafdb293cbba48868ee563811060f8499665f4d0ae920cf254cfc",
+      "tests/serializer_storage_plan_test.cpp": "cc3648927c2f71ccd3a1f5f2803b1c35089406dd6d5a9d3938ffc769f4c04b18"
+    },
+    "tests_log_sha256": "42b25124e252f616f1919e99d8734af6d815f7102d6d2b4770abcf689d26a844",
+    "timing_sha256": "56c668b79c39dde79e50b58a1a2c604d9bb7d22f39cf4ba3e06445d16c22dd11"
+  },
+  "range": [
+    75,
+    85
+  ],
+  "summary": {
+    "images": 65,
+    "larger_files": 0,
+    "native_wins": 65,
+    "smaller_files": 455,
+    "stock_wins": 38,
+    "vs_native_akima": -0.8048360886373166,
+    "vs_native_pchip": -0.8049496470638402,
+    "vs_stock_e4_akima": 0.04920925377881871,
+    "vs_stock_e4_pchip": -0.0028966102556726913
+  },
+  "timing": [
+    {
+      "image_id": "kodak/01",
+      "median_ms": {
+        "baseline": 13.317709,
+        "candidate": 13.1617915
+      },
+      "median_paired_ratio": 0.9899556271003858,
+      "paired_ratios": [
+        0.9991452936227454,
+        1.02091234587417,
+        0.779119672486475,
+        0.9807659605780262
+      ]
+    },
+    {
+      "image_id": "kodak/17",
+      "median_ms": {
+        "baseline": 12.4807085,
+        "candidate": 13.307417
+      },
+      "median_paired_ratio": 1.0763588566990911,
+      "paired_ratios": [
+        1.0833249299154952,
+        1.0129011768954346,
+        1.0720691269191962,
+        1.080648586478986
+      ]
+    },
+    {
+      "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "median_ms": {
+        "baseline": 48.6530835,
+        "candidate": 50.0765835
+      },
+      "median_paired_ratio": 1.0236895221892448,
+      "paired_ratios": [
+        1.0124684963727668,
+        1.01731405030932,
+        1.0433262315191427,
+        1.0300649940691695
+      ]
+    },
+    {
+      "image_id": "clic2024_test/d1a9be98d1936065967adac50a6fb750",
+      "median_ms": {
+        "baseline": 39.651021,
+        "candidate": 41.3969795
+      },
+      "median_paired_ratio": 1.0457676210885105,
+      "paired_ratios": [
+        1.026745663875598,
+        1.0420741827383344,
+        1.0494610594386866,
+        1.0501106335301345
+      ]
+    },
+    {
+      "image_id": "clic2024_test/b51d5fb537246482ef7a7ab63f093cab",
+      "median_ms": {
+        "baseline": 36.2410415,
+        "candidate": 37.373646
+      },
+      "median_paired_ratio": 1.0282234218492161,
+      "paired_ratios": [
+        1.0118882279462695,
+        1.020788464119616,
+        1.0356583795788163,
+        1.045964369407033
+      ]
+    },
+    {
+      "image_id": "kodak/08",
+      "median_ms": {
+        "baseline": 13.0136045,
+        "candidate": 13.435375
+      },
+      "median_paired_ratio": 1.0236702152011903,
+      "paired_ratios": [
+        1.0331639855149264,
+        1.0445867545576657,
+        0.9968466424446982,
+        1.014176444887454
+      ]
+    },
+    {
+      "image_id": "kodak/13",
+      "median_ms": {
+        "baseline": 13.182271,
+        "candidate": 13.271396
+      },
+      "median_paired_ratio": 1.0183104024436203,
+      "paired_ratios": [
+        1.003473891014119,
+        1.0183430526144324,
+        1.0182777522728081,
+        1.0335969360889872
+      ]
+    },
+    {
+      "image_id": "clic2024_test/28d24b9c83de066597ff96a68769884f",
+      "median_ms": {
+        "baseline": 41.848583,
+        "candidate": 42.3922915
+      },
+      "median_paired_ratio": 1.0173152813688886,
+      "paired_ratios": [
+        1.009259571417905,
+        1.0253709913198723,
+        1.0419295811381075,
+        1.0060615043747767
+      ]
+    },
+    {
+      "image_id": "unsplash/alpine_lake/24mp",
+      "median_ms": {
+        "baseline": 356.4701665,
+        "candidate": 371.5121045
+      },
+      "median_paired_ratio": 1.0401297788848756,
+      "paired_ratios": [
+        1.0571301858172093,
+        1.0443464148478907,
+        1.0359131429218602,
+        1.0163647675732088
+      ]
+    },
+    {
+      "image_id": "unsplash/campus_interior/12mp",
+      "median_ms": {
+        "baseline": 182.9296875,
+        "candidate": 185.738125
+      },
+      "median_paired_ratio": 1.0183658063038559,
+      "paired_ratios": [
+        1.0082130649686971,
+        1.0226478809179527,
+        1.01461896652801,
+        1.0221126460797014
+      ]
+    },
+    {
+      "image_id": "unsplash/campus_interior/48mp",
+      "median_ms": {
+        "baseline": 815.815417,
+        "candidate": 836.1814375
+      },
+      "median_paired_ratio": 1.0189839947085613,
+      "paired_ratios": [
+        1.0103908453128898,
+        1.0124978660791555,
+        1.0353945755448646,
+        1.0254701233379668
+      ]
+    },
+    {
+      "image_id": "unsplash/forest_stream/48mp",
+      "median_ms": {
+        "baseline": 823.9130835,
+        "candidate": 847.4132295
+      },
+      "median_paired_ratio": 1.0222937342257477,
+      "paired_ratios": [
+        1.0208576191438243,
+        1.0069296976988618,
+        1.0383771553051973,
+        1.023729849307671
+      ]
+    }
+  ],
+  "timing_boundary": "complete-encode-wall-time",
+  "timing_summary": {
+    "environment_snapshots": 34,
+    "limit": "Paired complete-call observations on AC-powered Apple M4 Pro, with other codec study activity. Not isolated latency qualification.",
+    "maximum_per_image_paired_ratio": 1.0763588566990911,
+    "median_per_image_paired_ratio": 1.022981974713469,
+    "minimum_per_image_paired_ratio": 0.9899556271003858,
+    "other_codec_maximum_cpu_percent": {
+      "butteraugli_main": 100.0,
+      "cjxl-quality-metric": 95.6,
+      "gjxl_quality_benchmark": 4.6
+    },
+    "power_after_run": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=21889123)\t80%; AC attached; not charging present: true\n",
+    "snapshots_with_active_other_codecs": 22
+  },
+  "validation": {
+    "ctest_passed": 137,
+    "ctest_total": 138,
+    "default_promotion": "Enabled on the feature branch; isolated latency qualification remains before main-branch promotion.",
+    "exact_decoded_float_identity": 455,
+    "fresh_baseline_byte_identity": 455,
+    "inherited_failure": "quantization_pipeline golden mismatch reproduced with baseline libraries",
+    "scope_cases": 26,
+    "scope_unchanged_byte_controls": 24,
+    "source_files": 310,
+    "status": "passed",
+    "successful_qualification_commands": 1517,
+    "timing_processes": 96
+  }
+}

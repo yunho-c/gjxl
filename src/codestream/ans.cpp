@@ -89,6 +89,7 @@ struct AnsOptimizationPolicy {
   std::span<const HybridUintConfig> uint_configs;
   AnsHistogramSearch histogram_search = AnsHistogramSearch::kPrecise;
   bool smallest_alphabet_width = false;
+  bool estimate_alphabet_width = false;
 };
 
 constexpr AnsOptimizationPolicy kMaximumCompressionAnsPolicy{
@@ -1428,7 +1429,8 @@ Status PrepareDirectAnsPartition(
     fixed_context_populations,
   EntropyCode* partition,
   codestream_internal::PreparedEntropyClusters* prepared,
-  EntropyWorkProfile* profile) {
+  EntropyWorkProfile* profile,
+  bool retain_values = false) {
 
   if (partition == nullptr || prepared == nullptr ||
       options.context_count == 0 || !options.uint_config.valid() ||
@@ -1583,7 +1585,8 @@ Status PrepareDirectAnsPartition(
     codestream_internal::PreparedEntropyClusters candidate_prepared;
     candidate_prepared.context_count = candidate_partition.context_count;
     candidate_prepared.context_map = candidate_partition.context_map;
-    if (mode == codestream_internal::DirectAnsEntropyMode::kBalanced) {
+    if (mode == codestream_internal::DirectAnsEntropyMode::kBalanced &&
+        !retain_values) {
       candidate_prepared.fixed_uint_config = options.uint_config;
       candidate_prepared.fixed_ans_clusters.resize(clustered.size());
       for (size_t cluster = 0; cluster < clustered.size(); ++cluster) {
@@ -1598,8 +1601,12 @@ Status PrepareDirectAnsPartition(
       const ProfileClock::time_point value_begin = ProfileBegin(profile);
       Storage<Storage<uint32_t>> cluster_values(clustered.size());
       for (const EntropyTokenStreamView section : section_tokens) {
+        if (!section.valid())
+          return Status::InvalidArgument("ANS token-stream view is invalid");
         for (size_t index = 0; index < section.size(); ++index) {
           const EntropyToken token = section[index];
+          if (token.context >= candidate_partition.context_count)
+            return Status::InvalidArgument("ANS token context is out of range");
           const size_t cluster =
             candidate_partition.context_map[token.context];
           cluster_values[cluster].push_back(token.value);
@@ -2501,8 +2508,34 @@ Status OptimizeAnsEntropyCodeImpl(
     width_candidates.reserve(kLogAlphaSizeCount);
     const ProfileClock::time_point model_build_begin =
       ProfileBegin(profile);
+    // Balanced DC selects one width using the same histogram/configuration
+    // estimate as the per-cluster mapping search. Context-map and stream-state
+    // costs are common to all widths. Avoid constructing and traversing four
+    // full ANS models before the final token emission.
+    size_t estimated_width = kMinimumLogAlphaSize;
+    if (policy.estimate_alphabet_width) {
+      double best = std::numeric_limits<double>::infinity();
+      for (size_t width = kMinimumLogAlphaSize;
+           width <= kMaximumLogAlphaSize; ++width) {
+        double total = 0.0;
+        for (const auto& cluster_options : options) {
+          double minimum = std::numeric_limits<double>::infinity();
+          for (const auto& option : cluster_options) {
+            const auto& stats = option.width_stats[width - kMinimumLogAlphaSize];
+            if (stats.valid) minimum = std::min(minimum, stats.estimated_bits);
+          }
+          total += minimum;
+        }
+        if (total < best) {
+          best = total;
+          estimated_width = width;
+        }
+      }
+    }
     for (size_t log_alpha_size = kMinimumLogAlphaSize;
          log_alpha_size <= kMaximumLogAlphaSize; ++log_alpha_size) {
+      if (policy.estimate_alphabet_width && log_alpha_size != estimated_width)
+        continue;
       EntropyCode candidate;
       candidate.mode = EntropyCodingMode::kAns;
       candidate.context_count = prefix_partition.context_count;
@@ -2980,7 +3013,8 @@ Status codestream_internal::OptimizeDirectAnsEntropyCodeWithFixedPopulations(
   std::span<const PreparedFixedAnsCluster> context_populations,
   EntropyCode* code,
   EntropyCodeCost* cost,
-  EntropyWorkProfile* profile) {
+  EntropyWorkProfile* profile,
+  bool dc_uint_search) {
 
   if (code == nullptr) {
     return Status::InvalidArgument("Direct ANS output is null");
@@ -2989,14 +3023,21 @@ Status codestream_internal::OptimizeDirectAnsEntropyCodeWithFixedPopulations(
   PreparedEntropyClusters prepared;
   Status status = PrepareDirectAnsPartition(
     section_tokens, options, DirectAnsEntropyMode::kBalanced,
-    context_populations, &partition, &prepared, profile);
+    context_populations, &partition, &prepared, profile, dc_uint_search);
   if (!status.ok()) return status;
   const std::array<HybridUintConfig, 1> balanced_configs = {
     options.uint_config};
+  // Keep the incumbent first so equal estimated costs preserve its mapping.
+  const std::array<HybridUintConfig, 4> dc_configs = {
+    options.uint_config, HybridUintConfig{4, 1, 2},
+    HybridUintConfig{0, 0, 0}, HybridUintConfig{2, 0, 1}};
   const AnsOptimizationPolicy policy{
-    .uint_configs = balanced_configs,
+    .uint_configs = dc_uint_search
+      ? std::span<const HybridUintConfig>(dc_configs)
+      : std::span<const HybridUintConfig>(balanced_configs),
     .histogram_search = AnsHistogramSearch::kApproximate,
     .smallest_alphabet_width = true,
+    .estimate_alphabet_width = dc_uint_search,
   };
   return OptimizeAnsEntropyCodeImpl(
     section_tokens, partition, &prepared, policy,
@@ -3107,7 +3148,9 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
   EntropyOptimizationStoragePlan* out) {
   using enum EntropyStoragePolicy;
   using enum resource_budget_internal::VectorCapacityPolicy;
-  const bool direct = o.policy == kBalancedAns || o.policy == kHighDensityAns;
+  const bool dc_search = o.policy == kBalancedDcAns;
+  const bool direct = o.policy == kBalancedAns || dc_search ||
+    o.policy == kHighDensityAns;
   if (out == nullptr || o.contexts == 0 || o.contexts > UINT32_MAX ||
       o.initial_histograms > 256 || o.retain_prepared_clusters ||
       (!direct && o.policy != kAnsFromPrefix && o.policy != kDeferredAnsFromPrefix) ||
@@ -3122,7 +3165,7 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
   EntropyOptimizationStoragePlan plan;
   const size_t k = plan.clusters = std::min(
     direct ? o.maximum_ans_clusters : kMaximumPrefixClusters, histograms);
-  const size_t configs = balanced ? 1 : (direct
+  const size_t configs = balanced ? 1 : dc_search ? 4 : (direct
     ? kHighDensityAnsUintConfigs.size() : kAnsUintConfigs.size());
   const size_t widths = direct ? 1 : kAnsAlphabetWidthCount;
   const auto overflow = [] {
@@ -3203,7 +3246,7 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
     if (balanced) {
       if (!work.AddVector<PreparedFixedAnsCluster>(k, kFreshExact))
         return overflow();
-    } else {
+    } else if (!dc_search) {
       // Initial K*(K-1)/2 pairs plus (K-1)*(K-2)/2 after successful merges.
       // Stale queue entries retain capacity: bound ALL enqueues, (K-1)^2,
       // not merely the current active-cluster pairs. K is in [1,64].
@@ -3213,6 +3256,9 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
           !work.AddVector<Storage<WeightedValue>>(k, kFreshExact))
         return overflow();
     }
+    if (dc_search &&
+        !work.AddVector<Storage<WeightedValue>>(k, kFreshExact))
+      return overflow();
   }
   if ((direct && !balanced) || (!direct && !o.borrow_prepared_clusters)) {
     EntropyAggregationStoragePlan aggregate;

@@ -213,6 +213,9 @@ Status Optimize(const EntropyOptimizationStorageOptions &o,
         o.policy == kBalancedAns ? DirectAnsEntropyMode::kBalanced
                                  : DirectAnsEntropyMode::kHighDensity,
         &out->code, cost);
+  case kBalancedDcAns:
+    return OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+      views, input_options, {}, &out->code, cost, nullptr, true);
   case kAnsFromPrefix:
     if (o.borrow_prepared_clusters)
       return OptimizeAnsEntropyCodeWithPreparedClusters(views, prefix, prepared,
@@ -346,12 +349,12 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
     population.maximum_symbol =
         std::max(population.maximum_symbol, token.symbol);
   }
-  for (size_t variant = 0; variant < 9; ++variant) {
+  for (size_t variant = 0; variant < 11; ++variant) {
     const std::array policies{kFastPrefix,     kPrefix,
                               kPrefix,         kBalancedAns,
                               kHighDensityAns, kAnsFromPrefix,
                               kAnsFromPrefix,  kDeferredAnsFromPrefix,
-                              kBalancedAns};
+                              kBalancedAns, kBalancedDcAns, kBalancedDcAns};
     EntropyOptimizationStorageOptions o{
         .policy = policies[variant],
         .tokens = n,
@@ -366,10 +369,10 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
     const auto run = [&](Result *out) {
       // Exercise the borrowed, unmapped source as well as the owning merge
       // fallback under the same reservation and allocation-failure sweep.
-      if ((variant == 3 && initial_map) || variant == 8)
+      if ((variant == 3 && initial_map) || variant == 8 || variant == 10)
         return OptimizeDirectAnsEntropyCodeWithFixedPopulations(
             views, input, fixed, &out->code,
-            o.return_cost ? &out->cost : nullptr);
+            o.return_cost ? &out->cost : nullptr, nullptr, variant == 10);
       return Optimize(o, views, input, prefix, prepared, out);
     };
     EntropyOptimizationStoragePlan plan;
@@ -712,7 +715,7 @@ bool InvalidAndLarge() {
   // Huge but representable count-only plans must not allocate or iterate N/H.
   ArmManagedHostAllocationFailureAfterForTest(0);
   bool good = true;
-  for (auto policy : {kFastPrefix, kPrefix, kBalancedAns, kHighDensityAns,
+  for (auto policy : {kFastPrefix, kPrefix, kBalancedAns, kBalancedDcAns, kHighDensityAns,
                       kAnsFromPrefix, kDeferredAnsFromPrefix}) {
     good &= ComputeEntropyOptimizationStoragePlan(
                 {.policy = policy,

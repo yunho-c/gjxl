@@ -8,6 +8,7 @@
 #include "codestream/batch_workflow.h"
 #include "codestream/compatibility_workflow_storage_plan.h"
 #include "codestream/resident_workflow_storage_plan.h"
+#include "codestream/workflow_internal.h"
 #include "core/image_buffer.h"
 
 namespace {
@@ -31,6 +32,25 @@ VarDctEncodingOptions Explicit(VarDctEncodingOptions options) {
   if (!options.adaptive_dc_smoothing.has_value())
     options.adaptive_dc_smoothing = options.effort >= 4;
   return options;
+}
+
+void CheckUintSearchPolicy() {
+  for (int effort = 1; effort <= 10; ++effort) {
+    VarDctEncodingOptions options{.effort = effort};
+    Check(UseDcUintSearch(options) == (effort == 4),
+          "DC uint search effort scope changed");
+    options.dc_quantization = DcQuantizationMode::kRound;
+    Check(!UseDcUintSearch(options), "Ordinary DC enabled uint search");
+  }
+  VarDctEncodingOptions options{.effort = 4};
+  options.density_mode = VarDctDensityMode::kHighDensity;
+  Check(!UseDcUintSearch(options), "High density enabled DC uint search");
+  options.density_mode = VarDctDensityMode::kDefault;
+  options.compression_mode = VarDctCompressionMode::kMaximumCompression;
+  Check(!UseDcUintSearch(options), "Maximum compression enabled DC uint search");
+  options.compression_mode = VarDctCompressionMode::kAutomatic;
+  options.rate_control_mode = VarDctRateControlMode::kMaximumError;
+  Check(!UseDcUintSearch(options), "Maximum error enabled DC uint search");
 }
 
 void CheckPlans() {
@@ -137,6 +157,7 @@ void CheckEncoding(ConstImage3FView image, VarDctBackendPreference backend) {
 
 int main() {
   try {
+    CheckUintSearchPolicy();
     CheckPlans();
     Image3FBuffer image({64, 48});
     benchmark::FillBatchTexture(image.view());

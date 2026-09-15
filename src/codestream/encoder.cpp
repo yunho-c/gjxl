@@ -443,7 +443,8 @@ Status OptimizeOrdinaryEntropyCode(
   bool defer_ans_token_cost,
   EntropyCode* code,
   EntropyCodeCost* cost,
-  codestream_internal::EntropyWorkProfile* profile) {
+  codestream_internal::EntropyWorkProfile* profile,
+  bool dc_uint_search = false) {
 
   if (code == nullptr || cost == nullptr || options.context_count == 0 ||
       behavior == VarDctEntropyBehavior::kMaximumCompression) {
@@ -465,20 +466,21 @@ Status OptimizeOrdinaryEntropyCode(
   const auto direct_mode = behavior == VarDctEntropyBehavior::kHighDensity
     ? codestream_internal::DirectAnsEntropyMode::kHighDensity
     : codestream_internal::DirectAnsEntropyMode::kBalanced;
-  if (!defer_ans_token_cost) {
+  const auto optimize_ans = [&](EntropyCodeCost* exact_cost) {
+    if (dc_uint_search && behavior == VarDctEntropyBehavior::kBalanced) {
+      return codestream_internal::OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+        streams, options, fixed_context_populations, code, exact_cost,
+        profile, true);
+    }
     return fixed_context_populations.empty()
       ? codestream_internal::OptimizeDirectAnsEntropyCode(
-          streams, options, direct_mode, code, cost, profile)
+          streams, options, direct_mode, code, exact_cost, profile)
       : codestream_internal::OptimizeDirectAnsEntropyCodeWithFixedPopulations(
           streams, options, fixed_context_populations,
-          code, cost, profile);
-  }
-  const Status optimization_status = fixed_context_populations.empty()
-    ? codestream_internal::OptimizeDirectAnsEntropyCode(
-        streams, options, direct_mode, code, nullptr, profile)
-    : codestream_internal::OptimizeDirectAnsEntropyCodeWithFixedPopulations(
-        streams, options, fixed_context_populations,
-        code, nullptr, profile);
+          code, exact_cost, profile);
+  };
+  if (!defer_ans_token_cost) return optimize_ans(cost);
+  const Status optimization_status = optimize_ans(nullptr);
   if (!optimization_status.ok()) {
     return optimization_status;
   }
@@ -1579,7 +1581,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
             return OptimizeOrdinaryEntropyCode(
               dc_views, {.context_count = dc_layout.context_count},
               options.entropy_behavior, populations, true,
-              &dc_code, &dc_cost, entropy_profile);
+              &dc_code, &dc_cost, entropy_profile, options.dc_uint_search);
           }
           return OptimizeOrdinaryEntropyCode(
             dc_streams, {.context_count = dc_layout.context_count},

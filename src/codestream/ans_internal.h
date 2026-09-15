@@ -91,13 +91,16 @@ DirectAnsHistogramPrecisionShifts(DirectAnsEntropyMode mode) noexcept;
 /// Balanced direct-ANS construction from already encoded per-context symbol
 /// populations. Ordered streams remain authoritative for final token cost and
 /// emission, but are not traversed to rebuild the same histograms.
+/// dc_uint_search retains raw values after the same balanced clustering and
+/// searches the four modular mappings and alphabet widths by estimated cost.
 [[nodiscard]] Status OptimizeDirectAnsEntropyCodeWithFixedPopulations(
   std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCodeOptions& options,
   std::span<const PreparedFixedAnsCluster> context_populations,
   EntropyCode* code,
   EntropyCodeCost* cost = nullptr,
-  EntropyWorkProfile* profile = nullptr);
+  EntropyWorkProfile* profile = nullptr,
+  bool dc_uint_search = false);
 
 /// Builds ANS models without traversing the ordered streams for exact cost.
 [[nodiscard]] Status PrepareAnsEntropyCodeWithPreparedClusters(

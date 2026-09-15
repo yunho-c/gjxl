@@ -67,6 +67,7 @@ enum class EntropyStoragePolicy {
   kFastPrefix,
   kPrefix,
   kBalancedAns,
+  kBalancedDcAns,
   kHighDensityAns,
   kAnsFromPrefix,
   kDeferredAnsFromPrefix,

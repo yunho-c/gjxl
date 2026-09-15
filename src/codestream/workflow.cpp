@@ -998,6 +998,7 @@ PrepareWorkflow(ConstImage3FView linear_rgb, VarDctEncodingOptions options,
       .coefficient_order_behavior =
           codestream_internal::ResolveCoefficientOrderBehavior(options),
       .dc_prediction = options.dc_prediction,
+      .dc_uint_search = codestream_internal::UseDcUintSearch(options),
   };
   const auto frame_view = encoding.completed_frame != nullptr
     ? encoding.completed_frame->view()

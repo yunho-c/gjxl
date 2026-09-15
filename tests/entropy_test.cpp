@@ -1293,6 +1293,85 @@ bool CheckDirectAnsOptimization() {
   return true;
 }
 
+bool CheckDcUintSearch() {
+  using namespace gjxl;
+  using namespace gjxl::codestream_internal;
+  for (int pattern = 0; pattern < 4; ++pattern) {
+    std::array<std::vector<EntropyToken>, 3> sections;
+    uint32_t random = 1234567;
+    for (size_t i = 0; i < (pattern == 0 ? 0ul : 12000ul); ++i) {
+      random ^= random << 13;
+      random ^= random >> 17;
+      random ^= random << 5;
+      const uint32_t value = pattern == 1 ? 4 * (random % 512)
+        : pattern == 2 ? random : random % 7;
+      sections[i % 2].push_back({static_cast<uint32_t>(i % 7), value});
+    }
+    if (pattern == 2) sections[0].push_back({0, UINT32_MAX});
+    std::array<EntropyTokenStreamView, 3> views;
+    for (size_t i = 0; i < views.size(); ++i)
+      views[i] = EntropyTokenStreamView::Interleaved(sections[i]);
+    Storage<PreparedFixedAnsCluster> populations;
+    EntropyCode baseline, searched, borrowed, without_cost;
+    EntropyCodeCost baseline_cost, searched_cost, borrowed_cost;
+    EntropyWorkProfile profile;
+    if (!CollectDefaultEntropyPopulations(views, 7, &populations).ok() ||
+        !OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+          views, {.context_count = 7}, populations, &baseline,
+          &baseline_cost).ok() ||
+        !OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+          views, {.context_count = 7}, {}, &searched, &searched_cost,
+          &profile, true).ok() ||
+        !OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+          views, {.context_count = 7}, populations, &borrowed, &borrowed_cost,
+          nullptr, true).ok() ||
+        !OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+          views, {.context_count = 7}, populations, &without_cost, nullptr,
+          nullptr, true).ok() ||
+        searched != borrowed || searched != without_cost ||
+        searched_cost != borrowed_cost ||
+        searched.context_map != baseline.context_map ||
+        profile.ans_alphabet_width_candidate_count != 1 ||
+        profile.ans_uint_config_candidate_count !=
+          4 * searched.ans_histograms.size()) {
+      std::cerr << "DC uint search changed clustering or input-form semantics\n";
+      return false;
+    }
+    if (pattern == 1 && searched_cost.model_bits + searched_cost.token_bits >=
+          baseline_cost.model_bits + baseline_cost.token_bits) {
+      std::cerr << "DC uint search missed structured residual savings\n";
+      return false;
+    }
+    BitWriter model;
+    if (!WriteEntropyCode(searched, &model).ok() ||
+        model.bits_written() != searched_cost.model_bits) return false;
+    for (size_t i = 0; i < sections.size(); ++i) {
+      BitWriter payload, reference;
+      if (!WriteTokenStream(sections[i], searched, &payload).ok() ||
+          !WriteReferenceAnsTokens(sections[i], searched, &reference) ||
+          payload.bits_written() != searched_cost.section_token_bits[i] ||
+          payload.bits_written() != reference.bits_written() ||
+          !std::ranges::equal(payload.padded_bytes(), reference.padded_bytes())) {
+        std::cerr << "DC uint search cost/emission differs from ANS oracle\n";
+        return false;
+      }
+    }
+    auto invalid = sections;
+    invalid[0].push_back({7, 0});
+    views[0] = EntropyTokenStreamView::Interleaved(invalid[0]);
+    const auto sentinel = searched;
+    const auto cost_sentinel = searched_cost;
+    if (OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+          views, {.context_count = 7}, populations, &searched, &searched_cost,
+          nullptr, true).ok() || searched != sentinel ||
+        searched_cost != cost_sentinel) {
+      std::cerr << "DC uint search accepted invalid context or changed output\n";
+      return false;
+    }
+  }
+  return true;
+}
+
 bool CheckSparseDirectAnsPopulations() {
   using gjxl::codestream_internal::DirectAnsEntropyMode;
   for (uint32_t contexts : {1u, 33u, 257u, 6930u}) {
@@ -2051,7 +2130,7 @@ int main() {
     return EXIT_FAILURE;
   }
   if (!CheckMutableValueAggregation() ||
-      !CheckHybridUintBoundaries() ||
+      !CheckHybridUintBoundaries() || !CheckDcUintSearch() ||
       !CheckValidatedHybridUintEncoding() ||
       !CheckDeterministicHuffmanScratch() ||
       !CheckUintConfigSerialization() ||

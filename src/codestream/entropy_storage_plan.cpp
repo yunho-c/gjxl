@@ -153,6 +153,7 @@ Status ComputeEntropyOptimizationStoragePlan(
       return Status::InvalidArgument("Prefix storage options are invalid");
     return ComputePrefixOptimizationStoragePlan(options, out);
   case kBalancedAns:
+  case kBalancedDcAns:
   case kHighDensityAns:
   case kAnsFromPrefix:
   case kDeferredAnsFromPrefix:
