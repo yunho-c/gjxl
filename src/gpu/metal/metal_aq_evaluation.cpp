@@ -4911,7 +4911,7 @@ Status CreateAqPipelines(
       "Metal cannot launch the AQ maximum-error threadgroup");
   }
   const std::array<
-    std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>, 40>
+    std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>, 41>
     reconstruction = {{
       {"gjxl_aq_reset_exact_evaluation", &pipelines.reset_exact_evaluation},
       {"gjxl_aq_reset_exact_coefficients", &pipelines.reset_exact_coefficients},
@@ -4953,6 +4953,8 @@ Status CreateAqPipelines(
       {"gjxl_aq_gather_transform_pixels", &pipelines.gather_transform_pixels},
       {"gjxl_aq_select_adjusted_quantization",
        &pipelines.select_adjusted_quantization},
+      {"gjxl_aq_select_adjusted_quantization_parallel",
+       &pipelines.select_adjusted_quantization_parallel},
       {"gjxl_aq_encode_reconstruction_coefficients",
        &pipelines.encode_reconstruction_coefficients},
       {"gjxl_aq_encode_scored_coefficients",

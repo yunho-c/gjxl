@@ -462,8 +462,13 @@ void MetalPreparedAqEvaluation::EncodeAdjustedQuantizationBatch(
   if (batch.anchor_count == 0) return;
   const AqReconstructionParams& params = reconstruction_params_[batch_index];
   if (params.adjust_ac_quant == 0u) return;
-  encoder->setComputePipelineState(
-      backend.aq_pipelines_.select_adjusted_quantization.get());
+  // The scalar kernel packs 256 independent transforms into a threadgroup.
+  // Parallel coefficient scans expose more work when a larger-transform batch
+  // fits in that single group; dense batches favor the scalar scan's throughput.
+  const bool parallel = batch.coefficient_count >= 128 && batch.anchor_count <= 256;
+  encoder->setComputePipelineState(parallel
+    ? backend.aq_pipelines_.select_adjusted_quantization_parallel.get()
+    : backend.aq_pipelines_.select_adjusted_quantization.get());
   BindPlane(encoder, anchors_, 0);
   BindPlane(encoder, quant_tables_, 1);
   BindPlane(encoder, raw_quant_, 2);
@@ -476,7 +481,12 @@ void MetalPreparedAqEvaluation::EncodeAdjustedQuantizationBatch(
               ? resident_quantizer_params_
               : raw_quant_,
             7);
-  DispatchThreads1d(encoder, batch.anchor_count);
+  if (parallel) {
+    DispatchMetalThreadgroups(encoder, MTL::Size(batch.anchor_count, 1, 1),
+      MTL::Size(128, 1, 1));
+  } else {
+    DispatchThreads1d(encoder, batch.anchor_count);
+  }
 }
 
 void MetalPreparedAqEvaluation::EncodeReconstructionBatch(
@@ -2024,7 +2034,8 @@ void MetalPreparedAqEvaluation::EncodeAdjustmentProbeSubmission(
   BindPlane(encoder, self.reconstruction_error_, 5);
   encoder->setBytes(
       &self.adjustment_probe_params_, sizeof(self.adjustment_probe_params_), 6);
-  DispatchThreads1d(encoder, 1);
+  DispatchMetalThreadgroups(encoder, MTL::Size(1, 1, 1),
+    MTL::Size(std::min<size_t>(128, self.adjustment_probe_params_.coefficient_count), 1, 1));
 }
 
 Status MetalPreparedAqEvaluation::RunAdjustmentProbe(

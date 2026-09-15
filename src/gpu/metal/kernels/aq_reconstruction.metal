@@ -1684,12 +1684,53 @@ kernel void gjxl_aq_select_adjusted_quantization(
   const uint global_scale = params.use_resident_quantizer != 0u
     ? resident_quantizer[0]
     : params.global_scale;
-  const AqAdjustedQuantization decision = aq_select_adjusted_quantization(
+  const AqAdjustedQuantization decision = aq_select_adjusted_quantization_serial(
     forward_coefficients + transform_offset, quant_tables,
     params.coefficient_count, group_channel_stride,
     coefficient_width, coefficient_height, params.strategy,
     global_scale, raw_quant[raw_index], params.x_matrix_multiplier,
     params.b_matrix_multiplier, error);
+  raw_quant[raw_index] = decision.raw_quant;
+  const uint threshold_offset =
+    params.coefficient_offset + 4u * anchor_index;
+  for (uint quadrant = 0u; quadrant < 4u; ++quadrant) {
+    adjustment_thresholds[threshold_offset + quadrant] =
+      decision.y_thresholds[quadrant];
+  }
+}
+
+kernel void gjxl_aq_select_adjusted_quantization_parallel(
+  device const uint2* anchors [[buffer(0)]],
+  device const float* quant_tables [[buffer(1)]],
+  device int* raw_quant [[buffer(2)]],
+  device const float* forward_coefficients [[buffer(3)]],
+  device float* adjustment_thresholds [[buffer(4)]],
+  device atomic_uint* error [[buffer(5)]],
+  constant AqReconstructionParams& params [[buffer(6)]],
+  device const uint* resident_quantizer [[buffer(7)]],
+  uint anchor_index [[threadgroup_position_in_grid]],
+  uint lane [[thread_index_in_threadgroup]]) {
+
+  if (anchor_index >= params.anchor_count) return;
+  const uint2 anchor = anchors[params.anchor_offset + anchor_index];
+  const uint group_channel_stride =
+    params.anchor_count * params.coefficient_count;
+  const uint transform_offset =
+    params.coefficient_offset + anchor_index * params.coefficient_count;
+  const uint coefficient_width = max(params.pixel_width, params.pixel_height);
+  const uint coefficient_height = min(params.pixel_width, params.pixel_height);
+  const uint raw_index = anchor.y * params.raw_quant_stride + anchor.x;
+  const uint global_scale = params.use_resident_quantizer != 0u
+    ? resident_quantizer[0]
+    : params.global_scale;
+  threadgroup float scratch[kAqAdjustmentScratchFloats];
+  const AqAdjustedQuantization decision = aq_select_adjusted_quantization_parallel(
+    forward_coefficients + transform_offset, quant_tables,
+    params.coefficient_count, group_channel_stride,
+    coefficient_width, coefficient_height, params.strategy,
+    global_scale, raw_quant[raw_index], params.x_matrix_multiplier,
+    params.b_matrix_multiplier, error, scratch, lane);
+  if (lane != 0u) return;
   raw_quant[raw_index] = decision.raw_quant;
   const uint threshold_offset =
     params.coefficient_offset + 4u * anchor_index;
@@ -2237,23 +2278,26 @@ kernel void gjxl_aq_adjustment_probe(
   device float* adjusted_y_thresholds [[buffer(4)]],
   device atomic_uint* error [[buffer(5)]],
   constant AqAdjustmentProbeParams& params [[buffer(6)]],
-  uint index [[thread_position_in_grid]]) {
+  uint lane [[thread_index_in_threadgroup]],
+  uint group_size [[threads_per_threadgroup]]) {
 
-  if (index != 0u) return;
-  const AqAdjustedQuantization decision = aq_select_adjusted_quantization(
+  threadgroup float scratch[kAqAdjustmentScratchFloats];
+  const AqAdjustedQuantization decision = aq_select_adjusted_quantization_parallel(
     coefficients, quant_tables, params.coefficient_count,
     params.coefficient_count,
     params.coefficient_width, params.coefficient_height, params.strategy,
     params.global_scale, params.initial_raw_quant,
-    params.x_matrix_multiplier, params.b_matrix_multiplier, error);
-  adjusted_raw_quant[0] = decision.raw_quant;
-  for (uint quadrant = 0u; quadrant < 4u; ++quadrant) {
-    adjusted_y_thresholds[quadrant] = decision.y_thresholds[quadrant];
+    params.x_matrix_multiplier, params.b_matrix_multiplier, error, scratch, lane);
+  if (lane == 0u) {
+    adjusted_raw_quant[0] = decision.raw_quant;
+    for (uint quadrant = 0u; quadrant < 4u; ++quadrant) {
+      adjusted_y_thresholds[quadrant] = decision.y_thresholds[quadrant];
+    }
   }
 
   const uint2 table_offsets = aq_quant_table_offsets(params.strategy);
-  for (uint coefficient = 0u;
-       coefficient < params.coefficient_count; ++coefficient) {
+  for (uint coefficient = lane;
+       coefficient < params.coefficient_count; coefficient += group_size) {
     const uint x = coefficient % params.coefficient_width;
     const uint y = coefficient / params.coefficient_width;
     const uint quadrant = uint(y >= params.coefficient_height / 2u) * 2u +

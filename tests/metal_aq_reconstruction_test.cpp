@@ -1168,59 +1168,62 @@ bool CheckAdjustmentProbe(const HostImage& image,
       }
     }
     for (AdjustmentPattern pattern : kPatterns) {
-      const int32_t raw_quant = pattern == AdjustmentPattern::kQuantLimit
-        ? gjxl::kMaxRawQuant
-        : 37;
-      std::array<std::vector<float>, 3> coefficients;
-      std::array<std::span<const float>, 3> coefficient_views;
-      for (size_t channel = 0; channel < 3; ++channel) {
-        coefficients[channel].resize(matrices[channel].dequant.size());
-        FillAdjustmentCoefficients(
-          pattern, channel, raw_quant, matrix_multipliers[channel], quantizer,
-          matrices[channel], &coefficients[channel]);
-        coefficient_views[channel] = coefficients[channel];
-      }
-      gjxl::AdjustedAcQuantization expected;
-      std::vector<int32_t> expected_y(coefficients[1].size());
-      if (!CheckStatus(gjxl::SelectAdjustedAcQuantization(
-            strategy, quantizer, raw_quant, matrix_multipliers,
-            coefficient_views, &expected), "CPU adjustment probe") ||
-          !CheckStatus(gjxl::QuantizeAdjustedYAcBlock(
-            strategy, quantizer, expected, coefficients[1], expected_y),
-            "CPU adjusted-Y probe")) {
-        return false;
-      }
-      gjxl::metal_internal::MetalAqAdjustmentResultForTesting actual;
-      if (!CheckStatus(
-            gjxl::metal_internal::RunMetalAqAdjustmentProbeForTesting(
-              *prepared,
-              {
-                .strategy = strategy,
-                .initial_raw_quant = raw_quant,
-                .quantizer = params,
-                .matrix_multipliers = matrix_multipliers,
-                .coefficients = coefficient_views,
-              },
-              &actual),
-            "Metal adjustment probe") ||
-          actual.decision.raw_quant != expected.raw_quant ||
-          actual.quantized_y != expected_y) {
-        std::cerr << "Adjusted Metal decision differs for strategy "
-                  << static_cast<int>(strategy) << ", pattern "
-                  << static_cast<int>(pattern) << ": raw="
-                  << actual.decision.raw_quant << ", expected="
-                  << expected.raw_quant << '\n';
-        return false;
-      }
-      for (size_t quadrant = 0; quadrant < 4; ++quadrant) {
-        if (!Near(actual.decision.y_thresholds[quadrant],
-                  expected.y_thresholds[quadrant], 2.0e-6, 2.0e-6)) {
-          std::cerr << "Adjusted Y threshold differs for quadrant "
-                    << quadrant << '\n';
+      // Exercise low, middle and saturated quantizers across 64..1024 values,
+      // including the sparse, threshold-tie and high-frequency-border cases.
+      for (int32_t raw_quant : {1, 37, 128, gjxl::kMaxRawQuant}) {
+        if (pattern == AdjustmentPattern::kQuantLimit &&
+            raw_quant != gjxl::kMaxRawQuant) continue;
+        std::array<std::vector<float>, 3> coefficients;
+        std::array<std::span<const float>, 3> coefficient_views;
+        for (size_t channel = 0; channel < 3; ++channel) {
+          coefficients[channel].resize(matrices[channel].dequant.size());
+          FillAdjustmentCoefficients(
+            pattern, channel, raw_quant, matrix_multipliers[channel], quantizer,
+            matrices[channel], &coefficients[channel]);
+          coefficient_views[channel] = coefficients[channel];
+        }
+        gjxl::AdjustedAcQuantization expected;
+        std::vector<int32_t> expected_y(coefficients[1].size());
+        if (!CheckStatus(gjxl::SelectAdjustedAcQuantization(
+              strategy, quantizer, raw_quant, matrix_multipliers,
+              coefficient_views, &expected), "CPU adjustment probe") ||
+            !CheckStatus(gjxl::QuantizeAdjustedYAcBlock(
+              strategy, quantizer, expected, coefficients[1], expected_y),
+              "CPU adjusted-Y probe")) {
           return false;
         }
+        gjxl::metal_internal::MetalAqAdjustmentResultForTesting actual;
+        if (!CheckStatus(
+              gjxl::metal_internal::RunMetalAqAdjustmentProbeForTesting(
+                *prepared,
+                {
+                  .strategy = strategy,
+                  .initial_raw_quant = raw_quant,
+                  .quantizer = params,
+                  .matrix_multipliers = matrix_multipliers,
+                  .coefficients = coefficient_views,
+                },
+                &actual),
+              "Metal adjustment probe") ||
+            actual.decision.raw_quant != expected.raw_quant ||
+            actual.quantized_y != expected_y) {
+          std::cerr << "Adjusted Metal decision differs for strategy "
+                    << static_cast<int>(strategy) << ", pattern "
+                    << static_cast<int>(pattern) << ": raw="
+                    << actual.decision.raw_quant << ", expected="
+                    << expected.raw_quant << '\n';
+          return false;
+        }
+        for (size_t quadrant = 0; quadrant < 4; ++quadrant) {
+          if (!Near(actual.decision.y_thresholds[quadrant],
+                    expected.y_thresholds[quadrant], 2.0e-6, 2.0e-6)) {
+            std::cerr << "Adjusted Y threshold differs for quadrant "
+                      << quadrant << '\n';
+            return false;
+          }
+        }
+        ++probe_count;
       }
-      ++probe_count;
     }
   }
   const gjxl::GpuBackendStats after = gpu->stats();
