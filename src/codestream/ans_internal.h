@@ -93,6 +93,14 @@ inline constexpr size_t kMaximumAnsConfigWorkers = 8;
 
 [[nodiscard]] Status ValidateAnsEntropyCode(const EntropyCode& code);
 
+/// One pre-encoded context-map alphabet, optionally followed by an implicit
+/// singleton distance-zero histogram. RLE distance reads consume no bits and
+/// leave the ANS state unchanged, so tokens contains only literals and lengths.
+/// The caller writes the LZ77 fields and (for RLE) the two-entry context map.
+[[nodiscard]] Status WriteContextMapAns(
+  std::span<const HybridUintToken> tokens, HybridUintConfig config, bool rle,
+  BitWriter* writer);
+
 struct PreparedAnsEntropyCandidate {
   EntropyCode code;
   uint64_t model_bits = 0;
@@ -147,13 +155,16 @@ DirectAnsHistogramPrecisionShifts(DirectAnsEntropyMode mode) noexcept;
 /// Balanced direct-ANS construction from already encoded per-context symbol
 /// populations. Ordered streams remain authoritative for final token cost and
 /// emission, but are not traversed to rebuild the same histograms.
+/// dc_uint_search retains raw values after the same balanced clustering and
+/// searches the four modular mappings and alphabet widths by estimated cost.
 [[nodiscard]] Status OptimizeDirectAnsEntropyCodeWithFixedPopulations(
   std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCodeOptions& options,
   std::span<const PreparedFixedAnsCluster> context_populations,
   EntropyCode* code,
   EntropyCodeCost* cost = nullptr,
-  EntropyWorkProfile* profile = nullptr);
+  EntropyWorkProfile* profile = nullptr,
+  bool dc_uint_search = false);
 
 /// Builds ANS models without traversing the ordered streams for exact cost.
 [[nodiscard]] Status PrepareAnsEntropyCodeWithPreparedClusters(

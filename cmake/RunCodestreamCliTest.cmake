@@ -461,14 +461,15 @@ if(NOT maximum_compression_hash STREQUAL maximum_compression_repeat_hash)
   message(FATAL_ERROR "Maximum-compression CLI output is not deterministic")
 endif()
 # Effort 7 defaults to prediction-aware quantization and adaptive DC smoothing.
+# Context-map search changes these codestreams without changing decoded pixels.
 set(expected_hash
-  97de84316e188f09165c7af3f30d0baeb9d6b395b906a809d34e360527a5cfc2)
+  c8a8c1215ac341df1a1a3337e428e9886bf8258fcde57aedd3958100d1cc3927)
 if(NOT first_hash STREQUAL expected_hash)
   message(FATAL_ERROR
     "checked sample codestream hash changed: ${first_hash}")
 endif()
 set(expected_maximum_compression_hash
-  9d4f8bb5703b998da3505f5c5506d63735378674ef49d8a118bac81f0ce1f95c)
+  38cf7b01a4c31c2e44a7ebd76ca9c92711606572e11107d95979054d0a14c49b)
 if(NOT maximum_compression_hash STREQUAL expected_maximum_compression_hash)
   message(FATAL_ERROR
     "Maximum-compression sample hash changed: ${maximum_compression_hash}")
@@ -480,15 +481,15 @@ foreach(compression IN ITEMS ordinary maximum maximum-error)
   set(compression_flags)
   set(rate_control_flags --distance 1.0)
   set(expected_legacy_hash
-    b0671094599faefd7312880e15aa89373612bbc5b5f028f7f19c60e09492f333)
+    5a24758f304fa1f651a96818273564c24772301af1d91ca8619bbd007755692b)
   if(compression STREQUAL "maximum")
     set(compression_flags --maximum-compression)
     set(expected_legacy_hash
-      a33d5414e7ac5db07184510e629266682cec583d7527bf9d9877317da86f92c4)
+      06fe9b7178f04931b5e0115f7bf2c88097a4a664cf8185bcbb830a91faf7726a)
   elseif(compression STREQUAL "maximum-error")
     set(rate_control_flags --maximum-error 0.1 0.1 0.1)
     set(expected_legacy_hash
-      eeb771640076375d10365be7b773e0768c3b495e0e8e322b6cd12623c8284673)
+      e7c0fefed83e4fffeb6e1e19fbb7b4a748bf8a6f3e437a17e0a8a2af43291ba9)
   endif()
   execute_process(
     COMMAND "${GJXL_ENCODER}" ${rate_control_flags} --backend cpu
@@ -678,7 +679,7 @@ if(NOT maximum_error_first_hash STREQUAL maximum_error_second_hash)
   message(FATAL_ERROR "Maximum-error CLI output is not deterministic")
 endif()
 set(expected_maximum_error_hash
-  8123c503c88c123679a2f9b302bb3244f973a7316cc8536dcbd32fb2eaf10794)
+  2b7c818ddb90f31a529e194ce6671dd07f8e868069b36e2d9fa1254f44731953)
 if(NOT maximum_error_first_hash STREQUAL expected_maximum_error_hash)
   message(FATAL_ERROR
     "Maximum-error sample hash changed: ${maximum_error_first_hash}")

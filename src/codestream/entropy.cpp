@@ -1184,8 +1184,8 @@ Status WriteValue(
     writer, prefix_depth + token.extra_bit_count, data);
 }
 
-Status WriteContextMapInternal(const EntropyCode& code, BitWriter* writer) {
-  if (*std::max_element(code.context_map.begin(), code.context_map.end()) == 0) {
+Status WriteLegacyContextMapInternal(std::span<const uint8_t> map, BitWriter* writer) {
+  if (*std::max_element(map.begin(), map.end()) == 0) {
     return WriteBits(writer, 3, 1);
   }
 
@@ -1194,7 +1194,7 @@ Status WriteContextMapInternal(const EntropyCode& code, BitWriter* writer) {
   for (const HybridUintConfig config : kBalancedUintConfigs) {
     std::array<uint64_t, kPrefixAlphabetSize> counts{};
     bool valid = true;
-    for (uint8_t cluster : code.context_map) {
+    for (uint8_t cluster : map) {
       HybridUintToken token;
       if (Status status = EncodeHybridUint(cluster, config, &token);
           !status.ok()) {
@@ -1223,7 +1223,7 @@ Status WriteContextMapInternal(const EntropyCode& code, BitWriter* writer) {
         !status.ok()) {
       return status;
     }
-    for (uint8_t cluster : code.context_map) {
+    for (uint8_t cluster : map) {
       if (Status status = WriteValue(cluster, prefix, config, &candidate);
           !status.ok()) {
         return status;
@@ -1241,6 +1241,17 @@ Status WriteContextMapInternal(const EntropyCode& code, BitWriter* writer) {
     return status;
   }
   return writer->Append(best);
+}
+
+Status WriteContextMapInternal(const EntropyCode& code, BitWriter* writer) {
+  if (code.context_map_encoding.Matches(code.context_map))
+    return code.context_map_encoding.AppendTo(writer);
+  if (*std::max_element(code.context_map.begin(), code.context_map.end()) == 0)
+    return writer->WriteBits(3, 1);
+  codestream_internal::ContextMapEncoding encoding;
+  if (Status status = codestream_internal::EncodeContextMap(code.context_map, &encoding);
+      !status.ok()) return status;
+  return encoding.AppendTo(writer);
 }
 
 Status AppendTemporary(BitWriter* destination, BitWriter* temporary) {
@@ -1571,7 +1582,8 @@ Status BuildEntropyCodeForPartition(
     ProfileBegin(profile);
   BitWriter model;
   EntropyCodeCost candidate_cost;
-  Status status = WriteEntropyCode(candidate, &model);
+  Status status = codestream_internal::PrepareEntropyContextMap(&candidate);
+  if (status.ok()) status = WriteEntropyCode(candidate, &model);
   if (status.ok()) {
     candidate_cost.model_bits = model.bits_written();
     candidate_cost.cluster_count = candidate.prefix_codes.size();
@@ -1655,6 +1667,8 @@ Status BuildFixedEntropyCodeForPartition(
     }
   }
   BitWriter model;
+  if (Status status = codestream_internal::PrepareEntropyContextMap(&candidate);
+      !status.ok()) return status;
   if (Status status = WriteEntropyCode(candidate, &model); !status.ok()) {
     return status;
   }
@@ -2204,6 +2218,13 @@ Status WritePrefixCodes(
   } catch (const std::length_error&) {
     return Status::OutOfMemory("Prefix-code serialization is too large");
   }
+}
+
+Status codestream_internal::WriteLegacyContextMap(
+  std::span<const uint8_t> map, BitWriter* writer) {
+  if (writer == nullptr || map.empty() || map.size() > UINT32_MAX)
+    return Status::InvalidArgument("Legacy context-map input is invalid");
+  return WriteLegacyContextMapInternal(map, writer);
 }
 
 Status WriteContextMap(const EntropyCode& code, BitWriter* writer) {

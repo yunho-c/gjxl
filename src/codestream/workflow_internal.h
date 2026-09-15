@@ -17,6 +17,17 @@
 
 namespace gjxl::codestream_internal {
 
+/// Scope for modular DC mapping search. Keep explicit frontend and
+/// entropy modes, ordinary DC rounding, and other efforts on their own policy.
+[[nodiscard]] constexpr bool UseDcUintSearch(
+  const VarDctEncodingOptions& options) noexcept {
+  return options.effort == 4 &&
+    options.density_mode == VarDctDensityMode::kDefault &&
+    options.compression_mode == VarDctCompressionMode::kAutomatic &&
+    options.rate_control_mode != VarDctRateControlMode::kMaximumError &&
+    ResolveDcQuantization(options) == DcQuantizationMode::kPredictionAware;
+}
+
 /// Nonlinear final CfL is qualified for ordinary effort-8 resident Metal AQ.
 /// Zero denotes the established fast regression. This changes no host/device
 /// arena dimensions; it adds only bounded threadgroup-local shader scratch.
@@ -35,6 +46,11 @@ namespace gjxl::codestream_internal {
   const VarDctEncodingOptions& options) noexcept {
   if (options.density_mode == VarDctDensityMode::kHighDensity) return 4;
   if (options.effort <= 3) return 0;
+  // Ordinary e4 skips perceptual refinement; explicit error/density recipes
+  // retain their existing update policy.
+  if (options.effort == 4 &&
+      options.density_mode == VarDctDensityMode::kDefault &&
+      options.rate_control_mode != VarDctRateControlMode::kMaximumError) return 0;
   if (options.effort <= 6) return 1;
   if (options.effort == 7) return 2;
   if (options.effort <= 9) return 3;

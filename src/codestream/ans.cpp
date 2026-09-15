@@ -91,6 +91,7 @@ struct AnsOptimizationPolicy {
   AnsHistogramSearch histogram_search = AnsHistogramSearch::kPrecise;
   bool smallest_alphabet_width = false;
   bool optimize_config_histograms = false;
+  bool estimate_alphabet_width = false;
 };
 
 constexpr AnsOptimizationPolicy kMaximumCompressionAnsPolicy{
@@ -1478,7 +1479,8 @@ Status PrepareDirectAnsPartition(
     fixed_context_populations,
   EntropyCode* partition,
   codestream_internal::PreparedEntropyClusters* prepared,
-  EntropyWorkProfile* profile) {
+  EntropyWorkProfile* profile,
+  bool retain_values = false) {
 
   if (partition == nullptr || prepared == nullptr ||
       options.context_count == 0 || !options.uint_config.valid() ||
@@ -1633,7 +1635,8 @@ Status PrepareDirectAnsPartition(
     codestream_internal::PreparedEntropyClusters candidate_prepared;
     candidate_prepared.context_count = candidate_partition.context_count;
     candidate_prepared.context_map = candidate_partition.context_map;
-    if (mode == codestream_internal::DirectAnsEntropyMode::kBalanced) {
+    if (mode == codestream_internal::DirectAnsEntropyMode::kBalanced &&
+        !retain_values) {
       candidate_prepared.fixed_uint_config = options.uint_config;
       candidate_prepared.fixed_ans_clusters.resize(clustered.size());
       for (size_t cluster = 0; cluster < clustered.size(); ++cluster) {
@@ -1648,8 +1651,12 @@ Status PrepareDirectAnsPartition(
       const ProfileClock::time_point value_begin = ProfileBegin(profile);
       Storage<Storage<uint32_t>> cluster_values(clustered.size());
       for (const EntropyTokenStreamView section : section_tokens) {
+        if (!section.valid())
+          return Status::InvalidArgument("ANS token-stream view is invalid");
         for (size_t index = 0; index < section.size(); ++index) {
           const EntropyToken token = section[index];
+          if (token.context >= candidate_partition.context_count)
+            return Status::InvalidArgument("ANS token context is out of range");
           const size_t cluster =
             candidate_partition.context_map[token.context];
           cluster_values[cluster].push_back(token.value);
@@ -1951,6 +1958,64 @@ Status MeasureAnsCodes(
   return Status::Ok();
 }
 
+template <typename Process>
+Status WriteAnsStream(size_t token_count, Process&& process, BitWriter* writer) {
+  try {
+    size_t chunk_count = 0;
+    if (Status status = codestream_internal::ComputeAnsReverseChunkCount(token_count, &chunk_count);
+        !status.ok()) {
+      return status;
+    }
+    // Pack during reverse token processing. Every stored word contains 56
+    // bits; only the final pending word needs a separate logical width.
+    Storage<uint64_t> reverse_words;
+    reverse_words.reserve(chunk_count);
+    uint64_t pending = 0;
+    size_t pending_bits = 0;
+    const auto append_chunk = [&](uint32_t bits, uint8_t bit_count) {
+      if (pending_bits + bit_count >= BitWriter::kMaxBitsPerWrite) {
+        const size_t take = BitWriter::kMaxBitsPerWrite - pending_bits;
+        const size_t remaining = bit_count - take;
+        reverse_words.push_back((pending << take) | (uint64_t{bits} >> remaining));
+        pending = bits & ((uint64_t{1} << remaining) - 1);
+        pending_bits = remaining;
+      } else {
+        pending = (pending << bit_count) | bits;
+        pending_bits += bit_count;
+      }
+    };
+    uint32_t state = 0;
+    if (Status status = process(append_chunk, &state);
+        !status.ok()) {
+      return status;
+    }
+    // The checked token bound above also bounds this exact size calculation.
+    const size_t total_bits = 32 + pending_bits +
+      BitWriter::kMaxBitsPerWrite * reverse_words.size();
+    BitWriter temporary;
+    const auto write_words = [&]() -> Status {
+      if (Status write = temporary.WriteBits(32, state); !write.ok()) return write;
+      if (Status write = temporary.WriteBits(pending_bits, pending); !write.ok())
+        return write;
+      for (auto word = reverse_words.rbegin(); word != reverse_words.rend(); ++word) {
+        if (Status write = temporary.WriteBits(BitWriter::kMaxBitsPerWrite, *word);
+            !write.ok()) return write;
+      }
+      return Status::Ok();
+    };
+    // reference_wrapper keeps the synchronous callback allocation-free.
+    Status status = temporary.WithMaxBits(total_bits, std::cref(write_words));
+    if (!status.ok()) return status;
+    return writer->Append(temporary);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
+  }
+}
+
 }  // namespace
 
 Status codestream_internal::CountAnsTokenStreamBits(
@@ -2184,68 +2249,57 @@ Status codestream_internal::WriteAnsEntropyCodeModel(
 }
 
 Status codestream_internal::WriteAnsTokenStream(
-  EntropyTokenStreamView tokens,
-  const EntropyCode& code,
-  BitWriter* writer) {
-
-  if (writer == nullptr || !tokens.valid()) {
+  EntropyTokenStreamView tokens, const EntropyCode& code, BitWriter* writer) {
+  if (writer == nullptr || !tokens.valid())
     return Status::InvalidArgument("ANS token-stream output is null");
+  const auto process = [&](auto&& emit, uint32_t* state) {
+    return ProcessAnsTokenStream(tokens, code, emit, state);
+  };
+  return WriteAnsStream(tokens.size(), process, writer);
+}
+
+Status codestream_internal::WriteContextMapAns(
+  std::span<const HybridUintToken> tokens, HybridUintConfig config, bool rle,
+  BitWriter* writer) {
+  if (writer == nullptr || tokens.empty() || !config.valid())
+    return Status::InvalidArgument("Context-map ANS input is invalid");
+  std::array<uint64_t, kMaximumAnsAlphabetSize> counts{};
+  size_t maximum = 0;
+  for (const auto token : tokens) {
+    if (token.symbol >= counts.size() || token.extra_bit_count > 31)
+      return Status::InvalidArgument("Context-map ANS token is invalid");
+    ++counts[token.symbol];
+    maximum = std::max(maximum, size_t{token.symbol});
   }
-  try {
-    size_t chunk_count = 0;
-    if (Status status = ComputeAnsReverseChunkCount(tokens.size(), &chunk_count);
-        !status.ok()) {
-      return status;
-    }
-    // Pack during reverse token processing. Every stored word contains 56
-    // bits; only the final pending word needs a separate logical width.
-    Storage<uint64_t> reverse_words;
-    reverse_words.reserve(chunk_count);
-    uint64_t pending = 0;
-    size_t pending_bits = 0;
-    const auto append_chunk = [&](uint32_t bits, uint8_t bit_count) {
-      if (pending_bits + bit_count >= BitWriter::kMaxBitsPerWrite) {
-        const size_t take = BitWriter::kMaxBitsPerWrite - pending_bits;
-        const size_t remaining = bit_count - take;
-        reverse_words.push_back((pending << take) | (uint64_t{bits} >> remaining));
-        pending = bits & ((uint64_t{1} << remaining) - 1);
-        pending_bits = remaining;
-      } else {
-        pending = (pending << bit_count) | bits;
-        pending_bits += bit_count;
-      }
-    };
-    uint32_t state = 0;
-    if (Status status = ProcessAnsTokenStream(
-          tokens, code, append_chunk, &state);
-        !status.ok()) {
-      return status;
-    }
-    // The checked token bound above also bounds this exact size calculation.
-    const size_t total_bits = 32 + pending_bits +
-      BitWriter::kMaxBitsPerWrite * reverse_words.size();
-    BitWriter temporary;
-    const auto write_words = [&]() -> Status {
-      if (Status write = temporary.WriteBits(32, state); !write.ok()) return write;
-      if (Status write = temporary.WriteBits(pending_bits, pending); !write.ok())
-        return write;
-      for (auto word = reverse_words.rbegin(); word != reverse_words.rend(); ++word) {
-        if (Status write = temporary.WriteBits(BitWriter::kMaxBitsPerWrite, *word);
-            !write.ok()) return write;
-      }
-      return Status::Ok();
-    };
-    // reference_wrapper keeps the synchronous callback allocation-free.
-    Status status = temporary.WithMaxBits(total_bits, std::cref(write_words));
-    if (!status.ok()) return status;
-    return writer->Append(temporary);
-  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
-    return error.status();
-  } catch (const std::bad_alloc&) {
-    return AllocationFailure();
-  } catch (const std::length_error&) {
-    return AllocationFailure();
+  const size_t width = std::max(size_t{5}, static_cast<size_t>(std::bit_width(maximum)));
+  AnsHistogram histogram;
+  Status status = BuildBestAnsHistogram(counts, AnsHistogramSearch::kPrecise, &histogram);
+  if (!status.ok()) return status;
+  status = BuildAnsEncoderTables(histogram.frequencies, width,
+                                 &histogram.reverse_map,
+                                 &histogram.reverse_offsets,
+                                 &histogram.reciprocal_frequencies);
+  if (!status.ok()) return status;
+  if (Status s = writer->WriteBits(3, (width - 5) << 1); !s.ok()) return s;
+  if (Status s = WriteAnsUintConfig(config, width, writer); !s.ok()) return s;
+  if (rle) {
+    if (Status s = WriteAnsUintConfig({0, 0, 0}, width, writer); !s.ok()) return s;
   }
+  if (Status s = WriteAnsHistogram(histogram, writer); !s.ok()) return s;
+  if (rle) {
+    AnsHistogram distance;
+    distance.frequencies = {kAnsTableSize};
+    if (Status s = WriteAnsHistogram(distance, writer); !s.ok()) return s;
+  }
+  const auto process = [&](auto&& emit, uint32_t* state) -> Status {
+    *state = kAnsSignature << 16;
+    for (size_t i = tokens.size(); i != 0; --i) {
+      if (const char* error = AdvanceAnsState(tokens[i - 1], histogram, emit, state))
+        return Status::InvalidArgument(error);
+    }
+    return Status::Ok();
+  };
+  return WriteAnsStream(tokens.size(), process, writer);
 }
 
 Status codestream_internal::WriteAnsTokenStream(
@@ -2642,8 +2696,34 @@ Status OptimizeAnsEntropyCodeImpl(
     width_candidates.reserve(kLogAlphaSizeCount);
     const ProfileClock::time_point model_build_begin =
       ProfileBegin(profile);
+    // Balanced DC selects one width using the same histogram/configuration
+    // estimate as the per-cluster mapping search. Context-map and stream-state
+    // costs are common to all widths. Avoid constructing and traversing four
+    // full ANS models before the final token emission.
+    size_t estimated_width = kMinimumLogAlphaSize;
+    if (policy.estimate_alphabet_width) {
+      double best = std::numeric_limits<double>::infinity();
+      for (size_t width = kMinimumLogAlphaSize;
+           width <= kMaximumLogAlphaSize; ++width) {
+        double total = 0.0;
+        for (const auto& cluster_options : options) {
+          double minimum = std::numeric_limits<double>::infinity();
+          for (const auto& option : cluster_options) {
+            const auto& stats = option.width_stats[width - kMinimumLogAlphaSize];
+            if (stats.valid) minimum = std::min(minimum, stats.estimated_bits);
+          }
+          total += minimum;
+        }
+        if (total < best) {
+          best = total;
+          estimated_width = width;
+        }
+      }
+    }
     for (size_t log_alpha_size = kMinimumLogAlphaSize;
          log_alpha_size <= kMaximumLogAlphaSize; ++log_alpha_size) {
+      if (policy.estimate_alphabet_width && log_alpha_size != estimated_width)
+        continue;
       EntropyCode candidate;
       candidate.mode = EntropyCodingMode::kAns;
       candidate.context_count = prefix_partition.context_count;
@@ -2692,6 +2772,8 @@ Status OptimizeAnsEntropyCodeImpl(
         continue;
       }
       BitWriter model;
+      if (Status status = codestream_internal::PrepareEntropyContextMap(&candidate);
+          !status.ok()) return status;
       if (Status status = WriteEntropyCode(candidate, &model); !status.ok()) {
         return status;
       }
@@ -3153,7 +3235,8 @@ Status codestream_internal::OptimizeDirectAnsEntropyCodeWithFixedPopulations(
   std::span<const PreparedFixedAnsCluster> context_populations,
   EntropyCode* code,
   EntropyCodeCost* cost,
-  EntropyWorkProfile* profile) {
+  EntropyWorkProfile* profile,
+  bool dc_uint_search) {
 
   if (code == nullptr) {
     return Status::InvalidArgument("Direct ANS output is null");
@@ -3162,14 +3245,21 @@ Status codestream_internal::OptimizeDirectAnsEntropyCodeWithFixedPopulations(
   PreparedEntropyClusters prepared;
   Status status = PrepareDirectAnsPartition(
     section_tokens, options, DirectAnsEntropyMode::kBalanced,
-    context_populations, &partition, &prepared, profile);
+    context_populations, &partition, &prepared, profile, dc_uint_search);
   if (!status.ok()) return status;
   const std::array<HybridUintConfig, 1> balanced_configs = {
     options.uint_config};
+  // Keep the incumbent first so equal estimated costs preserve its mapping.
+  const std::array<HybridUintConfig, 4> dc_configs = {
+    options.uint_config, HybridUintConfig{4, 1, 2},
+    HybridUintConfig{0, 0, 0}, HybridUintConfig{2, 0, 1}};
   const AnsOptimizationPolicy policy{
-    .uint_configs = balanced_configs,
+    .uint_configs = dc_uint_search
+      ? std::span<const HybridUintConfig>(dc_configs)
+      : std::span<const HybridUintConfig>(balanced_configs),
     .histogram_search = AnsHistogramSearch::kApproximate,
     .smallest_alphabet_width = true,
+    .estimate_alphabet_width = dc_uint_search,
   };
   return OptimizeAnsEntropyCodeImpl(
     section_tokens, partition, &prepared, policy,
@@ -3281,7 +3371,8 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
   EntropyOptimizationStoragePlan* out) {
   using enum EntropyStoragePolicy;
   using enum resource_budget_internal::VectorCapacityPolicy;
-  const bool direct = o.policy == kBalancedAns || o.policy == kHighDensityAns ||
+  const bool dc_search = o.policy == kBalancedDcAns;
+  const bool direct = o.policy == kBalancedAns || dc_search || o.policy == kHighDensityAns ||
                       o.policy == kRateOptimizedAns || o.policy == kDeferredRateOptimizedAns;
   if (out == nullptr || o.contexts == 0 || o.contexts > UINT32_MAX ||
       o.initial_histograms > 256 || o.retain_prepared_clusters ||
@@ -3300,7 +3391,7 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
   const size_t k = plan.clusters = std::min(
     direct ? o.maximum_ans_clusters : kMaximumPrefixClusters, histograms);
   const size_t cluster_workers = rate ? std::min(k, kMaximumAnsConfigWorkers) : 1;
-  const size_t configs = balanced ? 1 : (direct
+  const size_t configs = balanced ? 1 : dc_search ? 4 : (direct
     ? kHighDensityAnsUintConfigs.size() : kAnsUintConfigs.size());
   const size_t widths = direct && o.policy != kRateOptimizedAns &&
                                  o.policy != kDeferredRateOptimizedAns
@@ -3383,7 +3474,7 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
     if (balanced) {
       if (!work.AddVector<PreparedFixedAnsCluster>(k, kFreshExact))
         return overflow();
-    } else {
+    } else if (!dc_search) {
       // Initial K*(K-1)/2 pairs plus (K-1)*(K-2)/2 after successful merges.
       // Stale queue entries retain capacity: bound ALL enqueues, (K-1)^2,
       // not merely the current active-cluster pairs. K is in [1,64].
@@ -3393,6 +3484,9 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
           !work.AddVector<Storage<WeightedValue>>(k, kFreshExact))
         return overflow();
     }
+    if (dc_search &&
+        !work.AddVector<Storage<WeightedValue>>(k, kFreshExact))
+      return overflow();
   }
   if ((direct && !balanced) || (!direct && !o.borrow_prepared_clusters)) {
     EntropyAggregationStoragePlan aggregate;
@@ -3409,6 +3503,38 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
       return overflow();
   }
   *out = plan;
+  return Status::Ok();
+}
+
+Status codestream_internal::ComputeContextMapAnsStorageBound(
+  size_t tokens, resource_budget_internal::HostStorageBound* out) {
+  using enum resource_budget_internal::VectorCapacityPolicy;
+  if (out == nullptr || tokens == 0 || tokens > UINT32_MAX)
+    return Status::InvalidArgument("Context-map ANS bound is invalid");
+  resource_budget_internal::HostStorageBound bound;
+  // One normalized histogram, flat reverse map with per-symbol offsets, and
+  // serial normalization/alias-table scratch.
+  // The implicit distance histogram has a single frequency and no tables.
+  if (!bound.AddVector<uint16_t>(kMaximumAnsAlphabetSize, kFreshExact, 4) ||
+      !bound.AddVector<uint16_t>(kMaximumAnsAlphabetSize, kFreshExact) ||
+      !bound.AddVector<uint16_t>(kAnsTableSize, kFreshExact) ||
+      !bound.AddVector<uint64_t>(kMaximumAnsAlphabetSize, kFreshExact) ||
+      !bound.AddVector<Remainder>(kMaximumAnsAlphabetSize, kFreshExact) ||
+      !bound.AddVector<EntropyDelta>(kMaximumAnsAlphabetSize, kFreshExact) ||
+      !bound.AddVector<int32_t>(kMaximumAnsAlphabetSize, kFreshExact) ||
+      !bound.AddVector<AliasEntry>(kMaximumAnsAlphabetSize, kFreshExact) ||
+      !bound.AddVector<uint32_t>(kMaximumAnsAlphabetSize, kFreshExact, 2) ||
+      !bound.AddVector<uint32_t>(kMaximumAnsAlphabetSize, kGrowing, 2))
+    return Status::OutOfMemory("Context-map ANS bound overflows");
+  EntropyTokenEmissionStoragePlan emission;
+  Status status = ComputeEntropyTokenEmissionStoragePlan(EntropyCodingMode::kAns, tokens, &emission);
+  if (!status.ok()) return status;
+  resource_budget_internal::HostStorageBound writer;
+  status = ComputeEntropyWriterStorageBound(emission.maximum_bits, &writer);
+  if (!status.ok()) return status;
+  if (!bound.Add(emission.scratch) || !bound.Add(writer))
+    return Status::OutOfMemory("Context-map ANS emission bound overflows");
+  *out = bound;
   return Status::Ok();
 }
 

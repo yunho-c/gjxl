@@ -84,6 +84,9 @@ Status ComputeEntropyModelStoragePlan(EntropyCodingMode mode, size_t contexts,
       (mode != EntropyCodingMode::kPrefix && mode != EntropyCodingMode::kAns))
     return Status::InvalidArgument("Entropy model plan arguments are invalid");
   EntropyModelStoragePlan plan;
+  ContextMapStoragePlan context_map;
+  Status context_status = ComputeContextMapStoragePlan(contexts, &context_map);
+  if (!context_status.ok()) return context_status;
   // Config <=12 bits, alphabet <=20, tree header <=2+18*4, and at most
   // 2*128 RLE entries of depth <=5 plus <=3 extra bits. Simple trees are
   // smaller.
@@ -101,7 +104,8 @@ Status ComputeEntropyModelStoragePlan(EntropyCodingMode mode, size_t contexts,
     return Overflow();
   plan.maximum_bits = context_bits + payload;
   if (!plan.owned.AddVector<uint8_t>(contexts, kFreshExact) ||
-      !plan.owned.AddVector<HybridUintConfig>(clusters, kFreshExact))
+      !plan.owned.AddVector<HybridUintConfig>(clusters, kFreshExact) ||
+      !plan.owned.Add(context_map.owned))
     return Overflow();
   if (mode == EntropyCodingMode::kPrefix) {
     if (!plan.owned.AddVector<PrefixCode>(clusters, kFreshExact))
@@ -127,6 +131,7 @@ Status ComputeEntropyModelStoragePlan(EntropyCodingMode mode, size_t contexts,
   // Prefix: outer temporary, best and candidate context writers. ANS adds
   // WriteContextMap's public-wrapper temporary. Huffman RLE is serial.
   if (!plan.write_scratch.Add(model_writer) ||
+      !plan.write_scratch.Add(context_map.working) ||
       !plan.write_scratch.Add(context_writer,
                               mode == EntropyCodingMode::kPrefix ? 2 : 3) ||
       !plan.write_scratch.AddVector<uint8_t>(2 * kPrefixAlphabetSize,
@@ -152,6 +157,7 @@ Status ComputeEntropyOptimizationStoragePlan(
       return Status::InvalidArgument("Prefix storage options are invalid");
     return ComputePrefixOptimizationStoragePlan(options, out);
   case kBalancedAns:
+  case kBalancedDcAns:
   case kHighDensityAns:
   case kRateOptimizedAns:
   case kDeferredRateOptimizedAns:

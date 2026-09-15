@@ -1,0 +1,1022 @@
+{
+  "artifacts": {
+    "build/entropy-default-baseline-quantization.log": "7ce432a751482953a717004e4f9f85c3b89415f8e24be37783cd954a8a947882",
+    "build/entropy-default-candidate-tests.log": "ffe9b74a341d0266bf74947026e20f598d3965eded25b05602fe7b3a9b6f73cc",
+    "build/entropy-default-latency-20260915/analysis.json": "9df7812c16e081669f4802d74e1d2c0180da7368c2656bc42daeb102cab22b8f",
+    "build/entropy-default-latency-20260915/attempts.jsonl": "528f2de143ab9f454ad618c85c2f6284e0b7f84b1acbba6f9db0e9ce620bc0d3",
+    "build/entropy-default-latency-20260915/audit.json": "dd82b2b9ccfee1bcaf58c9bbd3645d128210862e32e1ec2ceaf004f00846911d",
+    "build/entropy-default-latency-20260915/commands.jsonl": "f13610e4e331eefff511bb91d35217b9f929e62bd9d0822b1566b632792a9523",
+    "build/entropy-default-latency-20260915/environment.jsonl": "08a062bdde96c4f2b30599f63280d57dfb26b0f19fa067d9ea36762445ed886f",
+    "build/entropy-default-latency-20260915/manifest.json": "e2e11b0928ff178d38e6494e549604faefce01ba4a9c57a6ee8d0e8500a118ff",
+    "build/entropy-default-latency-20260915/pause_suggestd.py": "ed2decf72abe80d5b318d8659039645a24ea859430248a10432eeba2ec92f8ba",
+    "build/entropy-default-latency-20260915/service-intervention.jsonl": "edda2c2f910066889f38e27f6846d73f3c2b3b6bd925444d24cbf955035a6fa6",
+    "build/entropy-default-qualification-20260915/analysis.json": "0d8771ac086cbc873983a48aefed711e2245110be14e1e2d78d4b2fa61175625",
+    "build/entropy-default-qualification-20260915/audit.json": "53d6161066051f1675479204692b7ab0dda522ffeca9c4aff7d5d9df59a6382f",
+    "build/entropy-default-qualification-20260915/commands.jsonl": "1474e97c1c4de60f2ac7f945febbaf661a1f226041a65c39988e6f7f2899dd51",
+    "build/entropy-default-qualification-20260915/export_results.py": "43ff805bd07efb468b26fe816609b0f78d0bacd1f4df637141561dd3d9364c9a",
+    "build/entropy-default-qualification-20260915/manifest.json": "7726a502c585bb235111790220aa1d7fe87417b0d32d141d7fc7f24ab392634b",
+    "build/entropy-default-qualification-20260915/observations.jsonl": "ba99d6db877e2b6bf63b245aad9e109ba41e0af91618ec16f3d2e28fb9a2ed14",
+    "build/entropy-default-qualification-20260915/qualify_defaults.py": "6b9362d246cd1b4de14711d4b477cd1484f3a80d6e435221a9ef7f2a0c0af7f3",
+    "build/entropy-default-qualification-20260915/scope.jsonl": "822d40ab004e393874baf581a5ba182d1f2e1455320cea01f2e4534ba4a9984f",
+    "build/entropy-default-qualification-20260915/source-snapshot.zip": "24dea6db434e70fec7dfbbc93c386dc9cd52e5aa0ef8d6a45b1a244a9212ea97"
+  },
+  "baseline_commit": "30bf1f3",
+  "binary_sha256": {
+    "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/entropy-default-baseline/gjxl_quality_benchmark": "559a589a21448538f9e566c1c3b7673f334356106c6e46fcff40ad5916dbae07",
+    "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/entropy-default-candidate/gjxl_quality_benchmark": "53e2ff6466c8deec6b909e3513d3f04811d43b7647dfc89f40d6fd234bebff6a"
+  },
+  "integration_commit": "d6852af907636c00bd1dce057f4f2d84fe4fb832",
+  "protocol": "Current-main zero-AQ e4 frontend in both arms. Twelve retained Q80 operating distances; fresh exact decoded PFM identity. Byte percentages at fixed reconstruction, not BD-rate; earlier one-AQ quality scores are not reused. Separate CPU/Metal effort controls.",
+  "rate": {
+    "equal": 0,
+    "larger": 0,
+    "mean_byte_change_percent": -1.1862672550459576,
+    "not_bd_rate": true,
+    "observations": [
+      {
+        "baseline_bytes": 123972,
+        "baseline_raw_sha256": "1814fba4121222d7e546db5d41c82270aa01c0c8457fc0792a80a51e81ef052f",
+        "baseline_sha256": "fb7ff6dece9c266c74aac1213a5a5b529c7578f0a6909d077253fd6c718fd300",
+        "candidate_bytes": 122470,
+        "candidate_raw_sha256": "43e89053132484dc5290e8a63bfb63b2bf9136cfeffc39a5573abbd9e6900487",
+        "candidate_sha256": "719b54f64b6277915005570f95becb56340a378ae1687fc1fc61d08c873771cd",
+        "decoded_sha256": "b2a55b606bbb48215ec739191b8a48395e11451f6a1122518234f3beab9081ef",
+        "distance": 1.9,
+        "exact_decoded_identity": true,
+        "folder": "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/entropy-default-qualification-20260915/rate/0",
+        "id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777|e4-prediction-aware-smooth1|q80",
+        "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+        "requested_quality": 80
+      },
+      {
+        "baseline_bytes": 107753,
+        "baseline_raw_sha256": "0aa1e1927aabbb97eb81442696a75911d6a842833c4e2483cf06871603ff8150",
+        "baseline_sha256": "e06f3b9360c62f840613b397bd23764557950874af67162c7b5fcf0794cdf9cb",
+        "candidate_bytes": 105967,
+        "candidate_raw_sha256": "a56c55113f7064db0dce1937e2526db14f2764e9d0c0d053ee2d683991a86b5c",
+        "candidate_sha256": "7daf598670076cdc701b92ed38cfcd1619ea88ad3b5c2feb6f71bbd9aab18a74",
+        "decoded_sha256": "126a0b56b20acce379c061927d869e7e9e52b824522fddac6690329dbd815265",
+        "distance": 1.9,
+        "exact_decoded_identity": true,
+        "folder": "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/entropy-default-qualification-20260915/rate/1",
+        "id": "clic2024_test/28d24b9c83de066597ff96a68769884f|e4-prediction-aware-smooth1|q80",
+        "image_id": "clic2024_test/28d24b9c83de066597ff96a68769884f",
+        "requested_quality": 80
+      },
+      {
+        "baseline_bytes": 76120,
+        "baseline_raw_sha256": "44b5faa5fb44862e8837f5e4a9d6fa8296ca183ed818a3fc60347757a3efcb88",
+        "baseline_sha256": "230214eb0f3a530ecd2aa37d1dafa5316b3eab81faad3e046de8eb8ab0343801",
+        "candidate_bytes": 74805,
+        "candidate_raw_sha256": "dde19e086cf3bceed6874d37adb486483ad074a1449bebfa4f28bfb6462c9f2c",
+        "candidate_sha256": "36e4b32e454260374ca825685995813dea31d9f6799f6c225c8c547efa1935ec",
+        "decoded_sha256": "18af380bb31b20122a82d82ae08c813af98e327c122ca64617ff3616f307fd62",
+        "distance": 1.9,
+        "exact_decoded_identity": true,
+        "folder": "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/entropy-default-qualification-20260915/rate/2",
+        "id": "clic2024_test/b51d5fb537246482ef7a7ab63f093cab|e4-prediction-aware-smooth1|q80",
+        "image_id": "clic2024_test/b51d5fb537246482ef7a7ab63f093cab",
+        "requested_quality": 80
+      },
+      {
+        "baseline_bytes": 139909,
+        "baseline_raw_sha256": "e60e1292d4353ba043fbc493e098cc6f466b9ab4649ed0a038044e2f05f959ed",
+        "baseline_sha256": "ff9fc97e1c6cdec9fd1fc41cbfb2cdac53119458e21ca83c77d30ce258b30546",
+        "candidate_bytes": 137849,
+        "candidate_raw_sha256": "299b101c5575f249300500d01eb609ced0ade34b4e217d9a8f7ed3f0b6adf02b",
+        "candidate_sha256": "a07c9957533a2b8cafc3d964fba1c79de9532ad87a5f8f26d3cd9d0f58909f68",
+        "decoded_sha256": "288f2044a2c1a837930a939986989c44cabb593ab5e02d7ed4061902faedd195",
+        "distance": 1.9,
+        "exact_decoded_identity": true,
+        "folder": "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/entropy-default-qualification-20260915/rate/3",
+        "id": "clic2024_test/d1a9be98d1936065967adac50a6fb750|e4-prediction-aware-smooth1|q80",
+        "image_id": "clic2024_test/d1a9be98d1936065967adac50a6fb750",
+        "requested_quality": 80
+      },
+      {
+        "baseline_bytes": 94087,
+        "baseline_raw_sha256": "d58946688d19213e78e0736d94888720b87ea8f4fa469660c08ec38dcf0c92aa",
+        "baseline_sha256": "9037d29dfb625b897cdb1de91b6dcda45fb53561036a3926ecfcf1a8c4c5fe84",
+        "candidate_bytes": 93239,
+        "candidate_raw_sha256": "3fefd0ac61ca6e4b29a32d8806d48720b4e88dbed2827830240aeea371ea6574",
+        "candidate_sha256": "18c5cd89c2be76510518aaf26ef91410d355a6aa59d833e6d6a4746cc6c33a20",
+        "decoded_sha256": "136fed48a77c0ad9db9872c0d626f5f224b71f992e4e00c23e497b167b1fd56f",
+        "distance": 1.9,
+        "exact_decoded_identity": true,
+        "folder": "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/entropy-default-qualification-20260915/rate/4",
+        "id": "kodak/01|e4-prediction-aware-smooth1|q80",
+        "image_id": "kodak/01",
+        "requested_quality": 80
+      },
+      {
+        "baseline_bytes": 103472,
+        "baseline_raw_sha256": "7266743a6e068cd35de11815d76a5a55549c62bd2aace906d8734ab78613433b",
+        "baseline_sha256": "72068e4dbf4499187080108c915e20de92d9c2a1e31831572e596b137ceb2c5e",
+        "candidate_bytes": 102537,
+        "candidate_raw_sha256": "67107f2879ce46297b20821d0a0ce4b7bda32eedf277093118b99cdd3a1439ac",
+        "candidate_sha256": "445d861b9b88308dea8d897a2eab05de753e90baa8d0d5aeb128fb425a4b7f99",
+        "decoded_sha256": "c115ea4249a0112f2b67e96a9bc1bbf35466b3db64193b57a4a3a901cf2ecc3a",
+        "distance": 1.9,
+        "exact_decoded_identity": true,
+        "folder": "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/entropy-default-qualification-20260915/rate/5",
+        "id": "kodak/08|e4-prediction-aware-smooth1|q80",
+        "image_id": "kodak/08",
+        "requested_quality": 80
+      },
+      {
+        "baseline_bytes": 118231,
+        "baseline_raw_sha256": "e6c166e398242cba92fb0262692bee66faee0e54fe8dccc6c468924d80d93555",
+        "baseline_sha256": "28a2a0724918b03e7ebeb7791693251b0e79b205cf2ab12a982f4e4bb1560694",
+        "candidate_bytes": 117313,
+        "candidate_raw_sha256": "a48c4929b165b1e97c7688a8c02e1187fadee135ec022bc406a6de0a2ddb5148",
+        "candidate_sha256": "af16de3f7117d25fbc9cad2ff11f37e3d947496e80f8583c4c49902610093612",
+        "decoded_sha256": "53b071a4229482e042f9df0c03bb3c712600e12fb1dc020ff23720498ba3a82e",
+        "distance": 1.9,
+        "exact_decoded_identity": true,
+        "folder": "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/entropy-default-qualification-20260915/rate/6",
+        "id": "kodak/13|e4-prediction-aware-smooth1|q80",
+        "image_id": "kodak/13",
+        "requested_quality": 80
+      },
+      {
+        "baseline_bytes": 52163,
+        "baseline_raw_sha256": "72ab8e2115a0eab59fa1c25dde171af90bdaf011d82d88b02864fc4f7cf7d3c8",
+        "baseline_sha256": "4643f2618ca9c275aaa7ffa12be1a5b2034a21300ffe0dc13fb94c3ce319eb58",
+        "candidate_bytes": 51397,
+        "candidate_raw_sha256": "96f90fc673c4ab8d0bec0527cf01daa2a5cd4ca966f7ecd07fcdd34dc3f6e47f",
+        "candidate_sha256": "324c12e9a0d069cc3f607f378af8f91e41b9cbc0c908501d7f547752f77c17bd",
+        "decoded_sha256": "47f5c6de950bed5db328c8cd517b8eb226b4330fd910d8ce41752f8d131f07e8",
+        "distance": 1.9,
+        "exact_decoded_identity": true,
+        "folder": "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/entropy-default-qualification-20260915/rate/7",
+        "id": "kodak/17|e4-prediction-aware-smooth1|q80",
+        "image_id": "kodak/17",
+        "requested_quality": 80
+      },
+      {
+        "baseline_bytes": 2211398,
+        "baseline_raw_sha256": "25049e83b26e999142c31f34c3866705a28d6138b3bba900f4367c7f2c4d66c8",
+        "baseline_sha256": "c4c3d43438ee153febdff03459d89624a35ace2daf1f71d894086e042d408d33",
+        "candidate_bytes": 2191922,
+        "candidate_raw_sha256": "1191ed171bc7fa2ea0f8eb73b842db87a0ffd2dfb781693b1cbe392d08bc38da",
+        "candidate_sha256": "b2cea90c331f86acf15af269cdabc7d9b6426529407958e7eeb6d328d1f4bb74",
+        "decoded_sha256": "10fad6f24ac91c7561ff9c9b0be9df8192d8be17cbb893c91d07e46809a851ba",
+        "distance": 1.9,
+        "exact_decoded_identity": true,
+        "folder": "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/entropy-default-qualification-20260915/rate/8",
+        "id": "unsplash/alpine_lake/24mp|e4-prediction-aware-smooth1|q80",
+        "image_id": "unsplash/alpine_lake/24mp",
+        "requested_quality": 80
+      },
+      {
+        "baseline_bytes": 1194569,
+        "baseline_raw_sha256": "65bb6854e46ad304552bc6d2ae90cb98b435928aec3f742ab28c949415973f4e",
+        "baseline_sha256": "8c4c2edd8a8cfa4eb80c4e4d0958fdd04e001ea0367688b34ab0c6a0fee0d495",
+        "candidate_bytes": 1184360,
+        "candidate_raw_sha256": "f047c7cbb5f6bda8dd90f34fa2e7880d8232fc5bee0f5ae578e18447784916fb",
+        "candidate_sha256": "5f2bb73f124aa12068d27975759e8327a3bf80a145a00303e2154729d5b039c7",
+        "decoded_sha256": "5d9de3e3a7feaba94618472de13b0f2e417b9717e27a9c35d030087a8a6ca78e",
+        "distance": 1.9,
+        "exact_decoded_identity": true,
+        "folder": "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/entropy-default-qualification-20260915/rate/9",
+        "id": "unsplash/campus_interior/12mp|e4-prediction-aware-smooth1|q80",
+        "image_id": "unsplash/campus_interior/12mp",
+        "requested_quality": 80
+      },
+      {
+        "baseline_bytes": 3361862,
+        "baseline_raw_sha256": "f5f6d502bfd8fbcbf455020ab8c82b32892ab64962f7d5824a6d70a3bedc9a77",
+        "baseline_sha256": "15c062f6dce8fd796a28710e946b6056c3b70fa2f7d6228ebd7e433568059a30",
+        "candidate_bytes": 3332361,
+        "candidate_raw_sha256": "0a4f3af4bcd744f18f162ec136ff2ee790498e69bdef1c29f76e4d40136c75c2",
+        "candidate_sha256": "eeff322c36d76b18876150c2ae0be574b983b9e0e1fef91f26573c96afb19937",
+        "decoded_sha256": "5441be39cb1e0d744cbb36c26ecc552713e6aeef72706c4a26fa3333352d49ba",
+        "distance": 1.9,
+        "exact_decoded_identity": true,
+        "folder": "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/entropy-default-qualification-20260915/rate/10",
+        "id": "unsplash/campus_interior/48mp|e4-prediction-aware-smooth1|q80",
+        "image_id": "unsplash/campus_interior/48mp",
+        "requested_quality": 80
+      },
+      {
+        "baseline_bytes": 7571328,
+        "baseline_raw_sha256": "4312323e0a9895a364c39a3fb24981a794f7870b6f6754471a1da624c5528407",
+        "baseline_sha256": "580967f9ee4f8fd9dbd95ddda0e69ee787f5e187a8466eb92bc002c860e0f4a1",
+        "candidate_bytes": 7457490,
+        "candidate_raw_sha256": "733c4e0612255239e057fe291b4d81aee694e53605c09f0f625a289361733b1a",
+        "candidate_sha256": "8152ef96d7bf67f53b36078baa2b3ccffde257343392f9355dc413f17eb07d19",
+        "decoded_sha256": "bfbd6d6fdfb1452330fc48136ba8f89b3501d1eefc8c310516f49cf42872d0c1",
+        "distance": 1.9,
+        "exact_decoded_identity": true,
+        "folder": "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/entropy-default-qualification-20260915/rate/11",
+        "id": "unsplash/forest_stream/48mp|e4-prediction-aware-smooth1|q80",
+        "image_id": "unsplash/forest_stream/48mp",
+        "requested_quality": 80
+      }
+    ],
+    "operating_points": 12,
+    "range_percent": [
+      -1.7275354703100376,
+      -0.77644610973433
+    ],
+    "smaller": 12
+  },
+  "rate_audit": {
+    "exact_decoded_identities": 40,
+    "rate_pairs": 12,
+    "scope_pairs": 28,
+    "status": "passed",
+    "successful_commands": 160
+  },
+  "release_tests": {
+    "inherited_failure": "quantization_pipeline score mismatch reproduced on untouched baseline",
+    "passed": 138,
+    "total": 139
+  },
+  "scope": [
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 70186,
+          "decoded_sha256": "bbe3f424087af335192944907bcdc6410b1ca515225530ecb84df4e75489df0a",
+          "sha256": "d2585c628436ad5fd1d44443e48bae0d8de3ca1e1ceac1bd799a8971b1b69812"
+        },
+        "candidate": {
+          "bytes": 69864,
+          "decoded_sha256": "bbe3f424087af335192944907bcdc6410b1ca515225530ecb84df4e75489df0a",
+          "sha256": "6f95d037a52806f40f6781dd7116b0f2a2f6791c2a6395a535733ddf27b590ed"
+        }
+      },
+      "backend": "cpu",
+      "policy": "e1"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 70186,
+          "decoded_sha256": "bbe3f424087af335192944907bcdc6410b1ca515225530ecb84df4e75489df0a",
+          "sha256": "d2585c628436ad5fd1d44443e48bae0d8de3ca1e1ceac1bd799a8971b1b69812"
+        },
+        "candidate": {
+          "bytes": 69864,
+          "decoded_sha256": "bbe3f424087af335192944907bcdc6410b1ca515225530ecb84df4e75489df0a",
+          "sha256": "6f95d037a52806f40f6781dd7116b0f2a2f6791c2a6395a535733ddf27b590ed"
+        }
+      },
+      "backend": "cpu",
+      "policy": "e2"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 70186,
+          "decoded_sha256": "bbe3f424087af335192944907bcdc6410b1ca515225530ecb84df4e75489df0a",
+          "sha256": "d2585c628436ad5fd1d44443e48bae0d8de3ca1e1ceac1bd799a8971b1b69812"
+        },
+        "candidate": {
+          "bytes": 69864,
+          "decoded_sha256": "bbe3f424087af335192944907bcdc6410b1ca515225530ecb84df4e75489df0a",
+          "sha256": "6f95d037a52806f40f6781dd7116b0f2a2f6791c2a6395a535733ddf27b590ed"
+        }
+      },
+      "backend": "cpu",
+      "policy": "e3"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 71598,
+          "decoded_sha256": "d2583e0495a2d692009317ef3d180104f66339798e1edc7402ec778940a5b6aa",
+          "sha256": "9fba526dc664a9c9c52f5bf791440624f3f1a076434f1b109bec02a8d52acb8e"
+        },
+        "candidate": {
+          "bytes": 70848,
+          "decoded_sha256": "d2583e0495a2d692009317ef3d180104f66339798e1edc7402ec778940a5b6aa",
+          "sha256": "832c8266ca42a851ebc926a6592b145e4ec9f4ea7dbdb6a901de4af8b6b8ae93"
+        }
+      },
+      "backend": "cpu",
+      "policy": "e4"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 49399,
+          "decoded_sha256": "49727f6865e842b64b022f9e85bbc3837e98970422f843be72321337c5cf5db8",
+          "sha256": "bbd0b726e5b426b0503ea1617131aa53b81f6e5c0ad7f285e124ffa729809aa3"
+        },
+        "candidate": {
+          "bytes": 49080,
+          "decoded_sha256": "49727f6865e842b64b022f9e85bbc3837e98970422f843be72321337c5cf5db8",
+          "sha256": "ffd59a134e268a7a13487871b84663dbe59bfa9ebe8d3aedbfc4a76ca49cfad8"
+        }
+      },
+      "backend": "cpu",
+      "policy": "e5"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 49399,
+          "decoded_sha256": "49727f6865e842b64b022f9e85bbc3837e98970422f843be72321337c5cf5db8",
+          "sha256": "bbd0b726e5b426b0503ea1617131aa53b81f6e5c0ad7f285e124ffa729809aa3"
+        },
+        "candidate": {
+          "bytes": 49080,
+          "decoded_sha256": "49727f6865e842b64b022f9e85bbc3837e98970422f843be72321337c5cf5db8",
+          "sha256": "ffd59a134e268a7a13487871b84663dbe59bfa9ebe8d3aedbfc4a76ca49cfad8"
+        }
+      },
+      "backend": "cpu",
+      "policy": "e6"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 48756,
+          "decoded_sha256": "a3da99f000dc68de4c4ececf21fc8ec5fdfa6c7d213bc8eb29e78bb69f53df84",
+          "sha256": "472fb1115e230eca0cb646c48c96ecaaeb9bba0388cb818a446b180ce9d97f74"
+        },
+        "candidate": {
+          "bytes": 48428,
+          "decoded_sha256": "a3da99f000dc68de4c4ececf21fc8ec5fdfa6c7d213bc8eb29e78bb69f53df84",
+          "sha256": "aa3a37c81ab89a8bf2a4eb6c60c198f4f879d4140c666ad7e2a7aaab9e639f38"
+        }
+      },
+      "backend": "cpu",
+      "policy": "e7"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 48784,
+          "decoded_sha256": "9794c49b561a4f7f2f483d22de0e12838d32fcb1513e25dfb2d700bbca345164",
+          "sha256": "de04bd72066933f803eac7381d1b9beb766e22698b2e68a15d5d640e4071c41b"
+        },
+        "candidate": {
+          "bytes": 48452,
+          "decoded_sha256": "9794c49b561a4f7f2f483d22de0e12838d32fcb1513e25dfb2d700bbca345164",
+          "sha256": "7c3a3c458628f01e9d7ca3dbd967449847abe41b82ee019be8cd0324b09e2396"
+        }
+      },
+      "backend": "cpu",
+      "policy": "e8"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 48720,
+          "decoded_sha256": "9794c49b561a4f7f2f483d22de0e12838d32fcb1513e25dfb2d700bbca345164",
+          "sha256": "811623ff48da29c71cd55c8a5be254a50b842db8cc79b001ff6228ea77a18dfb"
+        },
+        "candidate": {
+          "bytes": 48388,
+          "decoded_sha256": "9794c49b561a4f7f2f483d22de0e12838d32fcb1513e25dfb2d700bbca345164",
+          "sha256": "ee6b31fdfe87936c83a46734da21af01272bb0dee3b441781d6856a36fecbaa9"
+        }
+      },
+      "backend": "cpu",
+      "policy": "e9"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 48720,
+          "decoded_sha256": "9794c49b561a4f7f2f483d22de0e12838d32fcb1513e25dfb2d700bbca345164",
+          "sha256": "811623ff48da29c71cd55c8a5be254a50b842db8cc79b001ff6228ea77a18dfb"
+        },
+        "candidate": {
+          "bytes": 48388,
+          "decoded_sha256": "9794c49b561a4f7f2f483d22de0e12838d32fcb1513e25dfb2d700bbca345164",
+          "sha256": "ee6b31fdfe87936c83a46734da21af01272bb0dee3b441781d6856a36fecbaa9"
+        }
+      },
+      "backend": "cpu",
+      "policy": "e10"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 70185,
+          "decoded_sha256": "f30fdb7d3e3e6d48f0250aa66314739947286d1f5bb7778eb7a7958b3d6110e2",
+          "sha256": "7585f8016355b2347611f75f94d354d22b803bd28af9ac7800398a7aa8d5bfbf"
+        },
+        "candidate": {
+          "bytes": 69863,
+          "decoded_sha256": "f30fdb7d3e3e6d48f0250aa66314739947286d1f5bb7778eb7a7958b3d6110e2",
+          "sha256": "c3ae0e2ced6bcd83731a2faa18e3d27d1b3798f55e6a7c4ff949cf878b0a1566"
+        }
+      },
+      "backend": "cpu",
+      "policy": "e4-round"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 48720,
+          "decoded_sha256": "9794c49b561a4f7f2f483d22de0e12838d32fcb1513e25dfb2d700bbca345164",
+          "sha256": "811623ff48da29c71cd55c8a5be254a50b842db8cc79b001ff6228ea77a18dfb"
+        },
+        "candidate": {
+          "bytes": 48388,
+          "decoded_sha256": "9794c49b561a4f7f2f483d22de0e12838d32fcb1513e25dfb2d700bbca345164",
+          "sha256": "ee6b31fdfe87936c83a46734da21af01272bb0dee3b441781d6856a36fecbaa9"
+        }
+      },
+      "backend": "cpu",
+      "policy": "high-density"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 72623,
+          "decoded_sha256": "d2583e0495a2d692009317ef3d180104f66339798e1edc7402ec778940a5b6aa",
+          "sha256": "4c7933f5488d20c7aa1ff3caef488ceb15680c4138d04bfa4c7119c867557a4c"
+        },
+        "candidate": {
+          "bytes": 72572,
+          "decoded_sha256": "d2583e0495a2d692009317ef3d180104f66339798e1edc7402ec778940a5b6aa",
+          "sha256": "5627f03949ba9e89ae4ffce4937af1a1e713528fc5794f54653ca69bb42fc3f1"
+        }
+      },
+      "backend": "cpu",
+      "policy": "maximum-compression"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 175831,
+          "decoded_sha256": "6811ae77b45975a6400afefe59d3213306d4919d225b1d1fba8f25c8e892dd92",
+          "sha256": "d6f71edb541fc9c882c7a9e217688c5db69a712ef58926835b57adcde7be5798"
+        },
+        "candidate": {
+          "bytes": 175560,
+          "decoded_sha256": "6811ae77b45975a6400afefe59d3213306d4919d225b1d1fba8f25c8e892dd92",
+          "sha256": "d8967dd587016961f295c4160996de5bf5aa23dff1b0f26e5950059745739773"
+        }
+      },
+      "backend": "cpu",
+      "policy": "maximum-error"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 70186,
+          "decoded_sha256": "bbe3f424087af335192944907bcdc6410b1ca515225530ecb84df4e75489df0a",
+          "sha256": "d2585c628436ad5fd1d44443e48bae0d8de3ca1e1ceac1bd799a8971b1b69812"
+        },
+        "candidate": {
+          "bytes": 69864,
+          "decoded_sha256": "bbe3f424087af335192944907bcdc6410b1ca515225530ecb84df4e75489df0a",
+          "sha256": "6f95d037a52806f40f6781dd7116b0f2a2f6791c2a6395a535733ddf27b590ed"
+        }
+      },
+      "backend": "metal",
+      "policy": "e1"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 70186,
+          "decoded_sha256": "bbe3f424087af335192944907bcdc6410b1ca515225530ecb84df4e75489df0a",
+          "sha256": "d2585c628436ad5fd1d44443e48bae0d8de3ca1e1ceac1bd799a8971b1b69812"
+        },
+        "candidate": {
+          "bytes": 69864,
+          "decoded_sha256": "bbe3f424087af335192944907bcdc6410b1ca515225530ecb84df4e75489df0a",
+          "sha256": "6f95d037a52806f40f6781dd7116b0f2a2f6791c2a6395a535733ddf27b590ed"
+        }
+      },
+      "backend": "metal",
+      "policy": "e2"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 70186,
+          "decoded_sha256": "bbe3f424087af335192944907bcdc6410b1ca515225530ecb84df4e75489df0a",
+          "sha256": "d2585c628436ad5fd1d44443e48bae0d8de3ca1e1ceac1bd799a8971b1b69812"
+        },
+        "candidate": {
+          "bytes": 69864,
+          "decoded_sha256": "bbe3f424087af335192944907bcdc6410b1ca515225530ecb84df4e75489df0a",
+          "sha256": "6f95d037a52806f40f6781dd7116b0f2a2f6791c2a6395a535733ddf27b590ed"
+        }
+      },
+      "backend": "metal",
+      "policy": "e3"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 71598,
+          "decoded_sha256": "3d67fa371309d507e2a89a657be426616d8096de0e6d0c36e984c9c0333ee69b",
+          "sha256": "f4bc14bbe1f52e4714539406a1ce4875a5992de54dd807aacb5e2b7c1d2cd62b"
+        },
+        "candidate": {
+          "bytes": 70848,
+          "decoded_sha256": "3d67fa371309d507e2a89a657be426616d8096de0e6d0c36e984c9c0333ee69b",
+          "sha256": "95d1fde34929e6752ec4f7474cf56f1c79a95d5bdc5766d76dc3dba452d6b7ad"
+        }
+      },
+      "backend": "metal",
+      "policy": "e4"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 49376,
+          "decoded_sha256": "635b9d0c550f4099ac5452ecc8b958c4e1765db25d76e9d16a9506e8ba1963c0",
+          "sha256": "fa1bdf85e56b3ce84fc20acba81c33067863c617e883beaef4f7dc941542f13d"
+        },
+        "candidate": {
+          "bytes": 49059,
+          "decoded_sha256": "635b9d0c550f4099ac5452ecc8b958c4e1765db25d76e9d16a9506e8ba1963c0",
+          "sha256": "c3ee970e6cf961992efb884e48ae1d8d04816f011e25ef74d120f57a804bf920"
+        }
+      },
+      "backend": "metal",
+      "policy": "e5"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 49376,
+          "decoded_sha256": "635b9d0c550f4099ac5452ecc8b958c4e1765db25d76e9d16a9506e8ba1963c0",
+          "sha256": "fa1bdf85e56b3ce84fc20acba81c33067863c617e883beaef4f7dc941542f13d"
+        },
+        "candidate": {
+          "bytes": 49059,
+          "decoded_sha256": "635b9d0c550f4099ac5452ecc8b958c4e1765db25d76e9d16a9506e8ba1963c0",
+          "sha256": "c3ee970e6cf961992efb884e48ae1d8d04816f011e25ef74d120f57a804bf920"
+        }
+      },
+      "backend": "metal",
+      "policy": "e6"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 48789,
+          "decoded_sha256": "faa294b7ec303649246d52a65b9ebbb421b73651b4579b08bd7dc26e8166f6c3",
+          "sha256": "b3d01280a28d77b055366222da172b247296fbf90fd83a63c041646f0fd67079"
+        },
+        "candidate": {
+          "bytes": 48457,
+          "decoded_sha256": "faa294b7ec303649246d52a65b9ebbb421b73651b4579b08bd7dc26e8166f6c3",
+          "sha256": "7847b3cfb44a926777a705bc083a5d92cf82e103497c0623caf52c75be0b333c"
+        }
+      },
+      "backend": "metal",
+      "policy": "e7"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 48811,
+          "decoded_sha256": "5d6e5c69e10d456b23be7831450efa19ed839d29c18acf8f0b89e1d70ef169ed",
+          "sha256": "cdbdbead914f45163c074580baeeef910362f004499f6896a2db9143b1b72941"
+        },
+        "candidate": {
+          "bytes": 48486,
+          "decoded_sha256": "5d6e5c69e10d456b23be7831450efa19ed839d29c18acf8f0b89e1d70ef169ed",
+          "sha256": "741b070887dca2daf8aec65bee80e5508b4260d5d80fa90bc187d2d117aa783a"
+        }
+      },
+      "backend": "metal",
+      "policy": "e8"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 48736,
+          "decoded_sha256": "5d6e5c69e10d456b23be7831450efa19ed839d29c18acf8f0b89e1d70ef169ed",
+          "sha256": "f3fd24d558b684c556fef2af70ddb4a0f09a66e43224d5e0112d26042920cad1"
+        },
+        "candidate": {
+          "bytes": 48410,
+          "decoded_sha256": "5d6e5c69e10d456b23be7831450efa19ed839d29c18acf8f0b89e1d70ef169ed",
+          "sha256": "d3775e60e833b836775dac73eb37678c6c6c826126b24a3987bf992ada4ce44e"
+        }
+      },
+      "backend": "metal",
+      "policy": "e9"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 48736,
+          "decoded_sha256": "5d6e5c69e10d456b23be7831450efa19ed839d29c18acf8f0b89e1d70ef169ed",
+          "sha256": "f3fd24d558b684c556fef2af70ddb4a0f09a66e43224d5e0112d26042920cad1"
+        },
+        "candidate": {
+          "bytes": 48410,
+          "decoded_sha256": "5d6e5c69e10d456b23be7831450efa19ed839d29c18acf8f0b89e1d70ef169ed",
+          "sha256": "d3775e60e833b836775dac73eb37678c6c6c826126b24a3987bf992ada4ce44e"
+        }
+      },
+      "backend": "metal",
+      "policy": "e10"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 70185,
+          "decoded_sha256": "f30fdb7d3e3e6d48f0250aa66314739947286d1f5bb7778eb7a7958b3d6110e2",
+          "sha256": "7585f8016355b2347611f75f94d354d22b803bd28af9ac7800398a7aa8d5bfbf"
+        },
+        "candidate": {
+          "bytes": 69863,
+          "decoded_sha256": "f30fdb7d3e3e6d48f0250aa66314739947286d1f5bb7778eb7a7958b3d6110e2",
+          "sha256": "c3ae0e2ced6bcd83731a2faa18e3d27d1b3798f55e6a7c4ff949cf878b0a1566"
+        }
+      },
+      "backend": "metal",
+      "policy": "e4-round"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 48736,
+          "decoded_sha256": "5d6e5c69e10d456b23be7831450efa19ed839d29c18acf8f0b89e1d70ef169ed",
+          "sha256": "f3fd24d558b684c556fef2af70ddb4a0f09a66e43224d5e0112d26042920cad1"
+        },
+        "candidate": {
+          "bytes": 48410,
+          "decoded_sha256": "5d6e5c69e10d456b23be7831450efa19ed839d29c18acf8f0b89e1d70ef169ed",
+          "sha256": "d3775e60e833b836775dac73eb37678c6c6c826126b24a3987bf992ada4ce44e"
+        }
+      },
+      "backend": "metal",
+      "policy": "high-density"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 72624,
+          "decoded_sha256": "3d67fa371309d507e2a89a657be426616d8096de0e6d0c36e984c9c0333ee69b",
+          "sha256": "7c957108e024b9e4d1e77794260146fbba4fa1d49ad97b610b84a97ab38efd39"
+        },
+        "candidate": {
+          "bytes": 72572,
+          "decoded_sha256": "3d67fa371309d507e2a89a657be426616d8096de0e6d0c36e984c9c0333ee69b",
+          "sha256": "d53a4c9898e1e1a483ad962a0598e7f7282db74e6684d968a22734ec4cc35fe9"
+        }
+      },
+      "backend": "metal",
+      "policy": "maximum-compression"
+    },
+    {
+      "arms": {
+        "baseline": {
+          "bytes": 79194,
+          "decoded_sha256": "8b92b9b537158844f9e5cd2179b85ffca9eeb1d696f5f3f9d419a472f4f5d18f",
+          "sha256": "df4e6f9697d778ac467430719907a87eddd03737556f57cad48cc1577cfcd98c"
+        },
+        "candidate": {
+          "bytes": 78931,
+          "decoded_sha256": "8b92b9b537158844f9e5cd2179b85ffca9eeb1d696f5f3f9d419a472f4f5d18f",
+          "sha256": "fe8710a63f3d3c4bf9382d5275bc2603aebb4171771bd9734dc114be9267ef38"
+        }
+      },
+      "backend": "metal",
+      "policy": "maximum-error"
+    }
+  ],
+  "source_manifest_sha256": "7726a502c585bb235111790220aa1d7fe87417b0d32d141d7fc7f24ab392634b",
+  "timing": {
+    "accepted_pairs": 96,
+    "accepted_processes": 192,
+    "block_medians": [
+      1.0653855339151828,
+      1.077335990550512
+    ],
+    "codestream_identities": 194,
+    "environment_snapshots": 581,
+    "excluded_pairs": 1,
+    "images": [
+      {
+        "block_median_paired_ratios": [
+          1.0921328276524522,
+          1.0824280709266432
+        ],
+        "image_id": "kodak/01",
+        "median_ms": {
+          "baseline": 8.907354,
+          "candidate": 9.644792
+        },
+        "median_paired_ratio": 1.0891420214974414,
+        "paired_ratios": [
+          1.1310785435947395,
+          1.1005464059977372,
+          1.0837192493071672,
+          0.9461030103649579,
+          1.0702913481655705,
+          1.0945647936877159,
+          0.79800287034739,
+          1.120921609758189
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          0.9221173881593466,
+          1.1638743724264708
+        ],
+        "image_id": "kodak/17",
+        "median_ms": {
+          "baseline": 8.4206875,
+          "candidate": 9.7985
+        },
+        "median_paired_ratio": 1.0352438849667798,
+        "paired_ratios": [
+          0.9139422740237251,
+          0.7895961254452263,
+          1.3514072028764312,
+          0.9302925022949682,
+          1.1875534772143501,
+          0.6524378196797909,
+          1.3684484708476243,
+          1.1401952676385916
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          1.0252705915433704,
+          1.0398224575313608
+        ],
+        "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+        "median_ms": {
+          "baseline": 23.721188,
+          "candidate": 24.8613125
+        },
+        "median_paired_ratio": 1.0398224575313608,
+        "paired_ratios": [
+          0.9926482608975661,
+          1.060350248703375,
+          0.9859424553048788,
+          1.0578929221891746,
+          1.0197964511353448,
+          1.0344064709018241,
+          1.0452384441608975,
+          1.0482495361653168
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          1.0663981462902437,
+          1.0049577022897447
+        ],
+        "image_id": "clic2024_test/d1a9be98d1936065967adac50a6fb750",
+        "median_ms": {
+          "baseline": 20.435979,
+          "candidate": 21.2488125
+        },
+        "median_paired_ratio": 1.041109457492004,
+        "paired_ratios": [
+          1.0418302646774722,
+          1.0909660279030151,
+          0.905440679561587,
+          1.1066985064343888,
+          1.0736614803656261,
+          0.9425834807243298,
+          0.9695267542729538,
+          1.0403886503065354
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          1.0583791582675988,
+          0.9944553026218078
+        ],
+        "image_id": "clic2024_test/b51d5fb537246482ef7a7ab63f093cab",
+        "median_ms": {
+          "baseline": 19.1766665,
+          "candidate": 19.896604
+        },
+        "median_paired_ratio": 1.003185911511501,
+        "paired_ratios": [
+          1.074484708256517,
+          1.1287773683081028,
+          0.8600570197503439,
+          1.0422736082786805,
+          0.9977942051563663,
+          0.9911164000872493,
+          0.9453859272817828,
+          1.0085776178666355
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          1.1298517583350072,
+          1.136133904933203
+        ],
+        "image_id": "kodak/08",
+        "median_ms": {
+          "baseline": 8.8787295,
+          "candidate": 9.9659375
+        },
+        "median_paired_ratio": 1.1298517583350072,
+        "paired_ratios": [
+          1.571133729931554,
+          1.0058681830160456,
+          1.115433780491532,
+          1.1442697361784822,
+          1.071193207103768,
+          1.201074602762638,
+          1.3125263300475847,
+          0.905004146658461
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          1.080671695026953,
+          1.130812630167286
+        ],
+        "image_id": "kodak/13",
+        "median_ms": {
+          "baseline": 8.7724165,
+          "candidate": 9.626917
+        },
+        "median_paired_ratio": 1.1306007705493872,
+        "paired_ratios": [
+          1.1317465416818568,
+          1.0295968483720495,
+          1.5185578254135135,
+          0.7872214548502936,
+          1.1294549994169174,
+          1.0701040701269018,
+          1.139455272699468,
+          1.1321702609176545
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          1.0328635190543045,
+          1.0802945208703072
+        ],
+        "image_id": "clic2024_test/28d24b9c83de066597ff96a68769884f",
+        "median_ms": {
+          "baseline": 21.632375,
+          "candidate": 24.0145
+        },
+        "median_paired_ratio": 1.0724382736533438,
+        "paired_ratios": [
+          0.8571792666233068,
+          1.1466058499029403,
+          0.919689038771879,
+          1.14603799933673,
+          0.9988385479699574,
+          1.1617504937706569,
+          1.2472492940585747,
+          0.9876246974157956
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          1.0973398195430575,
+          1.1027254342119444
+        ],
+        "image_id": "unsplash/alpine_lake/24mp",
+        "median_ms": {
+          "baseline": 130.392375,
+          "candidate": 142.3618535
+        },
+        "median_paired_ratio": 1.1013866677132826,
+        "paired_ratios": [
+          1.1008168880026468,
+          1.1220861820076906,
+          1.072158135198839,
+          1.0938627510834682,
+          1.104511426258943,
+          1.1034944209999704,
+          1.1002872918038504,
+          1.1019564474239183
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          1.0821933648965887,
+          1.0743774602307168
+        ],
+        "image_id": "unsplash/campus_interior/12mp",
+        "median_ms": {
+          "baseline": 72.0697085,
+          "candidate": 77.443708
+        },
+        "median_paired_ratio": 1.0764089084979374,
+        "paired_ratios": [
+          1.0969518045050453,
+          1.0482701541633086,
+          1.0861911406509408,
+          1.0781955891422368,
+          1.065733460642004,
+          1.0829128881465644,
+          1.074622227853638,
+          1.0741326926077956
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          1.0643729215401219,
+          1.0524003784632858
+        ],
+        "image_id": "unsplash/campus_interior/48mp",
+        "median_ms": {
+          "baseline": 343.9346045,
+          "candidate": 362.054792
+        },
+        "median_paired_ratio": 1.0575037856465344,
+        "paired_ratios": [
+          1.0588324348368903,
+          1.0699134082433535,
+          1.0784751997679987,
+          1.0471873206225761,
+          1.0377565567404756,
+          1.0712546188993437,
+          1.0486256204703932,
+          1.0561751364561784
+        ]
+      },
+      {
+        "block_median_paired_ratios": [
+          1.0284602389739395,
+          1.0387587219276422
+        ],
+        "image_id": "unsplash/forest_stream/48mp",
+        "median_ms": {
+          "baseline": 362.568875,
+          "candidate": 376.729604
+        },
+        "median_paired_ratio": 1.0295553295135043,
+        "paired_ratios": [
+          1.0299321488471507,
+          1.0248609562362754,
+          1.0269883291007282,
+          1.0632064246961355,
+          1.0823855031718723,
+          1.0483389336754265,
+          1.0291785101798576,
+          1.025681502908512
+        ]
+      }
+    ],
+    "limitation": "No contention detected under the declared sampled checks. Desktop applications remain open; this is local warm-call qualification, not hardware-wide or cold-start qualification.",
+    "measured_calls": 960,
+    "median_per_image_paired_ratio": 1.064971029649939,
+    "per_image_ratio_range": [
+      1.003185911511501,
+      1.1306007705493872
+    ],
+    "protocol": {
+      "blocks": 2,
+      "boundary": "complete-encode-wall-time",
+      "cpu_measurement": "Process CPU-time deltas over at least 0.75 seconds; ps percent CPU for new processes and shorter intervals.",
+      "effort": 4,
+      "exclusion": "Reject the entire pair on observed competing codec/build work, CPU pressure above the declared limits, loss of AC power, thermal/performance warning, or monitoring failure.",
+      "maximum_aggregate_other_cpu_percent": 200,
+      "maximum_attempts_per_pair": 3,
+      "maximum_idle_wait_seconds": 600,
+      "maximum_other_process_cpu_percent": 80,
+      "monitor_interval_seconds": 1,
+      "order": "Alternate baseline/candidate order; rotate image order by pair index.",
+      "pairs_per_block": 4,
+      "quiet_seconds": 20,
+      "samples_per_process": 5,
+      "threads": 8,
+      "warmups": 2
+    },
+    "provenance": {
+      "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/entropy-default-latency-20260915/attempts.jsonl": "528f2de143ab9f454ad618c85c2f6284e0b7f84b1acbba6f9db0e9ce620bc0d3",
+      "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/entropy-default-latency-20260915/commands.jsonl": "f13610e4e331eefff511bb91d35217b9f929e62bd9d0822b1566b632792a9523",
+      "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/entropy-default-latency-20260915/environment.jsonl": "08a062bdde96c4f2b30599f63280d57dfb26b0f19fa067d9ea36762445ed886f",
+      "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/entropy-default-latency-20260915/manifest.json": "e2e11b0928ff178d38e6494e549604faefce01ba4a9c57a6ee8d0e8500a118ff"
+    },
+    "status": "passed"
+  },
+  "timing_audit": {
+    "accepted_environment_snapshots": 355,
+    "background_cpu_percent": {
+      "maximum": 142.116970740595,
+      "median": 65.6
+    },
+    "excluded_attempts": [
+      {
+        "attempt": 0,
+        "image_id": "unsplash/alpine_lake/24mp",
+        "issues": [
+          "aggregate other CPU pressure"
+        ],
+        "pair": 6
+      }
+    ],
+    "maximum_monitor_gap_seconds": 1.0755658149719238,
+    "service_intervention": {
+      "all_accepted_pairs_within_pause": true,
+      "duration_seconds": 223.01718306541443,
+      "resumed": true,
+      "service": "suggestd",
+      "user_authorized": true
+    },
+    "status": "passed"
+  }
+}

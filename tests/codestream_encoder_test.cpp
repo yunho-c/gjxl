@@ -261,7 +261,8 @@ bool CheckEncodedFrame(
   bool expect_ac_ans,
   bool expect_order_ans) {
 
-  // Frozen byte fixtures describe the original gradient/full-tree policy.
+  // Frozen byte fixtures use the original gradient/full-tree DC policy and
+  // the native context-map search. Decoded pixels match the earlier fixtures.
   gjxl::codestream_internal::ScopedDcTreePolicyForTesting legacy(
     gjxl::codestream_internal::DcTreePolicy::kLegacy);
   gjxl::VarDctEncoderFrame frame;
@@ -448,13 +449,13 @@ bool CheckAssemblyAndDeterminism() {
   // Values are pinned after independent header fixtures and section-layout
   // checks establish the constituent bit encodings.
   return CheckEncodedFrame(
-           8, 8, 203, 7880082076206412069ull, 0, false,
+           8, 8, 198, 8908325733842535201ull, 0, false,
            false, false, false) &&
          CheckEncodedFrame(
-           64, 9, 1107, 17820242185032511216ull, 0, true,
+           64, 9, 1101, 10867806195538497218ull, 0, true,
            false, true, false) &&
          CheckEncodedFrame(
-           257, 9, 3851, 18124942738510227601ull, 1, true,
+           257, 9, 3677, 7386469112535575388ull, 1, true,
            false, true, false);
 }
 

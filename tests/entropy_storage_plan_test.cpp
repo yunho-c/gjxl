@@ -48,6 +48,8 @@ struct Backings {
   }
   void Add(const EntropyCode &code) {
     Add(code.context_map);
+    Add(code.context_map_encoding.source());
+    Add(code.context_map_encoding.bytes());
     Add(code.uint_configs);
     Add(code.prefix_codes);
     Add(code.ans_histograms);
@@ -218,6 +220,9 @@ Status Optimize(const EntropyOptimizationStorageOptions &o,
           : (o.policy == kRateOptimizedAns ? DirectAnsEntropyMode::kRateOptimized
                                             : DirectAnsEntropyMode::kHighDensity),
         &out->code, cost, profile);
+  case kBalancedDcAns:
+    return OptimizeDirectAnsEntropyCodeWithFixedPopulations(
+      views, input_options, {}, &out->code, cost, profile, true);
   case kAnsFromPrefix:
     if (o.borrow_prepared_clusters)
       return OptimizeAnsEntropyCodeWithPreparedClusters(views, prefix, prepared,
@@ -353,20 +358,22 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
     population.maximum_symbol =
         std::max(population.maximum_symbol, token.symbol);
   }
-  for (size_t variant = 0; variant < 12; ++variant) {
+  for (size_t variant = 0; variant < 14; ++variant) {
     const std::array policies{kFastPrefix,     kPrefix,
                               kPrefix,         kBalancedAns,
                               kHighDensityAns, kAnsFromPrefix,
                               kAnsFromPrefix,  kDeferredAnsFromPrefix,
                               kBalancedAns,    kRateOptimizedAns,
-                              kRateOptimizedAns, kDeferredRateOptimizedAns};
+                              kRateOptimizedAns, kDeferredRateOptimizedAns,
+                              kBalancedDcAns, kBalancedDcAns};
     EntropyOptimizationStorageOptions o{
         .policy = policies[variant],
         .tokens = n,
         .contexts = contexts,
         .sections = sections,
         .initial_histograms = initial_map ? 17ul : 0ul,
-        .return_cost = variant != 9 && (pattern != 0 || variant == 2),
+        .return_cost = variant != 9 && variant != 12 &&
+                       (pattern != 0 || variant == 2),
         .retain_prepared_clusters = variant == 2,
         .borrow_prepared_clusters = variant == 6 || variant == 7,
         .maximum_ans_clusters = maximum_ans_clusters,
@@ -374,10 +381,10 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
     const auto run = [&](Result *out, EntropyWorkProfile* profile = nullptr) {
       // Exercise the borrowed, unmapped source as well as the owning merge
       // fallback under the same reservation and allocation-failure sweep.
-      if ((variant == 3 && initial_map) || variant == 8)
+      if ((variant == 3 && initial_map) || variant == 8 || variant == 13)
         return OptimizeDirectAnsEntropyCodeWithFixedPopulations(
             views, input, fixed, &out->code,
-            o.return_cost ? &out->cost : nullptr);
+            o.return_cost ? &out->cost : nullptr, profile, variant == 13);
       return Optimize(o, views, input, prefix, prepared, out, profile);
     };
     EntropyOptimizationStoragePlan plan;
@@ -728,7 +735,7 @@ bool InvalidAndLarge() {
   // Huge but representable count-only plans must not allocate or iterate N/H.
   ArmManagedHostAllocationFailureAfterForTest(0);
   bool good = true;
-  for (auto policy : {kFastPrefix, kPrefix, kBalancedAns, kHighDensityAns,
+  for (auto policy : {kFastPrefix, kPrefix, kBalancedAns, kBalancedDcAns, kHighDensityAns,
                       kRateOptimizedAns, kAnsFromPrefix, kDeferredAnsFromPrefix,
                       kDeferredRateOptimizedAns}) {
     good &= ComputeEntropyOptimizationStoragePlan(

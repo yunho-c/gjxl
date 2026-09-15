@@ -1,0 +1,1084 @@
+{
+  "aggregation": "Arithmetic mean of per-image BD-rate percentages; no extrapolation.",
+  "artifact_sha256": {
+    "build/context-map-baseline-quantization-test.log": "7ce432a751482953a717004e4f9f85c3b89415f8e24be37783cd954a8a947882",
+    "build/context-map-entropy-storage-test.log": "26763c673928ddbfd8695f8043d17f8480ac26911f90f510fdd75821078e6351",
+    "build/context-map-golden-audit/decoded-audit.json": "7dabf4c351e6a4dc8cc860f42c238cb56204e69dcdfae5ac20d8d091503dbdf2",
+    "build/context-map-qualification-20260914/analysis.json": "e64869fe56031a4b4084cdfed6ffc28359bd9fb1a52e9a1d1f08b500e0809c7f",
+    "build/context-map-qualification-20260914/audit.json": "e37e5094f62d6e55ad2a7edf666a1509b7ee293f6af0deffbdd2f785722b3b35",
+    "build/context-map-qualification-20260914/commands.jsonl": "672c249154486cc7052f48d15416ded27360efac7ceb0fea23e0b98a9a37e466",
+    "build/context-map-qualification-20260914/compare_tail.py": "fbf4894ce1b2df80df97ca6d11d5a55ac73cc357e9f788667f19fe1a745cf98f",
+    "build/context-map-qualification-20260914/environment.json": "88192d5b65e9225fcbe6b92b164bf116c61c18b9902eadd73371666a251c2bbc",
+    "build/context-map-qualification-20260914/export_results.py": "7d08fbf501152609dda866f9c0d8baee85ad5d31a24d7ce8f0ee5ff380c54a87",
+    "build/context-map-qualification-20260914/manifest.json": "1179a580484367d3c696878bf27c6250bca87b69a0f62a4abbfc8ee00b995609",
+    "build/context-map-qualification-20260914/observations.jsonl": "21164026167c91cd5701d074e7fa6fb0c248f60ff79e7dc5dd01d87aaa8a1afa",
+    "build/context-map-qualification-20260914/scope.json": "a8d055a607a20b3bebe188bca0a791897bdd2e6d42d2748723de241ab10358ae",
+    "build/context-map-qualification-20260914/scope.py": "611e0bf503719530607b51733e76b75870e00332814adf55a3c464ccb807cd54",
+    "build/context-map-qualification-20260914/source-snapshot.zip": "5eef75b12e2f7b290d2961d4cb4e7ecf3c2e67f423d5cd6b061e521a7870dfeb",
+    "build/context-map-qualification-20260914/source.patch": "beb95c5ecbfab63e94244fdc6137d6e4ee5d2c6ab696f611f50d8ddadf58b1ed",
+    "build/context-map-qualification-20260914/tail-comparison.json": "b50d7239030447fecee24bd2ca5c618830920b9274dd87f752dfc4664809d7a2",
+    "build/context-map-qualification-20260914/timing-environment-audit.json": "95729743f6e5be0eaf620ea4b5f2cb57e597602689e9d1f5e7894fd03a195863",
+    "build/context-map-qualification-20260914/timing-environment.jsonl": "75a599b0cdadb374c9d450764cbb207a39de71699c7507f078abf0f71430a943",
+    "build/context-map-qualification-20260914/timing.jsonl": "5b75b34e8a3e105d249545af3607fa3fa01486f4f62659661ba058b598f5183d",
+    "build/context-map-reference-test.log": "84c6647664c178d6dab458a4b71f80d1225f38b0585cc1535b96ef8529b674bd",
+    "build/context-map-serializer-storage-test.log": "44e55335ccc39ad47658452cc96b3a1191eb2ddbb234ebe845c5d06f945ca670",
+    "build/context-map-tests-final.log": "5265bad52b318bd2fcb3397165a5dabb08c2676c61a4f63e502af07a0e93ee0b",
+    "build/context-map-unit-test.log": "87d64ced16a38e5ce8f3d258870925b2a348822f75207e962fe62e2db91281ba"
+  },
+  "baseline_commit": "e8abc3486266952d7c4da0ec51952cee00585e8f",
+  "baseline_name": "Completed DC integer-mapping search",
+  "binary_sha256": {
+    "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/context-map-native/gjxl_quality_benchmark": "092c420f4ccfa90d55aa4265aac090f814deafa2f67d5b82d3df27fd6703d626",
+    "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/dc-uint-fast-candidate/gjxl_quality_benchmark": "35e6f2078a3a0eb696cf92c9893321d17e3c0597bacf000d193929340d437ec6"
+  },
+  "cohort": "Retained 65-image investigative cohort, seven distances each; not held-out data.",
+  "feature": "Native context-map compression",
+  "local_artifact_root": "build/context-map-qualification-20260914",
+  "per_image_rate": [
+    {
+      "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "vs_native_akima": -0.6368314185583004,
+      "vs_native_pchip": -0.6376014572204649,
+      "vs_stock_e4_akima": 1.3522466430609243,
+      "vs_stock_e4_pchip": 1.3573085074056856
+    },
+    {
+      "image_id": "clic2024_test/28d24b9c83de066597ff96a68769884f",
+      "vs_native_akima": -0.8242842644010441,
+      "vs_native_pchip": -0.8259001663469389,
+      "vs_stock_e4_akima": -0.43491099941674344,
+      "vs_stock_e4_pchip": -0.4877474068665669
+    },
+    {
+      "image_id": "clic2024_test/b51d5fb537246482ef7a7ab63f093cab",
+      "vs_native_akima": -1.1703580511004956,
+      "vs_native_pchip": -1.170640583469007,
+      "vs_stock_e4_akima": 3.4501018646893638,
+      "vs_stock_e4_pchip": 3.2907015800803476
+    },
+    {
+      "image_id": "clic2024_test/d1a9be98d1936065967adac50a6fb750",
+      "vs_native_akima": -0.7596671022441089,
+      "vs_native_pchip": -0.7601848984419213,
+      "vs_stock_e4_akima": -0.4512757075245107,
+      "vs_stock_e4_pchip": -0.5208688079720036
+    },
+    {
+      "image_id": "kodak/01",
+      "vs_native_akima": -0.3667533050824084,
+      "vs_native_pchip": -0.3646735599918771,
+      "vs_stock_e4_akima": -0.31227725758253483,
+      "vs_stock_e4_pchip": -0.4441778761787303
+    },
+    {
+      "image_id": "kodak/08",
+      "vs_native_akima": -0.33344376288190564,
+      "vs_native_pchip": -0.3331539464660872,
+      "vs_stock_e4_akima": -1.774524135101535,
+      "vs_stock_e4_pchip": -1.7099902682901107
+    },
+    {
+      "image_id": "kodak/13",
+      "vs_native_akima": -0.2896768878962252,
+      "vs_native_pchip": -0.28811300795235256,
+      "vs_stock_e4_akima": 0.7379362872302954,
+      "vs_stock_e4_pchip": 0.7371704763881143
+    },
+    {
+      "image_id": "kodak/17",
+      "vs_native_akima": -0.6475199012313796,
+      "vs_native_pchip": -0.646927582272174,
+      "vs_stock_e4_akima": 2.0558293662387586,
+      "vs_stock_e4_pchip": 2.0745261227154894
+    },
+    {
+      "image_id": "unsplash/alpine_lake/24mp",
+      "vs_native_akima": -0.03579222466166662,
+      "vs_native_pchip": -0.03562848977052685,
+      "vs_stock_e4_akima": 1.7929791441477132,
+      "vs_stock_e4_pchip": 1.8712041991213277
+    },
+    {
+      "image_id": "unsplash/campus_interior/12mp",
+      "vs_native_akima": -0.06231557610155225,
+      "vs_native_pchip": -0.06293250577406259,
+      "vs_stock_e4_akima": -0.45208378930132354,
+      "vs_stock_e4_pchip": -0.4901252205866046
+    },
+    {
+      "image_id": "unsplash/campus_interior/48mp",
+      "vs_native_akima": -0.02199104727622036,
+      "vs_native_pchip": -0.02205950714954996,
+      "vs_stock_e4_akima": -0.28276146202013924,
+      "vs_stock_e4_pchip": -0.36513086212967993
+    },
+    {
+      "image_id": "unsplash/forest_stream/48mp",
+      "vs_native_akima": -0.012606774995793045,
+      "vs_native_pchip": -0.012619542426220416,
+      "vs_stock_e4_akima": -1.507181697057719,
+      "vs_stock_e4_pchip": -1.5448602884408031
+    },
+    {
+      "image_id": "clic2024_test/0c49a5cce349020bbba2f97ae41e90ba",
+      "vs_native_akima": -0.2714925567401387,
+      "vs_native_pchip": -0.2726572249809621,
+      "vs_stock_e4_akima": 1.91697756657967,
+      "vs_stock_e4_pchip": 1.784771438668856
+    },
+    {
+      "image_id": "clic2024_test/100a02c269c5948392f283b2aa3bb4da",
+      "vs_native_akima": -0.45867750711131927,
+      "vs_native_pchip": -0.4585709654167448,
+      "vs_stock_e4_akima": -0.7111914277255342,
+      "vs_stock_e4_pchip": -0.7310698956639639
+    },
+    {
+      "image_id": "clic2024_test/100f17892cf7bb12beb12479641fcc4c",
+      "vs_native_akima": -0.4152811720981262,
+      "vs_native_pchip": -0.4162705193419585,
+      "vs_stock_e4_akima": 1.6881322805322119,
+      "vs_stock_e4_pchip": 1.527604792111616
+    },
+    {
+      "image_id": "clic2024_test/11f2b039b293758398b1a7a8afa64bb2",
+      "vs_native_akima": -0.2857974786361938,
+      "vs_native_pchip": -0.28580321741931985,
+      "vs_stock_e4_akima": -0.15625728964611268,
+      "vs_stock_e4_pchip": -0.39167753116436654
+    },
+    {
+      "image_id": "clic2024_test/14ab4af28901fbeb1356b06d2d08ae06",
+      "vs_native_akima": -0.20329753273104476,
+      "vs_native_pchip": -0.20399493463698115,
+      "vs_stock_e4_akima": -0.2887654562628641,
+      "vs_stock_e4_pchip": -0.35511841460596777
+    },
+    {
+      "image_id": "clic2024_test/1e2f9d41529197f10d32bfa68a1e0bcc",
+      "vs_native_akima": -0.08963373285380742,
+      "vs_native_pchip": -0.08951410173768429,
+      "vs_stock_e4_akima": -1.26130000627306,
+      "vs_stock_e4_pchip": -1.3818776464391822
+    },
+    {
+      "image_id": "clic2024_test/22ea12c903e41583b7c469cb86040157",
+      "vs_native_akima": -0.45554815332089077,
+      "vs_native_pchip": -0.4570943556755361,
+      "vs_stock_e4_akima": 0.9242916171996777,
+      "vs_stock_e4_pchip": 0.8233219310014155
+    },
+    {
+      "image_id": "clic2024_test/2a2420f929cd47122eae364a2bc27710",
+      "vs_native_akima": -0.37860503135950174,
+      "vs_native_pchip": -0.3800601610551578,
+      "vs_stock_e4_akima": -0.6893980476882983,
+      "vs_stock_e4_pchip": -0.7250676015117604
+    },
+    {
+      "image_id": "clic2024_test/2c1f84548ef99faec2b4f9bf12227c83",
+      "vs_native_akima": -0.5166965397757721,
+      "vs_native_pchip": -0.5166505584909006,
+      "vs_stock_e4_akima": 1.1134243113104185,
+      "vs_stock_e4_pchip": 1.1279627575144497
+    },
+    {
+      "image_id": "clic2024_test/3140d643a1f57e80ff265507984d95a0",
+      "vs_native_akima": -0.48886258680881967,
+      "vs_native_pchip": -0.49102606241651786,
+      "vs_stock_e4_akima": -0.8768249637142582,
+      "vs_stock_e4_pchip": -0.9174262015254566
+    },
+    {
+      "image_id": "clic2024_test/4a18abf66d65ad1a95ce455c8b6cd8de",
+      "vs_native_akima": -0.12137523394169733,
+      "vs_native_pchip": -0.12368574867417259,
+      "vs_stock_e4_akima": -1.2530169588880333,
+      "vs_stock_e4_pchip": -1.497010337963297
+    },
+    {
+      "image_id": "clic2024_test/4cd6910a0b7b39365fda5df87618d091",
+      "vs_native_akima": -0.4608157224405514,
+      "vs_native_pchip": -0.4609402922826705,
+      "vs_stock_e4_akima": -1.114313866861047,
+      "vs_stock_e4_pchip": -1.2128949308325185
+    },
+    {
+      "image_id": "clic2024_test/5dbdb989cf026f7ab3dd7167d7fc0fe2",
+      "vs_native_akima": -0.11131754343177964,
+      "vs_native_pchip": -0.11260047718823069,
+      "vs_stock_e4_akima": -0.7521080115910275,
+      "vs_stock_e4_pchip": -0.805705787036828
+    },
+    {
+      "image_id": "clic2024_test/5e5ce43575fa67fdc0dd37146d7f479e",
+      "vs_native_akima": -0.09780079596746877,
+      "vs_native_pchip": -0.10115685758898578,
+      "vs_stock_e4_akima": -1.8321129072919595,
+      "vs_stock_e4_pchip": -2.3415634359626476
+    },
+    {
+      "image_id": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "vs_native_akima": -1.3014675786278027,
+      "vs_native_pchip": -1.3008592994059727,
+      "vs_stock_e4_akima": -2.0714531053147454,
+      "vs_stock_e4_pchip": -2.1448625659611515
+    },
+    {
+      "image_id": "clic2024_test/7e499613c3e376ea93afb3649719abeb",
+      "vs_native_akima": -0.37970132975442916,
+      "vs_native_pchip": -0.3798010392144685,
+      "vs_stock_e4_akima": 0.07921027077250886,
+      "vs_stock_e4_pchip": 0.03472854114502449
+    },
+    {
+      "image_id": "clic2024_test/870516c65d81fb9267de6865964083a9",
+      "vs_native_akima": -0.16989071857464283,
+      "vs_native_pchip": -0.17003250047047558,
+      "vs_stock_e4_akima": -2.2467528139559656,
+      "vs_stock_e4_pchip": -2.233548729772782
+    },
+    {
+      "image_id": "clic2024_test/8bb119b8ca17492392e1e3ea4b811b32",
+      "vs_native_akima": -0.2695653008411315,
+      "vs_native_pchip": -0.2706018174113362,
+      "vs_stock_e4_akima": -0.12360374555321167,
+      "vs_stock_e4_pchip": -0.33981515889084074
+    },
+    {
+      "image_id": "clic2024_test/9466a908d088d32ee73f04116c40e48c",
+      "vs_native_akima": -0.6881937384781036,
+      "vs_native_pchip": -0.6878504766755265,
+      "vs_stock_e4_akima": 2.1004293304906203,
+      "vs_stock_e4_pchip": 2.0488582301895417
+    },
+    {
+      "image_id": "clic2024_test/a10ae819a2d24873079c93346200cab3",
+      "vs_native_akima": -0.25075181996891893,
+      "vs_native_pchip": -0.2510475984702285,
+      "vs_stock_e4_akima": -2.3867393413638385,
+      "vs_stock_e4_pchip": -2.432181887030785
+    },
+    {
+      "image_id": "clic2024_test/a36713f1943dac6bc74dea50cadaee6f",
+      "vs_native_akima": -0.1466026056303181,
+      "vs_native_pchip": -0.14919500467251887,
+      "vs_stock_e4_akima": -0.5142665752151331,
+      "vs_stock_e4_pchip": -0.615260305786505
+    },
+    {
+      "image_id": "clic2024_test/aed95e005df28e790519eefb6eb1e565",
+      "vs_native_akima": -0.5426340371798147,
+      "vs_native_pchip": -0.541069041129862,
+      "vs_stock_e4_akima": -2.5201229461787213,
+      "vs_stock_e4_pchip": -2.5568403725864455
+    },
+    {
+      "image_id": "clic2024_test/afe3676bbfcf7183d697ff7b5d5bd45b",
+      "vs_native_akima": -0.27047672848588966,
+      "vs_native_pchip": -0.2708641421168706,
+      "vs_stock_e4_akima": -1.8615806029197128,
+      "vs_stock_e4_pchip": -1.8969320617985885
+    },
+    {
+      "image_id": "clic2024_test/b939ac34faa94b5d0e753d570edc7048",
+      "vs_native_akima": -0.3142826413013382,
+      "vs_native_pchip": -0.3144284809334646,
+      "vs_stock_e4_akima": -0.8602128779087882,
+      "vs_stock_e4_pchip": -0.9274727686422207
+    },
+    {
+      "image_id": "clic2024_test/c80999cd5533e448167cd9b3ccfa2a37",
+      "vs_native_akima": -0.22382405515657028,
+      "vs_native_pchip": -0.22328348022860825,
+      "vs_stock_e4_akima": -3.535386252890486,
+      "vs_stock_e4_pchip": -3.5594735933544577
+    },
+    {
+      "image_id": "clic2024_test/d79d465ac77c36518e0f0d626bf97ec4",
+      "vs_native_akima": -0.17519520320760001,
+      "vs_native_pchip": -0.18632146873629693,
+      "vs_stock_e4_akima": 1.8664273281848331,
+      "vs_stock_e4_pchip": 1.7984323363295955
+    },
+    {
+      "image_id": "clic2024_test/ddcd24d99f48eaa369207882a6f37831",
+      "vs_native_akima": -0.36541658628093704,
+      "vs_native_pchip": -0.36744207105826493,
+      "vs_stock_e4_akima": -1.42429809462672,
+      "vs_stock_e4_pchip": -1.463753628619787
+    },
+    {
+      "image_id": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "vs_native_akima": -0.24725684118457608,
+      "vs_native_pchip": -0.24637685348307437,
+      "vs_stock_e4_akima": -0.5293779239960316,
+      "vs_stock_e4_pchip": -0.5933641759072983
+    },
+    {
+      "image_id": "kodak/02",
+      "vs_native_akima": -0.5411526173820681,
+      "vs_native_pchip": -0.5341371750210926,
+      "vs_stock_e4_akima": 0.8523261369598072,
+      "vs_stock_e4_pchip": 1.1368901529609847
+    },
+    {
+      "image_id": "kodak/03",
+      "vs_native_akima": -0.68367798597237,
+      "vs_native_pchip": -0.6836873826753209,
+      "vs_stock_e4_akima": -1.3017193918984458,
+      "vs_stock_e4_pchip": -1.3631267389379853
+    },
+    {
+      "image_id": "kodak/04",
+      "vs_native_akima": -0.5620611018542054,
+      "vs_native_pchip": -0.5555443617551381,
+      "vs_stock_e4_akima": 0.5719994626613626,
+      "vs_stock_e4_pchip": 0.5007589258310334
+    },
+    {
+      "image_id": "kodak/05",
+      "vs_native_akima": -0.3381585051745826,
+      "vs_native_pchip": -0.33807389692540163,
+      "vs_stock_e4_akima": -0.11950530695230485,
+      "vs_stock_e4_pchip": -0.09008324912429634
+    },
+    {
+      "image_id": "kodak/06",
+      "vs_native_akima": -0.4581061768984042,
+      "vs_native_pchip": -0.4584311755213116,
+      "vs_stock_e4_akima": -0.9382861835843932,
+      "vs_stock_e4_pchip": -0.9659814906070633
+    },
+    {
+      "image_id": "kodak/07",
+      "vs_native_akima": -0.6869973764162784,
+      "vs_native_pchip": -0.6875066336543522,
+      "vs_stock_e4_akima": -0.728325255347113,
+      "vs_stock_e4_pchip": -0.696992567509423
+    },
+    {
+      "image_id": "kodak/09",
+      "vs_native_akima": -0.7266456307574444,
+      "vs_native_pchip": -0.7268671368301894,
+      "vs_stock_e4_akima": -0.056703583141741044,
+      "vs_stock_e4_pchip": -0.19296828740036284
+    },
+    {
+      "image_id": "kodak/10",
+      "vs_native_akima": -0.6430735358738916,
+      "vs_native_pchip": -0.6426777486006389,
+      "vs_stock_e4_akima": -0.5988549891867934,
+      "vs_stock_e4_pchip": -0.5828137122502475
+    },
+    {
+      "image_id": "kodak/11",
+      "vs_native_akima": -0.4721964066570937,
+      "vs_native_pchip": -0.46845723635167297,
+      "vs_stock_e4_akima": -0.44661054453896337,
+      "vs_stock_e4_pchip": -0.5034735230237725
+    },
+    {
+      "image_id": "kodak/12",
+      "vs_native_akima": -0.6340972464752588,
+      "vs_native_pchip": -0.6338996039464302,
+      "vs_stock_e4_akima": 0.23370562579004595,
+      "vs_stock_e4_pchip": 0.35157187349079155
+    },
+    {
+      "image_id": "kodak/14",
+      "vs_native_akima": -0.40670257022742407,
+      "vs_native_pchip": -0.4060189597186049,
+      "vs_stock_e4_akima": -0.9055303581513965,
+      "vs_stock_e4_pchip": -0.9640939903265361
+    },
+    {
+      "image_id": "kodak/15",
+      "vs_native_akima": -0.6230850344170024,
+      "vs_native_pchip": -0.6271292404922119,
+      "vs_stock_e4_akima": -0.28124793707892687,
+      "vs_stock_e4_pchip": -0.446190634313396
+    },
+    {
+      "image_id": "kodak/16",
+      "vs_native_akima": -0.5399150710657322,
+      "vs_native_pchip": -0.5433242623454997,
+      "vs_stock_e4_akima": -0.326182565979129,
+      "vs_stock_e4_pchip": -0.1451331750579887
+    },
+    {
+      "image_id": "kodak/18",
+      "vs_native_akima": -0.3954241976879864,
+      "vs_native_pchip": -0.3945056147629844,
+      "vs_stock_e4_akima": -0.9978288397309409,
+      "vs_stock_e4_pchip": -1.3727849129940386
+    },
+    {
+      "image_id": "kodak/19",
+      "vs_native_akima": -0.46725010916445436,
+      "vs_native_pchip": -0.46821115862975854,
+      "vs_stock_e4_akima": -0.6078332465985495,
+      "vs_stock_e4_pchip": -0.49831583980083766
+    },
+    {
+      "image_id": "kodak/20",
+      "vs_native_akima": -0.7737878209600727,
+      "vs_native_pchip": -0.7737935979390453,
+      "vs_stock_e4_akima": -2.068087232680328,
+      "vs_stock_e4_pchip": -2.0204717337705986
+    },
+    {
+      "image_id": "kodak/21",
+      "vs_native_akima": -0.528987757915305,
+      "vs_native_pchip": -0.5320011418095574,
+      "vs_stock_e4_akima": -0.622454396779655,
+      "vs_stock_e4_pchip": -0.753167167970881
+    },
+    {
+      "image_id": "kodak/22",
+      "vs_native_akima": -0.4612395844117138,
+      "vs_native_pchip": -0.4611544664014066,
+      "vs_stock_e4_akima": 0.4545863226059388,
+      "vs_stock_e4_pchip": 0.40723441176367314
+    },
+    {
+      "image_id": "kodak/23",
+      "vs_native_akima": -0.8074190546682908,
+      "vs_native_pchip": -0.8087489400127614,
+      "vs_stock_e4_akima": -0.2843994488994111,
+      "vs_stock_e4_pchip": -0.3129821069719439
+    },
+    {
+      "image_id": "kodak/24",
+      "vs_native_akima": -0.41861815318197015,
+      "vs_native_pchip": -0.418415099512171,
+      "vs_stock_e4_akima": 0.17688193210782466,
+      "vs_stock_e4_pchip": 0.1923911404583195
+    },
+    {
+      "image_id": "unsplash/alpine_lake/12mp",
+      "vs_native_akima": -0.06259658641618918,
+      "vs_native_pchip": -0.0623936561511207,
+      "vs_stock_e4_akima": -0.21991040888406466,
+      "vs_stock_e4_pchip": -0.04595730525183247
+    },
+    {
+      "image_id": "unsplash/alpine_lake/48mp",
+      "vs_native_akima": -0.02138164473690284,
+      "vs_native_pchip": -0.021275088556348232,
+      "vs_stock_e4_akima": 0.13342543104321034,
+      "vs_stock_e4_pchip": 0.10490035150906601
+    },
+    {
+      "image_id": "unsplash/campus_interior/24mp",
+      "vs_native_akima": -0.03732758662024939,
+      "vs_native_pchip": -0.0376282739984516,
+      "vs_stock_e4_akima": -0.03700181228078119,
+      "vs_stock_e4_pchip": -0.09528888533266265
+    },
+    {
+      "image_id": "unsplash/forest_stream/12mp",
+      "vs_native_akima": -0.03133110528579023,
+      "vs_native_pchip": -0.0313700657017567,
+      "vs_stock_e4_akima": -0.7200137814984738,
+      "vs_stock_e4_pchip": -0.772971320072949
+    },
+    {
+      "image_id": "unsplash/forest_stream/24mp",
+      "vs_native_akima": -0.019437010926597678,
+      "vs_native_pchip": -0.019450078066690035,
+      "vs_stock_e4_akima": -1.1204746862406376,
+      "vs_stock_e4_pchip": -1.1629706114678755
+    }
+  ],
+  "quality_interval": [
+    75,
+    85
+  ],
+  "quality_metric": "SSIMULACRA2",
+  "rate_summary": {
+    "images": 65,
+    "larger_files": 0,
+    "native_wins": 65,
+    "smaller_files": 455,
+    "stock_wins": 47,
+    "vs_native_akima": -0.40311339937642404,
+    "vs_native_pchip": -0.40345132297805986,
+    "vs_stock_e4_akima": -0.3554485740264141,
+    "vs_stock_e4_pchip": -0.40771149607724166
+  },
+  "same_reconstruction_libjxl_writer": {
+    "comparison": "Native context-map implementation / retained same-frame libjxl writer",
+    "exact_decoded_identities": 455,
+    "images": [
+      {
+        "akima": -0.06093962542438251,
+        "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+        "pchip": -0.06328705980510535
+      },
+      {
+        "akima": -0.14283968480531573,
+        "image_id": "clic2024_test/28d24b9c83de066597ff96a68769884f",
+        "pchip": -0.14221678358703366
+      },
+      {
+        "akima": -0.2535754548740129,
+        "image_id": "clic2024_test/b51d5fb537246482ef7a7ab63f093cab",
+        "pchip": -0.25531538774967655
+      },
+      {
+        "akima": -0.060583014728294235,
+        "image_id": "clic2024_test/d1a9be98d1936065967adac50a6fb750",
+        "pchip": -0.06502563010472825
+      },
+      {
+        "akima": -0.10896292024727647,
+        "image_id": "kodak/01",
+        "pchip": -0.10345678647410061
+      },
+      {
+        "akima": -0.04800655025401625,
+        "image_id": "kodak/08",
+        "pchip": -0.05310842962493004
+      },
+      {
+        "akima": -0.09443815136102987,
+        "image_id": "kodak/13",
+        "pchip": -0.08805467714909322
+      },
+      {
+        "akima": 0.02413909074273463,
+        "image_id": "kodak/17",
+        "pchip": 0.02032741471580638
+      },
+      {
+        "akima": 0.07552788214961426,
+        "image_id": "unsplash/alpine_lake/24mp",
+        "pchip": 0.07474447523397576
+      },
+      {
+        "akima": 0.08400217980337472,
+        "image_id": "unsplash/campus_interior/12mp",
+        "pchip": 0.08665926131106648
+      },
+      {
+        "akima": 0.15515542317568934,
+        "image_id": "unsplash/campus_interior/48mp",
+        "pchip": 0.1582968193291655
+      },
+      {
+        "akima": 0.06491738114846901,
+        "image_id": "unsplash/forest_stream/48mp",
+        "pchip": 0.0647273841997509
+      },
+      {
+        "akima": 0.3115079316103294,
+        "image_id": "clic2024_test/0c49a5cce349020bbba2f97ae41e90ba",
+        "pchip": 0.32353064219609107
+      },
+      {
+        "akima": -0.17200105666886709,
+        "image_id": "clic2024_test/100a02c269c5948392f283b2aa3bb4da",
+        "pchip": -0.17460319585337022
+      },
+      {
+        "akima": -0.04430143982899672,
+        "image_id": "clic2024_test/100f17892cf7bb12beb12479641fcc4c",
+        "pchip": -0.041756736729983326
+      },
+      {
+        "akima": 0.09436043642376064,
+        "image_id": "clic2024_test/11f2b039b293758398b1a7a8afa64bb2",
+        "pchip": 0.08766231894067575
+      },
+      {
+        "akima": 0.017147821675993047,
+        "image_id": "clic2024_test/14ab4af28901fbeb1356b06d2d08ae06",
+        "pchip": 0.01691949722422787
+      },
+      {
+        "akima": 0.12422115891506258,
+        "image_id": "clic2024_test/1e2f9d41529197f10d32bfa68a1e0bcc",
+        "pchip": 0.12437327636225878
+      },
+      {
+        "akima": 0.07754365891002366,
+        "image_id": "clic2024_test/22ea12c903e41583b7c469cb86040157",
+        "pchip": 0.05850383867278243
+      },
+      {
+        "akima": -0.0359677815710382,
+        "image_id": "clic2024_test/2a2420f929cd47122eae364a2bc27710",
+        "pchip": -0.035814738143047406
+      },
+      {
+        "akima": -0.11788821423355841,
+        "image_id": "clic2024_test/2c1f84548ef99faec2b4f9bf12227c83",
+        "pchip": -0.11974270099006877
+      },
+      {
+        "akima": -0.05127714355384267,
+        "image_id": "clic2024_test/3140d643a1f57e80ff265507984d95a0",
+        "pchip": -0.049572685818718654
+      },
+      {
+        "akima": 0.18373524357685955,
+        "image_id": "clic2024_test/4a18abf66d65ad1a95ce455c8b6cd8de",
+        "pchip": 0.18137083753691402
+      },
+      {
+        "akima": 0.2994096263746856,
+        "image_id": "clic2024_test/4cd6910a0b7b39365fda5df87618d091",
+        "pchip": 0.30174815979784136
+      },
+      {
+        "akima": 0.1354630187066224,
+        "image_id": "clic2024_test/5dbdb989cf026f7ab3dd7167d7fc0fe2",
+        "pchip": 0.13419477937482102
+      },
+      {
+        "akima": 0.16064894416144057,
+        "image_id": "clic2024_test/5e5ce43575fa67fdc0dd37146d7f479e",
+        "pchip": 0.1620856898155621
+      },
+      {
+        "akima": -0.2311228839293163,
+        "image_id": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+        "pchip": -0.22930217909396802
+      },
+      {
+        "akima": -0.17573116529558402,
+        "image_id": "clic2024_test/7e499613c3e376ea93afb3649719abeb",
+        "pchip": -0.17259958280212892
+      },
+      {
+        "akima": 0.11983513561534735,
+        "image_id": "clic2024_test/870516c65d81fb9267de6865964083a9",
+        "pchip": 0.11922705301842794
+      },
+      {
+        "akima": 0.05785751476662885,
+        "image_id": "clic2024_test/8bb119b8ca17492392e1e3ea4b811b32",
+        "pchip": 0.050207851606213966
+      },
+      {
+        "akima": -0.18964888078318004,
+        "image_id": "clic2024_test/9466a908d088d32ee73f04116c40e48c",
+        "pchip": -0.18993092990346713
+      },
+      {
+        "akima": 0.01558203733967927,
+        "image_id": "clic2024_test/a10ae819a2d24873079c93346200cab3",
+        "pchip": 0.01708459265889125
+      },
+      {
+        "akima": 0.27516492563101774,
+        "image_id": "clic2024_test/a36713f1943dac6bc74dea50cadaee6f",
+        "pchip": 0.2668988477596865
+      },
+      {
+        "akima": -0.16113036461705071,
+        "image_id": "clic2024_test/aed95e005df28e790519eefb6eb1e565",
+        "pchip": -0.16275919411600487
+      },
+      {
+        "akima": -0.029934521415018102,
+        "image_id": "clic2024_test/afe3676bbfcf7183d697ff7b5d5bd45b",
+        "pchip": -0.02972457064001463
+      },
+      {
+        "akima": 0.10472474932415785,
+        "image_id": "clic2024_test/b939ac34faa94b5d0e753d570edc7048",
+        "pchip": 0.10963876189673759
+      },
+      {
+        "akima": 0.11648498149888431,
+        "image_id": "clic2024_test/c80999cd5533e448167cd9b3ccfa2a37",
+        "pchip": 0.1162799890810874
+      },
+      {
+        "akima": 0.11804293620967458,
+        "image_id": "clic2024_test/d79d465ac77c36518e0f0d626bf97ec4",
+        "pchip": 0.10636094207777283
+      },
+      {
+        "akima": 0.029565521056430316,
+        "image_id": "clic2024_test/ddcd24d99f48eaa369207882a6f37831",
+        "pchip": 0.03231821453389097
+      },
+      {
+        "akima": 0.1139196940432189,
+        "image_id": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+        "pchip": 0.11344746338669774
+      },
+      {
+        "akima": -0.02503145364503006,
+        "image_id": "kodak/02",
+        "pchip": -0.019481639129660847
+      },
+      {
+        "akima": -0.12777428136346158,
+        "image_id": "kodak/03",
+        "pchip": -0.11181104281787803
+      },
+      {
+        "akima": -0.13561225719904813,
+        "image_id": "kodak/04",
+        "pchip": -0.1323084515813786
+      },
+      {
+        "akima": -0.13253535279500997,
+        "image_id": "kodak/05",
+        "pchip": -0.12915652313563483
+      },
+      {
+        "akima": -0.20607283341909696,
+        "image_id": "kodak/06",
+        "pchip": -0.20446167858898073
+      },
+      {
+        "akima": -0.1452073187401073,
+        "image_id": "kodak/07",
+        "pchip": -0.14182169567139932
+      },
+      {
+        "akima": -0.5302699385490399,
+        "image_id": "kodak/09",
+        "pchip": -0.5301287469790478
+      },
+      {
+        "akima": -0.21599969682037312,
+        "image_id": "kodak/10",
+        "pchip": -0.21112909013564682
+      },
+      {
+        "akima": 0.0423347829625826,
+        "image_id": "kodak/11",
+        "pchip": 0.0250578500589935
+      },
+      {
+        "akima": -0.49392862527257797,
+        "image_id": "kodak/12",
+        "pchip": -0.5049073578849083
+      },
+      {
+        "akima": -0.0706530860913909,
+        "image_id": "kodak/14",
+        "pchip": -0.06332391984397294
+      },
+      {
+        "akima": -0.19575769997166284,
+        "image_id": "kodak/15",
+        "pchip": -0.19156224842315767
+      },
+      {
+        "akima": -0.1243405244848617,
+        "image_id": "kodak/16",
+        "pchip": -0.11847712531692497
+      },
+      {
+        "akima": -0.177391708151568,
+        "image_id": "kodak/18",
+        "pchip": -0.16767219920214604
+      },
+      {
+        "akima": -0.0963985219483411,
+        "image_id": "kodak/19",
+        "pchip": -0.09840167919203785
+      },
+      {
+        "akima": -0.16879625650519497,
+        "image_id": "kodak/20",
+        "pchip": -0.16029889220998836
+      },
+      {
+        "akima": -0.04888788798526962,
+        "image_id": "kodak/21",
+        "pchip": -0.05144478100426083
+      },
+      {
+        "akima": -0.19809010080815243,
+        "image_id": "kodak/22",
+        "pchip": -0.19689573743077246
+      },
+      {
+        "akima": -0.21880072453843788,
+        "image_id": "kodak/23",
+        "pchip": -0.2133275686256682
+      },
+      {
+        "akima": -0.09623181022259013,
+        "image_id": "kodak/24",
+        "pchip": -0.09182006708344477
+      },
+      {
+        "akima": 0.040436889081251134,
+        "image_id": "unsplash/alpine_lake/12mp",
+        "pchip": 0.04153279816388981
+      },
+      {
+        "akima": 0.08287898047374553,
+        "image_id": "unsplash/alpine_lake/48mp",
+        "pchip": 0.08394362184878784
+      },
+      {
+        "akima": 0.12737047441550658,
+        "image_id": "unsplash/campus_interior/24mp",
+        "pchip": 0.13471444107051814
+      },
+      {
+        "akima": 0.051398558248243374,
+        "image_id": "unsplash/forest_stream/12mp",
+        "pchip": 0.05147822151093504
+      },
+      {
+        "akima": 0.06386681047688723,
+        "image_id": "unsplash/forest_stream/24mp",
+        "pchip": 0.06410661022990191
+      }
+    ],
+    "larger_files": 159,
+    "mean_bd_percent": {
+      "akima": -0.03413669451667815,
+      "pchip": -0.03365015475736888
+    },
+    "native_wins_pchip": 36,
+    "range": [
+      75,
+      85
+    ],
+    "smaller_files": 295,
+    "status": "passed"
+  },
+  "scope_binary_sha256": {
+    "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/context-map-native/gjxl_encode": "481fe530d57c16d5d11a17c24840f4f523598a136ac66593a553f33a09e18083",
+    "/Users/yunhocho/GitHub/gjxl-low-effort-frontend/build/dc-uint-fast-candidate/gjxl_encode": "2d80480b5d1b7959c90b2d35e698b3d28e7c44b33ca79b205a4026b063f126d2"
+  },
+  "tested_changed_file_sha256": {
+    "CMakeLists.txt": "49032a3fcd128ea200da3a27d56e8da904ca94cb15d56947bdbdf8b7092e2001",
+    "cmake/InstalledHeaders.cmake": "4e3ea7542e1061c916c927bb4678489e924d3e9f11fb749ca6e90ffc79f75476",
+    "cmake/RunCodestreamCliTest.cmake": "794261799ad385f13f0022119d7ef1618ff7caafbfefffdb99d2db3d01b67b73",
+    "src/codestream/ans.cpp": "65dc6677df0178096a396da4c1a7c043a532a8822f78d63bbb6e4d0e1c9bf1f1",
+    "src/codestream/ans_internal.h": "70033e440a3a696208e0efd1eac2620000c920a9af599147614a780f71b74c5b",
+    "src/codestream/context_map.cpp": "46b2696311c5c7974d9e9d0ce0247139f60e0fa1214d8ebcc07765fd3f04ebd7",
+    "src/codestream/context_map_internal.h": "52158a5e1f062a765bad66f8586f574fbc5d700acfbc8151aae6661e16dc3631",
+    "src/codestream/entropy.cpp": "17b104914fa96c3a7eb44e24d825874f97a845e4f8feb523e0b457b6126ed52f",
+    "src/codestream/entropy.h": "72f98fd89469224f85c69b9fe11fa3bd763d477c3c43d460ad9c672f0252b9a4",
+    "src/codestream/entropy_internal.h": "0ca9f2aeb6255440afb1f4d854cf152f7ced39ae0776439ccf2890557ee4db02",
+    "src/codestream/entropy_storage_plan.cpp": "a2390a80a1a68541e8de0152dbb476818a8c4e8669581e86f31653491259dde8",
+    "src/codestream/entropy_storage_plan.h": "c18df90186ac8ddfb91972ba86c27fbdf0b767792a067f55568c94a13ab3b015",
+    "tests/codestream_encoder_test.cpp": "0c955796306e9f806c7564e67babea22e8603134bba4fd52ed7cac629d56c55e",
+    "tests/codestream_workflow_test.cpp": "2bcd90d98c307fc0dfa1f7e3979903ff82d034cdc099f28c8b5d7205f35801f0",
+    "tests/context_map_test.cpp": "15ff9bc327ba2714724e6ff17ea6def76ae8bfa0e9e8874b617f5dc16cbfb90c",
+    "tests/entropy_storage_plan_test.cpp": "6ece1310285630f2ebebf253640b521ee2d52feb754a803068117c8a387cfea2",
+    "tests/entropy_test.cpp": "4a3cf8759c4e13d0791b0c9b9612e7877c0194908a4f2b20f76e9a1f95a246fe",
+    "tests/serializer_storage_test.cpp": "62cbf575a6b4263b704c8b4a5048df784166001ea92d8b237312e7baaba9743f",
+    "tools/context_map/README.md": "550fda2da18456cc55355e06b8d47e040020c2df9d18b8c65b10a236ea4cb562",
+    "tools/context_map/qualify.py": "a09fc7fe9bde66fff9ec560e02be092881bdba0b55afdebdfc9a660e999609c9"
+  },
+  "timing": {
+    "boundary": "complete-encode-wall-time",
+    "environment": {
+      "conclusion": "Concurrent work from another checkout overlaps timing; these measurements do not qualify isolated latency.",
+      "snapshots": 34,
+      "snapshots_with_compiler_processes": 4,
+      "snapshots_with_other_codec_processes": 7,
+      "status": "confounded"
+    },
+    "measured_calls": 480,
+    "median_per_image_paired_ratio": 1.0085016139317917,
+    "per_image": [
+      {
+        "image_id": "kodak/01",
+        "median_ms": {
+          "baseline": 13.2817085,
+          "candidate": 14.165396
+        },
+        "median_paired_ratio": 1.0801178247386796,
+        "paired_ratios": [
+          1.1486975675158015,
+          1.064466718222457,
+          1.095768931254902,
+          0.8405888306198728
+        ]
+      },
+      {
+        "image_id": "kodak/17",
+        "median_ms": {
+          "baseline": 13.2248335,
+          "candidate": 13.7382915
+        },
+        "median_paired_ratio": 1.0389255854350905,
+        "paired_ratios": [
+          1.031682679706615,
+          1.0147190809549453,
+          1.052615485126877,
+          1.0461684911635658
+        ]
+      },
+      {
+        "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+        "median_ms": {
+          "baseline": 48.3252285,
+          "candidate": 48.2423125
+        },
+        "median_paired_ratio": 0.9950630112642642,
+        "paired_ratios": [
+          0.9872792873449501,
+          1.045332397687372,
+          0.9794986425602059,
+          1.0028467351835784
+        ]
+      },
+      {
+        "image_id": "clic2024_test/d1a9be98d1936065967adac50a6fb750",
+        "median_ms": {
+          "baseline": 39.5941875,
+          "candidate": 40.211458
+        },
+        "median_paired_ratio": 1.012374383598269,
+        "paired_ratios": [
+          1.002851127579848,
+          1.046211754036928,
+          1.011803203452511,
+          1.0129455637440268
+        ]
+      },
+      {
+        "image_id": "clic2024_test/b51d5fb537246482ef7a7ab63f093cab",
+        "median_ms": {
+          "baseline": 35.7708955,
+          "candidate": 36.0513335
+        },
+        "median_paired_ratio": 1.0058164754051662,
+        "paired_ratios": [
+          1.0005486209554186,
+          1.005853951022906,
+          1.005778999787426,
+          1.010006895529434
+        ]
+      },
+      {
+        "image_id": "kodak/08",
+        "median_ms": {
+          "baseline": 15.2045,
+          "candidate": 13.939583
+        },
+        "median_paired_ratio": 0.920936178077179,
+        "paired_ratios": [
+          1.0084267999923286,
+          0.9924469634169437,
+          0.8494253927374144,
+          0.833540089994201
+        ]
+      },
+      {
+        "image_id": "kodak/13",
+        "median_ms": {
+          "baseline": 13.397771,
+          "candidate": 13.936396
+        },
+        "median_paired_ratio": 1.03893383868173,
+        "paired_ratios": [
+          1.0480742813918305,
+          1.0220190081878608,
+          1.0297933959716297,
+          1.0703273888390936
+        ]
+      },
+      {
+        "image_id": "clic2024_test/28d24b9c83de066597ff96a68769884f",
+        "median_ms": {
+          "baseline": 41.4544165,
+          "candidate": 41.774437
+        },
+        "median_paired_ratio": 1.0110718490152353,
+        "paired_ratios": [
+          1.0368422735593772,
+          1.0129666827109673,
+          0.9890314871706243,
+          1.009177015319503
+        ]
+      },
+      {
+        "image_id": "unsplash/alpine_lake/24mp",
+        "median_ms": {
+          "baseline": 376.730271,
+          "candidate": 376.4047705
+        },
+        "median_paired_ratio": 1.0087507435328096,
+        "paired_ratios": [
+          0.9828747603265194,
+          0.9915932636467027,
+          1.0259082234189165,
+          1.0564222719782803
+        ]
+      },
+      {
+        "image_id": "unsplash/campus_interior/12mp",
+        "median_ms": {
+          "baseline": 182.1680835,
+          "candidate": 182.971771
+        },
+        "median_paired_ratio": 1.0063992993037854,
+        "paired_ratios": [
+          0.99300059413539,
+          1.0035344877721208,
+          1.00926411083545,
+          1.1168121472699097
+        ]
+      },
+      {
+        "image_id": "unsplash/campus_interior/48mp",
+        "median_ms": {
+          "baseline": 829.290021,
+          "candidate": 835.765312
+        },
+        "median_paired_ratio": 1.0082524843307739,
+        "paired_ratios": [
+          1.0042119608658873,
+          1.0122930077956602,
+          0.9921185884062773,
+          1.0197031626214796
+        ]
+      },
+      {
+        "image_id": "unsplash/forest_stream/48mp",
+        "median_ms": {
+          "baseline": 849.390708,
+          "candidate": 846.3821665
+        },
+        "median_paired_ratio": 0.9900588381442472,
+        "paired_ratios": [
+          0.9873183874805003,
+          1.0046987654291475,
+          0.9927992888079942,
+          0.88854818083751
+        ]
+      }
+    ],
+    "per_image_ratio_range": [
+      0.920936178077179,
+      1.0801178247386796
+    ],
+    "processes": 96,
+    "protocol": "12 images at original Q80 distances, 8 participating CPU threads, four alternating process pairs, two warmups and five samples per process.",
+    "qualification": "Provisional; concurrent codec and compiler work detected."
+  },
+  "validation": {
+    "allocation_failure_and_storage_bounds": "Passed native context-map, entropy, serializer and full-workflow checks.",
+    "cpu_metal_scope_pairs": 28,
+    "exact_decoded_float_identities": 455,
+    "fresh_baseline_byte_identities": 455,
+    "independently_decoded_golden_pairs": 11,
+    "installed_header_consumer": "Passed",
+    "reference_decoded_context_maps": 351,
+    "release_ctest": {
+      "inherited_failure": "quantization_pipeline: actual 0.24919039011001587 versus pinned 0.24914586544036865, reproduced with untouched baseline binary.",
+      "passed": 138,
+      "total": 139
+    },
+    "representation_families_exercised": 7,
+    "successful_qualification_commands": 1573
+  }
+}

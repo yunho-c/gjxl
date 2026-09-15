@@ -57,7 +57,8 @@ Status ComputeTaskStoragePlan(size_t tokens, size_t contexts, size_t sections,
                               VarDctEntropyBehavior behavior, bool deferred,
                               const EntropyModelStoragePlan &either_model,
                               TaskStoragePlan *out,
-                              size_t maximum_ans_clusters = kDefaultDirectAnsClusters) {
+                              size_t maximum_ans_clusters = kDefaultDirectAnsClusters,
+                              bool dc_uint_search = false) {
   const bool exhaustive =
       behavior == VarDctEntropyBehavior::kMaximumCompression;
   EntropyOptimizationStoragePlan prefix, ans;
@@ -80,7 +81,9 @@ Status ComputeTaskStoragePlan(size_t tokens, size_t contexts, size_t sections,
                                         : EntropyStoragePolicy::kRateOptimizedAns)
                             : (behavior == VarDctEntropyBehavior::kHighDensity
                                    ? EntropyStoragePolicy::kHighDensityAns
-                                   : EntropyStoragePolicy::kBalancedAns)),
+                                   : (dc_uint_search
+                                        ? EntropyStoragePolicy::kBalancedDcAns
+                                        : EntropyStoragePolicy::kBalancedAns))),
        .tokens = tokens,
        .contexts = contexts,
        .sections = sections,
@@ -224,7 +227,8 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
   TaskStoragePlan dc_task, order_task, ac_task;
   status = ComputeTaskStoragePlan(plan.maximum_dc_tokens, kSimpleDcContextCount,
                                   2 * d, behavior, false, headers.dc_model,
-                                  &dc_task);
+                                  &dc_task, kDefaultDirectAnsClusters,
+                                  options.coding.dc_uint_search);
   if (!status.ok())
     return status;
   if (has_orders) {

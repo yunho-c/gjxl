@@ -349,6 +349,15 @@ bool RealEncodes() {
     FrameFixture f;
     if (!Create(c, &f))
       return false;
+    const VarDctCodestreamOptions dc_search{
+      .entropy_behavior = kBalanced, .dc_uint_search = true};
+    std::vector<uint8_t> dc_oracle;
+    if (!Oracle(f, dc_search, &dc_oracle)) return false;
+    for (size_t threads : {1ul, 8ul}) {
+      if (!EncodeWithinPlan(f, {dc_search, threads, true}, dc_oracle))
+        return false;
+      ++count;
+    }
     for (auto prediction :
          {VarDctDcPrediction::kGradient, VarDctDcPrediction::kWeighted})
       for (auto entropy : {kBalanced, kHighDensity, kRateOptimized, kMaximumCompression}) {

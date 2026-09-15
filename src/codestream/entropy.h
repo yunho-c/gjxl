@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "codestream/storage.h"
+#include "codestream/context_map_internal.h"
 
 #include "codestream/bit_writer.h"
 #include "core/status.h"
@@ -151,6 +152,7 @@ struct EntropyCode {
   codestream_internal::Storage<PrefixCode> prefix_codes;
   uint8_t ans_log_alpha_size = 0;
   codestream_internal::Storage<AnsHistogram> ans_histograms;
+  codestream_internal::ContextMapEncoding context_map_encoding;
 
   friend bool operator==(const EntropyCode&, const EntropyCode&) = default;
 };

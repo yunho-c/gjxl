@@ -124,7 +124,8 @@ Status ComputeCpuWorkflowStoragePlan(Extent2D source,
       {.coding = {.entropy_behavior = ResolveEntropyBehavior(e),
                   .coefficient_order_behavior =
                       ResolveCoefficientOrderBehavior(e),
-                  .dc_prediction = e.dc_prediction},
+                  .dc_prediction = e.dc_prediction,
+                  .dc_uint_search = UseDcUintSearch(e)},
        .cpu_thread_count = e.cpu_thread_count,
        .collect_profile = o.collect_profile},
       &p.serializer);

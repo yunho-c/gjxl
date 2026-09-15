@@ -29,6 +29,8 @@ struct VarDctCodestreamOptions {
   VarDctCoefficientOrderBehavior coefficient_order_behavior =
     VarDctCoefficientOrderBehavior::kFull;
   VarDctDcPrediction dc_prediction = kDefaultDcPrediction;
+  /// Search modular integer mappings for balanced DC entropy coding only.
+  bool dc_uint_search = false;
 };
 
 /// Serializes one validated initial-profile frame as a raw JPEG XL codestream.

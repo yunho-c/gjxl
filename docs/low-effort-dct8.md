@@ -4,21 +4,23 @@ Ordinary efforts 1–4 select DCT8 for every 8×8 base block without invoking
 AC-strategy search. They disable Gaborish and initialize every quantization
 block to `0.79 / distance`, matching libjxl’s e1–4 initialization boundary.
 Effort 5 enables mixed-transform search, spatial initialization, and Gaborish.
-The uniform field is only the starting point; AQ may make the final field
-nonuniform.
-The adaptive-quantization update schedule stays unchanged:
+Ordinary effort 4 now skips perceptual AQ refinement, like efforts 1–3.
+It also enables the [default DC integer-mapping search](entropy-defaults.md)
+under automatic compression; native context-map compression applies at every
+effort. These serializer choices preserve the frontend's reconstruction.
+The adaptive-quantization update schedule is:
 
 | Effort | Transform selection | AQ updates |
 | --- | --- | --- |
-| 1–3 | Fixed DCT8 | 0 |
-| 4 | Fixed DCT8 | 1 |
+| 1–4 | Fixed DCT8 | 0 |
 | 5–6 | Mixed-transform search | 1 |
 | 7 | Mixed-transform search | 2 |
 | 8–9 | Mixed-transform search | 3 |
 | 10 | Mixed-transform search | 4 |
 
 The high-density and maximum-error overrides retain their existing search
-behavior. Target-byte and target-bpp retries follow the ordinary effort
+and refinement behavior; high density still requests four AQ updates.
+Target-byte and target-bpp retries follow the ordinary effort
 policy. Maximum-compression controls the serializer independently and does
 not re-enable AC search. The dedicated maximum-throughput path keeps its
 existing policy. The low-level quantization pipeline defaults to mixed search;
@@ -35,10 +37,10 @@ Initial quantization and CfL remain. Ordinary efforts 1–4 use a direct uniform
 fill on CPU and Metal, skipping spatial gradient, erosion, modulation, and
 mask convolution work. Their inverse-Gaborish stage is disabled and the frame
 header explicitly signals Gaborish off while retaining two EPF passes.
-Serializer admission includes the longer nondefault filter header. Effort 4 still performs
-its AQ update, so its speed cannot be inferred directly from a zero-update
-DCT8 experiment. Low-effort output bytes and rate-quality behavior change;
-this change does not establish speed parity or a new matched-quality result.
+Serializer admission includes the longer nondefault filter header. Ordinary
+effort 4 uses zero AQ updates in the shared execution and admission policy.
+This changes its output and perceptual tradeoff; the qualification below
+distinguishes the policy change from the separate diagnostic kernel changes.
 
 ## Resident search-data omission
 
@@ -50,7 +52,7 @@ full-sized backing. Initial strategy-mask and CfL host readbacks are also
 omitted. Uniform initial quantization and device CfL still feed final
 coefficient coding; higher-effort spatial paths retain inverse Gaborish.
 
-This applies to both zero-update efforts 1–3 and effort 4's AQ update. Full
+This applies to zero-update efforts 1–4. Full
 initial-quantization diagnostics retain all masks and initial CfL outputs;
 efforts using mixed-transform search retain their existing preparation. The
 cached evaluator includes this choice in its compatibility check, so changing
@@ -60,7 +62,7 @@ policy. Shared host preparation bounds remain conservative.
 
 ## Validation
 
-`low_effort_strategy_policy` checks the effort/override matrix, unchanged AQ
+`low_effort_strategy_policy` checks the effort/override matrix, AQ update
 counts, provider bypass, mixed/fixed preparation reuse, and reduced storage
 plans. It uses stub providers and performs no image encoding or GPU work.
 The CPU, resident, and compatibility workflow storage tests support
@@ -68,9 +70,10 @@ The CPU, resident, and compatibility workflow storage tests support
 search-interval checks).
 
 The workflow regression test also checks DCT8-only summaries on CPU and Metal
-at efforts 1–4, includes effort 5, and retains the scored/unscored byte-parity
-checks. The GPU pipeline regression covers switching mixed/fixed preparations,
-zero candidate statistics, and scored/unscored fixed-policy byte parity.
+at efforts 1–4, includes effort 5, and checks scored/unscored byte parity
+through effort 4. The GPU pipeline regression covers switching mixed/fixed
+preparations, zero candidate statistics, and scored/unscored fixed-policy
+byte parity.
 
 Release compilation and the non-encoding checks passed: the new policy test,
 4,480 CPU plan shapes, 2,240 resident plan shapes, and 2,800 compatibility plan
@@ -110,3 +113,28 @@ The original measurements and decoder/hash audits are retained in
 and its sibling `e4-low-quality-20260913`. Those studies evaluated rate,
 not production latency. The production replay and validation are recorded
 in `low-effort-frontend-qualification.md`.
+
+## Effort-4 zero-update default
+
+The September 14, 2026 investigation isolated zero AQ on revision `b1fbfc1`
+while keeping the existing e4 DC, smoothing, transform, and serializer
+policies. Seven rotated repetitions at six measured SSIMULACRA2 points near
+85 reduced complete encode time by 30.3–61.3% on the M4 Pro. Across all 65
+original images and seven quality settings, zero AQ changed mean BD-rate by
++0.17% versus baseline GJXL over scores 75–85. Six secondary-metric checks
+found standard Butteraugli error changes from -0.74% to +10.21% despite
+matched SSIMULACRA2. This perceptual tradeoff was accepted for the e4 default.
+
+Only the zero-update policy is promoted. The DC-fusion, final-CfL packing,
+and constant-field-statistics patches remain diagnostic. In particular, the
+full-corpus speed result for their combined build is not a timing result for
+this policy-only change. The frozen measurements are retained locally under
+`build/e4-study/`, with the detailed investigation in the local artifact
+`docs/e4-speed-investigation.md`.
+
+The policy-only Release build passes 11 focused CTests covering effort and
+override policy, CPU/Metal workflow and scoring parity, DC policy, Metal
+quantization, CPU/resident/compatibility storage, admission, and independent
+decoder smoke. Six representative encodes through 48 MP are byte-identical
+to the qualified zero-AQ diagnostic build. The fresh build and logs are in
+`build/e4-default/`; the frozen investigation binaries remain unchanged.
