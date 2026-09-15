@@ -1579,6 +1579,108 @@ kernel void gjxl_aq_resident_quant_finalize_quantizer(
   }
 }
 
+
+// Exact four-byte radix selection for small resident quant fields.
+// All median and MAD rounds share one group; no numerical approximation.
+kernel void
+gjxl_aq_resident_quant_small(device const float *quant_field [[buffer(0)]],
+                             device float *statistics [[buffer(1)]],
+                             device uint *quantizer_params [[buffer(2)]],
+                             device atomic_uint *error [[buffer(3)]],
+                             constant AqInitialQuantSelectionParams &params
+                             [[buffer(4)]],
+                             device uint *final_state [[buffer(5)]],
+                             device atomic_uint *device_histogram [[buffer(6)]],
+                             uint lane [[thread_index_in_threadgroup]]) {
+  // One histogram per SIMD group limits contention for repeated field values.
+  // Dispatch exactly 256 threads on a pipeline with 32-thread SIMD groups.
+  threadgroup atomic_uint histogram[8 * 256];
+  threadgroup uint group_counts[8];
+  threadgroup uint state[3];
+  threadgroup float selected[2];
+  for (uint deviation = 0u; deviation < 2u; ++deviation) {
+    if (lane == 0u) {
+      state[0] = 0u;
+      state[1] = 0u;
+      state[2] = params.median_index;
+    }
+    for (int shift = 24; shift >= 0; shift -= 8) {
+      for (uint group = 0u; group < 8u; ++group)
+        atomic_store_explicit(histogram + group * 256u + lane, 0u,
+                              memory_order_relaxed);
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      for (uint index = lane; index < params.value_count; index += 256u) {
+        const uint y = index / params.quant_width;
+        const uint x = index - y * params.quant_width;
+        float value = quant_field[y * params.quant_stride + x];
+        if (deviation != 0u)
+          value = abs(value - selected[0]);
+        const uint bits = as_type<uint>(value);
+        if ((bits & state[1]) == state[0]) {
+          atomic_fetch_add_explicit(histogram + (lane / 32u) * 256u +
+                                        ((bits >> uint(shift)) & 255u),
+                                    1u, memory_order_relaxed);
+        }
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      uint count = 0u;
+      for (uint group = 0u; group < 8u; ++group) {
+        count += atomic_load_explicit(histogram + group * 256u + lane,
+                                      memory_order_relaxed);
+      }
+      uint inclusive = count;
+      for (uint offset = 1u; offset < 32u; offset *= 2u) {
+        const uint previous = simd_shuffle_up(inclusive, offset);
+        if ((lane & 31u) >= offset)
+          inclusive += previous;
+      }
+      if ((lane & 31u) == 31u)
+        group_counts[lane / 32u] = inclusive;
+      // Capture the common rank before any winning bucket updates shared state.
+      const uint rank = state[2];
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      uint prefix_count = inclusive - count;
+      for (uint group = 0u; group < lane / 32u; ++group)
+        prefix_count += group_counts[group];
+      if (rank >= prefix_count && rank < prefix_count + count) {
+        state[0] |= lane << uint(shift);
+        state[1] |= 255u << uint(shift);
+        state[2] = rank - prefix_count;
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+    if (lane == 0u)
+      selected[deviation] = as_type<float>(state[0]);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  atomic_store_explicit(device_histogram + lane, 0u, memory_order_relaxed);
+  if (lane == 0u) {
+    for (uint i = 0u; i < 3u; ++i)
+      final_state[i] = state[i];
+    statistics[0] = selected[0];
+    statistics[1] = selected[1];
+    const float median_value = selected[0];
+    const float deviation = selected[1];
+    float scale = 65536.0f * (median_value - deviation) / 5.0f;
+    scale = clamp(scale, 1.0f, 32768.0f);
+    uint global_scale = uint(scale);
+    if (global_scale > params.scaled_quant_dc) {
+      global_scale = max(1u, params.scaled_quant_dc);
+    }
+    const float inverse_global_scale = 65536.0f / float(global_scale);
+    const float quant_dc =
+        min(65536.0f, params.quant_dc * inverse_global_scale + 0.5f);
+    quantizer_params[0] = global_scale;
+    quantizer_params[1] = uint(quant_dc);
+    if (!isfinite(median_value) || median_value <= 0.0f ||
+        !isfinite(deviation) || deviation < 0.0f || global_scale == 0u ||
+        global_scale > 32768u || quantizer_params[1] == 0u ||
+        quantizer_params[1] > 65536u) {
+      atomic_fetch_or_explicit(error, 524288u, memory_order_relaxed);
+    }
+  }
+}
+
 kernel void gjxl_aq_resident_policy_initialize(
   device const float* quant_field [[buffer(0)]],
   device float* initial_quant_field [[buffer(1)]],

@@ -190,7 +190,8 @@ ComputeResidentAqProfileStoragePlan(Extent2D source, Extent2D coding,
   status = ComputeResidentAqProfileInputStoragePlan(policy, &p.metadata);
   if (!status.ok())
     return status;
-  // Reset + 20-dispatch radix quantizer + four per-family coefficient/inverse/
+  // Reserve the 20-dispatch parallel quantizer bound even when a small field
+  // uses two dispatches. Reset + quantizer + four per-family coefficient/inverse/
   // scatter dispatches + filters + Opsin-to-linear + perceptual work + update.
   // First use also gathers/transforms each family, computes final CfL and
   // initializes the policy. Counting all first-use work bounds cached runs too.
