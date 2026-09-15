@@ -462,9 +462,11 @@ Status OptimizeOrdinaryEntropyCode(
     return codestream_internal::OptimizeFastPrefixEntropyCode(
       streams, options, code, cost, profile);
   }
-  const auto direct_mode = behavior == VarDctEntropyBehavior::kHighDensity
-    ? codestream_internal::DirectAnsEntropyMode::kHighDensity
-    : codestream_internal::DirectAnsEntropyMode::kBalanced;
+  const auto direct_mode = behavior == VarDctEntropyBehavior::kRateOptimized
+    ? codestream_internal::DirectAnsEntropyMode::kRateOptimized
+    : (behavior == VarDctEntropyBehavior::kHighDensity
+         ? codestream_internal::DirectAnsEntropyMode::kHighDensity
+         : codestream_internal::DirectAnsEntropyMode::kBalanced);
   if (!defer_ans_token_cost) {
     return fixed_context_populations.empty()
       ? codestream_internal::OptimizeDirectAnsEntropyCode(
@@ -1157,6 +1159,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
   switch (options.entropy_behavior) {
     case VarDctEntropyBehavior::kBalanced:
     case VarDctEntropyBehavior::kHighDensity:
+    case VarDctEntropyBehavior::kRateOptimized:
     case VarDctEntropyBehavior::kMaximumCompression:
       break;
     default:
@@ -2054,6 +2057,44 @@ Status EncodeVarDctCodestreamSingleRepresentation(
     frame, options, false, output, profile);
 }
 
+Status EncodeVarDctCodestreamRateOptimized(
+  const VarDctFrameView& frame,
+  VarDctCodestreamOptions options,
+  codestream_internal::CodestreamBuffer* output,
+  codestream_internal::VarDctCodestreamProfile* profile) {
+  if (output == nullptr)
+    return Status::InvalidArgument("Codestream output is null");
+  const auto begin = ProfileBegin(profile);
+  codestream_internal::CodestreamBuffer balanced, expanded;
+  codestream_internal::VarDctCodestreamProfile balanced_profile, expanded_profile;
+  auto fallback_options = options;
+  fallback_options.entropy_behavior = VarDctEntropyBehavior::kBalanced;
+  Status status = EncodeVarDctCodestreamSingleRepresentation(
+    frame, fallback_options, &balanced, profile ? &balanced_profile : nullptr);
+  if (!status.ok()) return status;
+  status = EncodeVarDctCodestreamSingleRepresentation(
+    frame, options, &expanded, profile ? &expanded_profile : nullptr);
+  if (!status.ok()) return status;
+
+  // Compare physical codestream bytes, including headers, padding and TOC.
+  // Equal sizes preserve the established balanced encoding. Errors still fail
+  // atomically; this is a rate fallback, not suppression of resource failures.
+  const bool use_balanced = balanced.size() <= expanded.size();
+  if (profile != nullptr) {
+    auto selected = use_balanced ? balanced_profile : expanded_profile;
+    codestream_internal::AccumulateCodestreamWorkProfile(
+      use_balanced ? expanded_profile : balanced_profile, &selected);
+    selected.entropy_behavior = VarDctEntropyBehavior::kRateOptimized;
+    selected.balanced_candidate_bytes = balanced.size();
+    selected.rate_candidate_bytes = expanded.size();
+    selected.selected_balanced_fallback = use_balanced;
+    selected.total_nanoseconds = ElapsedNanoseconds(begin);
+    *profile = selected;
+  }
+  *output = use_balanced ? std::move(balanced) : std::move(expanded);
+  return Status::Ok();
+}
+
 Status EncodeVarDctCodestreamImpl(
   const VarDctFrameView& frame,
   VarDctCodestreamOptions options,
@@ -2062,6 +2103,8 @@ Status EncodeVarDctCodestreamImpl(
 
   const resource_budget_internal::ManagedHostScope managed_host(
     resource_budget_internal::ResourceClass::kSerializer);
+  if (options.entropy_behavior == VarDctEntropyBehavior::kRateOptimized)
+    return EncodeVarDctCodestreamRateOptimized(frame, options, output, profile);
   return options.entropy_behavior ==
       VarDctEntropyBehavior::kMaximumCompression
     ? EncodeVarDctCodestreamMaximumCompression(
@@ -2071,6 +2114,51 @@ Status EncodeVarDctCodestreamImpl(
 }
 
 }  // namespace
+
+void codestream_internal::AccumulateCodestreamWorkProfile(
+  const VarDctCodestreamProfile& source,
+  VarDctCodestreamProfile* destination) noexcept {
+  destination->validation_nanoseconds += source.validation_nanoseconds;
+  destination->dc_tokenization_nanoseconds +=
+    source.dc_tokenization_nanoseconds;
+  destination->ac_tokenization_nanoseconds +=
+    source.ac_tokenization_nanoseconds;
+  destination->block_context_map_work_nanoseconds +=
+    source.block_context_map_work_nanoseconds;
+  destination->coefficient_order_work_nanoseconds +=
+    source.coefficient_order_work_nanoseconds;
+  destination->coefficient_tokenization_work_nanoseconds +=
+    source.coefficient_tokenization_work_nanoseconds;
+  destination->coefficient_context_materialization_work_nanoseconds +=
+    source.coefficient_context_materialization_work_nanoseconds;
+  destination->coefficient_tokenization_pass_count +=
+    source.coefficient_tokenization_pass_count;
+  destination->coefficient_token_count += source.coefficient_token_count;
+  destination->coefficient_context_materialization_count +=
+    source.coefficient_context_materialization_count;
+  destination->coefficient_materialized_token_count +=
+    source.coefficient_materialized_token_count;
+  destination->entropy_optimization_nanoseconds +=
+    source.entropy_optimization_nanoseconds;
+  codestream_internal::AccumulateEntropyWorkProfile(
+    source.entropy_work, &destination->entropy_work);
+  destination->section_writing_nanoseconds +=
+    source.section_writing_nanoseconds;
+  codestream_internal::AccumulateSectionWritingWorkProfile(
+    source.section_writing_work, &destination->section_writing_work);
+  destination->assembly_nanoseconds += source.assembly_nanoseconds;
+  destination->assembly.candidate_selection_nanoseconds +=
+    source.assembly.candidate_selection_nanoseconds;
+  destination->assembly.section_size_nanoseconds +=
+    source.assembly.section_size_nanoseconds;
+  destination->assembly.frame_header_nanoseconds +=
+    source.assembly.frame_header_nanoseconds;
+  destination->assembly.toc_and_sections_nanoseconds +=
+    source.assembly.toc_and_sections_nanoseconds;
+  destination->assembly.output_copy_nanoseconds +=
+    source.assembly.output_copy_nanoseconds;
+  destination->total_nanoseconds += source.total_nanoseconds;
+}
 
 Status codestream_internal::ComputeSerializerControlStorageBound(
   const SerializerStoragePlan& c, const SerializerStorageOptions& options,

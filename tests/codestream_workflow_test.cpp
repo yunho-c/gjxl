@@ -648,7 +648,8 @@ bool CheckEffortPolicy() {
         summary.entropy_behavior !=
           (test.effort >= 9
              ? gjxl::VarDctEntropyBehavior::kHighDensity
-             : gjxl::VarDctEntropyBehavior::kBalanced)) {
+             : (test.effort == 8 ? gjxl::VarDctEntropyBehavior::kRateOptimized
+                                 : gjxl::VarDctEntropyBehavior::kBalanced))) {
       std::cerr << "Effort " << test.effort << " workflow failed: "
                 << status.message() << " history="
                 << summary.score_history.size() << '\n';
@@ -747,13 +748,18 @@ bool CheckCompressionPolicy() {
     return false;
   }
 
-  for (const int32_t effort : {1, 7, 8}) {
+  for (const int32_t effort : {1, 2, 3, 4, 5, 6, 7}) {
     if (ResolveEntropyBehavior({.effort = effort}) !=
         VarDctEntropyBehavior::kBalanced) {
       std::cerr << "Effort " << effort
                 << " did not resolve to balanced entropy\n";
       return false;
     }
+  }
+  if (ResolveEntropyBehavior({.effort = 8}) !=
+      VarDctEntropyBehavior::kRateOptimized) {
+    std::cerr << "Effort 8 did not resolve to rate-optimized entropy\n";
+    return false;
   }
   for (const int32_t effort : {9, 10}) {
     if (ResolveEntropyBehavior({.effort = effort}) !=

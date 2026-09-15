@@ -1098,6 +1098,65 @@ bool CheckAnsSmallHistograms() {
   return true;
 }
 
+bool CheckRateOptimizedAns() {
+  using namespace gjxl;
+  using namespace gjxl::codestream_internal;
+  bool improved = false;
+  for (uint32_t scale : {16u, 64u, 256u, 1024u, 65536u}) {
+    std::array<std::vector<EntropyToken>, 3> sections;
+    uint32_t random = 12345;
+    for (size_t s = 0; s < sections.size(); ++s) {
+      for (size_t i = 0; i < 4096; ++i) {
+        random = random * 1664525u + 1013904223u;
+        sections[s].push_back({static_cast<uint32_t>(i % 3),
+          scale == 65536 && i % 7 == 0 ? random : (random >> 16) % scale});
+      }
+    }
+    if (scale == 65536) sections[0].push_back({0, UINT32_MAX});
+    const std::array views{EntropyTokenStreamView::Interleaved(sections[0]),
+                           EntropyTokenStreamView::Interleaved(sections[1]),
+                           EntropyTokenStreamView::Interleaved(sections[2])};
+    EntropyCode narrow, wide, no_cost;
+    EntropyCodeCost narrow_cost, wide_cost;
+    EntropyWorkProfile profile;
+    if (!OptimizeDirectAnsEntropyCode(views, {.context_count = 3},
+          DirectAnsEntropyMode::kHighDensity, &narrow, &narrow_cost).ok() ||
+        !OptimizeDirectAnsEntropyCode(views, {.context_count = 3},
+          DirectAnsEntropyMode::kRateOptimized, &wide, &wide_cost, &profile).ok() ||
+        !OptimizeDirectAnsEntropyCode(views, {.context_count = 3},
+          DirectAnsEntropyMode::kRateOptimized, &no_cost).ok() ||
+        wide != no_cost || profile.ans_alphabet_width_candidate_count !=
+          (scale == 65536 ? 3 : 4) ||
+        profile.ans_uint_config_candidate_count < 28 ||
+        profile.ans_uint_config_candidate_count % 28 != 0 ||
+        wide_cost.model_bits + wide_cost.token_bits >
+          narrow_cost.model_bits + narrow_cost.token_bits) {
+      std::cerr << "Full direct ANS search failed: scale=" << scale
+                << " widths=" << profile.ans_alphabet_width_candidate_count
+                << " configs=" << profile.ans_uint_config_candidate_count
+                << " cost=" << narrow_cost.model_bits + narrow_cost.token_bits
+                << '/' << wide_cost.model_bits + wide_cost.token_bits
+                << " no_cost_equal=" << (wide == no_cost) << '\n';
+      return false;
+    }
+    improved |= wide_cost.model_bits + wide_cost.token_bits <
+                  narrow_cost.model_bits + narrow_cost.token_bits;
+    BitWriter model;
+    if (!WriteEntropyCode(wide, &model).ok() ||
+        model.bits_written() != wide_cost.model_bits) return false;
+    uint64_t total = 0;
+    for (size_t s = 0; s < sections.size(); ++s) {
+      BitWriter tokens;
+      if (!WriteTokenStream(sections[s], wide, &tokens).ok() ||
+          tokens.bits_written() != wide_cost.section_token_bits[s]) return false;
+      total += tokens.bits_written();
+    }
+    if (total != wide_cost.token_bits) return false;
+  }
+  if (!improved) std::cerr << "ANS width fixture no longer exercises a rate gain\n";
+  return improved;
+}
+
 bool CheckAnsClusterLimits() {
   using namespace gjxl;
   using namespace gjxl::codestream_internal;
@@ -2072,6 +2131,7 @@ int main() {
       !CheckSparseDirectAnsPopulations() ||
       !CheckBorrowedDirectAnsValidation() ||
       !CheckScannedDirectAnsLateSectionFailures() ||
+      !CheckRateOptimizedAns() ||
       !CheckAnsClusterLimits() ||
       !CheckDirectAnsOptimization() ||
       !CheckSplitTokenStreamParity() ||

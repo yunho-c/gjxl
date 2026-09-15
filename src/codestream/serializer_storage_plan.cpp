@@ -74,9 +74,11 @@ Status ComputeTaskStoragePlan(size_t tokens, size_t contexts, size_t sections,
       {.policy = exhaustive
                      ? (deferred ? EntropyStoragePolicy::kDeferredAnsFromPrefix
                                  : EntropyStoragePolicy::kAnsFromPrefix)
-                     : (behavior == VarDctEntropyBehavior::kHighDensity
-                            ? EntropyStoragePolicy::kHighDensityAns
-                            : EntropyStoragePolicy::kBalancedAns),
+                     : (behavior == VarDctEntropyBehavior::kRateOptimized
+                            ? EntropyStoragePolicy::kRateOptimizedAns
+                            : (behavior == VarDctEntropyBehavior::kHighDensity
+                                   ? EntropyStoragePolicy::kHighDensityAns
+                                   : EntropyStoragePolicy::kBalancedAns)),
        .tokens = tokens,
        .contexts = contexts,
        .sections = sections,
@@ -143,6 +145,7 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
   const auto behavior = options.coding.entropy_behavior;
   if (behavior != VarDctEntropyBehavior::kBalanced &&
       behavior != VarDctEntropyBehavior::kHighDensity &&
+      behavior != VarDctEntropyBehavior::kRateOptimized &&
       behavior != VarDctEntropyBehavior::kMaximumCompression)
     return Status::InvalidArgument(
         "Serializer plan entropy behavior is invalid");
@@ -340,6 +343,20 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
       (g == 1 && !AddWriter(padded_payload_bits, &work)) ||
       !work.Add(plan.output))
     return Overflow();
+  if (behavior == VarDctEntropyBehavior::kRateOptimized) {
+    // Balanced runs first. Its published bytes survive the expanded search;
+    // all other backing from that invocation has already been released.
+    auto fallback_options = options;
+    fallback_options.coding.entropy_behavior = VarDctEntropyBehavior::kBalanced;
+    SerializerStoragePlan fallback;
+    status = ComputeSerializerStoragePlan(frame_extent, fallback_options, &fallback);
+    if (!status.ok()) return status;
+    if (!work.Add(fallback.output)) return Overflow();
+    work = Either(work, fallback.working);
+    plan.output = Either(plan.output, fallback.output);
+    plan.maximum_output_bytes =
+      std::max(plan.maximum_output_bytes, fallback.maximum_output_bytes);
+  }
   *out = plan;
   return Status::Ok();
 }

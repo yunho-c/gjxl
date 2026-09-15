@@ -1554,7 +1554,7 @@ Status PrepareDirectAnsPartition(
           histograms, &clustered, &histogram_symbols,
           options.maximum_ans_clusters);
     if (status.ok() &&
-        mode == codestream_internal::DirectAnsEntropyMode::kHighDensity) {
+        mode != codestream_internal::DirectAnsEntropyMode::kBalanced) {
       status = RefineBestDirectAnsClusters(
         histograms, &clustered, &histogram_symbols);
     }
@@ -2945,6 +2945,7 @@ Status codestream_internal::OptimizeDirectAnsEntropyCode(
   switch (mode) {
     case DirectAnsEntropyMode::kBalanced:
     case DirectAnsEntropyMode::kHighDensity:
+    case DirectAnsEntropyMode::kRateOptimized:
       break;
     default:
       return Status::InvalidArgument("Direct ANS mode is invalid");
@@ -2967,7 +2968,7 @@ Status codestream_internal::OptimizeDirectAnsEntropyCode(
     : AnsOptimizationPolicy{
         .uint_configs = HighDensityAnsUintConfigs(),
         .histogram_search = AnsHistogramSearch::kPrecise,
-        .smallest_alphabet_width = true,
+        .smallest_alphabet_width = mode != DirectAnsEntropyMode::kRateOptimized,
       };
   return OptimizeAnsEntropyCodeImpl(
     section_tokens, partition, &prepared, policy,
@@ -3017,7 +3018,8 @@ codestream_internal::DirectAnsHistogramPrecisionShifts(
       shifts[shift] = true;
     }
     shifts[kAnsLogTableSize - 1] = true;
-  } else if (mode == DirectAnsEntropyMode::kHighDensity) {
+  } else if (mode == DirectAnsEntropyMode::kHighDensity ||
+             mode == DirectAnsEntropyMode::kRateOptimized) {
     shifts.fill(true);
   }
   return shifts;
@@ -3107,7 +3109,8 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
   EntropyOptimizationStoragePlan* out) {
   using enum EntropyStoragePolicy;
   using enum resource_budget_internal::VectorCapacityPolicy;
-  const bool direct = o.policy == kBalancedAns || o.policy == kHighDensityAns;
+  const bool direct = o.policy == kBalancedAns || o.policy == kHighDensityAns ||
+                      o.policy == kRateOptimizedAns;
   if (out == nullptr || o.contexts == 0 || o.contexts > UINT32_MAX ||
       o.initial_histograms > 256 || o.retain_prepared_clusters ||
       (!direct && o.policy != kAnsFromPrefix && o.policy != kDeferredAnsFromPrefix) ||
@@ -3124,7 +3127,8 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
     direct ? o.maximum_ans_clusters : kMaximumPrefixClusters, histograms);
   const size_t configs = balanced ? 1 : (direct
     ? kHighDensityAnsUintConfigs.size() : kAnsUintConfigs.size());
-  const size_t widths = direct ? 1 : kAnsAlphabetWidthCount;
+  const size_t widths = direct && o.policy != kRateOptimizedAns
+    ? 1 : kAnsAlphabetWidthCount;
   const auto overflow = [] {
     return Status::OutOfMemory("ANS optimization storage overflows");
   };
@@ -3179,7 +3183,7 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
     if (!status.ok()) return status;
     if (!work.Add(prefix.write_scratch) || !work.Add(writer)) return overflow();
   }
-  if (deferred || !direct || o.return_cost) {
+  if (deferred || !direct || o.policy == kRateOptimizedAns || o.return_cost) {
     // Four measured costs, best-cost copy/assignment and the singleton
     // MeasureAnsCode replacement. This also covers finalization's two costs.
     if (!work.AddVector<uint64_t>(o.sections, kFreshExact, 5) ||

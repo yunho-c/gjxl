@@ -89,7 +89,7 @@ bool EmitOracle() {
     FrameFixture f;
     if (!Create(c, &f))
       return false;
-    for (auto entropy : {kBalanced, kHighDensity, kMaximumCompression}) {
+    for (auto entropy : {kBalanced, kHighDensity, kRateOptimized, kMaximumCompression}) {
       for (auto order : {kFull, kEffort7Dct8Sampled}) {
         std::vector<uint8_t> bytes;
         if (!Oracle(f, {entropy, order}, &bytes))
@@ -195,7 +195,7 @@ bool PurePlans() {
                             {1ul << 24, 1}}) {
       for (auto prediction :
            {VarDctDcPrediction::kGradient, VarDctDcPrediction::kWeighted})
-        for (auto entropy : {kBalanced, kHighDensity, kMaximumCompression}) {
+        for (auto entropy : {kBalanced, kHighDensity, kRateOptimized, kMaximumCompression}) {
           for (auto order : {kFull, kEffort7Dct8Sampled}) {
             size_t previous = 0;
             for (size_t threads : {1ul, 2ul, 8ul, SIZE_MAX}) {
@@ -351,7 +351,7 @@ bool RealEncodes() {
       return false;
     for (auto prediction :
          {VarDctDcPrediction::kGradient, VarDctDcPrediction::kWeighted})
-      for (auto entropy : {kBalanced, kHighDensity, kMaximumCompression}) {
+      for (auto entropy : {kBalanced, kHighDensity, kRateOptimized, kMaximumCompression}) {
         for (auto order : {kFull, kEffort7Dct8Sampled}) {
           std::vector<uint8_t> oracle;
           if (!Oracle(f, {entropy, order, prediction}, &oracle))
@@ -381,7 +381,7 @@ bool FailureSweep() {
       1); // Physical hooks are thread-local.
   for (auto prediction :
        {VarDctDcPrediction::kGradient, VarDctDcPrediction::kWeighted})
-    for (auto entropy : {kBalanced, kHighDensity, kMaximumCompression}) {
+    for (auto entropy : {kBalanced, kHighDensity, kRateOptimized, kMaximumCompression}) {
       SerializerStorageOptions options{{entropy, kFull, prediction}, 1, true};
       SerializerStoragePlan plan;
       std::vector<uint8_t> oracle;

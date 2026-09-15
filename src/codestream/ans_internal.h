@@ -64,6 +64,8 @@ struct PreparedAnsEntropyCode {
 enum class DirectAnsEntropyMode {
   kBalanced,
   kHighDensity,
+  /// High-density partition/config search, comparing every alphabet width.
+  kRateOptimized,
 };
 
 inline constexpr size_t kAnsHistogramPrecisionShiftCount = 12;
@@ -79,7 +81,8 @@ DirectAnsHistogramPrecisionShifts(DirectAnsEntropyMode mode) noexcept;
 
 /// Builds one ANS model directly from the requested contexts. Unlike the
 /// maximum-compression path, this does not derive the partition from an
-/// optimized Prefix model or compete across alphabet widths exactly.
+/// optimized Prefix model. kRateOptimized compares all alphabet widths using
+/// exact model and ordered token costs, even when cost is null.
 [[nodiscard]] Status OptimizeDirectAnsEntropyCode(
   std::span<const EntropyTokenStreamView> section_tokens,
   const EntropyCodeOptions& options,

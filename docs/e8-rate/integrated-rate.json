@@ -1,0 +1,804 @@
+{
+  "quality_range": [
+    75,
+    85
+  ],
+  "image_count": 65,
+  "points": 390,
+  "exact_pixels": 390,
+  "selected_balanced": 0,
+  "summary": {
+    "baseline": {
+      "pchip": -1.0202306689699578,
+      "akima": -1.0188066125092388
+    },
+    "libjxl": {
+      "pchip": -0.8618532487767366,
+      "akima": -0.8585423259857029
+    }
+  },
+  "rates": [
+    {
+      "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "anchor": "baseline",
+      "pchip": -0.737889568444199,
+      "akima": -0.7332487283029286
+    },
+    {
+      "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "anchor": "libjxl",
+      "pchip": -3.5703784954271733,
+      "akima": -3.0546481347194465
+    },
+    {
+      "image_id": "clic2024_test/0c49a5cce349020bbba2f97ae41e90ba",
+      "anchor": "baseline",
+      "pchip": -1.0685070216395336,
+      "akima": -1.0697859501846934
+    },
+    {
+      "image_id": "clic2024_test/0c49a5cce349020bbba2f97ae41e90ba",
+      "anchor": "libjxl",
+      "pchip": 8.039176285426363,
+      "akima": 8.153336611347816
+    },
+    {
+      "image_id": "clic2024_test/100a02c269c5948392f283b2aa3bb4da",
+      "anchor": "baseline",
+      "pchip": -2.164615845257622,
+      "akima": -2.1337836954603655
+    },
+    {
+      "image_id": "clic2024_test/100a02c269c5948392f283b2aa3bb4da",
+      "anchor": "libjxl",
+      "pchip": -2.370179709336415,
+      "akima": -2.35553004805375
+    },
+    {
+      "image_id": "clic2024_test/100f17892cf7bb12beb12479641fcc4c",
+      "anchor": "baseline",
+      "pchip": -0.6162249729695907,
+      "akima": -0.614170333452267
+    },
+    {
+      "image_id": "clic2024_test/100f17892cf7bb12beb12479641fcc4c",
+      "anchor": "libjxl",
+      "pchip": -2.30273486167475,
+      "akima": -2.2593558669998157
+    },
+    {
+      "image_id": "clic2024_test/11f2b039b293758398b1a7a8afa64bb2",
+      "anchor": "baseline",
+      "pchip": -0.8401378359843203,
+      "akima": -0.8397389142265936
+    },
+    {
+      "image_id": "clic2024_test/11f2b039b293758398b1a7a8afa64bb2",
+      "anchor": "libjxl",
+      "pchip": -1.996208860934499,
+      "akima": -2.2527575964711404
+    },
+    {
+      "image_id": "clic2024_test/14ab4af28901fbeb1356b06d2d08ae06",
+      "anchor": "baseline",
+      "pchip": -0.9156070563455798,
+      "akima": -0.9141626555521914
+    },
+    {
+      "image_id": "clic2024_test/14ab4af28901fbeb1356b06d2d08ae06",
+      "anchor": "libjxl",
+      "pchip": -0.2828468505061683,
+      "akima": -0.18705030798658365
+    },
+    {
+      "image_id": "clic2024_test/1e2f9d41529197f10d32bfa68a1e0bcc",
+      "anchor": "baseline",
+      "pchip": -1.0473463810299823,
+      "akima": -1.0461875467105202
+    },
+    {
+      "image_id": "clic2024_test/1e2f9d41529197f10d32bfa68a1e0bcc",
+      "anchor": "libjxl",
+      "pchip": 1.5711427401167088,
+      "akima": 1.5490713269923766
+    },
+    {
+      "image_id": "clic2024_test/22ea12c903e41583b7c469cb86040157",
+      "anchor": "baseline",
+      "pchip": -0.8623476003800935,
+      "akima": -0.8613515328621041
+    },
+    {
+      "image_id": "clic2024_test/22ea12c903e41583b7c469cb86040157",
+      "anchor": "libjxl",
+      "pchip": -1.6009915371883443,
+      "akima": -1.5343092116377752
+    },
+    {
+      "image_id": "clic2024_test/28d24b9c83de066597ff96a68769884f",
+      "anchor": "baseline",
+      "pchip": -1.294492498203822,
+      "akima": -1.294107416281271
+    },
+    {
+      "image_id": "clic2024_test/28d24b9c83de066597ff96a68769884f",
+      "anchor": "libjxl",
+      "pchip": -2.1499897664631136,
+      "akima": -2.1472616186899196
+    },
+    {
+      "image_id": "clic2024_test/2a2420f929cd47122eae364a2bc27710",
+      "anchor": "baseline",
+      "pchip": -1.1963348336013095,
+      "akima": -1.1993747819199132
+    },
+    {
+      "image_id": "clic2024_test/2a2420f929cd47122eae364a2bc27710",
+      "anchor": "libjxl",
+      "pchip": -2.8731263675472434,
+      "akima": -2.9804283949142274
+    },
+    {
+      "image_id": "clic2024_test/2c1f84548ef99faec2b4f9bf12227c83",
+      "anchor": "baseline",
+      "pchip": -1.4416640186279566,
+      "akima": -1.4346546249927934
+    },
+    {
+      "image_id": "clic2024_test/2c1f84548ef99faec2b4f9bf12227c83",
+      "anchor": "libjxl",
+      "pchip": -2.015713596975696,
+      "akima": -1.944810765595208
+    },
+    {
+      "image_id": "clic2024_test/3140d643a1f57e80ff265507984d95a0",
+      "anchor": "baseline",
+      "pchip": -1.2681173827121508,
+      "akima": -1.2702453444314248
+    },
+    {
+      "image_id": "clic2024_test/3140d643a1f57e80ff265507984d95a0",
+      "anchor": "libjxl",
+      "pchip": -3.462815158491743,
+      "akima": -3.5528090816336704
+    },
+    {
+      "image_id": "clic2024_test/4a18abf66d65ad1a95ce455c8b6cd8de",
+      "anchor": "baseline",
+      "pchip": -0.7957221921368881,
+      "akima": -0.792572194414843
+    },
+    {
+      "image_id": "clic2024_test/4a18abf66d65ad1a95ce455c8b6cd8de",
+      "anchor": "libjxl",
+      "pchip": 0.9206142574599566,
+      "akima": 0.9060767321284237
+    },
+    {
+      "image_id": "clic2024_test/4cd6910a0b7b39365fda5df87618d091",
+      "anchor": "baseline",
+      "pchip": -1.0375307934392022,
+      "akima": -1.0461759856566362
+    },
+    {
+      "image_id": "clic2024_test/4cd6910a0b7b39365fda5df87618d091",
+      "anchor": "libjxl",
+      "pchip": -6.683993490128436,
+      "akima": -6.663427198381791
+    },
+    {
+      "image_id": "clic2024_test/5dbdb989cf026f7ab3dd7167d7fc0fe2",
+      "anchor": "baseline",
+      "pchip": -0.8993163538173384,
+      "akima": -0.8907561080042457
+    },
+    {
+      "image_id": "clic2024_test/5dbdb989cf026f7ab3dd7167d7fc0fe2",
+      "anchor": "libjxl",
+      "pchip": -0.020476640896039358,
+      "akima": -0.33152308702338973
+    },
+    {
+      "image_id": "clic2024_test/5e5ce43575fa67fdc0dd37146d7f479e",
+      "anchor": "baseline",
+      "pchip": -0.41094761814730285,
+      "akima": -0.40834951109262574
+    },
+    {
+      "image_id": "clic2024_test/5e5ce43575fa67fdc0dd37146d7f479e",
+      "anchor": "libjxl",
+      "pchip": 0.3829853296738792,
+      "akima": 0.31522100198559877
+    },
+    {
+      "image_id": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "anchor": "baseline",
+      "pchip": -1.4268982596782998,
+      "akima": -1.4478976140390132
+    },
+    {
+      "image_id": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "anchor": "libjxl",
+      "pchip": -4.646541606564156,
+      "akima": -4.437031934794588
+    },
+    {
+      "image_id": "clic2024_test/7e499613c3e376ea93afb3649719abeb",
+      "anchor": "baseline",
+      "pchip": -1.0997748479121585,
+      "akima": -1.097847724697059
+    },
+    {
+      "image_id": "clic2024_test/7e499613c3e376ea93afb3649719abeb",
+      "anchor": "libjxl",
+      "pchip": -2.2951417943074848,
+      "akima": -2.3973517237174424
+    },
+    {
+      "image_id": "clic2024_test/870516c65d81fb9267de6865964083a9",
+      "anchor": "baseline",
+      "pchip": -0.9831419925705555,
+      "akima": -0.9867864851318736
+    },
+    {
+      "image_id": "clic2024_test/870516c65d81fb9267de6865964083a9",
+      "anchor": "libjxl",
+      "pchip": 0.1464892560710483,
+      "akima": 0.12679592069184722
+    },
+    {
+      "image_id": "clic2024_test/8bb119b8ca17492392e1e3ea4b811b32",
+      "anchor": "baseline",
+      "pchip": -0.8781198631971165,
+      "akima": -0.8762388149747483
+    },
+    {
+      "image_id": "clic2024_test/8bb119b8ca17492392e1e3ea4b811b32",
+      "anchor": "libjxl",
+      "pchip": -1.0362785736499927,
+      "akima": -1.012649747585894
+    },
+    {
+      "image_id": "clic2024_test/9466a908d088d32ee73f04116c40e48c",
+      "anchor": "baseline",
+      "pchip": -1.1024536115836319,
+      "akima": -1.1004783705500187
+    },
+    {
+      "image_id": "clic2024_test/9466a908d088d32ee73f04116c40e48c",
+      "anchor": "libjxl",
+      "pchip": -3.560221580875994,
+      "akima": -3.5603321214251213
+    },
+    {
+      "image_id": "clic2024_test/a10ae819a2d24873079c93346200cab3",
+      "anchor": "baseline",
+      "pchip": -1.6816404998481662,
+      "akima": -1.680837080591994
+    },
+    {
+      "image_id": "clic2024_test/a10ae819a2d24873079c93346200cab3",
+      "anchor": "libjxl",
+      "pchip": -2.5800409614286735,
+      "akima": -2.6096812915659298
+    },
+    {
+      "image_id": "clic2024_test/a36713f1943dac6bc74dea50cadaee6f",
+      "anchor": "baseline",
+      "pchip": -0.8495692327906627,
+      "akima": -0.8502282776426531
+    },
+    {
+      "image_id": "clic2024_test/a36713f1943dac6bc74dea50cadaee6f",
+      "anchor": "libjxl",
+      "pchip": 5.825228827093939,
+      "akima": 5.733207312941746
+    },
+    {
+      "image_id": "clic2024_test/aed95e005df28e790519eefb6eb1e565",
+      "anchor": "baseline",
+      "pchip": -0.7680690240821599,
+      "akima": -0.7677142333934682
+    },
+    {
+      "image_id": "clic2024_test/aed95e005df28e790519eefb6eb1e565",
+      "anchor": "libjxl",
+      "pchip": -1.8660066151285861,
+      "akima": -1.941567265680128
+    },
+    {
+      "image_id": "clic2024_test/afe3676bbfcf7183d697ff7b5d5bd45b",
+      "anchor": "baseline",
+      "pchip": -1.9070711592340444,
+      "akima": -1.9059375714312325
+    },
+    {
+      "image_id": "clic2024_test/afe3676bbfcf7183d697ff7b5d5bd45b",
+      "anchor": "libjxl",
+      "pchip": -2.332499506418123,
+      "akima": -2.361117943682142
+    },
+    {
+      "image_id": "clic2024_test/b51d5fb537246482ef7a7ab63f093cab",
+      "anchor": "baseline",
+      "pchip": -1.0256337773140627,
+      "akima": -1.0260705402644277
+    },
+    {
+      "image_id": "clic2024_test/b51d5fb537246482ef7a7ab63f093cab",
+      "anchor": "libjxl",
+      "pchip": -4.11005304033105,
+      "akima": -4.064369927584019
+    },
+    {
+      "image_id": "clic2024_test/b939ac34faa94b5d0e753d570edc7048",
+      "anchor": "baseline",
+      "pchip": -1.1265086399588267,
+      "akima": -1.128213654944638
+    },
+    {
+      "image_id": "clic2024_test/b939ac34faa94b5d0e753d570edc7048",
+      "anchor": "libjxl",
+      "pchip": 6.053519028749426,
+      "akima": 6.295659242731736
+    },
+    {
+      "image_id": "clic2024_test/c80999cd5533e448167cd9b3ccfa2a37",
+      "anchor": "baseline",
+      "pchip": -1.2009297643312176,
+      "akima": -1.1996457234681421
+    },
+    {
+      "image_id": "clic2024_test/c80999cd5533e448167cd9b3ccfa2a37",
+      "anchor": "libjxl",
+      "pchip": -0.5133908717662203,
+      "akima": -0.4765366428147076
+    },
+    {
+      "image_id": "clic2024_test/d1a9be98d1936065967adac50a6fb750",
+      "anchor": "baseline",
+      "pchip": -1.3712032549404336,
+      "akima": -1.3705207642970534
+    },
+    {
+      "image_id": "clic2024_test/d1a9be98d1936065967adac50a6fb750",
+      "anchor": "libjxl",
+      "pchip": -2.05219971751617,
+      "akima": -2.1842098086520623
+    },
+    {
+      "image_id": "clic2024_test/d79d465ac77c36518e0f0d626bf97ec4",
+      "anchor": "baseline",
+      "pchip": -0.5263834000141203,
+      "akima": -0.5137310328224591
+    },
+    {
+      "image_id": "clic2024_test/d79d465ac77c36518e0f0d626bf97ec4",
+      "anchor": "libjxl",
+      "pchip": 1.742147750572223,
+      "akima": 1.674100268470128
+    },
+    {
+      "image_id": "clic2024_test/ddcd24d99f48eaa369207882a6f37831",
+      "anchor": "baseline",
+      "pchip": -1.029941574059474,
+      "akima": -1.0313374957379107
+    },
+    {
+      "image_id": "clic2024_test/ddcd24d99f48eaa369207882a6f37831",
+      "anchor": "libjxl",
+      "pchip": -0.21341527113754682,
+      "akima": -0.41436721082494843
+    },
+    {
+      "image_id": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "anchor": "baseline",
+      "pchip": -1.0735304313661649,
+      "akima": -1.0604610696076184
+    },
+    {
+      "image_id": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "anchor": "libjxl",
+      "pchip": -2.7073490866657837,
+      "akima": -2.5564555756542906
+    },
+    {
+      "image_id": "kodak/01",
+      "anchor": "baseline",
+      "pchip": -0.7049046365185269,
+      "akima": -0.7031411766928554
+    },
+    {
+      "image_id": "kodak/01",
+      "anchor": "libjxl",
+      "pchip": -0.2866768475109414,
+      "akima": -0.24898894405842764
+    },
+    {
+      "image_id": "kodak/02",
+      "anchor": "baseline",
+      "pchip": -0.7212026351510967,
+      "akima": -0.7242077768164008
+    },
+    {
+      "image_id": "kodak/02",
+      "anchor": "libjxl",
+      "pchip": 0.6587004250656953,
+      "akima": 0.5876694074454452
+    },
+    {
+      "image_id": "kodak/03",
+      "anchor": "baseline",
+      "pchip": -1.0080545509932255,
+      "akima": -1.0025127604683968
+    },
+    {
+      "image_id": "kodak/03",
+      "anchor": "libjxl",
+      "pchip": -0.732982178580714,
+      "akima": -0.7299907094769903
+    },
+    {
+      "image_id": "kodak/04",
+      "anchor": "baseline",
+      "pchip": -0.9462310714434202,
+      "akima": -0.9358384529858573
+    },
+    {
+      "image_id": "kodak/04",
+      "anchor": "libjxl",
+      "pchip": -1.3756390725858831,
+      "akima": -1.316943537058674
+    },
+    {
+      "image_id": "kodak/05",
+      "anchor": "baseline",
+      "pchip": -0.9498981538616782,
+      "akima": -0.948193515410904
+    },
+    {
+      "image_id": "kodak/05",
+      "anchor": "libjxl",
+      "pchip": 1.2174840233902826,
+      "akima": 1.1866161780508193
+    },
+    {
+      "image_id": "kodak/06",
+      "anchor": "baseline",
+      "pchip": -0.7286591646291217,
+      "akima": -0.7361762442498767
+    },
+    {
+      "image_id": "kodak/06",
+      "anchor": "libjxl",
+      "pchip": -1.262918022725459,
+      "akima": -1.3313566460990744
+    },
+    {
+      "image_id": "kodak/07",
+      "anchor": "baseline",
+      "pchip": -1.169917941664187,
+      "akima": -1.1672721730663165
+    },
+    {
+      "image_id": "kodak/07",
+      "anchor": "libjxl",
+      "pchip": -2.1641568053639033,
+      "akima": -2.1741270359967206
+    },
+    {
+      "image_id": "kodak/08",
+      "anchor": "baseline",
+      "pchip": -0.7696088298132915,
+      "akima": -0.7725342831663854
+    },
+    {
+      "image_id": "kodak/08",
+      "anchor": "libjxl",
+      "pchip": -0.2515309207794968,
+      "akima": -0.28711770469863424
+    },
+    {
+      "image_id": "kodak/09",
+      "anchor": "baseline",
+      "pchip": -0.8724485041273334,
+      "akima": -0.8693003999807476
+    },
+    {
+      "image_id": "kodak/09",
+      "anchor": "libjxl",
+      "pchip": -2.4450991985561497,
+      "akima": -2.57597074728623
+    },
+    {
+      "image_id": "kodak/10",
+      "anchor": "baseline",
+      "pchip": -0.9336950767593882,
+      "akima": -0.9331940131924052
+    },
+    {
+      "image_id": "kodak/10",
+      "anchor": "libjxl",
+      "pchip": 0.05121952512412286,
+      "akima": 0.0949521438427976
+    },
+    {
+      "image_id": "kodak/11",
+      "anchor": "baseline",
+      "pchip": -0.7728186893169572,
+      "akima": -0.7774666033162015
+    },
+    {
+      "image_id": "kodak/11",
+      "anchor": "libjxl",
+      "pchip": 0.6134745506604814,
+      "akima": 0.7313777369997331
+    },
+    {
+      "image_id": "kodak/12",
+      "anchor": "baseline",
+      "pchip": -0.8050837687085162,
+      "akima": -0.8059529642901593
+    },
+    {
+      "image_id": "kodak/12",
+      "anchor": "libjxl",
+      "pchip": -0.8371035827231001,
+      "akima": -0.8139390343134323
+    },
+    {
+      "image_id": "kodak/13",
+      "anchor": "baseline",
+      "pchip": -0.6242880040788433,
+      "akima": -0.626971388031182
+    },
+    {
+      "image_id": "kodak/13",
+      "anchor": "libjxl",
+      "pchip": -0.7368640341010849,
+      "akima": -0.6044230331138769
+    },
+    {
+      "image_id": "kodak/14",
+      "anchor": "baseline",
+      "pchip": -0.9051137965881538,
+      "akima": -0.9033018265630587
+    },
+    {
+      "image_id": "kodak/14",
+      "anchor": "libjxl",
+      "pchip": -1.0479364537190994,
+      "akima": -0.8789226163983911
+    },
+    {
+      "image_id": "kodak/15",
+      "anchor": "baseline",
+      "pchip": -0.9440826402516858,
+      "akima": -0.9434360557823886
+    },
+    {
+      "image_id": "kodak/15",
+      "anchor": "libjxl",
+      "pchip": -1.7229642654432653,
+      "akima": -1.468225936895136
+    },
+    {
+      "image_id": "kodak/16",
+      "anchor": "baseline",
+      "pchip": -0.8148727207226986,
+      "akima": -0.8230556896865922
+    },
+    {
+      "image_id": "kodak/16",
+      "anchor": "libjxl",
+      "pchip": -1.2677655580692944,
+      "akima": -1.1734851656099945
+    },
+    {
+      "image_id": "kodak/17",
+      "anchor": "baseline",
+      "pchip": -1.0050320210604184,
+      "akima": -0.9981649188752282
+    },
+    {
+      "image_id": "kodak/17",
+      "anchor": "libjxl",
+      "pchip": 0.043660974522063564,
+      "akima": 0.1257756794382653
+    },
+    {
+      "image_id": "kodak/18",
+      "anchor": "baseline",
+      "pchip": -0.8791383614537334,
+      "akima": -0.880483454003792
+    },
+    {
+      "image_id": "kodak/18",
+      "anchor": "libjxl",
+      "pchip": 1.6363528706463522,
+      "akima": 1.681768865397302
+    },
+    {
+      "image_id": "kodak/19",
+      "anchor": "baseline",
+      "pchip": -0.8559379466655473,
+      "akima": -0.8471261693439763
+    },
+    {
+      "image_id": "kodak/19",
+      "anchor": "libjxl",
+      "pchip": -1.870775506510372,
+      "akima": -2.02766394822904
+    },
+    {
+      "image_id": "kodak/20",
+      "anchor": "baseline",
+      "pchip": -0.7752894060166429,
+      "akima": -0.7696890104031783
+    },
+    {
+      "image_id": "kodak/20",
+      "anchor": "libjxl",
+      "pchip": -1.4562653978210252,
+      "akima": -1.308275239700466
+    },
+    {
+      "image_id": "kodak/21",
+      "anchor": "baseline",
+      "pchip": -0.6961575186329279,
+      "akima": -0.694580816255277
+    },
+    {
+      "image_id": "kodak/21",
+      "anchor": "libjxl",
+      "pchip": -2.1247306725192074,
+      "akima": -2.3084931316971256
+    },
+    {
+      "image_id": "kodak/22",
+      "anchor": "baseline",
+      "pchip": -0.8570951381778867,
+      "akima": -0.855610032831154
+    },
+    {
+      "image_id": "kodak/22",
+      "anchor": "libjxl",
+      "pchip": -0.8769720025321367,
+      "akima": -1.0331357693699792
+    },
+    {
+      "image_id": "kodak/23",
+      "anchor": "baseline",
+      "pchip": -1.2655839090550844,
+      "akima": -1.2668150421773496
+    },
+    {
+      "image_id": "kodak/23",
+      "anchor": "libjxl",
+      "pchip": -2.3046064389619447,
+      "akima": -2.3464476583533846
+    },
+    {
+      "image_id": "kodak/24",
+      "anchor": "baseline",
+      "pchip": -0.8155022696760375,
+      "akima": -0.8139119007093573
+    },
+    {
+      "image_id": "kodak/24",
+      "anchor": "libjxl",
+      "pchip": 0.7940470869061109,
+      "akima": 0.917721386149055
+    },
+    {
+      "image_id": "unsplash/alpine_lake/12mp",
+      "anchor": "baseline",
+      "pchip": -0.9663168936360496,
+      "akima": -0.9645892409201573
+    },
+    {
+      "image_id": "unsplash/alpine_lake/12mp",
+      "anchor": "libjxl",
+      "pchip": -1.3108447602889859,
+      "akima": -1.2718947753779222
+    },
+    {
+      "image_id": "unsplash/alpine_lake/24mp",
+      "anchor": "baseline",
+      "pchip": -1.0023077685254522,
+      "akima": -0.9993262096517587
+    },
+    {
+      "image_id": "unsplash/alpine_lake/24mp",
+      "anchor": "libjxl",
+      "pchip": -0.2777539751103639,
+      "akima": -0.404889748263734
+    },
+    {
+      "image_id": "unsplash/alpine_lake/48mp",
+      "anchor": "baseline",
+      "pchip": -1.0773175009576434,
+      "akima": -1.0745806110135065
+    },
+    {
+      "image_id": "unsplash/alpine_lake/48mp",
+      "anchor": "libjxl",
+      "pchip": -1.4672469693386012,
+      "akima": -1.5098065106688252
+    },
+    {
+      "image_id": "unsplash/campus_interior/12mp",
+      "anchor": "baseline",
+      "pchip": -0.9175081989048052,
+      "akima": -0.9172739535836218
+    },
+    {
+      "image_id": "unsplash/campus_interior/12mp",
+      "anchor": "libjxl",
+      "pchip": 1.5299405237347217,
+      "akima": 1.4716564092210522
+    },
+    {
+      "image_id": "unsplash/campus_interior/24mp",
+      "anchor": "baseline",
+      "pchip": -0.9398041838341907,
+      "akima": -0.9378321236710245
+    },
+    {
+      "image_id": "unsplash/campus_interior/24mp",
+      "anchor": "libjxl",
+      "pchip": -0.07161622977211425,
+      "akima": -0.0997163029529636
+    },
+    {
+      "image_id": "unsplash/campus_interior/48mp",
+      "anchor": "baseline",
+      "pchip": -1.0083429040264233,
+      "akima": -1.007829932301227
+    },
+    {
+      "image_id": "unsplash/campus_interior/48mp",
+      "anchor": "libjxl",
+      "pchip": -2.039895918949473,
+      "akima": -2.0744271755571173
+    },
+    {
+      "image_id": "unsplash/forest_stream/12mp",
+      "anchor": "baseline",
+      "pchip": -1.2835112593340583,
+      "akima": -1.2796407157299685
+    },
+    {
+      "image_id": "unsplash/forest_stream/12mp",
+      "anchor": "libjxl",
+      "pchip": -0.37508603495619847,
+      "akima": -0.33439315477747694
+    },
+    {
+      "image_id": "unsplash/forest_stream/24mp",
+      "anchor": "baseline",
+      "pchip": -1.6428592901828094,
+      "akima": -1.6413334102222101
+    },
+    {
+      "image_id": "unsplash/forest_stream/24mp",
+      "anchor": "libjxl",
+      "pchip": -0.9352933996003667,
+      "akima": -0.958437461522213
+    },
+    {
+      "image_id": "unsplash/forest_stream/48mp",
+      "anchor": "baseline",
+      "pchip": -2.0087374226614454,
+      "akima": -2.008475170568278
+    },
+    {
+      "image_id": "unsplash/forest_stream/48mp",
+      "anchor": "libjxl",
+      "pchip": -0.7613264178226763,
+      "akima": -0.7956029193410099
+    }
+  ],
+  "manifest_sha256": "56a55698c3f49dffe8e691d0ceede51bae088d1982521d3c858fff52b7776225",
+  "results_sha256": "cce7dcfaeb798fb29f781a27609cd156c8001301b20da1f07bb4dedce3c59f6c"
+}

@@ -208,10 +208,13 @@ Status Optimize(const EntropyOptimizationStorageOptions &o,
     return OptimizeEntropyCode(views, input_options, &out->code, cost);
   case kBalancedAns:
   case kHighDensityAns:
+  case kRateOptimizedAns:
     return OptimizeDirectAnsEntropyCode(
         views, input_options,
-        o.policy == kBalancedAns ? DirectAnsEntropyMode::kBalanced
-                                 : DirectAnsEntropyMode::kHighDensity,
+        o.policy == kBalancedAns
+          ? DirectAnsEntropyMode::kBalanced
+          : (o.policy == kRateOptimizedAns ? DirectAnsEntropyMode::kRateOptimized
+                                            : DirectAnsEntropyMode::kHighDensity),
         &out->code, cost);
   case kAnsFromPrefix:
     if (o.borrow_prepared_clusters)
@@ -346,19 +349,20 @@ bool OptimizationCase(size_t contexts, size_t n, size_t sections,
     population.maximum_symbol =
         std::max(population.maximum_symbol, token.symbol);
   }
-  for (size_t variant = 0; variant < 9; ++variant) {
+  for (size_t variant = 0; variant < 11; ++variant) {
     const std::array policies{kFastPrefix,     kPrefix,
                               kPrefix,         kBalancedAns,
                               kHighDensityAns, kAnsFromPrefix,
                               kAnsFromPrefix,  kDeferredAnsFromPrefix,
-                              kBalancedAns};
+                              kBalancedAns,    kRateOptimizedAns,
+                              kRateOptimizedAns};
     EntropyOptimizationStorageOptions o{
         .policy = policies[variant],
         .tokens = n,
         .contexts = contexts,
         .sections = sections,
         .initial_histograms = initial_map ? 17ul : 0ul,
-        .return_cost = pattern != 0 || variant == 2,
+        .return_cost = variant != 9 && (pattern != 0 || variant == 2),
         .retain_prepared_clusters = variant == 2,
         .borrow_prepared_clusters = variant == 6 || variant == 7,
         .maximum_ans_clusters = maximum_ans_clusters,
@@ -713,7 +717,7 @@ bool InvalidAndLarge() {
   ArmManagedHostAllocationFailureAfterForTest(0);
   bool good = true;
   for (auto policy : {kFastPrefix, kPrefix, kBalancedAns, kHighDensityAns,
-                      kAnsFromPrefix, kDeferredAnsFromPrefix}) {
+                      kRateOptimizedAns, kAnsFromPrefix, kDeferredAnsFromPrefix}) {
     good &= ComputeEntropyOptimizationStoragePlan(
                 {.policy = policy,
                  .tokens = size_t{1} << 32,
@@ -745,7 +749,7 @@ int main() {
         if (!OptimizationCase(contexts, pattern == 0 ? 0 : 4097,
                               pattern == 0 ? 0 : 5, pattern, initial))
           return EXIT_FAILURE;
-        cases += 8;
+        cases += 11;
       }
     }
   }

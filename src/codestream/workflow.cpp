@@ -89,30 +89,6 @@ void AccumulateCodestreamProfile(
   destination->dc_sample_count = source.dc_sample_count;
   destination->dc_leaf_count = source.dc_leaf_count;
   destination->dc_context_count = source.dc_context_count;
-  destination->validation_nanoseconds += source.validation_nanoseconds;
-  destination->dc_tokenization_nanoseconds +=
-    source.dc_tokenization_nanoseconds;
-  destination->ac_tokenization_nanoseconds +=
-    source.ac_tokenization_nanoseconds;
-  destination->block_context_map_work_nanoseconds +=
-    source.block_context_map_work_nanoseconds;
-  destination->coefficient_order_work_nanoseconds +=
-    source.coefficient_order_work_nanoseconds;
-  destination->coefficient_tokenization_work_nanoseconds +=
-    source.coefficient_tokenization_work_nanoseconds;
-  destination->coefficient_context_materialization_work_nanoseconds +=
-    source.coefficient_context_materialization_work_nanoseconds;
-  destination->coefficient_tokenization_pass_count +=
-    source.coefficient_tokenization_pass_count;
-  destination->coefficient_token_count += source.coefficient_token_count;
-  destination->coefficient_context_materialization_count +=
-    source.coefficient_context_materialization_count;
-  destination->coefficient_materialized_token_count +=
-    source.coefficient_materialized_token_count;
-  destination->entropy_optimization_nanoseconds +=
-    source.entropy_optimization_nanoseconds;
-  codestream_internal::AccumulateEntropyWorkProfile(
-    source.entropy_work, &destination->entropy_work);
   destination->entropy_model_bits += source.entropy_model_bits;
   destination->entropy_token_bits += source.entropy_token_bits;
   destination->dc_entropy_clusters += source.dc_entropy_clusters;
@@ -139,22 +115,10 @@ void AccumulateCodestreamProfile(
     source.selected_block_context_count;
   destination->selected_block_context_qf_threshold_count +=
     source.selected_block_context_qf_threshold_count;
-  destination->section_writing_nanoseconds +=
-    source.section_writing_nanoseconds;
-  codestream_internal::AccumulateSectionWritingWorkProfile(
-    source.section_writing_work, &destination->section_writing_work);
-  destination->assembly_nanoseconds += source.assembly_nanoseconds;
-  destination->assembly.candidate_selection_nanoseconds +=
-    source.assembly.candidate_selection_nanoseconds;
-  destination->assembly.section_size_nanoseconds +=
-    source.assembly.section_size_nanoseconds;
-  destination->assembly.frame_header_nanoseconds +=
-    source.assembly.frame_header_nanoseconds;
-  destination->assembly.toc_and_sections_nanoseconds +=
-    source.assembly.toc_and_sections_nanoseconds;
-  destination->assembly.output_copy_nanoseconds +=
-    source.assembly.output_copy_nanoseconds;
-  destination->total_nanoseconds += source.total_nanoseconds;
+  destination->balanced_candidate_bytes = source.balanced_candidate_bytes;
+  destination->rate_candidate_bytes = source.rate_candidate_bytes;
+  destination->selected_balanced_fallback = source.selected_balanced_fallback;
+  codestream_internal::AccumulateCodestreamWorkProfile(source, destination);
 }
 
 void AccumulateEncodingProfile(
@@ -1910,7 +1874,8 @@ VarDctEntropyBehavior ResolveEntropyBehavior(
       options.density_mode == VarDctDensityMode::kHighDensity) {
     return VarDctEntropyBehavior::kHighDensity;
   }
-  return VarDctEntropyBehavior::kBalanced;
+  return options.effort == 8 ? VarDctEntropyBehavior::kRateOptimized
+                             : VarDctEntropyBehavior::kBalanced;
 }
 
 VarDctCoefficientOrderBehavior ResolveCoefficientOrderBehavior(
