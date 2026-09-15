@@ -711,7 +711,7 @@ void MetalPreparedAqEvaluation::EncodeFrameSubmission(
     BindPlane(encoder, self.reconstruction_error_, 5);
     encoder->setBytes(&self.initial_cfl_params_,
                       sizeof(self.initial_cfl_params_), 6);
-    DispatchThreads1d(encoder, self.tile_extent_.width *
+    DispatchThreads1d(encoder, 4 * self.tile_extent_.width *
                                    self.tile_extent_.height);
   }
 
@@ -849,7 +849,7 @@ void MetalPreparedAqEvaluation::EncodeInitialQuantizationSubmission(
     encoder->setBytes(&self.initial_cfl_params_,
                       sizeof(self.initial_cfl_params_), 6);
     DispatchThreads1d(
-      encoder, self.tile_extent_.width * self.tile_extent_.height);
+      encoder, 4 * self.tile_extent_.width * self.tile_extent_.height);
   }
 
   if (self.uniform_initial_quant_ > 0.0f) {

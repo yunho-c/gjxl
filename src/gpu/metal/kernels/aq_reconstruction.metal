@@ -453,18 +453,15 @@ static char aq_quantize_initial_cfl(float value) {
   return char(clamp(round(value), -128.0f, 127.0f));
 }
 
-// The maximum-throughput encoder's initial CfL policy accumulates four CPU
-// SIMD lanes independently. One Metal thread owns a complete 64x64 tile and
-// preserves that order exactly; tiles remain independent and run in parallel.
-kernel void gjxl_aq_initial_cfl(
-  device const float* coding_x [[buffer(0)]],
-  device const float* coding_y [[buffer(1)]],
-  device const float* coding_b [[buffer(2)]],
-  device char* y_to_x [[buffer(3)]],
-  device char* y_to_b [[buffer(4)]],
-  device atomic_uint* error [[buffer(5)]],
-  constant AqInitialCflParams& params [[buffer(6)]],
-  uint tile_index [[thread_position_in_grid]]) {
+static void aq_initial_cfl_scalar(
+  device const float* coding_x,
+  device const float* coding_y,
+  device const float* coding_b,
+  device char* y_to_x,
+  device char* y_to_b,
+  device atomic_uint* error,
+  constant AqInitialCflParams& params,
+  uint tile_index) {
 
   const uint tile_count = params.tile_width * params.tile_height;
   if (tile_index >= tile_count) return;
@@ -530,6 +527,97 @@ kernel void gjxl_aq_initial_cfl(
     (linear_x[0] + linear_x[1]) + (linear_x[2] + linear_x[3]);
   const float linear_b_sum =
     (linear_b[0] + linear_b[1]) + (linear_b[2] + linear_b[3]);
+  const float denominator = quadratic_sum + sample_count * 5.0e-10f;
+  const uint color_index = tile_y * params.color_stride + tile_x;
+  y_to_x[color_index] = aq_quantize_initial_cfl(-linear_x_sum / denominator);
+  y_to_b[color_index] = aq_quantize_initial_cfl(-linear_b_sum / denominator);
+}
+
+static float aq_initial_cfl_sum4(float value, uint base) {
+  return (simd_shuffle(value, base) + simd_shuffle(value, base + 1u)) +
+    (simd_shuffle(value, base + 2u) + simd_shuffle(value, base + 3u));
+}
+
+// Each group of four threads retains the four original accumulation lanes.
+kernel void gjxl_aq_initial_cfl(
+  device const float* coding_x [[buffer(0)]],
+  device const float* coding_y [[buffer(1)]],
+  device const float* coding_b [[buffer(2)]],
+  device char* y_to_x [[buffer(3)]],
+  device char* y_to_b [[buffer(4)]],
+  device atomic_uint* error [[buffer(5)]],
+  constant AqInitialCflParams& params [[buffer(6)]],
+  uint index [[thread_position_in_grid]],
+  uint simd_lane [[thread_index_in_simdgroup]],
+  uint simd_width [[threads_per_simdgroup]]) {
+
+  const uint tile_index = index / 4u;
+  // The scalar path preserves support for execution widths that cannot keep
+  // each group of four accumulation lanes in one SIMD group.
+  if ((simd_width & 3u) != 0u) {
+    if ((index & 3u) == 0u) {
+      aq_initial_cfl_scalar(coding_x, coding_y, coding_b, y_to_x, y_to_b,
+                            error, params, tile_index);
+    }
+    return;
+  }
+  const uint lane = index & 3u;
+  const uint base = simd_lane & ~3u;
+  const uint tile_count = params.tile_width * params.tile_height;
+  if (tile_index >= tile_count) return;
+  const uint tile_x = tile_index % params.tile_width;
+  const uint tile_y = tile_index / params.tile_width;
+  const uint x_begin = tile_x * 64u;
+  const uint y_begin = tile_y * 64u;
+  const uint x_end = min(x_begin + 64u, params.width);
+  const uint y_end = min(y_begin + 64u, params.height);
+  const uint width = x_end - x_begin;
+  const uint count = width * (y_end - y_begin);
+  if (count == 0u) {
+    atomic_fetch_or_explicit(error, 1024u, memory_order_relaxed);
+    return;
+  }
+  float sum_y = 0.0f, sum_x = 0.0f, sum_b = 0.0f;
+  uint invalid = 0u;
+  for (uint y = y_begin; y < y_end; ++y) {
+    const uint row = y * params.coding_stride;
+    const uint first = (lane + 4u - (((y - y_begin) * width) & 3u)) & 3u;
+    for (uint x = x_begin + first; x < x_end; x += 4u) {
+      const float value_y = coding_y[row + x];
+      const float value_x = coding_x[row + x];
+      const float value_b = coding_b[row + x];
+      invalid |= uint(!isfinite(value_y) || !isfinite(value_x) || !isfinite(value_b));
+      sum_y += value_y;
+      sum_x += value_x;
+      sum_b += value_b;
+    }
+  }
+  invalid = simd_shuffle(invalid, base) | simd_shuffle(invalid, base + 1u) |
+    simd_shuffle(invalid, base + 2u) | simd_shuffle(invalid, base + 3u);
+  if (invalid != 0u) {
+    atomic_fetch_or_explicit(error, 1024u, memory_order_relaxed);
+    return;
+  }
+  const float sample_count = float(count);
+  const float mean_y = aq_initial_cfl_sum4(sum_y, base) / sample_count;
+  const float mean_x = aq_initial_cfl_sum4(sum_x, base) / sample_count;
+  const float mean_b = aq_initial_cfl_sum4(sum_b, base) / sample_count;
+  float quadratic = 0.0f, linear_x = 0.0f, linear_b = 0.0f;
+  for (uint y = y_begin; y < y_end; ++y) {
+    const uint row = y * params.coding_stride;
+    const uint first = (lane + 4u - (((y - y_begin) * width) & 3u)) & 3u;
+    for (uint x = x_begin + first; x < x_end; x += 4u) {
+      const float centered_y = coding_y[row + x] - mean_y;
+      const float a = centered_y * (1.0f / 84.0f);
+      quadratic = fma(a, a, quadratic);
+      linear_x = fma(a, -(coding_x[row + x] - mean_x), linear_x);
+      linear_b = fma(a, centered_y - (coding_b[row + x] - mean_b), linear_b);
+    }
+  }
+  const float quadratic_sum = aq_initial_cfl_sum4(quadratic, base);
+  const float linear_x_sum = aq_initial_cfl_sum4(linear_x, base);
+  const float linear_b_sum = aq_initial_cfl_sum4(linear_b, base);
+  if (lane != 0u) return;
   const float denominator = quadratic_sum + sample_count * 5.0e-10f;
   const uint color_index = tile_y * params.color_stride + tile_x;
   y_to_x[color_index] = aq_quantize_initial_cfl(-linear_x_sum / denominator);

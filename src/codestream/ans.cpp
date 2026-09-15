@@ -509,25 +509,33 @@ bool RebalanceHistogram(
           balance_decrease[log] = std::numeric_limits<int64_t>::max();
         }
       }
-      auto best_increase = std::max_element(
-        bins.begin(), bins.end(), [&](const EntropyDelta& left,
-                                      const EntropyDelta& right) {
-          return (increase_delta(left) >>
-                  allowed[left.count_index].step_log) <
-            (increase_delta(right) >>
-             allowed[right.count_index].step_log);
-        });
+      auto best_increase = bins.begin();
+      int64_t best_increase_scaled = increase_delta(*best_increase) >>
+        allowed[best_increase->count_index].step_log;
+      for (auto trial = bins.begin() + 1; trial != bins.end(); ++trial) {
+        const int64_t scaled = increase_delta(*trial) >>
+          allowed[trial->count_index].step_log;
+        // Strict comparison preserves the first equal candidate, as max_element.
+        if (best_increase_scaled < scaled) {
+          best_increase = trial;
+          best_increase_scaled = scaled;
+        }
+      }
       if (increase_delta(*best_increase) > 0) {
         rest -= int32_t{1} << allowed[best_increase->count_index--].step_log;
       } else {
-        auto best_decrease = std::min_element(
-          bins.begin(), bins.end(), [&](const EntropyDelta& left,
-                                        const EntropyDelta& right) {
-            return (decrease_delta(left) >>
-                    allowed[left.count_index + 1].step_log) <
-              (decrease_delta(right) >>
-               allowed[right.count_index + 1].step_log);
-          });
+        auto best_decrease = bins.begin();
+        int64_t best_decrease_scaled = decrease_delta(*best_decrease) >>
+          allowed[best_decrease->count_index + 1].step_log;
+        for (auto trial = bins.begin() + 1; trial != bins.end(); ++trial) {
+          const int64_t scaled = decrease_delta(*trial) >>
+            allowed[trial->count_index + 1].step_log;
+          // Keep the first minimum; only the best score is cached in this scan.
+          if (scaled < best_decrease_scaled) {
+            best_decrease = trial;
+            best_decrease_scaled = scaled;
+          }
+        }
         if (decrease_delta(*best_decrease) >= 0) {
           break;
         }
