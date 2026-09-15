@@ -259,6 +259,50 @@ struct PreparedVarDctRepresentation {
   std::array<Storage<SimpleAcGroupTokenTemplate>, 2> order_templates;
 };
 
+struct RepresentationPhaseTimes {
+  struct Span {
+    ProfileClock::time_point begin, end;
+  };
+  // Entropy optimization, section writing, then assembly.
+  std::array<Span, 3> phases;
+};
+
+void SetOverlappingPhaseTimes(
+  const std::array<RepresentationPhaseTimes, 2>& representations,
+  codestream_internal::VarDctCodestreamProfile* profile) {
+  std::array<ProfileClock::time_point, 12> boundaries;
+  size_t next = 0;
+  for (const auto& representation : representations) {
+    for (const auto& span : representation.phases) {
+      boundaries[next++] = span.begin;
+      boundaries[next++] = span.end;
+    }
+  }
+  std::sort(boundaries.begin(), boundaries.end());
+  std::array<uint64_t, 3> elapsed{};
+  for (size_t i = 1; i < boundaries.size(); ++i) {
+    if (boundaries[i] == boundaries[i - 1]) continue;
+    // Attribute overlapping intervals to entropy, then writing, then assembly.
+    // Worker-time counters still include both searches' complete work.
+    for (size_t phase = 0; phase < elapsed.size(); ++phase) {
+      const bool active = std::any_of(
+        representations.begin(), representations.end(), [&](const auto& r) {
+          const auto& span = r.phases[phase];
+          return span.begin <= boundaries[i - 1] && boundaries[i - 1] < span.end;
+        });
+      if (active) {
+        elapsed[phase] += static_cast<uint64_t>(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(
+            boundaries[i] - boundaries[i - 1]).count());
+        break;
+      }
+    }
+  }
+  profile->entropy_optimization_nanoseconds = elapsed[0];
+  profile->section_writing_nanoseconds = elapsed[1];
+  profile->assembly_nanoseconds = elapsed[2];
+}
+
 struct AnsSectionTask {
   size_t candidate_index = 0;
   size_t section_index = 0;
@@ -1183,10 +1227,12 @@ Status EncodePreparedVarDctRepresentation(
   const VarDctFrameView& frame,
   VarDctCodestreamOptions options,
   bool exhaustive_representation_search,
-  PreparedVarDctRepresentation& prepared,
+  const PreparedVarDctRepresentation& prepared,
+  std::span<AcEncodingCandidate> candidates,
   const codestream_internal::DcContextTreeLayout& dc_layout,
   codestream_internal::CodestreamBuffer* output,
-  codestream_internal::VarDctCodestreamProfile* profile) {
+  codestream_internal::VarDctCodestreamProfile* profile,
+  RepresentationPhaseTimes* phase_times = nullptr) {
 
   const auto total_begin = ProfileBegin(profile);
   auto candidate_profile = profile == nullptr
@@ -1198,7 +1244,6 @@ Status EncodePreparedVarDctRepresentation(
   const auto& block_context_maps = prepared.block_context_maps;
   const auto& custom_orders = prepared.custom_orders;
   const auto& order_tokens = prepared.order_tokens;
-  auto& candidates = prepared.candidates;
   const bool has_custom_orders = custom_orders.used_order_mask != 0;
   const size_t candidates_per_map =
     exhaustive_representation_search && has_custom_orders ? 2 : 1;
@@ -1388,6 +1433,8 @@ Status EncodePreparedVarDctRepresentation(
   ProfileEnd(
     profile, entropy_begin,
     &candidate_profile.entropy_optimization_nanoseconds);
+  if (phase_times != nullptr)
+    phase_times->phases[0] = {entropy_begin, ProfileClock::now()};
 
   uint64_t section_measurement_nanoseconds = 0;
   size_t selected_index = 0;
@@ -1596,6 +1643,8 @@ Status EncodePreparedVarDctRepresentation(
   }
   uint64_t selected_write_nanoseconds = 0;
   ProfileEnd(profile, selected_write_begin, &selected_write_nanoseconds);
+  if (phase_times != nullptr)
+    phase_times->phases[1] = {selected_write_begin, ProfileClock::now()};
   codestream_internal::AccumulateSectionWritingWorkProfile(
     selected_write_profile, &candidate_profile.section_writing_work);
   if (section_measurement_nanoseconds >
@@ -1626,6 +1675,8 @@ Status EncodePreparedVarDctRepresentation(
   selected.complete_size = candidate_output.size();
   uint64_t assembly_write_nanoseconds = 0;
   ProfileEnd(profile, assembly_begin, &assembly_write_nanoseconds);
+  if (phase_times != nullptr)
+    phase_times->phases[2] = {assembly_begin, ProfileClock::now()};
   if (candidate_profile.assembly.candidate_selection_nanoseconds >
       std::numeric_limits<uint64_t>::max() - assembly_write_nanoseconds) {
     return Status::Internal("Codestream assembly profile overflow");
@@ -2115,7 +2166,8 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
 
     if (!rate_optimized) {
       status = EncodePreparedVarDctRepresentation(
-        frame, options, exhaustive_representation_search, prepared, dc_layout,
+        frame, options, exhaustive_representation_search, prepared,
+        prepared.candidates, dc_layout,
         output, profile == nullptr ? nullptr : &candidate_profile);
       if (status.ok() && profile != nullptr) {
         candidate_profile.total_nanoseconds = ElapsedNanoseconds(total_begin);
@@ -2126,29 +2178,71 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
 
     codestream_internal::CodestreamBuffer balanced, expanded;
     auto balanced_profile = candidate_profile;
-    status = EncodePreparedVarDctRepresentation(
-      frame, options, false, prepared, dc_layout, &balanced,
-      profile == nullptr ? nullptr : &balanced_profile);
-    if (!status.ok()) return status;
-
-    // Release the balanced model and fixed-config populations before expanded
-    // optimization. Only its complete output and shared preparation survive;
-    // the expanded pass owns the same token backing as an ordinary invocation.
-    for (auto& candidate : prepared.candidates) {
-      candidate.ac_code = {};
-      candidate.ac_cost = {};
-      Storage<codestream_internal::PreparedFixedAnsCluster>().swap(
-        candidate.fixed_context_populations);
-    }
-    options.entropy_behavior = VarDctEntropyBehavior::kRateOptimized;
     codestream_internal::VarDctCodestreamProfile expanded_profile;
     expanded_profile.dc_sample_count = dc_samples;
     expanded_profile.dc_leaf_count = dc_layout.dc_leaf_count;
     expanded_profile.dc_context_count = dc_layout.context_count;
-    status = EncodePreparedVarDctRepresentation(
-      frame, options, false, prepared, dc_layout, &expanded,
-      profile == nullptr ? nullptr : &expanded_profile);
-    if (!status.ok()) return status;
+    auto expanded_options = options;
+    expanded_options.entropy_behavior = VarDctEntropyBehavior::kRateOptimized;
+    const size_t requested = thread_budget_internal::CpuThreadCount();
+    const size_t workers = requested == 0
+      ? std::min(kMaximumSectionWorkers,
+                 std::max<size_t>(1, std::thread::hardware_concurrency()))
+      : std::min(kMaximumSectionWorkers, requested);
+    // Nested configuration workers must share an admitted per-image CPU cap.
+    // Unadmitted direct calls and explicit nested calls keep their old schedule.
+    const bool overlap = workers > 1 && thread_budget_internal::HasCpuParticipation() &&
+      !thread_budget_internal::InExplicitParallelScope();
+    std::array<RepresentationPhaseTimes, 2> phase_times{};
+    if (overlap) {
+      // Own independent search results, but borrow the common immutable tokens.
+      // Keep their backing in prepared until both complete files are finished.
+      Storage<AcEncodingCandidate> expanded_candidates;
+      expanded_candidates.reserve(prepared.candidates.size());
+      for (const auto& candidate : prepared.candidates) {
+        expanded_candidates.push_back({
+          .block_context_candidate_index = candidate.block_context_candidate_index,
+          .block_context_map = candidate.block_context_map,
+          .custom_order = candidate.custom_order,
+          .streams = candidate.streams,
+        });
+      }
+      auto* tracker = thread_budget_internal::ParticipantTracker();
+      status = RunParallelSections(2, [&](size_t policy) {
+        // A single participant handles the cheaper fallback. The other policy
+        // may launch section/config workers within the remaining capacity.
+        // RunParallelSections propagates resource and CPU-domain participation;
+        // reset only the local nesting depth, with disjoint explicit ceilings.
+        thread_budget_internal::EncodeScope scope(
+          policy == 0 ? 1 : workers - 1, tracker);
+        return policy == 0
+          ? EncodePreparedVarDctRepresentation(
+              frame, options, false, prepared, prepared.candidates, dc_layout,
+              &balanced, profile == nullptr ? nullptr : &balanced_profile,
+              profile == nullptr ? nullptr : &phase_times[0])
+          : EncodePreparedVarDctRepresentation(
+              frame, expanded_options, false, prepared, expanded_candidates,
+              dc_layout, &expanded,
+              profile == nullptr ? nullptr : &expanded_profile,
+              profile == nullptr ? nullptr : &phase_times[1]);
+      });
+      if (!status.ok()) return status;
+    } else {
+      status = EncodePreparedVarDctRepresentation(
+        frame, options, false, prepared, prepared.candidates, dc_layout,
+        &balanced, profile == nullptr ? nullptr : &balanced_profile);
+      if (!status.ok()) return status;
+      for (auto& candidate : prepared.candidates) {
+        candidate.ac_code = {};
+        candidate.ac_cost = {};
+        Storage<codestream_internal::PreparedFixedAnsCluster>().swap(
+          candidate.fixed_context_populations);
+      }
+      status = EncodePreparedVarDctRepresentation(
+        frame, expanded_options, false, prepared, prepared.candidates, dc_layout,
+        &expanded, profile == nullptr ? nullptr : &expanded_profile);
+      if (!status.ok()) return status;
+    }
 
     // Compare complete files, including headers, padding and TOC. Equal sizes
     // keep balanced bytes; either search failing still preserves caller output.
@@ -2157,6 +2251,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
       auto selected = use_balanced ? balanced_profile : expanded_profile;
       codestream_internal::AccumulateCodestreamWorkProfile(
         use_balanced ? expanded_profile : balanced_profile, &selected);
+      if (overlap) SetOverlappingPhaseTimes(phase_times, &selected);
       selected.entropy_behavior = VarDctEntropyBehavior::kRateOptimized;
       selected.balanced_candidate_bytes = balanced.size();
       selected.rate_candidate_bytes = expanded.size();

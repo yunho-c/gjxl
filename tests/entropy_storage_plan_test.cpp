@@ -751,6 +751,7 @@ bool InvalidAndLarge() {
 int main() {
   if (!Empty(DefaultResourceBudget()) || !InvalidAndLarge() || !Aggregation() ||
       !FullAlphabetModels() || !RefinementQueue() ||
+      !OptimizationCase(3, size_t{1} << 16, 5, 1, false) ||
       !OptimizationCase(96, 96 * 256, 3, 4, false, false, 64) ||
       !OptimizationCase(2, 96, 3, 2, false, true) ||
       !OptimizationCase(7, 0, 3, 0, false))

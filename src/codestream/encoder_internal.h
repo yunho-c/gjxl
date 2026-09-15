@@ -110,6 +110,9 @@ struct VarDctCodestreamProfile {
   size_t coefficient_token_count = 0;
   size_t coefficient_context_materialization_count = 0;
   size_t coefficient_materialized_token_count = 0;
+  /// Elapsed phase time. When rate searches overlap, intervals belong to
+  /// entropy first, then section writing, then assembly, without double counting.
+  /// The separate work counters retain both searches' full worker durations.
   uint64_t entropy_optimization_nanoseconds = 0;
   EntropyWorkProfile entropy_work;
   uint64_t entropy_model_bits = 0;

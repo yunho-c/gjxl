@@ -7,6 +7,7 @@
 #include <array>
 #include <functional>
 #include <limits>
+#include <thread>
 
 #include "codec/vardct_frame.h"
 #include "codestream/ans_internal.h"
@@ -346,16 +347,24 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
       !work.Add(plan.output))
     return Overflow();
   if (behavior == VarDctEntropyBehavior::kRateOptimized) {
-    // Balanced runs first. Its published bytes survive the expanded search.
-    // Shared token/representation backing is already included in this pass;
-    // balanced models and fixed populations are released before expansion.
+    // Sum both complete envelopes for admitted parallel searches. Shared
+    // preparation is conservatively counted twice, covering the second set of
+    // candidate/map/stream views. Add the outer dispatcher explicitly. Direct
+    // calls without CPU admission also fit this conservative envelope.
+    // A single participant retains the sequential envelope.
     auto fallback_options = options;
     fallback_options.coding.entropy_behavior = VarDctEntropyBehavior::kBalanced;
     SerializerStoragePlan fallback;
     status = ComputeSerializerStoragePlan(frame_extent, fallback_options, &fallback);
     if (!status.ok()) return status;
-    if (!work.Add(fallback.output)) return Overflow();
-    work = Either(work, fallback.working);
+    if (workers > 1) {
+      if (!work.Add(fallback.working) ||
+          !work.AddVector<Status>(2, kFreshExact) ||
+          !work.AddVector<std::thread>(2, kFreshExact)) return Overflow();
+    } else {
+      if (!work.Add(fallback.output)) return Overflow();
+      work = Either(work, fallback.working);
+    }
     plan.output = Either(plan.output, fallback.output);
     plan.maximum_output_bytes =
       std::max(plan.maximum_output_bytes, fallback.maximum_output_bytes);
