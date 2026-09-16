@@ -389,9 +389,12 @@ explicit unqualified override. Operational errors after GPU work starts are
 returned atomically instead of retrying on CPU. The default density policy
 performs two AQ updates; the explicit high-density policy performs four on CPU,
 exact-coefficient Metal, or fully-resident Metal.
-Entropy search is resolved independently: efforts 1-8 use the balanced
-single-representation serializer, efforts 9-10 and `kHighDensity` use the
-effort-9-like high-density serializer, and
+Entropy search is resolved independently: efforts 1-7 use the balanced
+single-representation serializer. Efforts 8-10 use full HybridUint/alphabet
+search with balanced complete-codestream fallback; ordinary fully resident
+Metal encoding also shares eight-step nonlinear final chroma-from-luma at
+these efforts. Explicit `kHighDensity` uses the effort-9-like high-density
+serializer, and
 `VarDctCompressionMode::kMaximumCompression` explicitly restores the former
 exhaustive map/order/coder tournament. Direct serializer calls default to
 balanced behavior. See

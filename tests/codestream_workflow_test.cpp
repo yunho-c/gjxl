@@ -634,6 +634,7 @@ bool CheckEffortPolicy() {
     return false;
   }
 
+  std::vector<uint8_t> cpu_effort8_bytes;
   for (size_t index = 0; index < kCases.size(); ++index) {
     const EffortCase test = kCases[index];
     std::vector<uint8_t> bytes;
@@ -647,10 +648,8 @@ bool CheckEffortPolicy() {
         summary.score_history.size() != test.expected_score_count ||
         !summary.final_butteraugli_score_evaluated ||
         summary.entropy_behavior !=
-          (test.effort >= 9
-             ? gjxl::VarDctEntropyBehavior::kHighDensity
-             : (test.effort == 8 ? gjxl::VarDctEntropyBehavior::kRateOptimized
-                                 : gjxl::VarDctEntropyBehavior::kBalanced))) {
+          (test.effort >= 8 ? gjxl::VarDctEntropyBehavior::kRateOptimized
+                            : gjxl::VarDctEntropyBehavior::kBalanced)) {
       std::cerr << "Effort " << test.effort << " workflow failed: "
                 << status.message() << " history="
                 << summary.score_history.size() << '\n';
@@ -669,9 +668,15 @@ bool CheckEffortPolicy() {
       std::cerr << "Explicit effort 7 changed the default workflow\n";
       return false;
     }
+    if (test.effort == 8) cpu_effort8_bytes = bytes;
+    if (test.effort == 9 && bytes != cpu_effort8_bytes) {
+      std::cerr << "Effort 9 did not inherit the effort-8 CPU rate recipe\n";
+      return false;
+    }
   }
 
-  for (const int32_t effort : {1, 2, 3, 4, 5, 7, 10}) {
+  std::vector<uint8_t> metal_effort8_bytes;
+  for (const int32_t effort : {1, 2, 3, 4, 5, 7, 8, 9, 10}) {
     const size_t index = static_cast<size_t>(effort - 1);
     const size_t expected_score_count = effort <= 4
       ? 0
@@ -689,10 +694,20 @@ bool CheckEffortPolicy() {
         summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kMetal ||
         summary.metal_aq_mode !=
-          gjxl::GpuAdaptiveQuantizationMode::kFullyResident) {
+          gjxl::GpuAdaptiveQuantizationMode::kFullyResident ||
+        summary.entropy_behavior !=
+          (effort >= 8 ? gjxl::VarDctEntropyBehavior::kRateOptimized
+                       : gjxl::VarDctEntropyBehavior::kBalanced)) {
       std::cerr << "Metal effort " << effort << " workflow failed: "
                 << status.message() << " history="
                 << summary.score_history.size() << '\n';
+      return false;
+    }
+    // Effort 9 retains three AQ updates, so inheriting both rate policies
+    // currently makes its ordinary resident encoding identical to effort 8.
+    if (effort == 8) metal_effort8_bytes = bytes;
+    if (effort == 9 && bytes != metal_effort8_bytes) {
+      std::cerr << "Effort 9 did not inherit the effort-8 resident rate recipe\n";
       return false;
     }
     if (effort <= 4 &&
@@ -757,34 +772,37 @@ bool CheckCompressionPolicy() {
       return false;
     }
   }
-  if (ResolveEntropyBehavior({.effort = 8}) !=
-      VarDctEntropyBehavior::kRateOptimized) {
-    std::cerr << "Effort 8 did not resolve to rate-optimized entropy\n";
-    return false;
-  }
   using gjxl::codestream_internal::FinalColorCorrelationIterations;
   for (int32_t effort = 1; effort <= 10; ++effort) {
     if (FinalColorCorrelationIterations({.effort = effort}, true) !=
-          (effort == 8 ? 8u : 0u) ||
+          (effort >= 8 ? 8u : 0u) ||
         FinalColorCorrelationIterations({.effort = effort}, false) != 0)
       return false;
-  }
-  for (auto mode : {gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients,
-                    gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput})
-    if (FinalColorCorrelationIterations({.effort = 8, .metal_aq_mode = mode}, true) != 0)
-      return false;
-  if (FinalColorCorrelationIterations(
-        {.effort = 8, .density_mode = VarDctDensityMode::kHighDensity}, true) != 0 ||
-      FinalColorCorrelationIterations(
-        {.effort = 8, .compression_mode = VarDctCompressionMode::kMaximumCompression}, true) != 8 ||
-      FinalColorCorrelationIterations(
-        {.effort = 8, .rate_control_mode = gjxl::VarDctRateControlMode::kMaximumError}, true) != 0)
-    return false;
-  for (const int32_t effort : {9, 10}) {
-    if (ResolveEntropyBehavior({.effort = effort}) !=
-        VarDctEntropyBehavior::kHighDensity) {
+    if (effort >= 8 && ResolveEntropyBehavior({.effort = effort}) !=
+        VarDctEntropyBehavior::kRateOptimized) {
       std::cerr << "Effort " << effort
-                << " did not resolve to high-density entropy\n";
+                << " did not resolve to rate-optimized entropy\n";
+      return false;
+    }
+    for (auto mode : {gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients,
+                      gjxl::GpuAdaptiveQuantizationMode::kThroughput,
+                      gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput})
+      if (FinalColorCorrelationIterations({.effort = effort, .metal_aq_mode = mode}, true) != 0)
+        return false;
+    if (FinalColorCorrelationIterations(
+          {.effort = effort, .density_mode = VarDctDensityMode::kHighDensity}, true) != 0 ||
+        FinalColorCorrelationIterations(
+          {.effort = effort, .compression_mode = VarDctCompressionMode::kMaximumCompression}, true) !=
+            (effort >= 8 ? 8u : 0u) ||
+        FinalColorCorrelationIterations(
+          {.effort = effort, .rate_control_mode = gjxl::VarDctRateControlMode::kMaximumError}, true) != 0 ||
+        ResolveEntropyBehavior(
+          {.effort = effort, .density_mode = VarDctDensityMode::kHighDensity}) !=
+            VarDctEntropyBehavior::kHighDensity ||
+        ResolveEntropyBehavior(
+          {.effort = effort, .compression_mode = VarDctCompressionMode::kMaximumCompression}) !=
+            VarDctEntropyBehavior::kMaximumCompression) {
+      std::cerr << "Explicit effort " << effort << " override policy changed\n";
       return false;
     }
   }

@@ -1878,11 +1878,10 @@ VarDctEntropyBehavior ResolveEntropyBehavior(
       VarDctCompressionMode::kMaximumCompression) {
     return VarDctEntropyBehavior::kMaximumCompression;
   }
-  if (options.effort >= 9 ||
-      options.density_mode == VarDctDensityMode::kHighDensity) {
+  if (options.density_mode == VarDctDensityMode::kHighDensity) {
     return VarDctEntropyBehavior::kHighDensity;
   }
-  return options.effort == 8 ? VarDctEntropyBehavior::kRateOptimized
+  return options.effort >= 8 ? VarDctEntropyBehavior::kRateOptimized
                              : VarDctEntropyBehavior::kBalanced;
 }
 

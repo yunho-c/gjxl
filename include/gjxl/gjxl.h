@@ -129,8 +129,10 @@ typedef struct {
   uint32_t struct_size;
   float distance;
   /// Speed/refinement intent in [1, 10]. Efforts 1-4 use DCT8, disable Gaborish, and start with a uniform
-  /// quantization field (0 AQ updates at e1-3, 1 at e4);
+  /// quantization field with zero AQ updates;
   /// efforts 5-10 enable mixed-transform AC-strategy search.
+  /// Efforts 8-10 share the rate-optimized writer and, on ordinary fully
+  /// resident Metal, eight-step nonlinear final chroma-from-luma.
   int32_t effort;
   /// Selects the entropy/codestream search policy independently of effort.
   /// Callers using the previous struct size implicitly select AUTOMATIC.
