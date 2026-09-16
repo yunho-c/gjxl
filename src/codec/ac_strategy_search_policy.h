@@ -28,6 +28,15 @@ inline constexpr std::array kCandidateStages = {
   CandidateStage{AcStrategyType::kDct32x32, 1.48f, 2},
 };
 
+/// Shared by candidate generation, CPU placement and host/device admission.
+[[nodiscard]] constexpr auto CandidateStages(bool dense_dct32_search) noexcept {
+  auto stages = kCandidateStages;
+  if (dense_dct32_search) {
+    for (auto& stage : stages) stage.anchor_step = 1;
+  }
+  return stages;
+}
+
 [[nodiscard]] constexpr float CandidateEntropyMultiplier(
   AcStrategyType strategy) noexcept {
 
@@ -40,9 +49,9 @@ inline constexpr std::array kCandidateStages = {
 }
 
 [[nodiscard]] constexpr size_t CandidateAnchorStep(
-  AcStrategyType strategy) noexcept {
+  AcStrategyType strategy, bool dense_dct32_search = false) noexcept {
 
-  for (const CandidateStage& stage : kCandidateStages) {
+  for (const CandidateStage& stage : CandidateStages(dense_dct32_search)) {
     if (stage.strategy == strategy) {
       return stage.anchor_step;
     }

@@ -127,6 +127,7 @@ public:
 };
 
 struct Fixture {
+  bool dense = false;
   Extent2D pixels, blocks;
   size_t stride;
   std::array<std::vector<float>, 3> image;
@@ -176,7 +177,8 @@ struct Fixture {
   Status Run(size_t mode, Backend &backend, AcStrategyGrid *out,
              PreparedAcStrategySearch *prepared = nullptr,
              AcStrategyGpuSearchStats *stats = nullptr) const {
-    constexpr AcStrategySearchOptions options{.butteraugli_target = 1.2f};
+    const AcStrategySearchOptions options{
+      .butteraugli_target = 1.2f, .dense_dct32_search = dense};
     if (mode == 0)
       return FindAcStrategyGrid(Image(), Quant(), Mask(), cfl, options, out);
     if (mode == 3)
@@ -207,7 +209,8 @@ std::vector<uint8_t> Cells(const AcStrategyGrid &grid) {
     }
   return cells;
 }
-HostStorageBound Bound(Extent2D pixels, size_t mode, bool reuse = false) {
+HostStorageBound Bound(Extent2D pixels, size_t mode, bool reuse = false,
+                       bool dense = false) {
   SearchStoragePlan cpu;
   HostStoragePlan gpu;
   if (mode < 3) {
@@ -215,7 +218,7 @@ HostStorageBound Bound(Extent2D pixels, size_t mode, bool reuse = false) {
       std::abort();
     return cpu.working;
   }
-  if (!Ok(ComputeHostStoragePlan(pixels, mode >= 4, reuse, &gpu)))
+  if (!Ok(ComputeHostStoragePlan(pixels, mode >= 4, reuse, &gpu, dense)))
     std::abort();
   return gpu.working;
 }
@@ -296,7 +299,7 @@ bool PlanCases() {
   return Empty(budget);
 }
 
-bool FreshCases() {
+bool FreshCases(bool dense) {
   Backend backend;
   size_t runs = 0;
   for (Extent2D e : {Extent2D{8, 8},
@@ -315,12 +318,13 @@ bool FreshCases() {
     for (size_t variant : {size_t{0}, size_t{1}, size_t{5}}) {
       backend.variant = variant;
       Fixture fixture(backend, e, variant);
+      fixture.dense = dense;
       AcStrategyGrid reference, direct;
       if (!Ok(fixture.Run(1, backend, &reference)) ||
           !Ok(fixture.Run(0, backend, &direct)))
         return false;
       for (size_t mode = 0; mode < 6; ++mode) {
-        const auto bound = Bound(e, mode);
+        const auto bound = Bound(e, mode, false, dense);
         ResourceBudget budget(bound.peak_bytes);
         ResourceReservation job;
         AcStrategyGrid result;
@@ -360,7 +364,7 @@ bool FreshCases() {
 bool ReuseCases() {
   Backend first, second;
   const Extent2D maximum{136, 144};
-  const auto bound = Bound(maximum, 5, true);
+  const auto bound = Bound(maximum, 5, true, true);
   const size_t max_blocks = maximum.width / 8 * (maximum.height / 8);
   // Include the old, tracked output until the next grid publishes atomically.
   ResourceBudget budget(bound.peak_bytes + max_blocks);
@@ -385,6 +389,7 @@ bool ReuseCases() {
     Backend &backend = iteration < 9 ? first : second;
     backend.variant = ++iteration;
     Fixture fixture(backend, e, backend.variant);
+    fixture.dense = iteration % 3 != 0;
     AcStrategyGrid reference;
     if (!Ok(fixture.Run(1, backend, &reference)))
       return false;
@@ -413,12 +418,13 @@ bool ReuseCases() {
   return Empty(budget);
 }
 
-bool FailureCases() {
+bool FailureCases(bool dense) {
   Backend backend;
   Fixture fixture(backend, {64, 64}, 0);
+  fixture.dense = dense;
   size_t positions = 0;
   for (size_t mode = 0; mode < 6; ++mode) {
-    const auto bound = Bound(fixture.pixels, mode, true);
+    const auto bound = Bound(fixture.pixels, mode, true, dense);
     bool completed = false;
     for (size_t fail_after = 0; fail_after < 80; ++fail_after) {
       ResourceBudget budget(bound.peak_bytes);
@@ -601,7 +607,8 @@ bool LateFailures() {
 } // namespace
 
 int main() {
-  if (!PlanCases() || !FreshCases() || !ReuseCases() || !FailureCases() ||
+  if (!PlanCases() || !FreshCases(false) || !FreshCases(true) ||
+      !ReuseCases() || !FailureCases(false) || !FailureCases(true) ||
       !LateFailures() ||
       !Check(DefaultResourceBudget().snapshot().peak_backing_bytes == 0,
              "Host AC test escaped to default domain"))

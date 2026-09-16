@@ -21,7 +21,7 @@ bool Check(bool good, const char *message) {
   return good;
 }
 
-bool CheckGeometry(Extent2D coding, bool resident) {
+bool CheckGeometry(Extent2D coding, bool resident, bool dense) {
   // Frozen dd5cd54 policy dimensions and tile-by-tile capacity recipe. Keep
   // this independent of production stage constants and its separable count
   // formula. Strategy names are rows-by-columns, extents width-by-height.
@@ -30,7 +30,7 @@ bool CheckGeometry(Extent2D coding, bool resident) {
   const size_t bw = coding.width / 8, bh = coding.height / 8;
   const size_t tw = (bw + 7) / 8, th = (bh + 7) / 8;
   StoragePlan plan;
-  if (!Check(ComputeStoragePlan(coding, resident, &plan).ok(),
+  if (!Check(ComputeStoragePlan(coding, resident, &plan, nullptr, dense).ok(),
              "Valid AC geometry failed"))
     return false;
   if (!Check(plan.block_extent == Extent2D{bw, bh} &&
@@ -47,7 +47,7 @@ bool CheckGeometry(Extent2D coding, bool resident) {
   size_t device_bytes = resident ? 0 : coding.width * coding.height * 16;
   size_t packed = 0, rate = 0;
   for (size_t family = 0; family < covered.size(); ++family) {
-    const size_t step = family < 4 ? 1 : 2;
+    const size_t step = family < 4 || dense ? 1 : 2;
     size_t count = 0;
     for (size_t ty = 0; ty < th; ++ty) {
       const size_t height = std::min(size_t{8}, bh - ty * 8);
@@ -134,19 +134,21 @@ int main() {
   for (size_t by = 1; by <= 64; ++by) {
     for (size_t bx = 1; bx <= 64; ++bx) {
       for (bool resident : {false, true}) {
-        if (!CheckGeometry({bx * 8, by * 8}, resident))
-          return EXIT_FAILURE;
+        for (bool dense : {false, true})
+          if (!CheckGeometry({bx * 8, by * 8}, resident, dense))
+            return EXIT_FAILURE;
       }
     }
   }
   for (Extent2D coding :
        {Extent2D{1920, 1080}, {3840, 2160}, {256, 4096}, {8192, 8}}) {
     for (bool resident : {false, true})
-      if (!CheckGeometry(coding, resident))
-        return EXIT_FAILURE;
+      for (bool dense : {false, true})
+        if (!CheckGeometry(coding, resident, dense))
+          return EXIT_FAILURE;
   }
   if (!CheckFailuresAndNoBacking())
     return EXIT_FAILURE;
-  std::cout << "Frozen AC geometry/capacity cases: 8200\n";
+  std::cout << "Sparse/dense AC geometry/capacity cases: 16400\n";
   return EXIT_SUCCESS;
 }

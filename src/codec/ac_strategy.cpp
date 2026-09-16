@@ -271,6 +271,7 @@ struct SearchContext {
   ConstPlaneF32View quant_field;
   ConstPlaneF32View pixel_mask;
   float butteraugli_target;
+  bool dense_dct32_search;
   std::array<float, 3> cfl_factors;
   size_t tile_block_x;
   size_t tile_block_y;
@@ -742,15 +743,15 @@ Status SearchTile(SearchContext* context) {
     }
   }
 
-  constexpr size_t kDct32SearchStep =
+  const size_t dct32_search_step =
     ac_strategy_internal::CandidateAnchorStep(
-      AcStrategyType::kDct32x32);
+      AcStrategyType::kDct32x32, context->dense_dct32_search);
   for (size_t y = 0;
        y + 3 < context->tile_block_extent.height;
-       y += kDct32SearchStep) {
+       y += dct32_search_step) {
     for (size_t x = 0;
          x + 3 < context->tile_block_extent.width;
-         x += kDct32SearchStep) {
+         x += dct32_search_step) {
       if ((y | x) % 4 == 0) {
         continue;
       }
@@ -1069,6 +1070,7 @@ Status FindAcStrategyGridImpl(
           .quant_field = quant_field,
           .pixel_mask = pixel_mask,
           .butteraugli_target = options.butteraugli_target,
+          .dense_dct32_search = options.dense_dct32_search,
           .cfl_factors = color_correlation.AcFactors(tile_x, tile_y),
           .tile_block_x = block_x,
           .tile_block_y = block_y,

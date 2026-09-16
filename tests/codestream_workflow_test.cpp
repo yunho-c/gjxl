@@ -620,7 +620,7 @@ bool CheckEffortPolicy() {
     {6, 2},
     {7, 3},
     {8, 4},
-    {9, 4},
+    {9, 5},
     {10, 5},
   }};
   std::vector<uint8_t> default_bytes;
@@ -634,7 +634,6 @@ bool CheckEffortPolicy() {
     return false;
   }
 
-  std::vector<uint8_t> cpu_effort8_bytes;
   for (size_t index = 0; index < kCases.size(); ++index) {
     const EffortCase test = kCases[index];
     std::vector<uint8_t> bytes;
@@ -668,14 +667,8 @@ bool CheckEffortPolicy() {
       std::cerr << "Explicit effort 7 changed the default workflow\n";
       return false;
     }
-    if (test.effort == 8) cpu_effort8_bytes = bytes;
-    if (test.effort == 9 && bytes != cpu_effort8_bytes) {
-      std::cerr << "Effort 9 did not inherit the effort-8 CPU rate recipe\n";
-      return false;
-    }
   }
 
-  std::vector<uint8_t> metal_effort8_bytes;
   for (const int32_t effort : {1, 2, 3, 4, 5, 7, 8, 9, 10}) {
     const size_t index = static_cast<size_t>(effort - 1);
     const size_t expected_score_count = effort <= 4
@@ -701,13 +694,6 @@ bool CheckEffortPolicy() {
       std::cerr << "Metal effort " << effort << " workflow failed: "
                 << status.message() << " history="
                 << summary.score_history.size() << '\n';
-      return false;
-    }
-    // Effort 9 retains three AQ updates, so inheriting both rate policies
-    // currently makes its ordinary resident encoding identical to effort 8.
-    if (effort == 8) metal_effort8_bytes = bytes;
-    if (effort == 9 && bytes != metal_effort8_bytes) {
-      std::cerr << "Effort 9 did not inherit the effort-8 resident rate recipe\n";
       return false;
     }
     if (effort <= 4 &&
@@ -773,7 +759,19 @@ bool CheckCompressionPolicy() {
     }
   }
   using gjxl::codestream_internal::FinalColorCorrelationIterations;
+  using gjxl::codestream_internal::UseDenseDct32Search;
   for (int32_t effort = 1; effort <= 10; ++effort) {
+    if (UseDenseDct32Search({.effort = effort}) != (effort == 10) ||
+        UseDenseDct32Search(
+          {.effort = effort, .density_mode = VarDctDensityMode::kHighDensity}) ||
+        UseDenseDct32Search(
+          {.effort = effort, .rate_control_mode = gjxl::VarDctRateControlMode::kMaximumError}) ||
+        UseDenseDct32Search(
+          {.effort = effort, .compression_mode = VarDctCompressionMode::kMaximumCompression}) !=
+            (effort == 10)) {
+      std::cerr << "Dense DCT32 effort/override policy changed\n";
+      return false;
+    }
     if (FinalColorCorrelationIterations({.effort = effort}, true) !=
           (effort >= 8 ? 8u : 0u) ||
         FinalColorCorrelationIterations({.effort = effort}, false) != 0)

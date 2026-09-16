@@ -133,6 +133,8 @@ typedef struct {
   /// efforts 5-10 enable mixed-transform AC-strategy search.
   /// Efforts 8-10 share the rate-optimized writer and, on ordinary fully
   /// resident Metal, eight-step nonlinear final chroma-from-luma.
+  /// Effort 8 uses three AQ updates; efforts 9-10 use four. Ordinary effort 10
+  /// also searches the larger transform placements at every 8x8 base block.
   int32_t effort;
   /// Selects the entropy/codestream search policy independently of effort.
   /// Callers using the previous struct size implicitly select AUTOMATIC.

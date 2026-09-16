@@ -2079,6 +2079,8 @@ if(GJXL_BUILD_TESTS)
   )
   add_test(NAME quantization_pipeline_uniform
     COMMAND gjxl_quantization_pipeline_test --uniform)
+  add_test(NAME quantization_pipeline_search_policy
+    COMMAND gjxl_quantization_pipeline_test --search-policy)
 
   add_executable(gjxl_low_effort_strategy_policy_test
     tests/low_effort_strategy_policy_test.cpp)

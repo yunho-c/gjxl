@@ -217,10 +217,11 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
            .ok())
     return status;
   if (!fixed_dct8) {
-    status = ac_strategy_search_internal::ComputeStoragePlan(coding, true, &ac);
+    status = ac_strategy_search_internal::ComputeStoragePlan(
+      coding, true, &ac, nullptr, UseDenseDct32Search(e));
     if (!status.ok()) return status;
     status = ac_strategy_search_internal::ComputeHostStoragePlan(
-      coding, true, search, &ac_host);
+      coding, true, search, &ac_host, UseDenseDct32Search(e));
     if (!status.ok()) return status;
   }
   HostStorageBound common_device;

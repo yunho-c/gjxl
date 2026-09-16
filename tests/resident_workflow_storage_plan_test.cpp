@@ -513,6 +513,26 @@ bool CheckRuntime(GpuBackend &gpu) {
       return false;
     ++cases;
   }
+  // Dense e10 preparation must fit both one-shot throughput and repeated
+  // target-size attempts, including growth/reuse of the candidate buffers.
+  for (auto mode : {GpuAdaptiveQuantizationMode::kFullyResident,
+                    GpuAdaptiveQuantizationMode::kThroughput}) {
+    for (bool search : {false, true}) {
+      ResidentWorkflowStorageOptions o;
+      o.encoding.backend = VarDctBackendPreference::kMetal;
+      o.encoding.metal_aq_mode = mode;
+      o.encoding.effort = 10;
+      o.encoding.cpu_thread_count = 1;
+      if (search) {
+        o.encoding.rate_control_mode = VarDctRateControlMode::kTargetBytes;
+        o.encoding.target_bytes = 650;
+        o.encoding.target_size_maximum_attempts = 4;
+        o.encoding.target_size_tolerance = 0;
+      }
+      if (!RunCase(gpu, image.const_view(), o)) return false;
+      ++cases;
+    }
+  }
   for (size_t flags = 0; flags < 4; ++flags) {
     ResidentWorkflowStorageOptions o;
     o.encoding.backend = VarDctBackendPreference::kMetal;

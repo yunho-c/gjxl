@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "codec/ac_strategy.h"
+#include "codec/ac_strategy_search_internal.h"
 #include "codec/ac_strategy_search_policy.h"
 #include "codec/chroma_from_luma.h"
 #include "codec/dct.h"
@@ -161,7 +162,8 @@ bool CheckPinnedSmoothMap() {
   return true;
 }
 
-bool CheckCompleteNonOverlappingGrid(gjxl::Extent2D pixel_extent) {
+bool CheckCompleteNonOverlappingGrid(gjxl::Extent2D pixel_extent,
+                                     bool dense = false) {
   const SearchFixture fixture(pixel_extent);
   gjxl::ColorCorrelationMap color_map;
   gjxl::AcStrategyGrid grid;
@@ -172,7 +174,7 @@ bool CheckCompleteNonOverlappingGrid(gjxl::Extent2D pixel_extent) {
         fixture.QuantView(),
         fixture.PixelMaskView(),
         color_map,
-        {.butteraugli_target = 1.2f},
+        {.butteraugli_target = 1.2f, .dense_dct32_search = dense},
         &grid).ok() ||
       !grid.complete() ||
       grid.extent() != fixture.block_extent) {
@@ -277,12 +279,53 @@ bool CheckTiePolicy() {
   return true;
 }
 
+bool CheckDensePlacement() {
+  // A cheap 32x32 candidate at an odd anchor cannot be reached by sparse
+  // traversal. All other merges lose to DCT8, so the expected map is independent
+  // of image arithmetic and CPU/GPU floating-point differences.
+  using namespace gjxl;
+  SearchFixture fixture({64, 64});
+  ColorCorrelationMap cfl;
+  if (!ComputeInitialColorCorrelationMap(fixture.OpsinView(), &cfl).ok())
+    return false;
+  std::array<std::vector<float>, kAcStrategyCount> costs;
+  ac_strategy_internal::CandidateCostTableView table{.block_extent = {8, 8}};
+  for (size_t s = 0; s < costs.size(); ++s) {
+    costs[s].assign(64, s == size_t(AcStrategyType::kDct8) ? 10.0f : 10000.0f);
+    table.strategy_costs[s] = costs[s];
+  }
+  costs[size_t(AcStrategyType::kDct32x32)][1 * 8 + 1] = 1.0f;
+  for (bool dense : {false, true}) {
+    AcStrategyGrid grid;
+    const auto status = ac_strategy_internal::FindAcStrategyGridFromCandidateCosts(
+      fixture.OpsinView(), fixture.QuantView(), fixture.PixelMaskView(), cfl,
+      {.butteraugli_target = 1.2f, .dense_dct32_search = dense}, table, &grid);
+    if (!status.ok() || !grid.complete()) return false;
+    for (size_t y = 0; y < 8; ++y) {
+      for (size_t x = 0; x < 8; ++x) {
+        AcStrategyCell cell;
+        const bool large = dense && x >= 1 && x < 5 && y >= 1 && y < 5;
+        if (!grid.Get(x, y, &cell).ok() ||
+            cell.strategy != (large ? AcStrategyType::kDct32x32 : AcStrategyType::kDct8) ||
+            cell.is_anchor != (!large || (x == 1 && y == 1))) {
+          std::cerr << "Dense search did not select the isolated odd anchor\n";
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 }  // namespace
 
 int main() {
   if (!CheckPinnedSmoothMap() ||
       !CheckCompleteNonOverlappingGrid({40, 24}) ||
       !CheckCompleteNonOverlappingGrid({136, 72}) ||
+      !CheckCompleteNonOverlappingGrid({40, 24}, true) ||
+      !CheckCompleteNonOverlappingGrid({136, 72}, true) ||
+      !CheckDensePlacement() ||
       !CheckValidationAndAtomicCommit() ||
       !CheckTiePolicy()) {
     return EXIT_FAILURE;

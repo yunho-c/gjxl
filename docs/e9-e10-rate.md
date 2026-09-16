@@ -1,4 +1,4 @@
-# Extend effort-8 rate policies to efforts 9 and 10
+# Effort-9/10 candidate ladder
 
 Ordinary efforts 9 and 10 previously bypassed both effort-8 rate improvements:
 they selected the older high-density writer and retained fast linear final
@@ -27,7 +27,7 @@ direct curve comparisons, not differences between the aggregate table entries.
 input identity. The figures describe the unchanged baseline; no candidate
 corpus result is claimed.
 
-## Policy change
+## Current candidate policy
 
 - Automatic compression at ordinary efforts 8-10 selects `kRateOptimized`:
   full HybridUint/alphabet-width search with balanced complete-file fallback.
@@ -36,37 +36,76 @@ corpus result is claimed.
 - Explicit high-density mode retains its existing writer, four AQ updates,
   and frontend policy. Maximum compression retains its independent exhaustive
   writer override. Maximum-error mode keeps its existing final-CfL selection.
-- Efforts 8-9 retain three AQ updates; effort 10 retains four. No effort-1-8
+- Effort 8 retains three AQ updates; efforts 9-10 use four. No effort-1-8
   defaults change.
+- Ordinary effort 10 additionally searches the existing 16x32, 32x16 and 32x32
+  transform families at every 8x8 base-block anchor, instead of every two
+  blocks. This applies to CPU and Metal paths that perform AC search.
+  Maximum-throughput mode still bypasses AC search. High-density and
+  maximum-error overrides retain their existing search spacing; the independent
+  maximum-compression writer override does not change frontend selection.
 
-Efforts 8 and 9 now have the same ordinary encoding recipe. Their equivalence
-is intentional: a higher effort no longer selects the older rate path. A
-future distinct e9 recipe needs its own qualification. Effort 10's fourth AQ
-update can change pixels and does not guarantee smaller files at every
-measured quality or for every image.
+| Ordinary effort | AQ updates | DCT32-family anchor spacing | Writer / resident final CfL |
+| --- | ---: | ---: | --- |
+| 8 | 3 | 2 blocks | Rate optimized / 8 nonlinear steps |
+| 9 | 4 | 2 blocks | Same as e8 |
+| 10 | 4 | 1 block | Same as e8 |
+
+This adopts the four-update e9/e10 refinement and denser e10 placement from
+libjxl revision `e8ff09762481785938d8e4e01333ed3917571161`, without claiming
+algorithm/output parity. GJXL retains its qualified three-update e8 policy
+(libjxl uses two). Learned Modular trees, additional prediction presets,
+AC run-length coding, optimal-matching LZ77 and downsampling are outside this
+candidate. Extra AQ/placement search can change pixels and does not guarantee
+smaller files at matched quality for every image.
+
+The initial inheritance commit `d3ae3dd` gave e8/e9 the same recipe. This
+candidate deliberately distinguishes them with the fourth update.
 
 The existing CPU and resident storage planners call the same entropy resolver
 as the encoder, so e9/e10 reserve the rate-optimized writer's model, fallback,
 and concurrent-search storage. Nonlinear final CfL uses the existing bounded
-shader scratch and adds no image allocation. This extension inherits the
+shader scratch and adds no image allocation. Dense e10 placement uses one
+shared stage policy for CPU traversal, GPU candidate generation and both
+host/device storage plans. A full 64x64 tile has 320 staged candidates, versus
+258 previously; larger-family counts grow from 12/12/9 to 35/35/25. No
+transform crosses the tile boundary. Candidate buffers and transform scratch
+grow accordingly. Prepared searches rebuild candidates at each call, and
+reuse bounds must cover both the largest dimensions and densest policy used
+since reset. This extension inherits the
 rate-optimized writer's runtime and memory tradeoffs; the balanced fallback
 protects bytes for the same completed frame, not quality across frontend
 recipes.
 
-## Validation scope
+## Validation
 
-The workflow regression covers CPU efforts 1-10 and resident Metal e8/e9/e10,
-checks e8/e9 byte equality on its fixture, verifies e10 retains its fourth AQ
-update, and exercises explicit policy overrides across every effort. Existing
-storage-envelope tests cover CPU/resident e9/e10 admission and execution.
+The previous inheritance-only validation remains in
+[e9-e10-rate-validation.json](e9-e10-rate-validation.json), tied to its recorded
+source hashes. Candidate-ladder checks and exact commands are recorded in
+[e9-e10-ladder-validation.json](e9-e10-ladder-validation.json).
 
-A fresh Release build passed **all nine focused suites**: codestream workflow,
-codestream encoder, C API, Metal AQ reconstruction, entropy and serializer
-storage plans, and CPU/resident/whole-workflow storage plans. Benchmarks were
-disabled in the build. Source/binary identities, commands, and log hashes are
-retained in [validation](e9-e10-rate-validation.json).
+The Release build passed all **17 focused suites**. All **16 CPU/Metal e1-e8
+outputs** from the retained 80x72 synthetic fixture are byte-identical to
+`d3ae3dd`. System `djxl` 0.12.0 decoded all four e9/e10 CPU/Metal outputs to
+finite 80x72 RGB float pixels. These bounded fixtures verify compatibility and
+decodability, not corpus rate-quality. The reproducible fixture emitter is
+[e9-e10-ladder-fixtures.cpp](e9-e10-ladder-fixtures.cpp).
 
-No speed benchmark or new corpus sweep was run. A subsequent e9/e10 rate
-sweep, secondary-quality review, and matched-quality timing are needed before
-claiming measured improvements for the extended policy. This focused run does
-not claim a full-suite or decoder-conformance qualification.
+The focused regression scope covers:
+
+- AQ counts and writer/CfL/placement override policies at efforts 1-10.
+- A supplied-cost fixture whose winning 32x32 transform is at an odd anchor,
+  reachable only by dense search; complete coverage and color-tile boundaries.
+- CPU/Metal grid parity, partial tiles, all three Metal DCT implementations,
+  and sparse/dense/sparse transitions in prepared resident searches.
+- Candidate counts across 16,400 geometry/mode combinations, real host
+  allocation peaks, allocation failures, and prepared-state recovery/reuse.
+- Forwarding the search policy through quantization orchestration and bounded
+  CPU, resident Metal, exact-coefficient and throughput workflows.
+- Baseline/candidate byte comparisons for efforts 1-8 and external decoding
+  of bounded synthetic e9/e10 fixtures.
+
+No speed benchmark or new corpus sweep is part of this implementation.
+Matched-quality BD-rate, secondary-quality review and controlled timing remain
+necessary before claiming a rate/speed improvement or promoting this candidate
+as a qualified replacement. The focused checks do not claim a full-suite pass.

@@ -68,7 +68,9 @@ struct VarDctEncodingOptions {
   /// deterministic DCT8-only coefficient-order sampling. Efforts 8-10 use full
   /// HybridUint/alphabet search with balanced complete-codestream fallback.
   /// Ordinary resident Metal efforts 8-10 also use eight-step nonlinear final
-  /// chroma-from-luma; efforts 8-9 run three AQ updates and effort 10 runs four.
+  /// chroma-from-luma; effort 8 runs three AQ updates and efforts 9-10 run four.
+  /// Ordinary effort 10 also searches DCT32-family placements at every base
+  /// block; efforts 5-9 use two-block spacing for these larger families.
   /// In the ordinary policy, efforts 1-4 use DCT8, disable Gaborish, and
   /// start with a uniform quantization field and run zero AQ updates.
   /// Efforts 5-6 enable mixed-transform AC search and run one AQ update.

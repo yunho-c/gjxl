@@ -295,13 +295,19 @@ behavior:
 | 1-4 | 0 | Balanced |
 | 5-6 | 1 | Balanced |
 | 7 | 2 | Balanced default |
-| 8-9 | 3 | Rate optimized, with balanced whole-file fallback |
-| 10 | 4 | Rate optimized, with balanced whole-file fallback |
+| 8 | 3 | Rate optimized, with balanced whole-file fallback |
+| 9-10 | 4 | Rate optimized, with balanced whole-file fallback |
 
 Ordinary fully resident Metal efforts 8-10 also share eight-step nonlinear
 final chroma-from-luma. CPU and explicit exact/throughput frontend modes retain
-their established final color-correlation policy. Efforts 8 and 9 currently
-share the same ordinary encoding recipe; effort 10 adds the fourth AQ update.
+their established final color-correlation policy. Effort 9 adds the fourth AQ
+update. Ordinary effort 10 additionally searches 16x32, 32x16 and 32x32
+transform placements at every 8x8 base block, instead of every two blocks.
+This increases candidate work and its host/device scratch reservation while
+preserving the 64x64 color-tile boundary. Explicit high-density and
+maximum-error modes retain their established placement policy. See the
+[candidate ladder and validation](e9-e10-rate.md); higher effort does not
+guarantee better measured rate-quality on every image.
 
 The numbers communicate the same user intent as `cjxl`, not identical
 algorithms or identical output. In particular, effort 10 does not select the

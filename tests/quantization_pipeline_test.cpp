@@ -519,6 +519,43 @@ bool CheckInvalidOutputsAreRejected() {
   return true;
 }
 
+bool CheckSearchPolicyForwarding() {
+  class Search final : public gjxl::AcStrategySearchProvider {
+  public:
+    bool expected_dense = false;
+    size_t calls = 0;
+    gjxl::Status Find(gjxl::ConstImage3FView opsin,
+      gjxl::ConstPlaneF32View quant, gjxl::ConstPlaneF32View mask,
+      const gjxl::ColorCorrelationMap& cfl, gjxl::AcStrategySearchOptions options,
+      gjxl::AcStrategyGrid* out) override {
+      ++calls;
+      if (options.dense_dct32_search != expected_dense)
+        return gjxl::Status::Internal("Pipeline lost dense-search policy");
+      return gjxl::FindAcStrategyGrid(opsin, quant, mask, cfl, options, out);
+    }
+  } search;
+  constexpr gjxl::Extent2D extent{16, 16};
+  ImageStorage original(extent), padded(extent), opsin(extent);
+  FillImages(Fixture::kGradient, &original, &padded);
+  if (!gjxl::LinearRgbToOpsin(padded.ConstView(), 255.0f, opsin.View()).ok())
+    return false;
+  for (bool dense : {false, true}) {
+    search.expected_dense = dense;
+    search.calls = 0;
+    PipelineStorage output(extent, extent);
+    gjxl::CpuQuantizationPipelineOptions options;
+    options.adaptive_quantization.iterations = 0;
+    options.dense_dct32_search = dense;
+    const auto status = gjxl::RunQuantizationPipeline(
+      original.ConstView(), opsin.ConstView(), search, options, output.Output());
+    if (!status.ok() || search.calls != 1 || !CheckResult(output, 1, true)) {
+      std::cerr << "AC search policy forwarding failed: " << status.message() << '\n';
+      return false;
+    }
+  }
+  return true;
+}
+
 bool CheckGaborishDisabledPath() {
   constexpr gjxl::Extent2D kExtent{16, 16};
   ImageStorage original(kExtent);
@@ -625,10 +662,14 @@ bool CheckPreparedReuse() {
 }  // namespace
 
 int main(int argc, char** argv) {
+  if (argc == 2 && std::string_view(argv[1]) == "--search-policy") {
+    return CheckSearchPolicyForwarding() ? EXIT_SUCCESS : EXIT_FAILURE;
+  }
   if (argc == 2 && std::string_view(argv[1]) == "--uniform") {
     return CheckGaborishDisabledPath() ? EXIT_SUCCESS : EXIT_FAILURE;
   }
-  if (!RunFixture(Fixture::kGradient, "odd gradient", {21, 13},
+  if (!CheckSearchPolicyForwarding() ||
+      !RunFixture(Fixture::kGradient, "odd gradient", {21, 13},
                   {kGradientScores, kGradientQuant, kGradientRaw}) ||
       !RunFixture(Fixture::kTexture, "texture", {32, 24},
                   {kTextureScores, kTextureQuant, kTextureRaw}) ||
