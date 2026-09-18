@@ -32,14 +32,18 @@ fn build_native() {
 
     let source_dir = source_dir();
     validate_source(&source_dir);
-    println!(
-        "cargo:rerun-if-changed={}",
-        source_dir.join("CMakeLists.txt").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        source_dir.join("include/gjxl/gjxl.h").display()
-    );
+    // CMake tracks its own dependencies only after Cargo reruns this script.
+    // Watch native sources as well, so kernel/codec edits cannot reuse stale
+    // libraries. Exclude build/output trees to keep an unchanged build fresh.
+    for path in ["CMakeLists.txt", "cmake", "include", "src"] {
+        println!("cargo:rerun-if-changed={}", source_dir.join(path).display());
+    }
+    if enable_metal {
+        println!(
+            "cargo:rerun-if-changed={}",
+            source_dir.join("third_party/metal-cpp").display()
+        );
+    }
 
     let mut native = cmake::Config::new(&source_dir);
     native

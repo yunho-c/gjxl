@@ -374,6 +374,21 @@ an intermediate build appear complete.
   reproduce in this follow-up. These are single-device photographic controls. See
   [the arithmetic record](cuda-exact-arithmetic-integration.md) for details.
 
+- The production exact-arithmetic build also passes the refreshed 150-case
+  public decoder matrix: three sources, all ten efforts, CPU exact and all
+  four CUDA modes. All streams decode to finite pixels with the expected
+  dimensions; all 30 CPU/exact-CUDA pairs have identical stream hashes.
+  Evidence is retained in `build/integration-evidence/public-decoder-matrix-ordered/`.
+- A native-only edit could previously leave Rust tests linked against stale
+  native libraries because Cargo watched only the root CMake file and public
+  C header. The regression was reproduced before adding watches for native
+  sources, headers, CMake helpers and enabled Metal headers. A real incremental
+  check now touches sources, verifies regenerated C++/CUDA objects (and the
+  Metal shader on macOS), and restores source timestamps without changing
+  content. The Windows CUDA check passes for both native objects; all 12 CUDA
+  Rust tests and clippy with warnings denied pass. CI runs this check on every
+  native Rust platform and in the explicit CUDA qualification workflow.
+
 ## Outstanding integration risks
 
 - Extend production exact-mode qualification beyond the current device;

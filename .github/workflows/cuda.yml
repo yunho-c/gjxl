@@ -68,6 +68,9 @@ jobs:
       - name: Test CUDA Rust bindings
         working-directory: rust
         run: cargo test --workspace --features cuda
+      - name: Check CUDA Rust incremental rebuilds
+        working-directory: rust
+        run: python check_native_rebuild.py --features cuda
       - name: Lint CUDA Rust bindings
         working-directory: rust
         run: cargo clippy --workspace --all-targets --features cuda -- -D warnings

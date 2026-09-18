@@ -58,5 +58,8 @@ jobs:
       - name: Test workspace
         run: cargo test --workspace
 
+      - name: Check native incremental rebuilds
+        run: python check_native_rebuild.py
+
       - name: Lint workspace
         run: cargo clippy --workspace --all-targets -- -D warnings
