@@ -9,7 +9,7 @@
 
 namespace gjxl::codestream_internal {
 
-enum class WorkflowStorageRoute { kCpu, kMetal, kAutomaticExactSearch };
+enum class WorkflowStorageRoute { kCpu, kMetal, kAutomaticExactSearch, kCuda };
 enum class WorkflowStorageAdapter { kBorrowedLinearRgb, kPackedSrgbC };
 
 struct WorkflowStorageOptions {
@@ -35,13 +35,17 @@ struct WorkflowStoragePlan {
   // One production backend's idle pools: resident input, AQ persistent, AQ
   // staging, Butteraugli, completed frame. Already included in backend_working.
   std::array<size_t, 5> idle_pool_capacity{};
+  // CUDA can retain exact-size backings from several image shapes. Sum this
+  // inventory across batch requests rather than taking a per-pool maximum.
+  size_t cuda_idle_capacity = 0;
   bool operator==(const WorkflowStoragePlan &) const = default;
 };
 
 /// Compose the existing policy recipe and outer adapter. Options and caller
 /// buffers must first pass normal entry-point validation. route records actual
 /// selection: kCpu requires proof every attempt stays on CPU; kMetal requires
-/// a selected Metal backend; kAutomaticExactSearch covers both possibilities.
+/// a selected Metal backend; kCuda requires a selected CUDA backend;
+/// kAutomaticExactSearch covers CPU/Metal selection across search attempts.
 /// This function never initializes a backend or changes its selection policy.
 /// Packed C conversion includes three source F32 planes and the final
 /// byte-array copy while the internal codestream remains owned; it has no
@@ -93,6 +97,7 @@ private:
   size_t maximum_working_ = 0;
   HostStorageBound retained_;
   decltype(WorkflowStoragePlan::idle_pool_capacity) idle_{};
+  size_t cuda_idle_capacity_ = 0;
 };
 
 } // namespace gjxl::codestream_internal

@@ -508,12 +508,25 @@ bool CheckFrameProcessLimitAndTeardown() {
 } // namespace
 
 int main() {
-  return CheckAggregateBackendLimit() && CheckAggregateProcessLimit() &&
-                 CheckDomainEviction() && CheckActiveReturn() &&
-                 CheckOversizedButteraugli() && CheckRegistryLifetime() &&
-                 CheckFrameCache() && CheckFrameDomains() &&
-                 CheckFrameQueuedAdmission() && CheckFrameProcessLimitAndTeardown() &&
-                 Check(Access::ProcessBytes() == 0, "Cache test leaked process allowance")
-             ? EXIT_SUCCESS
-             : EXIT_FAILURE;
+  struct Case { const char* name; bool (*run)(); };
+  for (const auto& test : {
+         Case{"aggregate backend", CheckAggregateBackendLimit},
+         Case{"aggregate process", CheckAggregateProcessLimit},
+         Case{"domain eviction", CheckDomainEviction},
+         Case{"active return", CheckActiveReturn},
+         Case{"oversized Butteraugli", CheckOversizedButteraugli},
+         Case{"registry lifetime", CheckRegistryLifetime},
+         Case{"frame cache", CheckFrameCache},
+         Case{"frame domains", CheckFrameDomains},
+         Case{"frame queued admission", CheckFrameQueuedAdmission},
+         Case{"frame process limit/teardown", CheckFrameProcessLimitAndTeardown}}) {
+    std::cout << "Begin " << test.name << std::endl;
+    const auto start = std::chrono::steady_clock::now();
+    if (!test.run()) return EXIT_FAILURE;
+    std::cout << "Pass " << test.name << " ("
+              << std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count()
+              << " s)" << std::endl;
+  }
+  return Check(Access::ProcessBytes() == 0, "Cache test leaked process allowance")
+    ? EXIT_SUCCESS : EXIT_FAILURE;
 }

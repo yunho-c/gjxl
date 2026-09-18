@@ -1,0 +1,144 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Yunho Cho
+
+#pragma once
+
+#include <cuda_runtime_api.h>
+
+#include <array>
+#include <cstdint>
+
+namespace gjxl::cuda_internal {
+
+struct CudaAqAnchor {
+  uint32_t x = 0;
+  uint32_t y = 0;
+};
+
+struct CudaAqExactBatch {
+  uint32_t anchor_offset = 0;
+  uint32_t anchor_count = 0;
+  uint32_t coefficient_offset = 0;
+  uint32_t coefficient_count = 0;
+  uint32_t pixel_width = 0;
+  uint32_t pixel_height = 0;
+  uint32_t covered_width = 0;
+  uint32_t covered_height = 0;
+};
+
+struct CudaAqGaborishParams {
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t input_stride = 0;
+  uint32_t output_stride = 0;
+  float center_weight[3]{};
+  float axis_weight[3]{};
+  float diagonal_weight[3]{};
+};
+
+struct CudaAqEpfParams {
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t input_stride = 0;
+  uint32_t output_stride = 0;
+  uint32_t inverse_sigma_stride = 0;
+  uint32_t pass = 0;
+  float sigma_scale = 0.0f;
+  float border_sad_multiplier = 0.0f;
+  float channel_scale[3]{};
+};
+
+struct CudaAqColorParams {
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t input_stride = 0;
+  uint32_t output_stride = 0;
+  float scale = 1.0f;
+};
+
+struct CudaLinearRgbToOpsinParams {
+  uint32_t source_width = 0;
+  uint32_t source_height = 0;
+  uint32_t source_stride = 0;
+  uint32_t padded_width = 0;
+  uint32_t padded_height = 0;
+  uint32_t output_stride = 0;
+  float intensity_target = 255.0f;
+  uint32_t compute_matrix_scale_stats = 0;
+};
+
+[[nodiscard]] cudaError_t LaunchCudaAqScatterReconstruction(
+    const CudaAqAnchor* anchors, const float* inverse,
+    std::array<float*, 3> reconstructed, uint32_t coding_stride,
+    CudaAqExactBatch batch, cudaStream_t stream);
+
+// Fused resident transforms. The caller validates nonoverlapping anchor
+// rectangles, plane extents/strides and coefficient ranges. Coefficients use
+// batch channel-major order and native DCT layout; image and coefficient
+// storage must not alias. Empty supported batches are no-ops.
+[[nodiscard]] cudaError_t LaunchCudaAqForwardDct(
+    std::array<const float*, 3> coding, const CudaAqAnchor* anchors,
+    float* coefficients, uint32_t coding_stride, CudaAqExactBatch batch,
+    cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaAqInverseDct(
+    const float* coefficients, const CudaAqAnchor* anchors,
+    std::array<float*, 3> reconstructed, uint32_t coding_stride,
+    CudaAqExactBatch batch, cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaAqGaborish(
+    std::array<const float*, 3> input, std::array<float*, 3> output,
+    unsigned int* error, CudaAqGaborishParams params, cudaStream_t stream);
+
+// Gaborish followed by EPF pass 1, retaining filtered XYB without a global
+// Gaborish intermediate. Input, sigma and output storage must not alias; the
+// caller validates allocation sizes. Gaborish output_stride and EPF
+// input_stride are unused. Matching empty extents are no-ops for pass 1.
+[[nodiscard]] cudaError_t LaunchCudaAqGaborishEpf(
+    std::array<const float*, 3> input, const float* inverse_sigma,
+    std::array<float*, 3> output, unsigned int* error,
+    CudaAqGaborishParams gaborish, CudaAqEpfParams epf, cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaAqEpf(std::array<const float*, 3> input,
+                                          const float* inverse_sigma,
+                                          std::array<float*, 3> output,
+                                          unsigned int* error,
+                                          CudaAqEpfParams params,
+                                          cudaStream_t stream);
+
+// Final EPF pass (1 or 2) followed by linear RGB conversion, without an XYB
+// intermediate. Input, sigma and RGB storage must not alias. The caller
+// validates allocation sizes. EPF output_stride and color input_stride are
+// unused; matching empty extents are no-ops for supported passes.
+[[nodiscard]] cudaError_t LaunchCudaAqEpfToLinear(
+    std::array<const float*, 3> input, const float* inverse_sigma,
+    std::array<float*, 3> output, unsigned int* error,
+    CudaAqEpfParams epf, CudaAqColorParams color, cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaAqOpsinToLinear(
+    std::array<const float*, 3> input, std::array<float*, 3> output,
+    unsigned int* error, CudaAqColorParams params, cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaLinearRgbToOpsin(
+  std::array<const float*, 3> input,
+  std::array<float*, 3> output,
+  unsigned int* matrix_scale_stats,
+  unsigned int* error,
+  CudaLinearRgbToOpsinParams params,
+  cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaAqReduceButteraugli(
+    const float* distance_map, uint32_t distance_stride,
+    const CudaAqAnchor* anchors, float* block_distance, uint32_t block_stride,
+    unsigned int* error, uint32_t source_width, uint32_t source_height,
+    CudaAqExactBatch batch, cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaAqReduceMaximumError(
+    std::array<const float*, 3> reference,
+    std::array<const float*, 3> reconstructed, uint32_t reference_stride,
+    uint32_t reconstruction_stride, const CudaAqAnchor* anchors,
+    float* block_error, uint32_t block_stride, float* transform_channel_maximum,
+    unsigned int* error, uint32_t source_width, uint32_t source_height,
+    std::array<float, 3> limits, CudaAqExactBatch batch, cudaStream_t stream);
+
+}  // namespace gjxl::cuda_internal

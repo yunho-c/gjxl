@@ -26,6 +26,7 @@ namespace {
 using namespace gjxl;
 using namespace gjxl::codestream_internal;
 using namespace gjxl::resource_budget_internal;
+bool cuda_backend = false;
 bool Check(bool good, const char *message) {
   if (!good)
     std::cerr << message << '\n';
@@ -66,11 +67,11 @@ VarDctEncodingOptions Options(size_t mode = 0) {
   o.effort = 1;
   o.cpu_thread_count = 1;
   if (mode == 2 || mode == 8 || mode == 9)
-    o.metal_aq_mode = GpuAdaptiveQuantizationMode::kExactCoefficients;
+    o.gpu_aq_mode = GpuAdaptiveQuantizationMode::kExactCoefficients;
   if (mode == 3)
-    o.metal_aq_mode = GpuAdaptiveQuantizationMode::kThroughput;
+    o.gpu_aq_mode = GpuAdaptiveQuantizationMode::kThroughput;
   if (mode == 4)
-    o.metal_aq_mode = GpuAdaptiveQuantizationMode::kMaximumThroughput;
+    o.gpu_aq_mode = GpuAdaptiveQuantizationMode::kMaximumThroughput;
   if (mode == 5 || mode == 6) {
     o.rate_control_mode = VarDctRateControlMode::kMaximumError;
     o.maximum_error = {0.05f, 0.05f, 0.05f};
@@ -83,6 +84,8 @@ VarDctEncodingOptions Options(size_t mode = 0) {
   }
   if (mode == 9)
     o.backend = VarDctBackendPreference::kAutomatic;
+  if (cuda_backend && (o.backend == VarDctBackendPreference::kMetal || mode == 9))
+    o.backend = VarDctBackendPreference::kCuda;
   return o;
 }
 bool Plan(const Image3FBuffer &image, const VarDctEncodingOptions &o, WorkflowStoragePlan *p) {
@@ -584,7 +587,8 @@ bool CheckMixedApiDomain(bool cpu_only = false) {
                    gjxl_encoder_options_init(&eo, sizeof(eo)) == GJXL_OK,
                "Mixed API options failed"))
       return false;
-    co.backend = mode == 0 ? GJXL_BACKEND_CPU : GJXL_BACKEND_METAL;
+    co.backend = mode == 0 ? GJXL_BACKEND_CPU
+                          : cuda_backend ? GJXL_BACKEND_CUDA : GJXL_BACKEND_METAL;
     co.num_cpu_threads = 1;
     co.execution_domain = c_domain.get();
     eo.effort = 1;
@@ -621,8 +625,10 @@ bool CheckMixedApiDomain(bool cpu_only = false) {
     if (!Check(Until([&] { return gate.entered.load(); }), "Mixed API blocker did not enter"))
       return false;
     std::jthread c([&] {
-      if (gjxl_encode(context.get(), &image, &eo, &c_output.bytes) != GJXL_OK)
+      if (gjxl_encode(context.get(), &image, &eo, &c_output.bytes) != GJXL_OK) {
+        std::cerr << "Mixed API C encode failed: " << gjxl_get_last_error() << '\n';
         good = false;
+      }
       c_done = true;
     });
     if (!Check(Until([&] { return domain->snapshot().waiting_requests == 1; }) && !c_done &&
@@ -656,6 +662,13 @@ bool CheckMixedApiDomain(bool cpu_only = false) {
 } // namespace
 
 int main(int argc, char** argv) {
+  if (argc == 2 && std::string_view(argv[1]) == "--cuda") {
+    cuda_backend = true;
+    const auto status = EnsureProductionCudaBackendAvailable();
+    if (status.code() == StatusCode::kUnavailable) return 77;
+    if (!Ok(status)) return EXIT_FAILURE;
+    argc = 1;
+  }
   // Run the shared-domain test before any default-domain oracle. Starting at
   // zero makes the monotonic default peak sensitive even to transient escapes.
   if (!Check(ExecutionDomain::Default()->snapshot().peak_backing_bytes == 0,

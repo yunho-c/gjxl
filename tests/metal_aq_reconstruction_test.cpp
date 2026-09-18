@@ -107,13 +107,13 @@ bool MakeMixedStrategies(gjxl::AcStrategyGrid *strategies) {
                    "DCT32x32 placement") ||
       !CheckStatus(strategies->Set(4, 0, gjxl::AcStrategyType::kDct32x16),
                    "DCT32x16 placement") ||
-      !CheckStatus(strategies->Set(6, 0, gjxl::AcStrategyType::kDct16x32),
+      !CheckStatus(strategies->Set(4, 4, gjxl::AcStrategyType::kDct16x32),
                    "DCT16x32 placement") ||
-      !CheckStatus(strategies->Set(10, 0, gjxl::AcStrategyType::kDct16x16),
+      !CheckStatus(strategies->Set(8, 0, gjxl::AcStrategyType::kDct16x16),
                    "DCT16x16 placement") ||
-      !CheckStatus(strategies->Set(6, 2, gjxl::AcStrategyType::kDct16x8),
+      !CheckStatus(strategies->Set(10, 0, gjxl::AcStrategyType::kDct16x8),
                    "DCT16x8 placement") ||
-      !CheckStatus(strategies->Set(7, 2, gjxl::AcStrategyType::kDct8x16),
+      !CheckStatus(strategies->Set(10, 2, gjxl::AcStrategyType::kDct8x16),
                    "DCT8x16 placement")) {
     return false;
   }
@@ -397,6 +397,17 @@ bool EqualFrames(const gjxl::VarDctEncoderFrame &expected,
   for (size_t channel = 0; channel < 3; ++channel) {
     if (!EqualPlane(expected_dc.plane[channel], actual_dc.plane[channel])) {
       std::cerr << "Frame-only DC differs in channel " << channel << '\n';
+      size_t reported = 0;
+      for (size_t y = 0; y < expected_dc.plane[channel].extent.height; ++y) {
+        for (size_t x = 0; x < expected_dc.plane[channel].extent.width; ++x) {
+          const auto expected_value = expected_dc.plane[channel].Row(y)[x];
+          const auto actual_value = actual_dc.plane[channel].Row(y)[x];
+          if (expected_value != actual_value && reported++ < 8)
+            std::cerr << "  block " << x << ',' << y << ": "
+                      << expected_value << " vs " << actual_value << '\n';
+        }
+      }
+      std::cerr << "  differing DC samples: " << reported << '\n';
       return false;
     }
   }
@@ -1911,12 +1922,89 @@ bool CheckResidentQuantizationPreparation(
         "resident quantizer CPU oracle")) {
     return false;
   }
-  gjxl::ColorCorrelationMap color;
-  if (!CheckStatus(gjxl::ComputeInitialColorCorrelationMap(
-                     image.View(), &color),
-                   "resident quantizer color map")) {
+
+  std::vector<float> invariant_field(block_count);
+  for (size_t y = 0; y < kBlockExtent.height; ++y) {
+    for (size_t x = 0; x < kBlockExtent.width; ++x) {
+      invariant_field[y * kBlockExtent.width + x] =
+        ((x + 3 * y) % 8) < 4 ? 0.24f : 3.4f;
+    }
+  }
+  float invariant_quant_dc = 0.0f;
+  std::vector<int32_t> invariant_raw(block_count);
+  gjxl::Quantizer invariant_quantizer;
+  gjxl::ColorCorrelationMap invariant_color;
+  gjxl::ColorCorrelationMap evaluation_color;
+  if (!CheckStatus(gjxl::ComputeInitialQuantDc(
+                     1.0f, &invariant_quant_dc),
+                   "resident invariant-CfL DC oracle") ||
+      !CheckStatus(gjxl::CreateQuantizerFromField(
+                     invariant_quant_dc,
+                     {invariant_field.data(), kBlockExtent,
+                      kBlockExtent.width},
+                     {invariant_raw.data(), kBlockExtent,
+                      kBlockExtent.width},
+                     &invariant_quantizer),
+                   "resident invariant-CfL quantizer oracle") ||
+      !CheckStatus(gjxl::ComputeFinalColorCorrelationMap(
+                     image.View(), strategies,
+                     {invariant_raw.data(), kBlockExtent,
+                      kBlockExtent.width},
+                     invariant_quantizer, true, &invariant_color),
+                   "resident invariant-CfL map oracle") ||
+      !CheckStatus(gjxl::ComputeFinalColorCorrelationMap(
+                     image.View(), strategies,
+                     {expected_raw.data(), kBlockExtent,
+                      kBlockExtent.width},
+                     expected_quantizer, true, &evaluation_color),
+                   "resident evaluation CfL map oracle")) {
     return false;
   }
+  const auto maps_equal = [](const gjxl::ColorCorrelationMap& left,
+                             const gjxl::ColorCorrelationMap& right) {
+    if (!left.valid() || !right.valid() ||
+        left.tile_extent() != right.tile_extent()) {
+      return false;
+    }
+    const auto left_x = left.y_to_x_map();
+    const auto right_x = right.y_to_x_map();
+    const auto left_b = left.y_to_b_map();
+    const auto right_b = right.y_to_b_map();
+    for (size_t y = 0; y < left.tile_extent().height; ++y) {
+      if (!std::equal(left_x.Row(y),
+                      left_x.Row(y) + left.tile_extent().width,
+                      right_x.Row(y)) ||
+          !std::equal(left_b.Row(y),
+                      left_b.Row(y) + left.tile_extent().width,
+                      right_b.Row(y))) {
+        return false;
+      }
+    }
+    return true;
+  };
+  if (maps_equal(invariant_color, evaluation_color)) {
+    std::cerr << "Resident invariant-CfL test maps are not distinct\n";
+    return false;
+  }
+  const gjxl::GpuBackendStats before_invariant = gpu->stats();
+  if (!CheckStatus(prepared->PrepareInvariantColorCorrelationResident(
+                     {invariant_field.data(), kBlockExtent,
+                      kBlockExtent.width},
+                     invariant_quant_dc),
+                   "resident invariant-CfL preparation")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats after_invariant = gpu->stats();
+  if (after_invariant.successful_allocations !=
+        before_invariant.successful_allocations ||
+      after_invariant.committed_submissions !=
+        before_invariant.committed_submissions) {
+    std::cerr << "Resident invariant CfL preparation allocated or submitted\n";
+    return false;
+  }
+  const auto retained_invariant_field = invariant_field;
+  std::fill(invariant_field.begin(), invariant_field.end(),
+            std::numeric_limits<float>::quiet_NaN());
   std::vector<float> block_distance(block_count, -1.0f);
   gjxl::Image3FBuffer reconstructed(kPixelExtent);
   gjxl::VarDctEncoderFrame frame;
@@ -1931,8 +2019,6 @@ bool CheckResidentQuantizationPreparation(
   if (!CheckStatus(
         prepared->Evaluate(
           {
-            .y_to_x = color.y_to_x_map(),
-            .y_to_b = color.y_to_b_map(),
             .quant_field = {actual.data(), kBlockExtent, kOutputStride},
             .quant_dc = quant_dc,
           },
@@ -1954,12 +2040,67 @@ bool CheckResidentQuantizationPreparation(
       frame.quantizer().params().global_scale !=
         actual_quantizer.global_scale ||
       frame.quantizer().params().quant_dc != actual_quantizer.quant_dc ||
+      !maps_equal(frame.color_correlation(), invariant_color) ||
+      maps_equal(frame.color_correlation(), evaluation_color) ||
       !frame.valid() || !std::isfinite(score) || score < 0.0 ||
       after_evaluation.successful_allocations !=
         before_evaluation.successful_allocations ||
       after_evaluation.committed_submissions !=
         before_evaluation.committed_submissions + 1) {
-    std::cerr << "Resident device quantizer or resource contract differs\n";
+    std::cerr << "Resident device quantizer, invariant CfL, or resource "
+                 "contract differs: quantizer="
+              << actual_quantizer.global_scale << ',' << actual_quantizer.quant_dc
+              << " expected=" << expected_quantizer.params().global_scale << ','
+              << expected_quantizer.params().quant_dc
+              << " frame=" << frame.quantizer().params().global_scale << ','
+              << frame.quantizer().params().quant_dc
+              << " invariant_cfl="
+              << maps_equal(frame.color_correlation(), invariant_color)
+              << " evaluation_cfl="
+              << maps_equal(frame.color_correlation(), evaluation_color)
+              << " valid=" << frame.valid() << " score=" << score
+              << " allocations=" << before_evaluation.successful_allocations
+              << "->" << after_evaluation.successful_allocations
+              << " submissions=" << before_evaluation.committed_submissions
+              << "->" << after_evaluation.committed_submissions << '\n';
+    return false;
+  }
+
+  // Re-preparing CfL must also preserve a later host-supplied raw quantizer.
+  // The preparation snapshot cannot borrow the caller's field or overwrite
+  // the raw input while selecting the separate invariant quantizer.
+  std::vector<float> inverse_sigma(block_count);
+  if (!CheckStatus(gjxl::ComputeEpfInverseSigma(
+        strategies, {expected_raw.data(), kBlockExtent, kBlockExtent.width},
+        expected_quantizer,
+        {sharpness.data(), kBlockExtent, kBlockExtent.width},
+        evaluation_options.profile.epf_sigma,
+        {inverse_sigma.data(), kBlockExtent, kBlockExtent.width}),
+        "resident invariant-CfL host sigma") ||
+      !CheckStatus(prepared->PrepareInvariantColorCorrelationResident(
+        {retained_invariant_field.data(), kBlockExtent, kBlockExtent.width},
+        invariant_quant_dc), "resident invariant-CfL reprepare")) {
+    return false;
+  }
+  const auto before_host_evaluation = gpu->stats();
+  if (!CheckStatus(prepared->Evaluate(
+        {.raw_quant_field = {expected_raw.data(), kBlockExtent, kBlockExtent.width},
+         .quantizer = expected_quantizer.params(),
+         .epf_inverse_sigma = {inverse_sigma.data(), kBlockExtent, kBlockExtent.width}},
+        {.block_distance_map = {block_distance.data(), kBlockExtent, kBlockExtent.width},
+         .score = &score, .maximum_error = &maximum_error,
+         .quantizer = &actual_quantizer, .final = &final}),
+        "resident invariant-CfL host-quantized evaluation")) {
+    return false;
+  }
+  const auto after_host_evaluation = gpu->stats();
+  if (!frame.valid() || !maps_equal(frame.color_correlation(), invariant_color) ||
+      frame.quantizer().params().global_scale != expected_quantizer.params().global_scale ||
+      frame.quantizer().params().quant_dc != expected_quantizer.params().quant_dc ||
+      !std::isfinite(score) || score < 0.0 ||
+      after_host_evaluation.successful_allocations != before_host_evaluation.successful_allocations ||
+      after_host_evaluation.committed_submissions != before_host_evaluation.committed_submissions + 1) {
+    std::cerr << "Resident invariant CfL overwrote the host quantizer or resource contract\n";
     return false;
   }
 

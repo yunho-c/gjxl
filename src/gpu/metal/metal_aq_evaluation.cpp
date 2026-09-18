@@ -1688,6 +1688,11 @@ Status MetalPreparedAqEvaluation::Reconfigure(
         return Status::InvalidArgument(
           "Prepared AQ reconfiguration metadata is invalid");
       }
+      if (cell.is_anchor && !chroma_from_luma_internal::StrategyFitsColorTile(
+            x, y, cell.strategy)) {
+        return Status::InvalidArgument(
+          "Prepared AQ reconfiguration strategy crosses a color tile");
+      }
     }
   }
 
@@ -2837,10 +2842,20 @@ Status MetalPreparedAqEvaluation::PrepareInvariantColorCorrelationResident(
     return Status::FailedPrecondition(
       "Prepared resident color correlation requires ready state");
   }
-  // The next resident evaluation already uploads this field and selects its
-  // quantizer. Schedule final CfL in that same command buffer so no additional
-  // submission or host synchronization is introduced.
-  (void)quant_dc;
+  // Retain the caller's field, which may differ from the next evaluation's.
+  // Policy initialization uses this scratch only after invariant CfL has
+  // consumed it. Keeping the snapshot on the device adds neither an allocation
+  // nor a submission, and does not retain caller-owned host memory.
+  Status status = UploadPlane(
+      *backend_, quant_field, resident_policy_initial_field_);
+  if (!status.ok()) {
+    // Reject competing operations before releasing the lock for cleanup.
+    state_ = State::kInvalid;
+    lock.unlock();
+    Invalidate();
+    return status;
+  }
+  invariant_quant_dc_ = quant_dc;
   final_cfl_params_.nonlinear_iterations = nonlinear_iterations;
   invariant_color_correlation_ready_ = true;
   resident_forward_coefficients_ready_ = false;
@@ -3917,6 +3932,11 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
         return Status::InvalidArgument(
             "Prepared AQ strategy grid contains an unsupported strategy");
       }
+      if (cell.is_anchor && !chroma_from_luma_internal::StrategyFitsColorTile(
+            x, y, cell.strategy)) {
+        return Status::InvalidArgument(
+          "Prepared AQ strategy crosses a color tile");
+      }
       if (preparation.epf_sharpness.Row(y)[x] >= 8) {
         return Status::InvalidArgument(
             "Prepared AQ EPF sharpness is out of range");
@@ -4724,13 +4744,15 @@ void MetalPreparedAqEvaluation::EncodeResidentFrame(
   reset_params_.preserve_forward_coefficients =
     first_pass && !resident_forward_coefficients_ready_ ? 0u : 1u;
   if (first_pass) EncodeReconstructionReset(backend, encoder);
-  EncodeResidentQuantizer(backend, encoder);
+  if (!resident_color_correlation_pending_) {
+    EncodeResidentQuantizer(backend, encoder);
+  }
   if (first_pass) {
     if (!resident_forward_coefficients_ready_) {
       EncodeForwardCoefficients(backend, encoder);
     }
     if (resident_color_correlation_pending_) {
-      EncodeFinalColorCorrelation(backend, encoder);
+      EncodeInvariantColorCorrelation(backend, encoder);
       resident_color_correlation_pending_ = false;
       resident_color_correlation_readback_needed_ = true;
       resident_forward_coefficients_ready_ = true;

@@ -18,6 +18,31 @@ if(NOT DEFINED GJXL_INSTALL_INCLUDEDIR)
 endif()
 file(REMOVE_RECURSE "${test_root}")
 
+# Reuse the parent toolchain. An installed MSVC compiler can work with Ninja
+# without being discoverable by a different Visual Studio generator/instance.
+set(consumer_generator_arguments -G "${GJXL_TEST_GENERATOR}"
+  "-DCMAKE_C_COMPILER=${GJXL_TEST_C_COMPILER}"
+  "-DCMAKE_CXX_COMPILER=${GJXL_TEST_CXX_COMPILER}")
+foreach(setting IN ITEMS GENERATOR_PLATFORM GENERATOR_TOOLSET GENERATOR_INSTANCE
+                         MAKE_PROGRAM RC_COMPILER MT)
+  if(DEFINED GJXL_TEST_${setting} AND NOT "${GJXL_TEST_${setting}}" STREQUAL ""
+     AND NOT "${GJXL_TEST_${setting}}" MATCHES "-NOTFOUND$")
+    list(APPEND consumer_generator_arguments
+      "-DCMAKE_${setting}=${GJXL_TEST_${setting}}")
+  endif()
+endforeach()
+if(DEFINED GJXL_TEST_CUDA_TOOLKIT_ROOT AND
+   NOT "${GJXL_TEST_CUDA_TOOLKIT_ROOT}" STREQUAL "")
+  # Preserve an explicitly selected toolkit for downstream find_dependency.
+  # This is a test configure hint, not an installed package absolute path.
+  list(APPEND consumer_generator_arguments
+    "-DCUDAToolkit_ROOT=${GJXL_TEST_CUDA_TOOLKIT_ROOT}")
+endif()
+set(consumer_suffix "")
+if(WIN32)
+  set(consumer_suffix ".exe")
+endif()
+
 # Keep the same configure/build/run checks for each supported consumer mode.
 function(run_checked description)
   execute_process(
@@ -67,23 +92,23 @@ endforeach()
 foreach(standard IN ITEMS 20 23)
   set(consumer_build "${test_root}/cxx${standard}")
   run_checked("downstream C++${standard} configure"
-    "${CMAKE_COMMAND}" -S "${consumer_source}" -B "${consumer_build}"
+    "${CMAKE_COMMAND}" ${consumer_generator_arguments} -S "${consumer_source}" -B "${consumer_build}"
     "-DCMAKE_PREFIX_PATH=${install_prefix}" "-DCMAKE_BUILD_TYPE=${GJXL_TEST_CONFIG}"
     "-DCMAKE_CXX_STANDARD=${standard}" -DCMAKE_CXX_STANDARD_REQUIRED=ON
     -DGJXL_CHECK_INSTALLED_HEADERS=ON)
   run_checked("downstream C++${standard} build"
     "${CMAKE_COMMAND}" --build "${consumer_build}" --config "${GJXL_TEST_CONFIG}" --parallel 4)
   foreach(consumer IN ITEMS gjxl_codec_consumer gjxl_codestream_consumer gjxl_c_consumer gjxl_domain_consumer)
-    set(consumer_executable "${consumer_build}/${consumer}")
+    set(consumer_executable "${consumer_build}/${consumer}${consumer_suffix}")
     if(NOT EXISTS "${consumer_executable}")
-      set(consumer_executable "${consumer_build}/${GJXL_TEST_CONFIG}/${consumer}")
+      set(consumer_executable "${consumer_build}/${GJXL_TEST_CONFIG}/${consumer}${consumer_suffix}")
     endif()
     run_checked("downstream C++${standard} ${consumer}" "${consumer_executable}")
   endforeach()
 endforeach()
 
 execute_process(
-  COMMAND "${CMAKE_COMMAND}" -S "${consumer_source}"
+  COMMAND "${CMAKE_COMMAND}" ${consumer_generator_arguments} -S "${consumer_source}"
     -B "${test_root}/unsupported-cxx26" "-DCMAKE_PREFIX_PATH=${install_prefix}"
     -DCMAKE_CXX_STANDARD=26
   RESULT_VARIABLE unsupported_result OUTPUT_VARIABLE unsupported_output ERROR_VARIABLE unsupported_error
@@ -99,13 +124,13 @@ endif()
 # A client requesting only the C ABI does not need the C++ interface probe.
 set(c_abi_build "${test_root}/c-abi-cxx23")
 run_checked("C ABI-only C++23 configure"
-  "${CMAKE_COMMAND}" -S "${consumer_source}" -B "${c_abi_build}"
+  "${CMAKE_COMMAND}" ${consumer_generator_arguments} -S "${consumer_source}" -B "${c_abi_build}"
   "-DCMAKE_PREFIX_PATH=${install_prefix}" "-DCMAKE_BUILD_TYPE=${GJXL_TEST_CONFIG}"
   -DCMAKE_CXX_STANDARD=23 -DCMAKE_CXX_STANDARD_REQUIRED=ON -DGJXL_TEST_C_ABI_ONLY=ON)
 run_checked("C ABI-only C++23 build"
   "${CMAKE_COMMAND}" --build "${c_abi_build}" --config "${GJXL_TEST_CONFIG}")
-set(c_abi_executable "${c_abi_build}/gjxl_c_abi_consumer")
+set(c_abi_executable "${c_abi_build}/gjxl_c_abi_consumer${consumer_suffix}")
 if(NOT EXISTS "${c_abi_executable}")
-  set(c_abi_executable "${c_abi_build}/${GJXL_TEST_CONFIG}/gjxl_c_abi_consumer")
+  set(c_abi_executable "${c_abi_build}/${GJXL_TEST_CONFIG}/gjxl_c_abi_consumer${consumer_suffix}")
 endif()
 run_checked("C ABI-only C++23 encode" "${c_abi_executable}")

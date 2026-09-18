@@ -44,8 +44,7 @@ public:
       const Status status = domain_->budget_.Reserve(
           bytes, &reservation_, {},
           +[](void *opaque) {
-            return metal_internal::TrimMetalPreparationCachesForDomain(
-                static_cast<WorkflowAdmission *>(opaque)->domain_->budget_);
+            return TrimIdle(*static_cast<WorkflowAdmission *>(opaque)->domain_);
           },
           this);
       if (!status.ok())
@@ -60,9 +59,7 @@ public:
     }
   }
 
-  [[nodiscard]] static Status TrimIdle(const ExecutionDomain &domain) {
-    return metal_internal::TrimMetalPreparationCachesForDomain(domain.budget_);
-  }
+  [[nodiscard]] static Status TrimIdle(const ExecutionDomain &domain);
 
 private:
   std::shared_ptr<const ExecutionDomain> domain_;

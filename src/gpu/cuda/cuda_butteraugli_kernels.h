@@ -1,0 +1,281 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Yunho Cho
+
+#pragma once
+
+#include <cuda_runtime_api.h>
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+
+#include "gpu/cuda/cuda_aq_butteraugli_kernels.h"
+
+namespace gjxl::cuda_internal {
+
+// 20 psycho planes, one cached reference mask, and four reusable work planes.
+// Future high-frequency outputs also hold temporary horizontal blur values.
+inline constexpr size_t kCudaButteraugliWorkingPlaneCount = 25;
+inline constexpr size_t kCudaButteraugliPsychoPlaneCount = 10;
+inline constexpr size_t kCudaButteraugliKernelCount = 5;
+
+// Immutable tap values copied into vertical kernel arguments at launch.
+// Keep the normalization on the device in its original accumulation order.
+struct CudaButteraugliLowMediumWeights {
+  float taps[33];
+};
+static_assert(sizeof(CudaButteraugliLowMediumWeights) == 33 * sizeof(float));
+
+struct CudaButteraugliPlan {
+  std::array<const float*, 3> reference{};
+  std::array<uint32_t, 3> reference_stride{};
+  std::array<float*, kCudaButteraugliWorkingPlaneCount> planes{};
+  std::array<float*, kCudaButteraugliPsychoPlaneCount> reference_sub{};
+  std::array<const float*, kCudaButteraugliKernelCount> kernels{};
+  std::array<float*, 2> reduction{};
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t working_width = 0;
+  uint32_t working_height = 0;
+  uint32_t sub_width = 0;
+  uint32_t sub_height = 0;
+  uint32_t xborder = 0;
+  uint32_t yborder = 0;
+  uint32_t expanded = 0;
+  uint32_t multiscale = 0;
+  float hf_asymmetry = 1.0f;
+  float x_multiplier = 1.0f;
+  float intensity_target = 255.0f;
+  CudaButteraugliLowMediumWeights low_medium_weights{};
+  // Scalar CPU convolution order, used only by exact-coefficient AQ.
+  uint32_t cpu_order = 0;
+};
+
+// One scaled Malta response, including the caller's initialization/addition
+// policy. The separate-pass entry point is retained as a test oracle.
+struct CudaButteraugliMaltaParams {
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t reference_stride = 0;
+  uint32_t distorted_stride = 0;
+  uint32_t accumulation_stride = 0;
+  uint32_t low_frequency = 0;
+  uint32_t initialize_accumulation = 0;
+  float norm2_0_gt_1 = 0.0f;
+  float norm2_0_lt_1 = 0.0f;
+  float norm = 0.0f;
+};
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliMalta(
+    const float* reference, const float* distorted, float* accumulation,
+    CudaButteraugliMaltaParams params, cudaStream_t stream);
+
+// Internal differential entry for the prior fused response, with no zero-tile
+// shortcut. Force the tile/grid policy independently of image size.
+[[nodiscard]] cudaError_t LaunchCudaButteraugliMaltaForTesting(
+    const float* reference, const float* distorted, float* accumulation,
+    CudaButteraugliMaltaParams params, unsigned int tile_height, bool flat_grid,
+    cudaStream_t stream);
+
+// Exercise the prior zero-aware schedule, also retained for tiny/short images.
+[[nodiscard]] cudaError_t LaunchCudaButteraugliMaltaZeroAwareForTesting(
+    const float* reference, const float* distorted, float* accumulation,
+    CudaButteraugliMaltaParams params, unsigned int tile_height, bool flat_grid,
+    cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliMaltaReference(
+    const float* reference, const float* distorted, float* scaled,
+    uint32_t scaled_stride, float* accumulation,
+    CudaButteraugliMaltaParams params, cudaStream_t stream);
+
+// Force every paired-response specialization independently of image size.
+[[nodiscard]] cudaError_t LaunchCudaButteraugliMaltaRowPairForTesting(
+    const float* reference, const float* distorted, float* accumulation,
+    CudaButteraugliMaltaParams params, unsigned int tile_height, bool flat_grid,
+    cudaStream_t stream);
+
+// Blur followed by the in-place low/high frequency split. Channels 0/1 use
+// 15 taps; 3/4 use 7 taps. Intermediate storage is tightly packed width*height.
+// Input and high output must not overlap it or each other. The reference
+// additionally materializes the blurred plane for differential qualification.
+struct CudaButteraugliFrequencyParams {
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t input_stride = 0;
+  uint32_t output_stride = 0;
+  uint32_t channel = 0;
+  // Scalar CPU convolution order, used only by exact-coefficient AQ.
+  uint32_t cpu_order = 0;
+};
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliBlurAndSplit(
+    float* input, const float* weights, float* intermediate, float* output,
+    CudaButteraugliFrequencyParams params, cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliBlurAndSplitReference(
+    float* input, const float* weights, float* intermediate, float* blurred,
+    uint32_t blurred_stride, float* output,
+    CudaButteraugliFrequencyParams params, cudaStream_t stream);
+
+// Mirrored five-tap RGB blur followed by pointwise Opsin conversion.
+// At width <= 24, resident intermediates are three disjoint packed
+// width*height planes; wider resident inputs ignore them and permit null.
+// The materialized resident oracle always needs three such intermediates.
+// RGB inputs, used intermediates and XYB outputs must be mutually disjoint. The
+// separate-pass oracle may reuse one horizontal intermediate and may alias
+// each blurred plane with its output. Blurred/output strides are identical;
+// fused blurred pointers are ignored and may be null.
+struct CudaButteraugliOpsinPlan {
+  std::array<const float*, 3> input{};
+  std::array<uint32_t, 3> input_stride{};
+  std::array<float*, 3> intermediate{};
+  std::array<float*, 3> blurred{};
+  std::array<float*, 3> output{};
+  const float* weights = nullptr;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t output_stride = 0;
+  float intensity_target = 255.0f;
+  // Scalar CPU convolution order, used only by exact-coefficient AQ.
+  uint32_t cpu_order = 0;
+};
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliOpsin(
+    const CudaButteraugliOpsinPlan& plan, cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliOpsinReference(
+    const CudaButteraugliOpsinPlan& plan, cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliOpsinMaterializedReference(
+    const CudaButteraugliOpsinPlan& plan, cudaStream_t stream);
+
+// 33-tap separable blur followed by low/medium-frequency construction.
+// Each horizontal intermediate is tightly packed width*height. Inputs,
+// intermediates, and outputs must be mutually disjoint. Only the separate-pass
+// reference writes blurred planes; both resident entries ignore those pointers.
+// The owned weights must match the 33 values in device_weights. Horizontal
+// and reference kernels use device_weights; rolling vertical kernels receive
+// the owned payload by value. No caller-owned host pointer survives launch.
+struct CudaButteraugliLowMediumPlan {
+  std::array<const float*, 3> input{};
+  std::array<float*, 3> intermediate{};
+  std::array<float*, 3> blurred{};
+  std::array<float*, 3> low{};
+  std::array<float*, 3> medium{};
+  const float* device_weights = nullptr;
+  CudaButteraugliLowMediumWeights weights{};
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t input_stride = 0;
+  uint32_t blurred_stride = 0;
+  uint32_t output_stride = 0;
+  // Scalar CPU convolution order, used only by exact-coefficient AQ.
+  uint32_t cpu_order = 0;
+};
+
+// Zero selects the plain 48-row tile. Large planes amortize rolling chunks;
+// narrow/short planes keep the plain body even when their area is large.
+// Eligible planes use four outputs per lane in 64- or 96-row rolling tiles.
+[[nodiscard]] constexpr unsigned CudaButteraugliLowMediumRollingTileHeight(
+    uint32_t width, uint32_t height) {
+  if (width < 32 || height < 96) return 0;
+  const uint64_t area = static_cast<uint64_t>(width) * height;
+  return area < 2000000 ? 0 : area < 4000000 ? 64 : 96;
+}
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliLowMedium(
+    const CudaButteraugliLowMediumPlan& plan, cudaStream_t stream);
+
+// Force plain (0), four-row rolling 64, or rolling 96 independently of geometry.
+[[nodiscard]] cudaError_t LaunchCudaButteraugliLowMediumForTesting(
+    const CudaButteraugliLowMediumPlan& plan, unsigned rolling_tile_height,
+    cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliLowMediumReference(
+    const CudaButteraugliLowMediumPlan& plan, cudaStream_t stream);
+
+// Prior resident computation, which accumulates one output row at a time.
+[[nodiscard]] cudaError_t LaunchCudaButteraugliLowMediumSequentialReference(
+    const CudaButteraugliLowMediumPlan& plan, cudaStream_t stream);
+
+// Pointwise L2 difference followed by final masking. The fused entry reads
+// only the first two Malta AC accumulations and leaves all AC/DC planes
+// unchanged. The separate-pass oracle overwrites all six scratch planes.
+// Output must not overlap any input or scratch plane; inputs must not overlap
+// scratch. The unused fused ac[2] and dc pointers may be null.
+struct CudaButteraugliL2FinalPlan {
+  std::array<const float*, 8> reference{};
+  std::array<const float*, 8> distorted{};
+  std::array<float*, 3> ac{};
+  std::array<float*, 3> dc{};
+  const float* mask = nullptr;
+  const float* mask_reference = nullptr;
+  const float* mask_distorted = nullptr;
+  float* output = nullptr;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t reference_stride = 0;
+  uint32_t distorted_stride = 0;
+  uint32_t work_stride = 0;
+  uint32_t output_stride = 0;
+  float asymmetry = 1.0f;
+  float x_multiplier = 1.0f;
+};
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliL2Final(
+    const CudaButteraugliL2FinalPlan& plan, cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliL2FinalReference(
+    const CudaButteraugliL2FinalPlan& plan, cudaStream_t stream);
+
+// Internal conformance entry for reference-mask erosion plus L2/final masking.
+// The plan's mask pointer is ignored. The separate reference writes the
+// caller's disjoint erosion_scratch plane (work_stride); the fused entry
+// leaves all inputs untouched and permits null scratch. Output must not
+// overlap any input, including the reference mask's neighboring pixels.
+[[nodiscard]] cudaError_t LaunchCudaButteraugliErosionFinalForTesting(
+    const CudaButteraugliL2FinalPlan& plan, float* erosion_scratch,
+    bool reference, cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliPrepare(
+    const CudaButteraugliPlan& plan, cudaStream_t stream);
+
+// Qualified fusion primitive; prepared comparisons still use separate passes
+// pending a repeatable integrated performance gain (see S110).
+// Multiscale map composition and maximum score. Width/height are nonzero and
+// width*height <= UINT32_MAX-255; strides cover their logical row widths.
+// The sub-map is ceil(width/2) by ceil(height/2). Output may alias main_map
+// exactly (with equal strides), but no other buffers may overlap. Each scratch
+// buffer holds ceil(width*height/256) floats; neither is needed for <=256 pixels.
+// The map preserves the composition result; any nonfinite or negative logical
+// value makes the score NaN. Padding is neither read nor written.
+struct CudaButteraugliComposePlan {
+  const float* main_map = nullptr;
+  const float* sub_map = nullptr;
+  float* output = nullptr;
+  std::array<float*, 2> reduction{};
+  float* score = nullptr;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t main_stride = 0;
+  uint32_t sub_stride = 0;
+  uint32_t output_stride = 0;
+};
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliCompose(
+    const CudaButteraugliComposePlan& plan, cudaStream_t stream);
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliCompare(
+    const CudaButteraugliPlan& plan, std::array<const float*, 3> distorted,
+    std::array<uint32_t, 3> distorted_stride, float* distance_map,
+    uint32_t distance_stride, float* score, cudaStream_t stream);
+
+// Resident-policy consumer: distance_map is working storage only, not a
+// composed-map output. Returns the same score and per-transform L16 values.
+[[nodiscard]] cudaError_t LaunchCudaButteraugliCompareAndReduce(
+    const CudaButteraugliPlan& plan, std::array<const float*, 3> distorted,
+    std::array<uint32_t, 3> distorted_stride, float* distance_map,
+    uint32_t distance_stride, float* score,
+    const CudaAqButteraugliReduction& reduction, cudaStream_t stream);
+
+}  // namespace gjxl::cuda_internal

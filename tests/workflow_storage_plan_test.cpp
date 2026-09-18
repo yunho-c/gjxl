@@ -56,16 +56,16 @@ WorkflowStorageOptions Options(size_t mode) {
   o.route =
       mode == 0 ? WorkflowStorageRoute::kCpu : WorkflowStorageRoute::kMetal;
   if (mode == 2)
-    o.encoding.metal_aq_mode = GpuAdaptiveQuantizationMode::kExactCoefficients;
+    o.encoding.gpu_aq_mode = GpuAdaptiveQuantizationMode::kExactCoefficients;
   if (mode == 3)
-    o.encoding.metal_aq_mode = GpuAdaptiveQuantizationMode::kMaximumThroughput;
+    o.encoding.gpu_aq_mode = GpuAdaptiveQuantizationMode::kMaximumThroughput;
   if (mode == 4) {
     o.encoding.rate_control_mode = VarDctRateControlMode::kMaximumError;
     o.encoding.maximum_error = {0.05f, 0.05f, 0.05f};
   }
   if (mode == 5) {
     o.encoding.backend = VarDctBackendPreference::kAutomatic;
-    o.encoding.metal_aq_mode = GpuAdaptiveQuantizationMode::kExactCoefficients;
+    o.encoding.gpu_aq_mode = GpuAdaptiveQuantizationMode::kExactCoefficients;
     o.encoding.rate_control_mode = VarDctRateControlMode::kTargetBytes;
     o.encoding.target_bytes = 1;
     o.encoding.target_size_maximum_attempts = 64;
@@ -312,7 +312,7 @@ bool CheckCompletedCacheBounds() {
                          GpuAdaptiveQuantizationMode::kThroughput}) {
         auto options = Options(1);
         options.encoding.effort = effort;
-        options.encoding.metal_aq_mode = mode;
+        options.encoding.gpu_aq_mode = mode;
         WorkflowStoragePlan plan;
         if (!Ok(ComputeWorkflowStoragePlan(test.source, options, &plan)) ||
             !Check(plan.idle_pool_capacity.back() ==

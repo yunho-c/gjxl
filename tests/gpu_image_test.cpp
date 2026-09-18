@@ -10,8 +10,13 @@
 #include <memory>
 #include <random>
 
+#if defined(_MSC_VER) && defined(_M_X64)
+#include <intrin.h>
+#endif
+
 #include "gpu/backend.h"
 #include "gpu/image.h"
+#include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/primitives.h"
 #include "gpu/scratch.h"
 
@@ -78,6 +83,58 @@ public:
 
 bool IsInvalid(const gjxl::Status& status) {
   return status.code() == gjxl::StatusCode::kInvalidArgument;
+}
+
+bool CheckAcScratchRequirements() {
+  // A backend that has not opted into compact scratch keeps the original
+  // contract, without needing to implement a new virtual function.
+  class DefaultAcEvaluation final : public gjxl::GpuAcStrategyEvaluation {
+    gjxl::Status EvaluateAcStrategyCandidateBatches(
+      std::span<const gjxl::AcStrategyCandidateBatch>,
+      std::unique_ptr<gjxl::GpuSubmission>*) override {
+      return gjxl::Status::Unavailable("Not implemented by sizing test");
+    }
+  } evaluator;
+  for (const auto& info : gjxl::kAcStrategyInfos) {
+    const size_t bytes_per_candidate = 3 * info.coefficient_count() * sizeof(float);
+    const size_t maximum_count =
+      std::numeric_limits<size_t>::max() / bytes_per_candidate;
+    for (const size_t count : {size_t{0}, size_t{1}, size_t{33}, maximum_count}) {
+      gjxl::AcStrategyScratchRequirements scratch{1, 2, 3};
+      if (!evaluator.GetAcStrategyScratchRequirements(info.type, count,
+            &scratch).ok() ||
+          scratch.scratch_a_bytes != count * bytes_per_candidate ||
+          scratch.scratch_b_bytes != count * bytes_per_candidate ||
+          scratch.rate_scratch_bytes != count * 3 *
+            gjxl::kAcStrategyRateScratchBytesPerChannel) {
+        std::cerr << "Default AC scratch sizes are incorrect\n";
+        return false;
+      }
+    }
+    gjxl::AcStrategyScratchRequirements scratch{1, 2, 3};
+    if (!IsInvalid(evaluator.GetAcStrategyScratchRequirements(
+          info.type, maximum_count + 1, &scratch)) ||
+        scratch.scratch_a_bytes != 1 || scratch.scratch_b_bytes != 2 ||
+        scratch.rate_scratch_bytes != 3) {
+      std::cerr << "Overflowing AC scratch sizes changed the output\n";
+      return false;
+    }
+  }
+  FakeBackend backend;
+  gjxl::AcStrategyScratchRequirements scratch{1, 2, 3};
+  return IsInvalid(evaluator.GetAcStrategyScratchRequirements(
+           gjxl::AcStrategyType::kCount, 0, &scratch)) &&
+         IsInvalid(evaluator.GetAcStrategyScratchRequirements(
+           gjxl::AcStrategyType::kDct8, 1, nullptr)) &&
+         IsInvalid(gjxl::GetAcStrategyScratchRequirements(
+           backend, gjxl::AcStrategyType::kDct8, 1, nullptr)) &&
+         gjxl::GetAcStrategyScratchRequirements(
+           backend, gjxl::AcStrategyType::kDct8, 1, &scratch).code() ==
+           gjxl::StatusCode::kUnavailable &&
+         scratch.scratch_a_bytes == 1 && scratch.scratch_b_bytes == 2 &&
+         scratch.rate_scratch_bytes == 3 &&
+         backend.stats().successful_allocations == 0 &&
+         backend.stats().committed_submissions == 0;
 }
 
 bool CheckPlaneRanges() {
@@ -224,8 +281,31 @@ bool CheckLayoutPlanning() {
     bool valid = element_size != 0 && extent.width != 0 && extent.height != 0 &&
       stride >= extent.width && alignment >= element_size && (alignment & (alignment - 1)) == 0;
     size_t expected_offset = 0, expected_bytes = 0, expected_end = 0;
-    using Wide = __uint128_t;
     if (valid) {
+#if defined(_MSC_VER) && defined(_M_X64)
+      // Use hardware wide arithmetic as an independent overflow oracle on
+      // MSVC, which has no C++ unsigned 128-bit integer type.
+      static_assert(sizeof(size_t) == sizeof(unsigned long long));
+      unsigned long long elements_high = 0;
+      unsigned long long elements = _umul128(extent.height - 1, stride,
+                                             &elements_high);
+      elements_high += _addcarry_u64(0, elements, extent.width, &elements);
+      unsigned long long offset = 0;
+      const bool offset_high =
+        _addcarry_u64(0, initial, alignment - 1, &offset) != 0;
+      offset &= ~(static_cast<unsigned long long>(alignment) - 1);
+      valid = elements_high == 0 && elements <= maximum / element_size &&
+        !offset_high;
+      if (valid) {
+        const auto bytes = elements * element_size;
+        unsigned long long end = 0;
+        valid = _addcarry_u64(0, offset, bytes, &end) == 0;
+        expected_offset = offset;
+        expected_bytes = bytes;
+        expected_end = end;
+      }
+#else
+      using Wide = __uint128_t;
       const Wide elements = (Wide{extent.height} - 1) * stride + extent.width;
       const Wide offset = ((Wide{initial} + alignment - 1) / alignment) * alignment;
       valid = elements <= maximum / element_size && offset <= maximum;
@@ -236,6 +316,7 @@ bool CheckLayoutPlanning() {
         expected_bytes = static_cast<size_t>(bytes);
         expected_end = static_cast<size_t>(offset + bytes);
       }
+#endif
     }
     DeviceScratchLayoutPlan plan(initial);
     DevicePlaneLayout plane{DeviceElementType::kI8, {5, 3}, 7, 9, 11};
@@ -273,7 +354,8 @@ bool CheckLayoutPlanning() {
 
 int main() {
   if (!CheckPlaneRanges() || !CheckImageAndOverlap() ||
-      !CheckScratchArena() || !CheckLayoutPlanning()) {
+      !CheckScratchArena() || !CheckLayoutPlanning() ||
+      !CheckAcScratchRequirements()) {
     return EXIT_FAILURE;
   }
   std::cout << "All device-image and scratch tests passed.\n";

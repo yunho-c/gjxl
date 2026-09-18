@@ -172,8 +172,12 @@ bool CheckElementFailureAndRebind() {
         budget.snapshot().total.live_capacity_bytes == bytes &&
         budget.snapshot().peak_backing_bytes >= bytes + 8 * sizeof(ThrowingValue),
         "Element exception lost the prior value or leaked new backing")) return false;
-    std::list<int, ManagedAllocator<int>> nodes{1, 2, 3};
-    if (!Check(budget.snapshot().total.backing_count == 4,
+    std::list<int, ManagedAllocator<int>> nodes;
+    // MSVC also owns an allocated empty sentinel; count the three insertions
+    // independently of each library's empty-container representation.
+    const auto empty_backings = budget.snapshot().total.backing_count;
+    nodes.insert(nodes.end(), {1, 2, 3});
+    if (!Check(budget.snapshot().total.backing_count == empty_backings + 3,
         "Rebound node allocations were not independently charged")) return false;
   }
   job.Reset();

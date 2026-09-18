@@ -51,6 +51,7 @@ using metal_internal::TransformPipelineRegistry;
 
 enum class TransformDispatchMode {
   kOneThreadPerElement,
+  kStridedElements,
   kFixedThreadCount,
   kFixedSimdgroupCount,
 };
@@ -155,7 +156,7 @@ kDctImplementationSpecs{{
       "gjxl_dct32_forward_scalar_2d_matmul",
     .inverse_function_name =
       "gjxl_dct32_inverse_scalar_2d_matmul",
-    .dispatch_mode = TransformDispatchMode::kOneThreadPerElement,
+    .dispatch_mode = TransformDispatchMode::kStridedElements,
   },
   {
     .strategy = AcStrategyType::kDct32x32,
@@ -590,6 +591,12 @@ Status CreateTransformPipeline(
         static_cast<NS::UInteger>(coefficient_count);
       break;
 
+    case TransformDispatchMode::kStridedElements:
+      threads_per_threadgroup = std::min(
+        static_cast<NS::UInteger>(coefficient_count),
+        state->maxTotalThreadsPerThreadgroup());
+      break;
+
     case TransformDispatchMode::kFixedThreadCount:
       threads_per_threadgroup =
         static_cast<NS::UInteger>(fixed_threads_per_threadgroup);
@@ -624,7 +631,10 @@ Status CreateTransformPipeline(
 
     return Status::Unavailable(
       std::string("Metal GPU cannot launch the required threadgroup for ") +
-      std::string(implementation_name));
+      std::string(implementation_name) + " " + std::string(operation) + " " +
+      std::string(strategy_info->name) + " (required " +
+      std::to_string(threads_per_threadgroup) + ", supported " +
+      std::to_string(state->maxTotalThreadsPerThreadgroup()) + ")");
   }
 
   out->state = std::move(state);

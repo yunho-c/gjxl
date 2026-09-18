@@ -67,6 +67,17 @@ struct GpuEncodingQuantizationPipelineOutput {
     completed_frame = nullptr;
 };
 
+/// Reuses maximum-throughput prepared device storage across compatible
+/// rate-control attempts. This encoding-only entry point ignores diagnostic
+/// plane outputs and commits only the frame.
+[[nodiscard]] Status RunPreparedGpuFrameOnlyQuantizationPipeline(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  PreparedQuantizationPipeline& prepared_pipeline,
+  CpuQuantizationPipelineOptions options,
+  GpuFrameOnlyPipelineOutput output,
+  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization* prepared);
+
 /// Reuses target-invariant host preparation across complete GPU attempts.
 [[nodiscard]] Status RunPreparedGpuQuantizationPipeline(
   GpuBackend& gpu,
@@ -79,7 +90,7 @@ struct GpuEncodingQuantizationPipelineOutput {
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
     prepared_aq = nullptr);
 
-/// Runs a Metal pipeline for codestream encoding without materializing
+/// Runs a GPU pipeline for codestream encoding without materializing
 /// diagnostic quant fields, block maps, or reconstructed RGB.
 /// Set retain_ac_search_storage=false only when no later search needs the
 /// cached capacity. The final search still reuses existing backing, then

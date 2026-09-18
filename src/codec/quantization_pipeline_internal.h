@@ -81,6 +81,10 @@ struct PreparedQuantizationPipeline {
   AcStrategyGrid strategies;
   ButteraugliOptions butteraugli_options;
   std::unique_ptr<PreparedButteraugliReference> butteraugli_reference;
+
+  /// Retains correctly sized storage, or commits all three new arrays only
+  /// after every allocation succeeds. Does not compute initial results.
+  [[nodiscard]] Status PrepareHostInitialStorage(bool include_pixel_mask = true);
 };
 
 enum class QuantizationPipelineInputProvenance {
@@ -97,6 +101,7 @@ struct QuantizationPipelineMaterialization {
   /// Public throughput diagnostics retain their one-update policy. Encoding
   /// paths set this false so requesting a final score cannot change the field.
   bool apply_throughput_iteration_limit = true;
+  bool resident_initial_quantization = false;
 };
 
 [[nodiscard]] Status PrepareQuantizationPipeline(

@@ -5,28 +5,38 @@ on:
     branches: [main]
     paths:
       - 'CMakeLists.txt'
-      - 'include/gjxl/**'
-      - 'src/c_api/**'
+      - 'cmake/**'
+      - 'include/**'
+      - 'src/**'
       - 'rust/**'
+      - '.github/actions/setup-native-toolchain/**'
       - '.github/workflows/rust.yml'
       - '.github/workflows/publish-rust.yml'
   pull_request:
     paths:
       - 'CMakeLists.txt'
-      - 'include/gjxl/**'
-      - 'src/c_api/**'
+      - 'cmake/**'
+      - 'include/**'
+      - 'src/**'
       - 'rust/**'
+      - '.github/actions/setup-native-toolchain/**'
       - '.github/workflows/rust.yml'
       - '.github/workflows/publish-rust.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   test:
-    name: macOS native wrapper
-    runs-on: macos-26
+    name: ${{ matrix.os }} native wrapper
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, ubuntu-24.04, windows-2022]
     env:
-      # Match the audited compiler/libc++ contract in docs/storage-toolchain.md.
-      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      CMAKE_GENERATOR: Ninja
     defaults:
       run:
         working-directory: rust
@@ -40,20 +50,16 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - name: Install build tools
-        run: brew install cmake ninja
-
-      - name: Report native toolchain
-        run: |
-          xcodebuild -version
-          xcrun clang++ --version
-          xcrun --show-sdk-version
+      - uses: ./.github/actions/setup-native-toolchain
 
       - name: Check formatting
         run: cargo fmt --all --check
 
       - name: Test workspace
         run: cargo test --workspace
+
+      - name: Check native incremental rebuilds
+        run: python check_native_rebuild.py
 
       - name: Lint workspace
         run: cargo clippy --workspace --all-targets -- -D warnings

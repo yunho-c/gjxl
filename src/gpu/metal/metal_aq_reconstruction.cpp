@@ -170,14 +170,15 @@ void MetalPreparedAqEvaluation::EncodeReconstructionSubmission(
     return;
   }
 
-  if (self.resident_quantization_active_) {
+  if (self.resident_quantization_active_ &&
+      !self.resident_color_correlation_pending_) {
     self.EncodeResidentQuantizer(backend, encoder);
   }
 
   if (!self.exact_coefficient_reconstruction_) {
     if (self.resident_color_correlation_pending_) {
       self.EncodeForwardCoefficients(backend, encoder);
-      self.EncodeFinalColorCorrelation(backend, encoder);
+      self.EncodeInvariantColorCorrelation(backend, encoder);
     } else if (self.reset_params_.preserve_forward_coefficients == 0u) {
       self.EncodeForwardCoefficients(backend, encoder);
     }
@@ -334,7 +335,7 @@ void MetalPreparedAqEvaluation::EncodeReconstructionProfileStage(
     return;
   }
   if (stage == ReconstructionProfileStage::kQuantizer) {
-    if (resident_quantization_active_) {
+    if (resident_quantization_active_ && !resident_color_correlation_pending_) {
       EncodeResidentQuantizer(backend, encoder);
     }
     return;
@@ -347,7 +348,7 @@ void MetalPreparedAqEvaluation::EncodeReconstructionProfileStage(
   }
   if (stage == ReconstructionProfileStage::kFinalColorCorrelation) {
     if (!exact_coefficient_reconstruction_) {
-      EncodeFinalColorCorrelation(backend, encoder);
+      EncodeInvariantColorCorrelation(backend, encoder);
     }
     return;
   }
@@ -572,6 +573,18 @@ void MetalPreparedAqEvaluation::EncodeReconstructionScatterBatch(
 void MetalPreparedAqEvaluation::EncodeResidentQuantizer(
     MetalBackend &backend, MTL::ComputeCommandEncoder *encoder) const {
 
+  EncodeResidentQuantizer(backend, encoder, resident_quant_field_, raw_quant_,
+                          resident_quant_selection_params_);
+}
+
+void MetalPreparedAqEvaluation::EncodeResidentQuantizer(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    DevicePlaneView quant_field, DevicePlaneView raw_quant,
+    AqInitialQuantSelectionParams params) const {
+
+  params.quant_stride = static_cast<uint32_t>(quant_field.row_stride);
+  params.raw_quant_stride = static_cast<uint32_t>(raw_quant.row_stride);
+
   // A single group saves 18 dispatches, but loses parallelism on larger fields.
   // Keep a conservative cutoff below the measured repetitive-field crossover.
   constexpr size_t kMaxSmallQuantizerBlocks = 8192;
@@ -580,12 +593,11 @@ void MetalPreparedAqEvaluation::EncodeResidentQuantizer(
       small_pipeline->threadExecutionWidth() == 32u &&
       small_pipeline->maxTotalThreadsPerThreadgroup() >= 256u) {
     encoder->setComputePipelineState(small_pipeline);
-    BindPlane(encoder, resident_quant_field_, 0);
+    BindPlane(encoder, quant_field, 0);
     BindPlane(encoder, resident_quant_statistics_, 1);
     BindPlane(encoder, resident_quantizer_params_, 2);
     BindPlane(encoder, reconstruction_error_, 3);
-    encoder->setBytes(&resident_quant_selection_params_,
-                      sizeof(resident_quant_selection_params_), 4);
+    encoder->setBytes(&params, sizeof(params), 4);
     BindPlane(encoder, resident_quant_selection_state_, 5);
     BindPlane(encoder, resident_quant_histogram_, 6);
     DispatchMetalThreadgroups(encoder, MTL::Size(1, 1, 1),
@@ -595,8 +607,7 @@ void MetalPreparedAqEvaluation::EncodeResidentQuantizer(
         backend.aq_pipelines_.resident_quant_select_initialize.get());
     BindPlane(encoder, resident_quant_selection_state_, 0);
     BindPlane(encoder, resident_quant_histogram_, 1);
-    encoder->setBytes(&resident_quant_selection_params_,
-                      sizeof(resident_quant_selection_params_), 2);
+    encoder->setBytes(&params, sizeof(params), 2);
     DispatchThreads1d(encoder, 256);
 
     const auto encode_selection = [&](bool deviation) {
@@ -605,8 +616,7 @@ void MetalPreparedAqEvaluation::EncodeResidentQuantizer(
             backend.aq_pipelines_.resident_quant_select_initialize.get());
         BindPlane(encoder, resident_quant_selection_state_, 0);
         BindPlane(encoder, resident_quant_histogram_, 1);
-        encoder->setBytes(&resident_quant_selection_params_,
-                          sizeof(resident_quant_selection_params_), 2);
+        encoder->setBytes(&params, sizeof(params), 2);
         DispatchThreads1d(encoder, 256);
       }
       constexpr std::array<uint32_t, 4> kShifts = {24, 16, 8, 0};
@@ -614,12 +624,11 @@ void MetalPreparedAqEvaluation::EncodeResidentQuantizer(
         const AqResidentQuantSelectionPass pass{shift, deviation ? 1u : 0u};
         encoder->setComputePipelineState(
             backend.aq_pipelines_.resident_quant_histogram.get());
-        BindPlane(encoder, resident_quant_field_, 0);
+        BindPlane(encoder, quant_field, 0);
         BindPlane(encoder, resident_quant_statistics_, 1);
         BindPlane(encoder, resident_quant_histogram_, 2);
         BindPlane(encoder, resident_quant_selection_state_, 3);
-        encoder->setBytes(&resident_quant_selection_params_,
-                          sizeof(resident_quant_selection_params_), 4);
+        encoder->setBytes(&params, sizeof(params), 4);
         encoder->setBytes(&pass, sizeof(pass), 5);
         DispatchThreads1d(encoder, block_count_);
 
@@ -640,30 +649,51 @@ void MetalPreparedAqEvaluation::EncodeResidentQuantizer(
     BindPlane(encoder, resident_quant_statistics_, 0);
     BindPlane(encoder, resident_quantizer_params_, 1);
     BindPlane(encoder, reconstruction_error_, 2);
-    encoder->setBytes(&resident_quant_selection_params_,
-                      sizeof(resident_quant_selection_params_), 3);
+    encoder->setBytes(&params, sizeof(params), 3);
     DispatchThreads1d(encoder, 1);
   }
 
   encoder->setComputePipelineState(
       backend.aq_pipelines_.initial_quant_raw_quant.get());
-  BindPlane(encoder, resident_quant_field_, 0);
+  BindPlane(encoder, quant_field, 0);
   BindPlane(encoder, resident_quantizer_params_, 1);
-  BindPlane(encoder, raw_quant_, 2);
+  BindPlane(encoder, raw_quant, 2);
   BindPlane(encoder, reconstruction_error_, 3);
-  encoder->setBytes(&resident_quant_selection_params_,
-                    sizeof(resident_quant_selection_params_), 4);
+  encoder->setBytes(&params, sizeof(params), 4);
   DispatchThreads2d(encoder, block_extent_);
 }
 
 void MetalPreparedAqEvaluation::EncodeFinalColorCorrelation(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
+  EncodeFinalColorCorrelation(backend, encoder, raw_quant_);
+}
+
+void MetalPreparedAqEvaluation::EncodeInvariantColorCorrelation(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
+  auto params = resident_quant_selection_params_;
+  params.quant_dc = invariant_quant_dc_;
+  params.scaled_quant_dc = static_cast<uint32_t>(static_cast<int32_t>(
+      static_cast<double>(invariant_quant_dc_ * 4096.0f) * 1.6));
+  // Block reduction has not run yet. Its four-byte-per-block storage holds
+  // temporary integer quantization for CfL without disturbing the evaluation
+  // field or raw quantization supplied by a host-driven caller.
+  EncodeResidentQuantizer(backend, encoder, resident_policy_initial_field_,
+                          block_distance_, params);
+  EncodeFinalColorCorrelation(backend, encoder, block_distance_);
+  if (resident_quantization_active_) {
+    EncodeResidentQuantizer(backend, encoder);
+  }
+}
+
+void MetalPreparedAqEvaluation::EncodeFinalColorCorrelation(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    DevicePlaneView raw_quant) const {
   encoder->setComputePipelineState(backend.aq_pipelines_.final_cfl.get());
   BindPlane(encoder, color_transform_records_, 0);
   BindPlane(encoder, color_tile_offsets_, 1);
   BindPlane(encoder, quant_tables_, 2);
   BindPlane(encoder, forward_coefficients_, 3);
-  BindPlane(encoder, raw_quant_, 4);
+  BindPlane(encoder, raw_quant, 4);
   BindPlane(encoder, resident_quantizer_params_, 5);
   BindPlane(encoder, y_to_x_, 6);
   BindPlane(encoder, y_to_b_, 7);
