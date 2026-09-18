@@ -55,10 +55,9 @@ Status ComputeWorkflowStoragePlan(Extent2D source,
   switch (o.route) {
   case WorkflowStorageRoute::kCuda: {
 #if defined(GJXL_ENABLE_CUDA)
-    if (o.collect_gpu_profile)
-      return Status::Unavailable("CUDA workflow GPU profiling is unavailable");
     CudaWorkflowStoragePlan cuda;
-    status = ComputeCudaWorkflowStoragePlan(source, plain, &cuda);
+    status = ComputeCudaWorkflowStoragePlan(
+      source, {e, o.collect_timing, o.collect_profile, o.collect_gpu_profile}, &cuda);
     if (!status.ok()) return status;
     CopyBase(cuda, &p);
     break;

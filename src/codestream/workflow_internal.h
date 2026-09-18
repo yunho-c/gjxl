@@ -240,7 +240,7 @@ EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
   VarDctEncodingSummary* summary,
   VarDctEncodingProfile* profile);
 
-/// Diagnostic-only public-workflow entry point with resident Metal GPU
+/// Diagnostic-only public-workflow entry point with resident GPU
 /// timestamps. On failure, every caller-visible output remains unchanged.
 [[nodiscard]] Status
 EncodeLinearRgbVarDctCodestreamGpuProfiledWithBackendForTesting(

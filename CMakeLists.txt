@@ -2732,6 +2732,10 @@ if(GJXL_BUILD_TESTS)
     set_tests_properties(cuda_profiling PROPERTIES SKIP_RETURN_CODE 77)
     add_test(NAME cuda_aq_profile COMMAND gjxl_cuda_aq_test --profile-only)
     set_tests_properties(cuda_aq_profile PROPERTIES SKIP_RETURN_CODE 77)
+    add_executable(gjxl_cuda_workflow_profile_test tests/cuda_workflow_profile_test.cpp)
+    target_link_libraries(gjxl_cuda_workflow_profile_test PRIVATE gjxl_codestream gjxl_cuda)
+    add_test(NAME cuda_workflow_profile COMMAND gjxl_cuda_workflow_profile_test)
+    set_tests_properties(cuda_workflow_profile PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 180)
 
     add_executable(
       gjxl_gpu_primitives_cuda_test

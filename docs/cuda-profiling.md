@@ -2,9 +2,12 @@
 
 CUDA currently implements stage profiling for coherent image-primitive,
 AC-candidate and prepared resident AQ submissions through the shared internal
-profiling interfaces. This is an integration foundation: dispatch records and
-whole-workflow diagnostic storage planning remain unfinished. Public CUDA
-GPU-profile requests still fail explicitly.
+profiling interfaces. The diagnostic public-workflow entry point accepts stage
+profiles for explicit CUDA fully-resident/throughput Butteraugli-target encodes.
+The whole-workflow storage recipe includes the retained graph, nested capture,
+submission recordings and snapshot/aggregation overlap. Normal finite-domain
+admission and publication apply. Dispatch records and a benchmark profile-export
+interface remain unfinished; this is not full Metal diagnostics parity.
 
 Timing-enabled CUDA events bracket the compute callback on the backend stream
 under its submission lock. Uploads, readbacks and host preparation outside that
@@ -47,5 +50,13 @@ fresh/reused resident pipeline comparisons cover two fixtures, efforts
 1/4/7/8/10, fully-resident/throughput modes and final-score toggles; profiled
 and ordinary results have identical codestream bytes and score histories.
 Injected initial-quantization completion failure and invalid preparation keep
-caller outputs unchanged. These checks do not qualify a public workflow's
-complete diagnostic storage bound.
+caller outputs unchanged.
+
+An additional 80 fresh/reused public-workflow comparisons preserve codestream
+bytes and full summaries under their calculated finite admission bounds. The
+profile shapes fit the policy-derived counts, published profiles release domain
+charges, and allocations remain in the selected domain. A sweep of all 55
+diagnostic allocation boundaries for a representative effort-7 workflow keeps
+every caller-visible output unchanged on failure. A reservation one byte below
+the complete plan is rejected before GPU work. Planning itself allocates no
+managed backing across 400 geometry/policy combinations, including odd 4K.

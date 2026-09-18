@@ -4,8 +4,16 @@
 
 #include "codestream/cpu_workflow_storage_plan.h"
 #include "gpu/cuda/cuda_storage_plan.h"
+#include "gpu/ops/profile_storage_plan.h"
 
 namespace gjxl::codestream_internal {
+struct CudaWorkflowStorageOptions {
+  VarDctEncodingOptions encoding;
+  bool collect_timing = false;
+  bool collect_profile = false;
+  bool collect_gpu_profile = false;
+};
+
 struct CudaWorkflowStoragePlan {
   Extent2D coding_extent;
   size_t maximum_attempts = 0;
@@ -17,6 +25,9 @@ struct CudaWorkflowStoragePlan {
   HostStorageBound device;
   HostStorageBound completed;
   SerializerStoragePlan serializer;
+  gpu_profile_internal::ProfileStorageShape profile_shape;
+  HostStorageBound diagnostics;
+  HostStorageBound profile_output;
   HostStorageBound output;
   HostStorageBound working;
 };
@@ -30,6 +41,6 @@ struct CudaWorkflowStoragePlan {
 // are excluded.
 [[nodiscard]] Status
 ComputeCudaWorkflowStoragePlan(Extent2D source,
-                               const CpuWorkflowStorageOptions &options,
+                               const CudaWorkflowStorageOptions &options,
                                CudaWorkflowStoragePlan *out);
 } // namespace gjxl::codestream_internal

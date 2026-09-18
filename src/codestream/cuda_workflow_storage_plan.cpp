@@ -8,7 +8,9 @@
 #include "codestream/workflow_publication_storage_plan.h"
 #include "core/frame_geometry.h"
 #include "gpu/ops/ac_strategy_storage_plan.h"
+#include <algorithm>
 #include <cmath>
+#include <string_view>
 
 namespace gjxl::codestream_internal {
 namespace {
@@ -17,12 +19,12 @@ Status Overflow() {
   return Status::OutOfMemory("CUDA workflow storage bound overflows");
 }
 
-Status ComputeCompatibility(Extent2D source, const CpuWorkflowStorageOptions &o,
+Status ComputeCompatibility(Extent2D source, const CudaWorkflowStorageOptions &o,
                             CudaWorkflowStoragePlan *out) {
   // These routes retain the shared CPU frontend/AQ owners (including exact
   // coefficients or final quality measurement). Compose their audited bound
   // with the concrete CUDA owners. No memory guard is relaxed for these modes.
-  auto cpu_options = o;
+  CpuWorkflowStorageOptions cpu_options{o.encoding, o.collect_timing, o.collect_profile};
   cpu_options.encoding.backend = VarDctBackendPreference::kCpu;
   CpuWorkflowStoragePlan cpu;
   Status status = ComputeCpuWorkflowStoragePlan(source, cpu_options, &cpu);
@@ -137,7 +139,7 @@ Status ComputeCompatibility(Extent2D source, const CpuWorkflowStorageOptions &o,
 } // namespace
 
 Status ComputeCudaWorkflowStoragePlan(Extent2D source,
-                                      const CpuWorkflowStorageOptions &o,
+                                      const CudaWorkflowStorageOptions &o,
                                       CudaWorkflowStoragePlan *out) {
   const auto &e = o.encoding;
   const bool search =
@@ -153,6 +155,11 @@ Status ComputeCudaWorkflowStoragePlan(Extent2D source,
        e.rate_control_mode == VarDctRateControlMode::kButteraugliTarget &&
        (!std::isfinite(e.butteraugli_target) || e.butteraugli_target <= 0)))
     return Status::InvalidArgument("CUDA workflow storage options are invalid");
+  if (o.collect_gpu_profile &&
+      ((e.gpu_aq_mode != GpuAdaptiveQuantizationMode::kFullyResident &&
+        e.gpu_aq_mode != GpuAdaptiveQuantizationMode::kThroughput) ||
+       e.rate_control_mode != VarDctRateControlMode::kButteraugliTarget))
+    return Status::InvalidArgument("CUDA GPU profiles require a resident target workflow");
   if (e.gpu_aq_mode == GpuAdaptiveQuantizationMode::kExactCoefficients ||
       e.gpu_aq_mode == GpuAdaptiveQuantizationMode::kMaximumThroughput ||
       e.rate_control_mode == VarDctRateControlMode::kMaximumError)
@@ -174,6 +181,43 @@ Status ComputeCudaWorkflowStoragePlan(Extent2D source,
   p.score_count = AdaptiveQuantizationIterations(e) +
                   size_t(e.collect_final_butteraugli_score);
   const bool fixed = UseFixedDct8Strategy(e);
+  if (o.collect_gpu_profile) {
+    // Reference preparation (unless evaluation-free), initial quantization,
+    // optional AC search, encoding-policy setup, and the resident policy.
+    // Sparse AC publication can submit one additional packing callback.
+    // AQ iterations execute inside the policy callback, so they do not add
+    // submissions. These bounds follow the call graph, not measured counts.
+    const size_t submissions = 4 + size_t(!fixed) + size_t(p.score_count != 0);
+    size_t id_length = 0;
+    for (std::string_view id : {
+           "aq.prepare_reference", "aq.initial_quantization", "aq.prepare_encoding_policy",
+           "aq.resident_policy", "ac_strategy.candidates", "frontend.ac_strategy",
+           "frontend.prepare_evaluator", "frontend.initial_quantization",
+           "frontend.reconfigure_aq", "frontend.quant_adjustment", "frontend.fixed_cfl",
+           "resident.aq", "frontend.ac_strategy.prepare", "frontend.ac_strategy.wait",
+           "frontend.ac_strategy.readback", "frontend.ac_strategy.merge"})
+      id_length = std::max(id_length, id.size());
+    p.profile_shape = {.wall_stages = 6 + (fixed ? 0u : 4u),
+                       .submissions = submissions, .stages = submissions,
+                       .maximum_id_length = id_length};
+    status = gpu_profile_internal::ComputeProfileStorageBound(p.profile_shape, &p.profile_output);
+    if (!status.ok()) return status;
+    // The parent can coexist with the largest in-flight operation capture
+    // (policy + sparse packing), one fresh resolved snapshot, and two retained
+    // submission recordings: policy's owner remains alive during sparse pack.
+    HostStorageBound capture;
+    status = gpu_profile_internal::ComputeProfileStorageBound(
+      {.submissions = 2, .stages = 2, .maximum_id_length = id_length}, &capture);
+    if (!status.ok()) return status;
+    gpu_profile_internal::SubmissionProfileStoragePlan child;
+    status = gpu_profile_internal::ComputeSubmissionProfileStoragePlan(
+      {.stages = 1, .maximum_stage_id_length = id_length,
+       .maximum_submission_id_length = id_length}, &child);
+    if (!status.ok()) return status;
+    p.diagnostics = p.profile_output;
+    if (!p.diagnostics.Add(capture) || !p.diagnostics.Add(child.resolution) ||
+        !p.diagnostics.Add(child.recorded)) return Overflow();
+  }
   AqEvaluationOptions evaluation;
   evaluation.evaluation_free = p.score_count == 0;
   evaluation.dc_quantization = ResolveDcQuantization(e);
@@ -257,7 +301,7 @@ Status ComputeCudaWorkflowStoragePlan(Extent2D source,
                   .dc_prediction = e.dc_prediction,
                   .dc_uint_search = UseDcUintSearch(e)},
        .cpu_thread_count = e.cpu_thread_count,
-       .collect_profile = o.collect_profile},
+       .collect_profile = o.collect_profile || o.collect_gpu_profile},
       &p.serializer);
   if (!status.ok())
     return status;
@@ -269,7 +313,9 @@ Status ComputeCudaWorkflowStoragePlan(Extent2D source,
   if (!status.ok())
     return status;
   p.output = publication.output;
+  if (!p.output.Add(p.profile_output)) return Overflow();
   for (auto part : {p.frontend, p.device, p.completed, p.serializer.working,
+                    p.diagnostics,
                     publication.scores, publication.timing,
                     publication.search_control, publication.retained_best})
     if (!p.working.Add(part))

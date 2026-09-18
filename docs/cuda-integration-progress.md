@@ -270,6 +270,20 @@ an intermediate build appear complete.
   pending. Serializer failure diagnostics now distinguish byte, participant,
   accounting and fallback-domain failures.
 
+- The diagnostic CUDA public-workflow entry point now supports stage profiles
+  with normal finite-domain admission. Its storage recipe derives reference,
+  initial, optional AC, policy setup/evaluation and sparse-pack counts from
+  the call graph, and includes nested capture, retained recordings and snapshot
+  overlap. Eighty fresh/reused workflow comparisons preserve bytes and full
+  summaries under the computed bound; all 55 diagnostic allocation boundaries
+  in an effort-7 workflow preserve outputs on failure. Under-admission rejects
+  before GPU work. Four hundred geometry/policy planning cases allocate no
+  managed backing. Dispatch records and benchmark profile export remain open.
+  The earlier capture test also passes memcheck with zero errors and an
+  explicit child completion marker. All nine focused CPU/CUDA admission,
+  storage, DC-policy and profiling checks pass (110 seconds), followed by
+  the strengthened workflow check for default-domain allocation escape.
+
 ## Outstanding integration risks
 
 - Broaden public policy/DC/low-effort coverage to all efforts, controls and
