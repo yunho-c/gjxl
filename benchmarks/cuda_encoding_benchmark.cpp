@@ -31,6 +31,7 @@
 #include "core/image_buffer.h"
 #include "gpu/cuda/cuda_backend.h"
 #include "io/pfm.h"
+#include "gpu_profile_json.h"
 
 namespace {
 
@@ -62,6 +63,9 @@ struct CommandLineOptions {
   bool collect_final_butteraugli_score = false;
   bool gpu_only = false;
   bool profile_range = false;
+  gjxl::gpu_profile_internal::GpuProfilingMode gpu_profiling_mode =
+      gjxl::gpu_profile_internal::GpuProfilingMode::kDisabled;
+  std::filesystem::path gpu_profile_path;
   gjxl::DcQuantizationMode dc_quantization = gjxl::DcQuantizationMode::kAutomatic;
   gjxl::VarDctDcPrediction dc_prediction = gjxl::kDefaultDcPrediction;
   std::optional<bool> adaptive_dc_smoothing;
@@ -172,9 +176,13 @@ void PrintUsage(std::string_view executable) {
                " [--distance D] [--effort 1..10] [--cpu-threads auto|N]"
                " [--warmups N] [--samples N] [--collect-final-score]"
                " [--gpu-only] [--profile-range]"
+               " [--gpu-profile stage|dispatch --gpu-profile-output FILE.json]"
                " [--dc-quantization auto|round|prediction-aware]"
                " [--dc-prediction gradient|weighted]"
-               " [--adaptive-dc-smoothing|--no-adaptive-dc-smoothing]\n";
+               " [--adaptive-dc-smoothing|--no-adaptive-dc-smoothing]\n"
+               "GPU profiles run CUDA diagnostics only, validate against ordinary CUDA output,\n"
+               "and require fully-resident or throughput AQ. --profile-range selects Nsight\n"
+               "capture of ordinary samples and cannot be combined with --gpu-profile.\n";
 }
 
 [[nodiscard]] CommandLineOptions ParseCommandLine(int argc, char **argv) {
@@ -211,6 +219,13 @@ void PrintUsage(std::string_view executable) {
       options.input_path = value;
     } else if (argument == "--gpu-aq") {
       options.gpu_aq_mode = ParseGpuAqMode(value);
+    } else if (argument == "--gpu-profile") {
+      using gjxl::gpu_profile_internal::GpuProfilingMode;
+      if (value == "stage") options.gpu_profiling_mode = GpuProfilingMode::kStage;
+      else if (value == "dispatch") options.gpu_profiling_mode = GpuProfilingMode::kDispatch;
+      else throw std::runtime_error("GPU profile must be stage or dispatch");
+    } else if (argument == "--gpu-profile-output") {
+      options.gpu_profile_path = value;
     } else if (argument == "--dc-quantization") {
       if (value == "auto") options.dc_quantization = gjxl::DcQuantizationMode::kAutomatic;
       else if (value == "round") options.dc_quantization = gjxl::DcQuantizationMode::kRound;
@@ -242,6 +257,20 @@ void PrintUsage(std::string_view executable) {
       throw std::runtime_error("Unknown benchmark option: " +
                                std::string(argument));
     }
+  }
+  const bool gpu_profile = options.gpu_profiling_mode !=
+      gjxl::gpu_profile_internal::GpuProfilingMode::kDisabled;
+  if (gpu_profile != !options.gpu_profile_path.empty()) {
+    throw std::runtime_error(
+        "--gpu-profile and --gpu-profile-output must be supplied together");
+  }
+  if (gpu_profile && options.profile_range) {
+    throw std::runtime_error("--gpu-profile cannot be combined with --profile-range");
+  }
+  if (gpu_profile &&
+      options.gpu_aq_mode != gjxl::GpuAdaptiveQuantizationMode::kFullyResident &&
+      options.gpu_aq_mode != gjxl::GpuAdaptiveQuantizationMode::kThroughput) {
+    throw std::runtime_error("--gpu-profile requires fully-resident or throughput GPU AQ");
   }
   if (!options.input_path.empty() && options.workload == "all") {
     throw std::runtime_error("An input image cannot be combined with all");
@@ -380,31 +409,34 @@ void PrintProfile(std::string_view backend, const ProfileSamples &samples) {
   }
 }
 
+[[nodiscard]] gjxl::VarDctEncodingOptions EncodingOptions(
+    const CommandLineOptions& options, gjxl::VarDctBackendPreference backend) {
+  const auto mode =
+      backend == gjxl::VarDctBackendPreference::kCuda
+          ? options.gpu_aq_mode
+          : gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
+  return {.butteraugli_target = options.butteraugli_target,
+          .effort = options.effort,
+          .cpu_thread_count = options.cpu_thread_count,
+          .backend = backend,
+          .gpu_aq_mode = mode,
+          .collect_final_butteraugli_score = options.collect_final_butteraugli_score,
+          .dc_prediction = options.dc_prediction,
+          .dc_quantization = options.dc_quantization,
+          .adaptive_dc_smoothing = options.adaptive_dc_smoothing};
+}
+
 [[nodiscard]] EncodeResult Encode(gjxl::ConstImage3FView image,
                                   const CommandLineOptions &options,
                                   gjxl::VarDctBackendPreference backend,
                                   gjxl::GpuBackend *gpu) {
   EncodeResult result;
-  const gjxl::GpuAdaptiveQuantizationMode mode =
-      backend == gjxl::VarDctBackendPreference::kCuda
-          ? options.gpu_aq_mode
-          : gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
   RequireStatus(
       backend == gjxl::VarDctBackendPreference::kCuda ? "CUDA encode"
                                                       : "CPU encode",
       gjxl::codestream_internal::
           EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
-              image,
-              {.butteraugli_target = options.butteraugli_target,
-               .effort = options.effort,
-               .cpu_thread_count = options.cpu_thread_count,
-               .backend = backend,
-               .gpu_aq_mode = mode,
-               .collect_final_butteraugli_score =
-                   options.collect_final_butteraugli_score,
-               .dc_prediction = options.dc_prediction,
-               .dc_quantization = options.dc_quantization,
-               .adaptive_dc_smoothing = options.adaptive_dc_smoothing},
+              image, EncodingOptions(options, backend),
               gpu, false, &result.codestream, &result.summary,
               &result.profile));
   const gjxl::VarDctExecutionBackend expected_backend =
@@ -419,6 +451,64 @@ void PrintProfile(std::string_view backend, const ProfileSamples &samples) {
     throw std::runtime_error("Profiled encode returned an invalid result");
   }
   return result;
+}
+
+[[nodiscard]] gjxl::benchmark::RawGpuProfileWorkload RunGpuProfileWorkload(
+    std::string_view name, gjxl::ConstImage3FView image,
+    const CommandLineOptions& options, gjxl::GpuBackend& gpu) {
+  const auto expected = Encode(image, options,
+      gjxl::VarDctBackendPreference::kCuda, &gpu);
+  const auto encoding_options = EncodingOptions(
+      options, gjxl::VarDctBackendPreference::kCuda);
+  gjxl::benchmark::RawGpuProfileWorkload workload{
+      .workload = std::string(name), .source_extent = image.extent()};
+  workload.samples.reserve(options.samples);
+  const auto sample = [&]() {
+    EncodeResult result;
+    gjxl::gpu_profile_internal::GpuExecutionProfile profile;
+    RequireStatus("CUDA GPU-profile encode",
+        gjxl::codestream_internal::
+            EncodeLinearRgbVarDctCodestreamGpuProfiledWithBackendForTesting(
+                image, encoding_options, &gpu, false, options.gpu_profiling_mode,
+                &result.codestream, &result.summary, &result.profile, &profile));
+    if (result.codestream != expected.codestream || result.summary != expected.summary ||
+        profile.mode != options.gpu_profiling_mode || profile.submissions.empty()) {
+      throw std::runtime_error("GPU-profile encode changed the encoded result");
+    }
+    return profile;
+  };
+  for (size_t i = 0; i < options.warmups; ++i) (void)sample();
+  for (size_t i = 0; i < options.samples; ++i) {
+    workload.samples.push_back({i, sample()});
+  }
+  std::cout << "workload " << name << " source=" << image.width() << 'x'
+            << image.height() << " scope=gpu-profile samples=" << options.samples
+            << " codestream_comparison=exact cuda_bytes=" << expected.codestream.size()
+            << '\n';
+  return workload;
+}
+
+void WriteGpuProfileSamples(const CommandLineOptions& options,
+    const std::vector<gjxl::benchmark::RawGpuProfileWorkload>& workloads) {
+  gjxl::benchmark::GpuProfileJsonOptions metadata;
+  metadata.scope = "cuda-public-workflow";
+  metadata.gpu_profiling_mode = options.gpu_profiling_mode;
+  metadata.gpu_aq = GpuAqModeName(options.gpu_aq_mode);
+  metadata.ac_residual_inverse = "fused";
+  metadata.collect_final_butteraugli_score = options.collect_final_butteraugli_score;
+  metadata.butteraugli_target = options.butteraugli_target;
+  metadata.warmups = options.warmups;
+  metadata.samples = options.samples;
+  metadata.effort = options.effort;
+  metadata.cpu_thread_count = options.cpu_thread_count;
+  metadata.timestamp_origin = "submission-local";
+  metadata.dc_quantization = options.dc_quantization == gjxl::DcQuantizationMode::kAutomatic
+      ? "auto" : (options.dc_quantization == gjxl::DcQuantizationMode::kRound
+          ? "round" : "prediction-aware");
+  metadata.dc_prediction = options.dc_prediction == gjxl::VarDctDcPrediction::kWeighted
+      ? "weighted" : "gradient";
+  metadata.adaptive_dc_smoothing = options.adaptive_dc_smoothing;
+  gjxl::benchmark::WriteGpuProfileSamples(options.gpu_profile_path, metadata, workloads);
 }
 
 void RunWorkload(std::string_view name, gjxl::Image3FBuffer image,
@@ -551,8 +641,12 @@ int main(int argc, char **argv) {
       throw std::runtime_error("CUDA backend creation failed: " +
                                std::string(factory.message()));
     }
+    const bool gpu_profile = options.gpu_profiling_mode !=
+        gjxl::gpu_profile_internal::GpuProfilingMode::kDisabled;
     std::cout << std::fixed << std::setprecision(3)
-              << "CPU/CUDA public-workflow wall profile: device=" << gpu->name()
+              << (gpu_profile ? "CUDA diagnostic GPU profile: device="
+                              : "CPU/CUDA public-workflow wall profile: device=")
+              << gpu->name()
               << " gpu_aq=" << GpuAqModeName(options.gpu_aq_mode)
               << " final_score="
               << (options.collect_final_butteraugli_score ? "collect" : "skip")
@@ -561,18 +655,26 @@ int main(int argc, char **argv) {
                       ? std::string("auto")
                       : std::to_string(options.cpu_thread_count))
               << '\n';
+    std::vector<gjxl::benchmark::RawGpuProfileWorkload> gpu_profiles;
+    const auto run = [&](std::string_view name, gjxl::Image3FBuffer image) {
+      if (gpu_profile) {
+        gpu_profiles.push_back(RunGpuProfileWorkload(name, image.const_view(), options, *gpu));
+      } else {
+        RunWorkload(name, std::move(image), options, *gpu);
+      }
+    };
     if (!options.input_path.empty()) {
       gjxl::Image3FBuffer image;
       RequireStatus("PFM input", gjxl::io::ReadPfm(options.input_path, &image));
-      RunWorkload("external_input", std::move(image), options, *gpu);
+      run("external_input", std::move(image));
     } else {
       for (const WorkloadSpec &workload : kWorkloads) {
         if (options.workload == "all" || options.workload == workload.name) {
-          RunWorkload(workload.name, MakeSynthetic(workload.extent), options,
-                      *gpu);
+          run(workload.name, MakeSynthetic(workload.extent));
         }
       }
     }
+    if (gpu_profile) WriteGpuProfileSamples(options, gpu_profiles);
     return EXIT_SUCCESS;
   } catch (const std::exception &error) {
     std::cerr << "Benchmark error: " << error.what() << '\n';

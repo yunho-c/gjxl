@@ -6,8 +6,33 @@ profiling interfaces. The diagnostic public-workflow entry point accepts both
 profiles for explicit CUDA fully-resident/throughput Butteraugli-target encodes.
 The whole-workflow storage recipe includes the retained graph, nested capture,
 submission recordings and snapshot/aggregation overlap. Normal finite-domain
-admission and publication apply. A benchmark profile-export interface remains
-unfinished; this is not full Metal diagnostics parity.
+admission and publication apply. The CUDA benchmark exports both modes through
+the same schema-4 JSON writer as the Metal benchmark. CUDA stages currently
+identify complete submissions; Metal has finer semantic stage boundaries.
+
+For example, from a CUDA benchmark build:
+
+```sh
+gjxl_cuda_encoding_benchmark --workload synthetic_128x96 --gpu-aq fully-resident \
+  --effort 7 --cpu-threads 1 --warmups 2 --samples 5 \
+  --gpu-profile dispatch --gpu-profile-output profiles/cuda-dispatch.json
+```
+
+Use `--gpu-profile stage` to retain launch metadata with submission timings
+without per-launch timestamps. These diagnostic modes implicitly run CUDA only;
+they do not print CPU/CUDA speed ratios. Every warmup and retained sample must
+preserve both the ordinary CUDA codestream and its full encoding summary.
+Exact-coefficients and maximum-throughput AQ profiles are rejected, as is
+combining GPU event profiling with the ordinary Nsight `--profile-range` option.
+
+Exports include effort, CPU thread request, distance, AQ mode, final-score
+setting, DC policy requests and `timestamp_origin: "submission-local"`.
+`adaptive_dc_smoothing: null` means the effort default; `dc_quantization: "auto"`
+also means the effort default. All workloads finish and validate before output
+publication. The writer uses a uniquely reserved sibling staging directory,
+then replaces the destination on success on Windows and POSIX. Failures keep
+an existing output intact and remove staging files. Schema 4's existing Metal
+fields are preserved; effort and CPU thread request are additive metadata.
 
 Timing-enabled CUDA events bracket the compute callback on the backend stream
 under its submission lock. Uploads, readbacks and host preparation outside that

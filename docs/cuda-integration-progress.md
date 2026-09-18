@@ -322,6 +322,30 @@ an intermediate build appear complete.
   5-second admission waits while allowing 180 seconds for repeated backend
   creation (the prior successful hosted run took 43.4 seconds overall).
 
+- CUDA benchmark profile export now supports `--gpu-profile stage|dispatch`
+  and `--gpu-profile-output` through the shared Metal/CUDA schema-4 writer.
+  Diagnostic warmups/samples preserve ordinary CUDA bytes and full summaries;
+  ordinary timing runs retain their separate path. CLI tests cover both AQ
+  modes, efforts 1/7/8/10, final scores, odd PFM input, all bundled workloads,
+  DC overrides, repeated output replacement, invalid options and failed final
+  publication. The three focused benchmark/writer tests pass on CUDA; shared
+  writer tests also pass with Windows C++23 and Linux C++20. JSON numbers are
+  locale independent; failed writes preserve outputs and clean staging files.
+  The extracted Metal benchmark passes an MSVC syntax check after correcting
+  two existing designated-initializer ordering errors. A full CUDA-build
+  regression run is in progress. CUDA's semantic stages still identify whole
+  submissions, while dispatch mode provides individual launch timings.
+- At `27c4344`, both hosted Metal modes pass 147/149 tests, including cache
+  admission (64 seconds on C++20, within the revised outer deadline). The main
+  control with the scalar-DCT portability patch and identical valid mixed
+  reconstruction fixture reproduces both numerical failures exactly: channel-0
+  DC block (4,5), 3979 versus 3978, and maximum-throughput pixel-mask error
+  0.000419617. The latter retains identical frames and codestreams. These are
+  inherited numerical checks on the paravirtual GPU, not evidence of a CUDA
+  integration regression; they remain unresolved, with tolerances unchanged.
+  Hosted Windows and Linux C++20/C++23 and all three Rust jobs pass at this
+  revision.
+
 ## Outstanding integration risks
 
 - Broaden public policy/DC/low-effort coverage to all efforts, controls and
