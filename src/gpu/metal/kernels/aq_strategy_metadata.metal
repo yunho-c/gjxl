@@ -203,3 +203,48 @@ kernel void gjxl_aq_metadata_destinations(device const uchar* cells [[buffer(0)]
     }
   }
 }
+
+#include "aq_strategy_dispatch.h"
+// Templates contain only geometry/policy values. Selection-dependent fields
+// and every indirect group count are overwritten from the validated family bank.
+kernel void gjxl_aq_strategy_dispatch(
+    device const uint* families [[buffer(0)]],
+    constant gjxl_aq_dispatch::Record* templates [[buffer(1)]],
+    device gjxl_aq_dispatch::Record* records [[buffer(2)]],
+    uint f [[thread_position_in_grid]]) {
+  if (f >= 7) return;
+  using namespace gjxl_aq_dispatch;
+  Record r = templates[f];
+  const uint a = families[5*f+1], n = families[5*f+2];
+  const uint c = families[5*f+3], size = families[5*f+4];
+  r.reconstruction[8] = a;
+  r.reconstruction[9] = n;
+  r.reconstruction[10] = c;
+  r.completed_reconstruction[8] = a;
+  r.completed_reconstruction[9] = n;
+  r.completed_reconstruction[10] = c;
+  r.forward[0] = r.inverse[0] = a;
+  r.forward[1] = r.inverse[1] = n;
+  r.forward[2] = r.inverse[2] = c;
+  r.adjustment[1] = a;
+  r.adjustment[2] = n;
+  r.population[0] = a;
+  r.population[1] = n;
+  r.population[3] = families[2] == r.reconstruction[3]*r.reconstruction[4] ? 1u : 0u;
+  r.block_reduction[4] = a;
+  r.block_reduction[5] = n;
+  const bool parallel = size >= 128 && n <= 256;
+  for (uint d = 0; d < kDispatchCount; ++d) {
+    r.groups[d][0] = 0;
+    r.groups[d][1] = r.groups[d][2] = 1;
+  }
+  r.groups[kTransforms][0] = n;
+  r.groups[kDct][0] = 3*n;
+  r.groups[kAdjustedScalar][0] = parallel ? 0 : (n+255)/256;
+  r.groups[kAdjustedParallel][0] = parallel ? n : 0;
+  r.groups[kQuantField][0] = (n+255)/256;
+  r.groups[kPopulation][0] = size/32;
+  r.groups[kPopulation][1] = (n+63)/64;
+  r.groups[kLlf][0] = (3*n*(size/64)+255)/256;
+  records[f] = r;
+}

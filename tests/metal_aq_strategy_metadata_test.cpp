@@ -11,7 +11,11 @@
 #include <string_view>
 #include <vector>
 
+#include "codec/adaptive_quantization.h"
+#include "codec/vardct_frame.h"
+#include "codec/vardct_frame_view_internal.h"
 #include "core/ac_strategy.h"
+#include "gpu/metal/kernels/aq_strategy_dispatch.h"
 #include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_aq_strategy_metadata.h"
 #include "gpu/metal/metal_backend.h"
@@ -172,17 +176,27 @@ struct Oracle {
   std::array<std::vector<float>, 3> image;
   std::vector<uint8_t> sharpness;
   std::unique_ptr<PreparedAqEvaluation> prepared;
-  bool Prepare(GpuBackend &gpu, const AcStrategyGrid &grid) {
+  bool Prepare(GpuBackend &gpu, const AcStrategyGrid &grid,
+               bool evaluate = false) {
     const auto blocks = grid.extent();
     const Extent2D pixels{blocks.width * 8, blocks.height * 8};
     for (auto &p : image)
       p.assign(pixels.width * pixels.height, 0.25f);
+    if (evaluate) {
+      for (size_t c = 0; c < 3; ++c)
+        for (size_t y = 0; y < pixels.height; ++y)
+          for (size_t x = 0; x < pixels.width; ++x)
+            image[c][y * pixels.width + x] =
+                c == 0   ? .002f * float((x + 7 * y) % 9)
+                : c == 1 ? .19f + .00012f * float(x) - .00007f * float(y)
+                         : .15f + .00004f * float(x + 2 * y);
+    }
     sharpness.assign(blocks.width * blocks.height, 4);
     ConstImage3FView view{{{{image[0].data(), pixels, pixels.width},
                             {image[1].data(), pixels, pixels.width},
                             {image[2].data(), pixels, pixels.width}}}};
     AqEvaluationOptions options;
-    options.evaluation_free = true;
+    options.evaluation_free = !evaluate;
     return Ok(PrepareAqEvaluation(
         gpu,
         {.original_linear_rgb = view,
@@ -315,6 +329,251 @@ bool CheckFailure(GpuBackend &gpu) {
   return true;
 }
 
+bool QuantizedCoefficientsEqual(const auto &expected, const auto &actual) {
+  if (!expected.valid() || !actual.valid() ||
+      expected.ac_group_count() != actual.ac_group_count()) {
+    return false;
+  }
+  const gjxl::ConstImage3I32View expected_dc = expected.quantized_dc();
+  const gjxl::ConstImage3I32View actual_dc = actual.quantized_dc();
+  if (expected_dc.extent() != actual_dc.extent())
+    return false;
+  for (size_t channel = 0; channel < 3; ++channel) {
+    for (size_t y = 0; y < expected_dc.extent().height; ++y) {
+      if (!std::equal(expected_dc.plane[channel].Row(y),
+                      expected_dc.plane[channel].Row(y) +
+                          expected_dc.extent().width,
+                      actual_dc.plane[channel].Row(y))) {
+        return false;
+      }
+    }
+  }
+  for (size_t group_index = 0; group_index < expected.ac_group_count();
+       ++group_index) {
+    gjxl::VarDctAcGroupView expected_group;
+    gjxl::VarDctAcGroupView actual_group;
+    if (!expected.GetAcGroup(group_index, &expected_group).ok() ||
+        !actual.GetAcGroup(group_index, &actual_group).ok() ||
+        expected_group.used_coefficient_count !=
+            actual_group.used_coefficient_count) {
+      return false;
+    }
+    for (size_t channel = 0; channel < 3; ++channel) {
+      if (!std::equal(expected_group.coefficients[channel].begin(),
+                      expected_group.coefficients[channel].end(),
+                      actual_group.coefficients[channel].begin())) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+
+bool CheckDispatchConsumers(GpuBackend &gpu) {
+  using gjxl_aq_dispatch::Record;
+  for (size_t trial = 0; trial < 27; ++trial) {
+    const Extent2D blocks = trial >= 24 ? Extent2D{1, trial - 23}
+                            : trial < 3 ? Extent2D{13, 11}
+                                        : Extent2D{69, 69};
+    AcStrategyGrid grid;
+    if (trial < 3 || trial >= 24) {
+      if (!Grid(blocks, uint32_t(trial), &grid))
+        return false;
+    } else {
+      if (!Ok(AcStrategyGrid::Create(blocks, &grid)))
+        return false;
+      // Empty families, pure DCT8, and either side of the 256-anchor switch.
+      const size_t family = (trial - 3) / 3;
+      const auto type = kSupportedAqStrategies[family];
+      size_t left = 255 + (trial - 3) % 3;
+      const auto covered = GetAcStrategyInfo(type)->covered_blocks;
+      for (size_t y = 0; y < blocks.height; ++y)
+        for (size_t x = 0; x < blocks.width; ++x) {
+          if (grid.occupied(x, y))
+            continue;
+          if (left &&
+              x + covered.width <= std::min((x / 8 + 1) * 8, blocks.width) &&
+              y + covered.height <= std::min((y / 8 + 1) * 8, blocks.height) &&
+              grid.Set(x, y, type).ok())
+            --left;
+          else if (!Ok(grid.Set(x, y, AcStrategyType::kDct8)))
+            return false;
+        }
+    }
+    Arena metadata;
+    Oracle oracle;
+    if (!metadata.Prepare(gpu, blocks) || !metadata.Run(gpu, Cells(grid)) ||
+        !oracle.Prepare(gpu, grid, true))
+      return false;
+    if (trial >= 6 && trial < 24 &&
+        metadata.result[kMetadataFamilies][5 * ((trial - 3) / 3) + 2] !=
+            255 + (trial - 3) % 3) {
+      std::cerr << "Fixture missed the requested family-count boundary\n";
+      return false;
+    }
+    DeviceScratchLayoutPlan layout;
+    DevicePlaneLayout parameter_layout;
+    constexpr size_t words = 7 * sizeof(Record) / 4;
+    if (!Ok(layout.AddPlane(DeviceElementType::kI32, {words + 64, 1},
+                            words + 64, 256, &parameter_layout)))
+      return false;
+    DeviceScratchArena parameters;
+    DevicePlaneView view;
+    if (!Ok(parameters.Prepare(gpu, layout.capacity_bytes())) ||
+        !Ok(parameters.BindPlane(parameter_layout, &view)))
+      return false;
+    std::vector<uint32_t> poison(words + 64, kPoison);
+    if (!Ok(gpu.CopyHostToDevice(*view.buffer, poison.data(), poison.size() * 4,
+                                 view.offset_bytes)))
+      return false;
+    view.extent = {words, 1};
+    view.row_stride = words;
+    if (trial == 0) {
+      const auto families = metadata.descriptor.planes[kMetadataFamilies];
+      auto short_view = view;
+      --short_view.extent.width;
+      auto alias = view;
+      alias.extent = {35, 1};
+      if (BindMetalAqStrategyDispatchForTesting(*oracle.prepared, families,
+                                                short_view)
+                  .code() != StatusCode::kInvalidArgument ||
+          BindMetalAqStrategyDispatchForTesting(*oracle.prepared, alias, view)
+                  .code() != StatusCode::kInvalidArgument)
+        return false;
+    }
+    const size_t count = blocks.width * blocks.height;
+    std::vector<float> initial(count), expected(count), actual(count);
+    for (size_t i = 0; i < count; ++i)
+      initial[i] = .25f + float(i % 37) * .09f;
+    float quant_dc = 0;
+    if (!Ok(ComputeInitialQuantDc(2.4f, &quant_dc)))
+      return false;
+    const ConstPlaneF32View quant{initial.data(), blocks, blocks.width};
+    const AqResidentButteraugliPolicyInput input{
+        .adjusted_initial_quant_field = quant,
+        .quant_dc = quant_dc,
+        .butteraugli_target = 2.4f,
+        .iterations = trial % 5,
+        .evaluate_final_field = trial % 2 == 0,
+        .adjust_initial_field = true};
+    VarDctEncoderFrame expected_frame, actual_frame;
+    const bool completed = trial % 3 == 0;
+    std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame>
+        expected_completed, actual_completed;
+    std::vector<double> expected_scores, actual_scores;
+    if (!Ok(oracle.prepared->PrepareInvariantColorCorrelationResident(
+            quant, quant_dc)) ||
+        !Ok(oracle.prepared->EvaluateResidentButteraugliPolicy(
+            input,
+            {.quant_field = {expected.data(), blocks, blocks.width},
+             .score_history = &expected_scores,
+             .frame = completed ? nullptr : &expected_frame,
+             .completed_frame = completed ? &expected_completed : nullptr})) ||
+        !Ok(BindMetalAqStrategyDispatchForTesting(
+            *oracle.prepared, metadata.descriptor.planes[kMetadataFamilies],
+            view)) ||
+        !Ok(oracle.prepared->PrepareInvariantColorCorrelationResident(
+            quant, quant_dc)))
+      return false;
+    const auto before = gpu.stats();
+    if (!Ok(oracle.prepared->EvaluateResidentButteraugliPolicy(
+            input,
+            {.quant_field = {actual.data(), blocks, blocks.width},
+             .score_history = &actual_scores,
+             .frame = completed ? nullptr : &actual_frame,
+             .completed_frame = completed ? &actual_completed : nullptr})) ||
+        expected != actual || expected_scores != actual_scores ||
+        !(completed
+              ? expected_completed && actual_completed &&
+                    QuantizedCoefficientsEqual(expected_completed->view(),
+                                               actual_completed->view())
+              : QuantizedCoefficientsEqual(expected_frame, actual_frame)) ||
+        gpu.stats().committed_submissions != before.committed_submissions + 1 ||
+        (!completed &&
+         gpu.stats().successful_allocations != before.successful_allocations)) {
+      std::cerr << "Indirect AQ dispatch changed output on trial " << trial
+                << '\n';
+      return false;
+    }
+    if (trial == 0) {
+      std::vector<double> rejected_scores{-99.0};
+      gpu_profile_internal::GpuExecutionProfile profile;
+      const auto submissions = gpu.stats().committed_submissions;
+      auto *profiler =
+          dynamic_cast<gpu_profile_internal::PreparedAqEvaluationProfiler *>(
+              oracle.prepared.get());
+      if (!profiler ||
+          profiler->EvaluateResidentButteraugliPolicyProfiled(
+                      input, {.score_history = &rejected_scores},
+                      gpu_profile_internal::GpuProfilingMode::kStage, &profile)
+                  .code() != StatusCode::kUnavailable ||
+          rejected_scores != std::vector<double>{-99.0} ||
+          gpu.stats().committed_submissions != submissions)
+        return false;
+    }
+    if (completed) {
+      const auto a = expected_completed->view().coefficient_order_population();
+      const auto b = actual_completed->view().coefficient_order_population();
+      if (a.present_mask != b.present_mask ||
+          !std::ranges::equal(a.counts, b.counts)) {
+        std::cerr << "Indirect coefficient populations differ on trial "
+                  << trial << '\n';
+        return false;
+      }
+    }
+    if (!Ok(gpu.CopyDeviceToHost(*view.buffer, poison.data(), poison.size() * 4,
+                                 view.offset_bytes)))
+      return false;
+    if (!std::all_of(poison.begin() + words, poison.end(),
+                     [](auto v) { return v == kPoison; })) {
+      std::cerr << "Indirect parameters overwrote guards\n";
+      return false;
+    }
+    if (trial < 5) {
+      std::fill(actual.begin(), actual.end(), -123.0f);
+      std::vector<double> failed_scores{-91.0};
+      VarDctEncoderFrame failed_frame;
+      if (trial == 0 && !Ok(FailNextMetalAqUploadForTesting(*oracle.prepared)))
+        return false;
+      if (trial == 1 &&
+          !Ok(ArmNextMetalSubmissionFailureForTest(gpu, true, false)))
+        return false;
+      if (trial == 2 &&
+          !Ok(ArmNextMetalSubmissionFailureForTest(gpu, false, true)))
+        return false;
+      if (trial == 3 &&
+          !Ok(FailNextMetalAqReadbackForTesting(*oracle.prepared)))
+        return false;
+      if (trial == 4 && !Ok(FailNextMetalAqNumericForTesting(*oracle.prepared)))
+        return false;
+      const AqResidentButteraugliPolicyOutput out{
+          .quant_field = {actual.data(), blocks, blocks.width},
+          .score_history = &failed_scores,
+          .frame = &failed_frame};
+      const auto status =
+          oracle.prepared->EvaluateResidentButteraugliPolicy(input, out);
+      if (status.code() != (trial == 1 ? StatusCode::kSubmissionFailed
+                                       : StatusCode::kDeviceError) ||
+          failed_frame.valid() || failed_scores != std::vector<double>{-91.0} ||
+          !std::ranges::all_of(actual, [](float v) { return v == -123.0f; }) ||
+          oracle.prepared->EvaluateResidentButteraugliPolicy(input, out)
+                  .code() != StatusCode::kFailedPrecondition) {
+        std::cerr << "Indirect dispatch failure was not atomic: " << trial
+                  << '\n';
+        return false;
+      }
+      oracle.prepared.reset(); // Release borrower before external buffers.
+    } else {
+      if (!Ok(BindMetalAqStrategyDispatchForTesting(*oracle.prepared, {}, {})))
+        return false;
+    }
+  }
+  std::cout << "27 GPU-family/indirect AQ consumer cases matched CPU dispatch "
+               "exactly\n";
+  return true;
+}
+
 bool Benchmark(GpuBackend &gpu, unsigned rotation) {
   const std::array shapes{Extent2D{250, 188}, Extent2D{480, 270},
                           Extent2D{750, 500}};
@@ -370,7 +629,16 @@ int main(int argc, char **argv) {
     }
   }
   std::unique_ptr<GpuBackend> gpu;
-  if (!Ok(CreateMetalBackend(library, &gpu)))
+  MetalBackendOptions options;
+  options.forward_dct8 = options.inverse_dct8 = options.forward_dct16x16 =
+      options.inverse_dct16x16 = options.forward_dct32x32 =
+          options.inverse_dct32x32 = options.forward_dct16x8 =
+              options.inverse_dct16x8 = options.forward_dct8x16 =
+                  options.inverse_dct8x16 = options.forward_dct32x16 =
+                      options.inverse_dct32x16 = options.forward_dct16x32 =
+                          options.inverse_dct16x32 =
+                              MetalDctImplementation::kSimdgroupMatmul;
+  if (!Ok(CreateMetalBackend(library, options, &gpu)))
     return EXIT_FAILURE;
   if (benchmark)
     return Benchmark(*gpu, rotation) ? EXIT_SUCCESS : EXIT_FAILURE;
@@ -390,7 +658,7 @@ int main(int argc, char **argv) {
                            {129, 131}})
     if (!CheckShape(*gpu, shape, &cases))
       return EXIT_FAILURE;
-  if (!CheckFailure(*gpu))
+  if (!CheckFailure(*gpu) || !CheckDispatchConsumers(*gpu))
     return EXIT_FAILURE;
   std::cout << cases
             << " exact CPU-builder/GPU-metadata cases passed; guards, failure "

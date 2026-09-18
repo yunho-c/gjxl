@@ -126,7 +126,7 @@ struct PrimitivePipelines {
 };
 
 struct AqPipelines {
-  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 7> strategy_metadata;
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 8> strategy_metadata;
   NS::SharedPtr<MTL::ComputePipelineState> block_reduction;
   NS::SharedPtr<MTL::ComputePipelineState> maximum_error_reduction;
   NS::SharedPtr<MTL::ComputePipelineState> reset_exact_evaluation;
@@ -262,6 +262,7 @@ struct ButteraugliPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> final_l2_masked_ac;
   NS::SharedPtr<MTL::ComputePipelineState> crop;
   NS::SharedPtr<MTL::ComputePipelineState> compose;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_parameters;
   NS::SharedPtr<MTL::ComputePipelineState> resident_reduction;
   NS::SharedPtr<MTL::ComputePipelineState> resident_reduction_small;
   NS::SharedPtr<MTL::ComputePipelineState> maximum_reduction;

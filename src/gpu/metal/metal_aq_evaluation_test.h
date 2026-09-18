@@ -11,6 +11,14 @@
 
 namespace gjxl::metal_internal {
 
+// Qualification only: buffers are borrowed until explicitly unbound or the
+// preparation is destroyed. Families must come from validated metadata for the
+// current host grid. Only unprofiled resident-policy evaluation consumes them.
+[[nodiscard]] Status
+BindMetalAqStrategyDispatchForTesting(PreparedAqEvaluation &prepared,
+                                      ConstDevicePlaneView families,
+                                      DevicePlaneView parameters);
+
 struct MetalAqStrategyMetadataSnapshot {
   std::array<uint32_t, 35> families{};
   std::array<uint32_t, 4> control{};

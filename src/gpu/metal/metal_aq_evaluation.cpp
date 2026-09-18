@@ -1908,6 +1908,8 @@ Status MetalPreparedAqEvaluation::Reconfigure(
     row_major_anchors_ = std::move(row_major_anchors);
     final_transform_layouts_ = std::move(transform_layouts);
     final_transform_metadata_pending_ = false;
+    strategy_dispatch_ = {};
+    strategy_dispatch_families_ = {};
     anchor_count_ = anchor_offset;
     final_cfl_params_.transform_count =
       static_cast<uint32_t>(anchor_count_);
@@ -2006,6 +2008,9 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       profiling_mode, &candidate_profile);
     if (!profile_status.ok()) return profile_status;
   }
+  if (profiling && DeviceStrategyDispatch())
+    return Status::Unavailable(
+        "Device strategy dispatch profiling is not enabled");
   if (!resident_quantization_ ||
       options_.metric != AqEvaluationMetric::kButteraugli) {
     return Status::Unavailable(
@@ -2085,19 +2090,23 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     const auto batches =
       MakeResidentButteraugliBatches(block_reduction_params_);
     status = ValidatePreparedMetalButteraugliResidentEncoding(
-      *butteraugli_,
-      {
-        .distorted_linear_rgb = {{{reconstructed_linear_[0],
-                                   reconstructed_linear_[1],
-                                   reconstructed_linear_[2]}}},
-        .anchors = MakeResidentAnchors(anchors_, anchor_count_),
-        .block_distance = block_distance_,
-        .score_partials =
-          MakeResidentScorePartials(score_partials_, anchor_count_),
-        .score = score_,
-        .error = reconstruction_error_,
-        .batches = batches,
-      });
+        *butteraugli_,
+        {
+            .distorted_linear_rgb = {{{reconstructed_linear_[0],
+                                       reconstructed_linear_[1],
+                                       reconstructed_linear_[2]}}},
+            .anchors = MakeResidentAnchors(anchors_, DeviceStrategyDispatch()
+                                                         ? block_count_
+                                                         : anchor_count_),
+            .block_distance = block_distance_,
+            .score_partials = MakeResidentScorePartials(
+                score_partials_,
+                DeviceStrategyDispatch() ? block_count_ : anchor_count_),
+            .score = score_,
+            .error = reconstruction_error_,
+            .batches = batches,
+            .strategy_dispatch = strategy_dispatch_,
+        });
   } else if (score_count != 0) {
     status = ValidatePreparedMetalButteraugliEncoding(
       *butteraugli_,
@@ -3241,6 +3250,9 @@ Status MetalPreparedAqEvaluation::AssembleFrameFromCompletedDeviceBuffers(
 Status MetalPreparedAqEvaluation::SubmitEvaluation(
   AqEvaluationInput input,
   bool profiling_reserved) {
+  if (DeviceStrategyDispatch())
+    return Status::Unavailable(
+        "Device strategy dispatch is restricted to resident policy evaluation");
   if (options_.evaluation_free) {
     return Status::FailedPrecondition(
       "Evaluation-free preparation cannot evaluate a quantization field");
@@ -3260,19 +3272,23 @@ Status MetalPreparedAqEvaluation::SubmitEvaluation(
     const auto batches =
       MakeResidentButteraugliBatches(block_reduction_params_);
     status = ValidatePreparedMetalButteraugliResidentEncoding(
-      *butteraugli_,
-      {
-        .distorted_linear_rgb = {{{reconstructed_linear_[0],
-                                   reconstructed_linear_[1],
-                                   reconstructed_linear_[2]}}},
-        .anchors = MakeResidentAnchors(anchors_, anchor_count_),
-        .block_distance = block_distance_,
-        .score_partials =
-          MakeResidentScorePartials(score_partials_, anchor_count_),
-        .score = score_,
-        .error = reconstruction_error_,
-        .batches = batches,
-      });
+        *butteraugli_,
+        {
+            .distorted_linear_rgb = {{{reconstructed_linear_[0],
+                                       reconstructed_linear_[1],
+                                       reconstructed_linear_[2]}}},
+            .anchors = MakeResidentAnchors(anchors_, DeviceStrategyDispatch()
+                                                         ? block_count_
+                                                         : anchor_count_),
+            .block_distance = block_distance_,
+            .score_partials = MakeResidentScorePartials(
+                score_partials_,
+                DeviceStrategyDispatch() ? block_count_ : anchor_count_),
+            .score = score_,
+            .error = reconstruction_error_,
+            .batches = batches,
+            .strategy_dispatch = strategy_dispatch_,
+        });
     if (!status.ok()) return status;
   } else if (options_.metric == AqEvaluationMetric::kButteraugli) {
     status = ValidatePreparedMetalButteraugliEncoding(
@@ -4614,7 +4630,7 @@ void MetalPreparedAqEvaluation::EncodeBlockReduction(
     MetalBackend::AsMetalBuffer(*reconstruction_error_.buffer);
   for (size_t batch_index = 0; batch_index < batches_.size(); ++batch_index) {
     const AqStrategyBatch& batch = batches_[batch_index];
-    if (batch.anchor_count == 0) {
+    if (!DeviceStrategyDispatch() && batch.anchor_count == 0) {
       continue;
     }
     encoder->setBuffer(distance->handle(), distance_map.offset_bytes, 0);
@@ -4622,6 +4638,14 @@ void MetalPreparedAqEvaluation::EncodeBlockReduction(
     encoder->setBuffer(block->handle(), block_distance_.offset_bytes, 2);
     encoder->setBuffer(
       error->handle(), reconstruction_error_.offset_bytes, 3);
+    if (DeviceStrategyDispatch()) {
+      BindStrategyParameters(
+          encoder, batch_index,
+          offsetof(gjxl_aq_dispatch::Record, block_reduction), 4);
+      DispatchStrategy(encoder, batch_index, gjxl_aq_dispatch::kTransforms,
+                       MTL::Size(kBlockReductionThreadCount, 1, 1));
+      continue;
+    }
     encoder->setBytes(
       &block_reduction_params_[batch_index],
       sizeof(block_reduction_params_[batch_index]), 4);
@@ -4708,20 +4732,25 @@ void MetalPreparedAqEvaluation::EncodeEvaluationSubmission(
       const auto batches =
         MakeResidentButteraugliBatches(self.block_reduction_params_);
       EncodePreparedMetalButteraugliResident(
-        *self.butteraugli_, encoder,
-        {
-          .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
-                                     self.reconstructed_linear_[1],
-                                     self.reconstructed_linear_[2]}}},
-          .anchors = MakeResidentAnchors(
-            self.anchors_, self.anchor_count_),
-          .block_distance = self.block_distance_,
-          .score_partials = MakeResidentScorePartials(
-            self.score_partials_, self.anchor_count_),
-          .score = self.score_,
-          .error = self.reconstruction_error_,
-          .batches = batches,
-        });
+          *self.butteraugli_, encoder,
+          {
+              .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
+                                         self.reconstructed_linear_[1],
+                                         self.reconstructed_linear_[2]}}},
+              .anchors = MakeResidentAnchors(self.anchors_,
+                                             self.DeviceStrategyDispatch()
+                                                 ? self.block_count_
+                                                 : self.anchor_count_),
+              .block_distance = self.block_distance_,
+              .score_partials = MakeResidentScorePartials(
+                  self.score_partials_, self.DeviceStrategyDispatch()
+                                            ? self.block_count_
+                                            : self.anchor_count_),
+              .score = self.score_,
+              .error = self.reconstruction_error_,
+              .batches = batches,
+              .strategy_dispatch = self.strategy_dispatch_,
+          });
     } else {
       EncodePreparedMetalButteraugli(
         *self.butteraugli_, encoder,
@@ -4745,6 +4774,8 @@ void MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission(
     const void* context) {
   auto& self = *static_cast<MetalPreparedAqEvaluation*>(
     const_cast<void*>(context));
+  if (self.DeviceStrategyDispatch())
+    self.EncodeStrategyDispatch(backend, encoder);
   if (self.resident_policy_adjust_initial_field_) {
     EncodeQuantFieldAdjustmentSubmission(backend, encoder, context);
     self.EncodeResidentPolicyBounds(backend, encoder);
@@ -4765,20 +4796,25 @@ void MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission(
       const auto batches =
         MakeResidentButteraugliBatches(self.block_reduction_params_);
       EncodePreparedMetalButteraugliResident(
-        *self.butteraugli_, encoder,
-        {
-          .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
-                                     self.reconstructed_linear_[1],
-                                     self.reconstructed_linear_[2]}}},
-          .anchors = MakeResidentAnchors(
-            self.anchors_, self.anchor_count_),
-          .block_distance = self.block_distance_,
-          .score_partials = MakeResidentScorePartials(
-            self.score_partials_, self.anchor_count_),
-          .score = self.score_,
-          .error = self.reconstruction_error_,
-          .batches = batches,
-        });
+          *self.butteraugli_, encoder,
+          {
+              .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
+                                         self.reconstructed_linear_[1],
+                                         self.reconstructed_linear_[2]}}},
+              .anchors = MakeResidentAnchors(self.anchors_,
+                                             self.DeviceStrategyDispatch()
+                                                 ? self.block_count_
+                                                 : self.anchor_count_),
+              .block_distance = self.block_distance_,
+              .score_partials = MakeResidentScorePartials(
+                  self.score_partials_, self.DeviceStrategyDispatch()
+                                            ? self.block_count_
+                                            : self.anchor_count_),
+              .score = self.score_,
+              .error = self.reconstruction_error_,
+              .batches = batches,
+              .strategy_dispatch = self.strategy_dispatch_,
+          });
     } else {
       EncodePreparedMetalButteraugli(
         *self.butteraugli_, encoder,
@@ -4975,21 +5011,26 @@ void MetalPreparedAqEvaluation::EncodeResidentProfileStage(
       const auto batches =
         MakeResidentButteraugliBatches(self.block_reduction_params_);
       EncodePreparedMetalButteraugliResidentProfileStage(
-        *self.butteraugli_, encoder,
-        {
-          .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
-                                     self.reconstructed_linear_[1],
-                                     self.reconstructed_linear_[2]}}},
-          .anchors = MakeResidentAnchors(
-            self.anchors_, self.anchor_count_),
-          .block_distance = self.block_distance_,
-          .score_partials = MakeResidentScorePartials(
-            self.score_partials_, self.anchor_count_),
-          .score = self.score_,
-          .error = self.reconstruction_error_,
-          .batches = batches,
-        },
-        stage.butteraugli_stage, stage.psycho_stage);
+          *self.butteraugli_, encoder,
+          {
+              .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
+                                         self.reconstructed_linear_[1],
+                                         self.reconstructed_linear_[2]}}},
+              .anchors = MakeResidentAnchors(self.anchors_,
+                                             self.DeviceStrategyDispatch()
+                                                 ? self.block_count_
+                                                 : self.anchor_count_),
+              .block_distance = self.block_distance_,
+              .score_partials = MakeResidentScorePartials(
+                  self.score_partials_, self.DeviceStrategyDispatch()
+                                            ? self.block_count_
+                                            : self.anchor_count_),
+              .score = self.score_,
+              .error = self.reconstruction_error_,
+              .batches = batches,
+              .strategy_dispatch = self.strategy_dispatch_,
+          },
+          stage.butteraugli_stage, stage.psycho_stage);
       break;
     }
     case ResidentProfileStage::kBlockReduction:
@@ -5012,10 +5053,10 @@ Status CreateAqPipelines(
   }
   AqPipelines pipelines;
   const std::array metadata_names{
-      "gjxl_aq_metadata_reset",       "gjxl_aq_metadata_count",
-      "gjxl_aq_metadata_tile_count",  "gjxl_aq_metadata_prefix",
-      "gjxl_aq_metadata_scatter",     "gjxl_aq_metadata_cfl",
-      "gjxl_aq_metadata_destinations"};
+      "gjxl_aq_metadata_reset",        "gjxl_aq_metadata_count",
+      "gjxl_aq_metadata_tile_count",   "gjxl_aq_metadata_prefix",
+      "gjxl_aq_metadata_scatter",      "gjxl_aq_metadata_cfl",
+      "gjxl_aq_metadata_destinations", "gjxl_aq_strategy_dispatch"};
   for (size_t i = 0; i < metadata_names.size(); ++i) {
     Status metadata_status = CreateAqPipeline(
         device, library, metadata_names[i], &pipelines.strategy_metadata[i]);

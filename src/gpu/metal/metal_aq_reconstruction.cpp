@@ -111,7 +111,8 @@ void MetalPreparedAqEvaluation::EncodeForwardCoefficientBatch(
 
   if (batch_index >= batches_.size()) return;
   const AqStrategyBatch& batch = batches_[batch_index];
-  if (batch.anchor_count == 0) return;
+  if (!DeviceStrategyDispatch() && batch.anchor_count == 0)
+    return;
   const MetalBuffer* anchors =
       MetalBackend::AsMetalBuffer(*anchors_.buffer);
   const MetalBuffer* gathered =
@@ -139,9 +140,17 @@ void MetalPreparedAqEvaluation::EncodeForwardCoefficientBatch(
     }
     BindPlane(encoder, anchors_, 3);
     BindPlane(encoder, forward_coefficients_, 4);
-    encoder->setBytes(&image_params, sizeof(image_params), 5);
-    DispatchMetalThreadgroups(encoder, MTL::Size(3 * batch.anchor_count, 1, 1),
-      MTL::Size(image_pipeline.threads_per_threadgroup, 1, 1));
+    if (DeviceStrategyDispatch()) {
+      BindStrategyParameters(encoder, batch_index,
+                             offsetof(gjxl_aq_dispatch::Record, forward), 5);
+      DispatchStrategy(encoder, batch_index, gjxl_aq_dispatch::kDct,
+                       MTL::Size(image_pipeline.threads_per_threadgroup, 1, 1));
+    } else {
+      encoder->setBytes(&image_params, sizeof(image_params), 5);
+      DispatchMetalThreadgroups(
+          encoder, MTL::Size(3 * batch.anchor_count, 1, 1),
+          MTL::Size(image_pipeline.threads_per_threadgroup, 1, 1));
+    }
     return;
   }
   encoder->setComputePipelineState(
@@ -262,14 +271,24 @@ void MetalPreparedAqEvaluation::EncodeDcLowFrequencies(
   if (!DeferredLlf() || exact_coefficient_reconstruction_ ||
       exact_linear_reconstruction_ || batch_index >= batches_.size()) return;
   const auto& batch = batches_[batch_index];
-  if (batch.anchor_count == 0) return;
+  if (!DeviceStrategyDispatch() && batch.anchor_count == 0)
+    return;
   const auto& params = reconstruction_params_[batch_index];
   encoder->setComputePipelineState(backend.aq_pipelines_.dc_low_frequencies.get());
   BindPlane(encoder, anchors_, 0);
   BindPlane(encoder, options_.profile.adaptive_dc_smoothing ? smoothed_dc_ : dc_, 1);
   BindPlane(encoder, reconstruction_coefficients_, 2);
-  encoder->setBytes(&params, sizeof(params), 3);
-  DispatchThreads1d(encoder, batch.anchor_count * 3 * params.covered_width * params.covered_height);
+  if (DeviceStrategyDispatch()) {
+    BindStrategyParameters(encoder, batch_index,
+                           offsetof(gjxl_aq_dispatch::Record, reconstruction),
+                           3);
+    DispatchStrategy(encoder, batch_index, gjxl_aq_dispatch::kLlf,
+                     MTL::Size(256, 1, 1));
+  } else {
+    encoder->setBytes(&params, sizeof(params), 3);
+    DispatchThreads1d(encoder, batch.anchor_count * 3 * params.covered_width *
+                                   params.covered_height);
+  }
 }
 
 void MetalPreparedAqEvaluation::EncodeReconstructionReset(
@@ -386,7 +405,8 @@ void MetalPreparedAqEvaluation::EncodeReconstructionCoefficientBatch(
 
   if (exact_linear_reconstruction_ || batch_index >= batches_.size()) return;
   const AqStrategyBatch& batch = batches_[batch_index];
-  if (batch.anchor_count == 0) return;
+  if (!DeviceStrategyDispatch() && batch.anchor_count == 0)
+    return;
   const AqReconstructionParams& params = reconstruction_params_[batch_index];
 
   if (!exact_coefficient_reconstruction_) {
@@ -417,7 +437,15 @@ void MetalPreparedAqEvaluation::EncodeReconstructionCoefficientBatch(
     BindPlane(encoder, dc_, 8);
     BindPlane(encoder, quantized_dc_, 9);
     BindPlane(encoder, reconstruction_error_, 10);
-    encoder->setBytes(&output_params, sizeof(output_params), 11);
+    if (DeviceStrategyDispatch())
+      BindStrategyParameters(
+          encoder, batch_index,
+          write_completed_coefficients_
+              ? offsetof(gjxl_aq_dispatch::Record, completed_reconstruction)
+              : offsetof(gjxl_aq_dispatch::Record, reconstruction),
+          11);
+    else
+      encoder->setBytes(&output_params, sizeof(output_params), 11);
     BindPlane(encoder, inverse_sigma_, 12);
     BindPlane(encoder, epf_sharpness_, 13);
     BindPlane(encoder,
@@ -428,12 +456,19 @@ void MetalPreparedAqEvaluation::EncodeReconstructionCoefficientBatch(
     BindPlane(encoder, gathered_pixels_, 15);
     BindPlane(encoder, write_completed_coefficients_
         ? completed_destinations_ : anchors_, 16);
-    DispatchMetalThreadgroups(
-        encoder,
-        MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
-        MTL::Size(std::min<NS::UInteger>(
-                      kAqThreadCount, batch.coefficient_count),
-                  1, 1));
+    if (DeviceStrategyDispatch())
+      DispatchStrategy(encoder, batch_index, gjxl_aq_dispatch::kTransforms,
+                       MTL::Size(std::min<NS::UInteger>(
+                                     kAqThreadCount, batch.coefficient_count),
+                                 1, 1));
+    else {
+      DispatchMetalThreadgroups(
+          encoder,
+          MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
+          MTL::Size(
+              std::min<NS::UInteger>(kAqThreadCount, batch.coefficient_count),
+              1, 1));
+    }
     if (write_completed_coefficients_) {
       // Serial dispatch dependency: consume this batch only after its final
       // integer stores. Profiled and ordinary execution take this same path.
@@ -449,10 +484,19 @@ void MetalPreparedAqEvaluation::EncodeReconstructionCoefficientBatch(
       BindPlane(encoder, completed_destinations_, 1);
       BindPlane(encoder, completed_order_samples_, 2);
       BindPlane(encoder, completed_order_population_, 3);
-      encoder->setBytes(count_params.data(), sizeof(count_params), 4);
-      DispatchMetalThreadgroups(encoder,
-        MTL::Size(batch.coefficient_count / 32, (batch.anchor_count + 63) / 64, 1),
-        MTL::Size(32, 8, 1));
+      if (DeviceStrategyDispatch()) {
+        BindStrategyParameters(encoder, batch_index,
+                               offsetof(gjxl_aq_dispatch::Record, population),
+                               4);
+        DispatchStrategy(encoder, batch_index, gjxl_aq_dispatch::kPopulation,
+                         MTL::Size(32, 8, 1));
+      } else {
+        encoder->setBytes(count_params.data(), sizeof(count_params), 4);
+        DispatchMetalThreadgroups(encoder,
+                                  MTL::Size(batch.coefficient_count / 32,
+                                            (batch.anchor_count + 63) / 64, 1),
+                                  MTL::Size(32, 8, 1));
+      }
     }
   }
 }
@@ -463,34 +507,53 @@ void MetalPreparedAqEvaluation::EncodeAdjustedQuantizationBatch(
 
   if (batch_index >= batches_.size()) return;
   const AqStrategyBatch& batch = batches_[batch_index];
-  if (batch.anchor_count == 0) return;
+  if (!DeviceStrategyDispatch() && batch.anchor_count == 0)
+    return;
   const AqReconstructionParams& params = reconstruction_params_[batch_index];
   if (params.adjust_ac_quant == 0u) return;
   // The scalar kernel packs 256 independent transforms into a threadgroup.
   // Parallel coefficient scans expose more work when a larger-transform batch
   // fits in that single group; dense batches favor the scalar scan's throughput.
-  const bool parallel = batch.coefficient_count >= 128 && batch.anchor_count <= 256;
-  encoder->setComputePipelineState(parallel
-    ? backend.aq_pipelines_.select_adjusted_quantization_parallel.get()
-    : backend.aq_pipelines_.select_adjusted_quantization.get());
-  BindPlane(encoder, anchors_, 0);
-  BindPlane(encoder, quant_tables_, 1);
-  BindPlane(encoder, raw_quant_, 2);
-  BindPlane(encoder, forward_coefficients_, 3);
-  BindPlane(encoder, gathered_pixels_, 4);
-  BindPlane(encoder, reconstruction_error_, 5);
-  encoder->setBytes(&params, sizeof(params), 6);
-  BindPlane(encoder,
-            resident_quantization_active_
-              ? resident_quantizer_params_
-              : raw_quant_,
-            7);
-  if (parallel) {
-    DispatchMetalThreadgroups(encoder, MTL::Size(batch.anchor_count, 1, 1),
-      MTL::Size(128, 1, 1));
-  } else {
-    DispatchThreads1d(encoder, batch.anchor_count);
-  }
+  const auto encode = [&](bool parallel) {
+    encoder->setComputePipelineState(
+        parallel
+            ? backend.aq_pipelines_.select_adjusted_quantization_parallel.get()
+            : backend.aq_pipelines_.select_adjusted_quantization.get());
+    BindPlane(encoder, anchors_, 0);
+    BindPlane(encoder, quant_tables_, 1);
+    BindPlane(encoder, raw_quant_, 2);
+    BindPlane(encoder, forward_coefficients_, 3);
+    BindPlane(encoder, gathered_pixels_, 4);
+    BindPlane(encoder, reconstruction_error_, 5);
+    if (DeviceStrategyDispatch())
+      BindStrategyParameters(encoder, batch_index,
+                             offsetof(gjxl_aq_dispatch::Record, reconstruction),
+                             6);
+    else
+      encoder->setBytes(&params, sizeof(params), 6);
+    BindPlane(encoder,
+              resident_quantization_active_ ? resident_quantizer_params_
+                                            : raw_quant_,
+              7);
+    if (DeviceStrategyDispatch()) {
+      DispatchStrategy(encoder, batch_index,
+                       parallel ? gjxl_aq_dispatch::kAdjustedParallel
+                                : gjxl_aq_dispatch::kAdjustedScalar,
+                       MTL::Size(parallel ? 128 : 256, 1, 1));
+    } else if (parallel) {
+      DispatchMetalThreadgroups(encoder, MTL::Size(batch.anchor_count, 1, 1),
+                                MTL::Size(128, 1, 1));
+    } else
+      DispatchThreads1d(encoder, batch.anchor_count);
+  };
+  if (DeviceStrategyDispatch()) {
+    // Exactly one indirect grid is nonempty. Preserve the established choice
+    // of scalar/parallel arithmetic at the 256-anchor threshold.
+    encode(false);
+    if (batch.coefficient_count >= 128)
+      encode(true);
+  } else
+    encode(batch.coefficient_count >= 128 && batch.anchor_count <= 256);
 }
 
 void MetalPreparedAqEvaluation::EncodeReconstructionBatch(
@@ -499,7 +562,8 @@ void MetalPreparedAqEvaluation::EncodeReconstructionBatch(
 
   if (exact_linear_reconstruction_ || batch_index >= batches_.size()) return;
   const AqStrategyBatch& batch = batches_[batch_index];
-  if (batch.anchor_count == 0) return;
+  if (!DeviceStrategyDispatch() && batch.anchor_count == 0)
+    return;
   EncodeReconstructionCoefficientBatch(backend, encoder, batch_index);
   EncodeReconstructionInverseBatch(backend, encoder, batch_index);
   EncodeReconstructionScatterBatch(backend, encoder, batch_index);
@@ -511,7 +575,8 @@ void MetalPreparedAqEvaluation::EncodeReconstructionInverseBatch(
 
   if (exact_linear_reconstruction_ || batch_index >= batches_.size()) return;
   const AqStrategyBatch& batch = batches_[batch_index];
-  if (batch.anchor_count == 0) return;
+  if (!DeviceStrategyDispatch() && batch.anchor_count == 0)
+    return;
   const TransformPipeline& image_pipeline = backend.transform_pipelines_[
     static_cast<size_t>(batch.strategy)].inverse_image;
   if (image_pipeline.state) {
@@ -524,9 +589,18 @@ void MetalPreparedAqEvaluation::EncodeReconstructionInverseBatch(
     }
     BindPlane(encoder, anchors_, 3);
     BindPlane(encoder, reconstruction_coefficients_, 4);
-    encoder->setBytes(&image_params, sizeof(image_params), 5);
-    DispatchMetalThreadgroups(encoder, MTL::Size(3 * batch.anchor_count, 1, 1),
-      MTL::Size(image_pipeline.threads_per_threadgroup, 1, 1));
+    if (DeviceStrategyDispatch()) {
+      BindStrategyParameters(encoder, batch_index,
+                             offsetof(gjxl_aq_dispatch::Record, inverse), 5);
+      DispatchStrategy(encoder, batch_index, gjxl_aq_dispatch::kDct,
+                       MTL::Size(image_pipeline.threads_per_threadgroup, 1, 1));
+    } else {
+      encoder->setBytes(&image_params, sizeof(image_params), 5);
+      DispatchMetalThreadgroups(
+          encoder, MTL::Size(3 * batch.anchor_count, 1, 1),
+          MTL::Size(image_pipeline.threads_per_threadgroup, 1, 1));
+    }
+
     return;
   }
   const size_t coefficient_offset_bytes =
@@ -550,7 +624,8 @@ void MetalPreparedAqEvaluation::EncodeReconstructionScatterBatch(
 
   if (exact_linear_reconstruction_ || batch_index >= batches_.size()) return;
   const AqStrategyBatch& batch = batches_[batch_index];
-  if (batch.anchor_count == 0) return;
+  if (!DeviceStrategyDispatch() && batch.anchor_count == 0)
+    return;
   if (backend.transform_pipelines_[static_cast<size_t>(batch.strategy)].inverse_image.state) {
     return;
   }
@@ -698,15 +773,24 @@ void MetalPreparedAqEvaluation::EncodeQuantFieldAdjustmentSubmission(
   for (size_t batch_index = 0; batch_index < self.batches_.size();
        ++batch_index) {
     const AqStrategyBatch& batch = self.batches_[batch_index];
-    if (batch.anchor_count == 0) continue;
+    if (!self.DeviceStrategyDispatch() && batch.anchor_count == 0)
+      continue;
     encoder->setComputePipelineState(
         backend.aq_pipelines_.adjust_quant_field.get());
     BindPlane(encoder, self.anchors_, 0);
     BindPlane(encoder, self.resident_quant_field_, 1);
     BindPlane(encoder, self.reconstruction_error_, 2);
-    encoder->setBytes(&self.quant_field_adjustment_params_[batch_index],
-                      sizeof(AqQuantFieldAdjustmentParams), 3);
-    DispatchThreads1d(encoder, batch.anchor_count);
+    if (self.DeviceStrategyDispatch()) {
+      self.BindStrategyParameters(
+          encoder, batch_index, offsetof(gjxl_aq_dispatch::Record, adjustment),
+          3);
+      self.DispatchStrategy(encoder, batch_index, gjxl_aq_dispatch::kQuantField,
+                            MTL::Size(256, 1, 1));
+    } else {
+      encoder->setBytes(&self.quant_field_adjustment_params_[batch_index],
+                        sizeof(AqQuantFieldAdjustmentParams), 3);
+      DispatchThreads1d(encoder, batch.anchor_count);
+    }
   }
 }
 
@@ -1083,6 +1167,9 @@ Status MetalPreparedAqEvaluation::AdjustQuantFieldResidentImpl(
     gpu_profile_internal::GpuProfilingMode profiling_mode,
     gpu_profile_internal::GpuExecutionProfile* profile) {
 
+  if (DeviceStrategyDispatch())
+    return Status::Unavailable(
+        "Device strategy dispatch requires fused policy initialization");
   const bool profiling = profiling_mode !=
     gpu_profile_internal::GpuProfilingMode::kDisabled;
   gpu_profile_internal::GpuExecutionProfile candidate_profile;

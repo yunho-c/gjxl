@@ -65,6 +65,10 @@ The standalone device metadata builder now matches the actual CPU builders in
 292 cases, including Metal validation; see METADATA.md. It is not yet consumed
 by ordinary AQ.
 
-Progress: active. Device parameter/consumer integration, deferred completion,
+Device parameter bindings and indirect consumer dispatches now have an internal
+qualification path, including resident Butteraugli and completed populations;
+see DISPATCH.md. Ordinary encodes do not activate it yet.
+
+Progress: active. Production ownership/admission and deferred completion,
 profiling the executing new paths, final combined qualification and fresh paper
 studies remain open.

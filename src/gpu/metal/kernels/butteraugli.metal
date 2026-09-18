@@ -1717,3 +1717,17 @@ kernel void gjxl_butteraugli_reduce_max_f32(
   }
   if (thread_index == 0) output[group_position.x] = values[0];
 }
+
+#include "aq_strategy_dispatch.h"
+kernel void gjxl_butteraugli_resident_parameters(
+    constant uint* templates [[buffer(0)]],
+    device gjxl_aq_dispatch::Record* records [[buffer(1)]],
+    device float* score_partials [[buffer(2)]],
+    constant uint& score_capacity [[buffer(3)]],
+    uint i [[thread_position_in_grid]]) {
+  if (i < score_capacity) score_partials[i] = 0.0f;
+  if (i >= 7) return;
+  for (uint w=0; w<13; ++w) records[i].butteraugli[w] = templates[13*i+w];
+  records[i].butteraugli[5] = records[i].reconstruction[8];
+  records[i].butteraugli[6] = records[i].reconstruction[9];
+}

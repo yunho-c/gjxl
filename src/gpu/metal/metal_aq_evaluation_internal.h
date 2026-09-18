@@ -12,18 +12,19 @@
 #include <mutex>
 #include <vector>
 
-#include "core/managed_allocator.h"
-#include "core/ac_strategy.h"
 #include "codec/vardct_frame_internal.h"
+#include "core/ac_strategy.h"
+#include "core/managed_allocator.h"
+#include "gpu/metal/kernels/aq_strategy_dispatch.h"
 #include "gpu/metal/metal_aq_butteraugli_test.h"
 #include "gpu/metal/metal_aq_evaluation_profile.h"
-#include "gpu/metal/metal_aq_profile_storage_plan.h"
 #include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_aq_postprocess_test.h"
+#include "gpu/metal/metal_aq_profile_storage_plan.h"
 #include "gpu/metal/metal_aq_reconstruction_test.h"
 #include "gpu/metal/metal_backend_internal.h"
-#include "gpu/metal/metal_dc_processing_internal.h"
 #include "gpu/metal/metal_butteraugli_encoding.h"
+#include "gpu/metal/metal_dc_processing_internal.h"
 #include "gpu/scratch.h"
 
 namespace gjxl::metal_internal {
@@ -403,6 +404,11 @@ public:
   Status SetWaitObserver(bool *observed);
   Status GetReadbackStats(MetalAqReadbackStatsForTesting* stats) const;
   Status GetStrategyMetadataSnapshot(MetalAqStrategyMetadataSnapshot *output);
+  // Internal dispatch-consumer qualification seam. Borrowed buffers must
+  // outlive policy completion; ordinary callers do not enable it until handoff
+  // integration.
+  Status BindStrategyDispatchForTesting(ConstDevicePlaneView families,
+                                        DevicePlaneView parameters);
   Status GetResidentPolicyBounds(float *lower, float *upper) const;
   Status RunBlockReduction(ConstPlaneF32View distance_map,
                            PlaneF32View block_distance_map);
@@ -478,6 +484,19 @@ private:
     const MetalPreparedAqEvaluation* self = nullptr;
     ConstDevicePlaneView distance_map;
   };
+
+  bool DeviceStrategyDispatch() const {
+    return strategy_dispatch_.buffer != nullptr;
+  }
+  void EncodeStrategyDispatch(MetalBackend &,
+                              MTL::ComputeCommandEncoder *) const;
+  void BindStrategyParameters(MTL::ComputeCommandEncoder *, size_t batch,
+                              size_t member_offset, size_t binding) const;
+  void DispatchStrategy(MTL::ComputeCommandEncoder *, size_t batch,
+                        gjxl_aq_dispatch::Dispatch dispatch,
+                        MTL::Size threads) const;
+  ConstDevicePlaneView strategy_dispatch_families_;
+  DevicePlaneView strategy_dispatch_;
 
   enum class State {
     kReady,

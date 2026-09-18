@@ -92,6 +92,11 @@ struct MetalButteraugliResidentComparisonDescriptor {
   DevicePlaneView score;
   DevicePlaneView error;
   std::span<const MetalButteraugliResidentBatch> batches;
+  // Optional AQ-generated records. Counts/offsets and indirect grids come from
+  // device metadata. Host batches describe only the seven fixed shapes. Anchor
+  // and score-partial views have full base-block capacity; unused scores clear
+  // to zero before the maximum reduction. Borrowed through completion.
+  DevicePlaneView strategy_dispatch;
 };
 
 /// Prevents pooling after failure in an enclosing AQ submission/readback.

@@ -884,6 +884,7 @@ add_custom_command(
 
   DEPENDS
     "${GJXL_BUTTERAUGLI_METAL_SOURCE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/aq_strategy_dispatch.h"
 
   COMMENT
     "Compiling strict-math Metal Butteraugli shaders"
@@ -898,6 +899,7 @@ add_custom_command(OUTPUT "${GJXL_AQ_METADATA_METAL_IR}"
   COMMAND "${XCRUN_EXECUTABLE}" -sdk macosx metal -std=metal3.1
     ${GJXL_METAL_PROFILING_FLAGS} -c "${GJXL_AQ_METADATA_METAL_SOURCE}" -o "${GJXL_AQ_METADATA_METAL_IR}"
   DEPENDS "${GJXL_AQ_METADATA_METAL_SOURCE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/aq_strategy_dispatch.h"
   COMMENT "Compiling Metal AQ strategy metadata" VERBATIM)
 
 add_custom_command(OUTPUT "${GJXL_AC_SELECTION_METAL_IR}"
@@ -1034,6 +1036,7 @@ add_library(
   src/gpu/metal/metal_aq_profile_storage_plan.cpp
   src/gpu/metal/metal_aq_postprocess.cpp
   src/gpu/metal/metal_aq_reconstruction.cpp
+  src/gpu/metal/metal_aq_strategy_dispatch.cpp
   src/gpu/metal/metal_aq_strategy_metadata.cpp
   src/gpu/metal/metal_butteraugli.cpp
   src/gpu/metal/metal_primitives.cpp

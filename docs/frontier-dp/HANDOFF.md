@@ -71,6 +71,21 @@ post-completion host metadata publication. Other diagnostic frame outputs can
 materialize the same authoritative map after completion. A failed final readback
 must leave caller outputs unchanged.
 
+## Qualified foundations
+
+The device metadata constructor is committed in `407cd05`; see METADATA.md.
+The parameter/indirect-dispatch consumer qualification is described in
+DISPATCH.md. Its real AQ kernels consume GPU family counts, but its test still
+retains CPU anchors and final-frame metadata as an oracle. Neither milestone
+removes the production search wait by itself.
+
+The next integration must bind all builder outputs into prepared AQ, include
+prefix/parameter storage in admission, and make completed-frame allocation
+independent of the selected host grid. Retain the selector submission until
+consumer completion, import metadata errors after any reconstruction reset,
+and publish the authoritative host grid only after AQ finishes. The pending
+provider result must be explicit at the codec boundary.
+
 ## Acceptance gates
 
 1. Compare every device metadata field and coefficient destination with the

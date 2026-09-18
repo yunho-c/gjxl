@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
-#include "gpu/metal/metal_backend_internal.h"
+#include "gpu/metal/kernels/aq_strategy_dispatch.h"
 #include "gpu/metal/metal_aq_profile_storage_plan.h"
+#include "gpu/metal/metal_backend_internal.h"
 
 #include "core/managed_allocator.h"
 #include "gpu/metal/metal_butteraugli_encoding.h"
@@ -653,19 +654,30 @@ public:
       return Status::InvalidArgument(
         "Resident Metal Butteraugli requires seven strategy batches");
     }
+    const bool device_batches = descriptor.strategy_dispatch.buffer != nullptr;
     size_t anchor_count = 0;
     for (const MetalButteraugliResidentBatch& batch : descriptor.batches) {
-      if (batch.anchor_offset != anchor_count ||
+      if ((!device_batches && batch.anchor_offset != anchor_count) ||
           batch.pixel_width == 0 || batch.pixel_height == 0 ||
           batch.covered_width == 0 || batch.covered_height == 0 ||
           batch.pixel_width != 8u * batch.covered_width ||
           batch.pixel_height != 8u * batch.covered_height ||
           batch.anchor_count >
-            std::numeric_limits<uint32_t>::max() - batch.anchor_offset) {
+              std::numeric_limits<uint32_t>::max() - batch.anchor_offset) {
         return Status::InvalidArgument(
           "Resident Metal Butteraugli batch metadata is invalid");
       }
       anchor_count += batch.anchor_count;
+    }
+    if (device_batches) {
+      anchor_count = ((extent().width + 7) / 8) * ((extent().height + 7) / 8);
+      if (descriptor.strategy_dispatch.element_type !=
+              DeviceElementType::kI32 ||
+          descriptor.strategy_dispatch.extent !=
+              Extent2D{7 * sizeof(gjxl_aq_dispatch::Record) / 4, 1} ||
+          descriptor.strategy_dispatch.offset_bytes % 4)
+        return Status::InvalidArgument(
+            "Resident strategy dispatch storage is invalid");
     }
     if (anchor_count == 0 ||
         anchor_count > std::numeric_limits<size_t>::max() / 2) {
@@ -692,14 +704,15 @@ public:
     status = ComputeDevicePlaneRange(
       descriptor.anchors, metal_.id(), &anchors_range);
     if (!status.ok()) return status;
-    std::array<DeviceMemoryRange, 4> output_ranges;
-    const std::array<DevicePlaneView, 4> outputs{
-      descriptor.block_distance,
-      descriptor.score_partials,
-      descriptor.score,
-      descriptor.error,
+    std::array<DeviceMemoryRange, 5> output_ranges;
+    const std::array<DevicePlaneView, 5> outputs{
+        descriptor.block_distance,
+        descriptor.score_partials,
+        descriptor.score,
+        descriptor.error,
+        descriptor.strategy_dispatch,
     };
-    for (size_t index = 0; index < outputs.size(); ++index) {
+    for (size_t index = 0; index < 4 + size_t(device_batches); ++index) {
       status = ComputeDevicePlaneRange(
         outputs[index], metal_.id(), &output_ranges[index]);
       if (!status.ok()) return status;
@@ -1717,6 +1730,39 @@ private:
     ConstDevicePlaneView sub_map,
     const MetalButteraugliResidentComparisonDescriptor& descriptor) {
 
+    const bool device_batches = descriptor.strategy_dispatch.buffer != nullptr;
+    if (device_batches) {
+      std::array<ResidentReductionParams, 7> templates;
+      for (size_t f = 0; f < 7; ++f) {
+        const auto &b = descriptor.batches[f];
+        templates[f] = {uint32_t(extent().width),
+                        uint32_t(extent().height),
+                        uint32_t(working_extent_.width),
+                        uint32_t(sub_map.row_stride),
+                        uint32_t(descriptor.block_distance.row_stride),
+                        0,
+                        0,
+                        b.pixel_width,
+                        b.pixel_height,
+                        b.covered_width,
+                        b.covered_height,
+                        options().x_multiplier,
+                        options().hf_asymmetry};
+      }
+      encoder->setComputePipelineState(
+          metal_.butteraugli_pipelines_.resident_parameters.get());
+      encoder->setBytes(templates.data(), sizeof(templates), 0);
+      Bind(encoder, Handle(metal_, descriptor.strategy_dispatch),
+           descriptor.strategy_dispatch.offset_bytes, 1);
+      Bind(encoder, Handle(metal_, descriptor.score_partials),
+           descriptor.score_partials.offset_bytes, 2);
+      const uint32_t capacity =
+          uint32_t(descriptor.score_partials.extent.width);
+      encoder->setBytes(&capacity, sizeof(capacity), 3);
+      DispatchMetalThreads(encoder,
+                           MTL::Size(std::max<uint32_t>(7, capacity), 1, 1),
+                           MTL::Size(256, 1, 1));
+    }
     const PsychoPlanes reference = PsychoSlots(kPsychoReference, working_extent_);
     const PsychoPlanes distorted = PsychoSlots(kPsychoDistorted, working_extent_);
     for (size_t index = 0; index < 8; ++index) {
@@ -1749,8 +1795,10 @@ private:
     Bind(encoder, Handle(metal_, descriptor.error),
          descriptor.error.offset_bytes, 25);
 
-    for (const MetalButteraugliResidentBatch& batch : descriptor.batches) {
-      if (batch.anchor_count == 0) continue;
+    for (size_t f = 0; f < descriptor.batches.size(); ++f) {
+      const auto &batch = descriptor.batches[f];
+      if (!device_batches && batch.anchor_count == 0)
+        continue;
       const bool small = batch.pixel_width == 8 && batch.pixel_height == 8 &&
         bool(metal_.butteraugli_pipelines_.resident_reduction_small);
       encoder->setComputePipelineState(small
@@ -1771,11 +1819,24 @@ private:
         options().x_multiplier,
         options().hf_asymmetry,
       };
-      encoder->setBytes(&params, sizeof(params), 26);
-      DispatchMetalThreadgroups(
-        encoder,
-        MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
-        MTL::Size(small ? 64 : kReductionWidth, 1, 1));
+      if (device_batches) {
+        using gjxl_aq_dispatch::Record;
+        const auto view = descriptor.strategy_dispatch;
+        const size_t offset = view.offset_bytes + f * sizeof(Record);
+        Bind(encoder, Handle(metal_, view),
+             offset + offsetof(Record, butteraugli), 26);
+        encoder->dispatchThreadgroups(
+            Handle(metal_, view),
+            offset + offsetof(Record, groups) +
+                gjxl_aq_dispatch::kTransforms * 3 * sizeof(uint32_t),
+            MTL::Size(small ? 64 : kReductionWidth, 1, 1));
+      } else {
+        encoder->setBytes(&params, sizeof(params), 26);
+        DispatchMetalThreadgroups(
+            encoder,
+            MTL::Size(static_cast<NS::UInteger>(batch.anchor_count), 1, 1),
+            MTL::Size(small ? 64 : kReductionWidth, 1, 1));
+      }
     }
     EncodeMaximumReduction(
       encoder, descriptor.score_partials, descriptor.score);
@@ -2252,47 +2313,54 @@ Status CreateButteraugliPipelines(
       "Butteraugli pipeline output is null");
   }
   ButteraugliPipelines pipelines;
-  const std::array<std::pair<
-    std::string_view,
-    NS::SharedPtr<MTL::ComputePipelineState>*>, 26> bindings{{
-    {"gjxl_butteraugli_copy_f32", &pipelines.copy},
-    {"gjxl_butteraugli_expand_f32", &pipelines.expand},
-    {"gjxl_butteraugli_subsample2x_f32", &pipelines.subsample},
-    {"gjxl_butteraugli_blur5_horizontal_f32", &pipelines.blur5_horizontal},
-    {"gjxl_butteraugli_blur5_vertical_f32", &pipelines.blur5_vertical},
-    {"gjxl_butteraugli_convolve_transpose_f32", &pipelines.convolution_transpose},
-    {"gjxl_butteraugli_opsin_blur5_tiled_f32",
-     &pipelines.opsin_blur5_tiled},
-    {device->supportsFamily(MTL::GPUFamilyApple9)
-       ? "gjxl_butteraugli_low_medium_p1_device"
-       : "gjxl_butteraugli_frequency_low_medium_tiled_f32",
-     &pipelines.frequency_low_medium_tiled},
-    {"gjxl_butteraugli_frequency_high_convolve_f32",
-     &pipelines.frequency_high_convolve},
-    {"gjxl_butteraugli_frequency_suppress_x_f32", &pipelines.frequency_suppress_x},
-    {"gjxl_butteraugli_frequency_ultra_convolve_f32",
-     &pipelines.frequency_ultra_convolve},
-    {"gjxl_butteraugli_frequency_ultra_mask_convolve_f32",
-     &pipelines.frequency_ultra_mask_convolve},
-    {"gjxl_butteraugli_malta_scale_f32", &pipelines.malta_scale},
-    {"gjxl_butteraugli_malta_response_f32", &pipelines.malta_response},
-    {device->supportsFamily(MTL::GPUFamilyApple9)
-       ? "gjxl_butteraugli_malta_fixed_f32" : "gjxl_butteraugli_malta_fused_f32",
-     &pipelines.malta_fused},
-    {"gjxl_butteraugli_l2_f32", &pipelines.l2},
-    {"gjxl_butteraugli_mask_precompute_f32", &pipelines.mask_precompute},
-    {"gjxl_butteraugli_fuzzy_erosion_f32", &pipelines.fuzzy_erosion},
-    {"gjxl_butteraugli_masked_ac_f32", &pipelines.masked_ac},
-    {"gjxl_butteraugli_final_f32", &pipelines.final},
-    {"gjxl_butteraugli_final_masked_ac_f32", &pipelines.final_masked_ac},
-    {"gjxl_butteraugli_final_l2_masked_ac_f32",
-     &pipelines.final_l2_masked_ac},
-    {"gjxl_butteraugli_crop_f32", &pipelines.crop},
-    {"gjxl_butteraugli_compose_f32", &pipelines.compose},
-    {"gjxl_butteraugli_resident_l2_reduce_f32",
-     &pipelines.resident_reduction},
-    {"gjxl_butteraugli_reduce_max_f32", &pipelines.maximum_reduction},
-  }};
+  const std::array<
+      std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,
+      27>
+      bindings{{
+          {"gjxl_butteraugli_copy_f32", &pipelines.copy},
+          {"gjxl_butteraugli_expand_f32", &pipelines.expand},
+          {"gjxl_butteraugli_subsample2x_f32", &pipelines.subsample},
+          {"gjxl_butteraugli_blur5_horizontal_f32",
+           &pipelines.blur5_horizontal},
+          {"gjxl_butteraugli_blur5_vertical_f32", &pipelines.blur5_vertical},
+          {"gjxl_butteraugli_convolve_transpose_f32",
+           &pipelines.convolution_transpose},
+          {"gjxl_butteraugli_opsin_blur5_tiled_f32",
+           &pipelines.opsin_blur5_tiled},
+          {device->supportsFamily(MTL::GPUFamilyApple9)
+               ? "gjxl_butteraugli_low_medium_p1_device"
+               : "gjxl_butteraugli_frequency_low_medium_tiled_f32",
+           &pipelines.frequency_low_medium_tiled},
+          {"gjxl_butteraugli_frequency_high_convolve_f32",
+           &pipelines.frequency_high_convolve},
+          {"gjxl_butteraugli_frequency_suppress_x_f32",
+           &pipelines.frequency_suppress_x},
+          {"gjxl_butteraugli_frequency_ultra_convolve_f32",
+           &pipelines.frequency_ultra_convolve},
+          {"gjxl_butteraugli_frequency_ultra_mask_convolve_f32",
+           &pipelines.frequency_ultra_mask_convolve},
+          {"gjxl_butteraugli_malta_scale_f32", &pipelines.malta_scale},
+          {"gjxl_butteraugli_malta_response_f32", &pipelines.malta_response},
+          {device->supportsFamily(MTL::GPUFamilyApple9)
+               ? "gjxl_butteraugli_malta_fixed_f32"
+               : "gjxl_butteraugli_malta_fused_f32",
+           &pipelines.malta_fused},
+          {"gjxl_butteraugli_l2_f32", &pipelines.l2},
+          {"gjxl_butteraugli_mask_precompute_f32", &pipelines.mask_precompute},
+          {"gjxl_butteraugli_fuzzy_erosion_f32", &pipelines.fuzzy_erosion},
+          {"gjxl_butteraugli_masked_ac_f32", &pipelines.masked_ac},
+          {"gjxl_butteraugli_final_f32", &pipelines.final},
+          {"gjxl_butteraugli_final_masked_ac_f32", &pipelines.final_masked_ac},
+          {"gjxl_butteraugli_final_l2_masked_ac_f32",
+           &pipelines.final_l2_masked_ac},
+          {"gjxl_butteraugli_crop_f32", &pipelines.crop},
+          {"gjxl_butteraugli_compose_f32", &pipelines.compose},
+          {"gjxl_butteraugli_resident_parameters",
+           &pipelines.resident_parameters},
+          {"gjxl_butteraugli_resident_l2_reduce_f32",
+           &pipelines.resident_reduction},
+          {"gjxl_butteraugli_reduce_max_f32", &pipelines.maximum_reduction},
+      }};
   for (const auto& [name, pipeline] : bindings) {
     Status status = CreatePipeline(device, library, name, pipeline);
     if (!status.ok()) {

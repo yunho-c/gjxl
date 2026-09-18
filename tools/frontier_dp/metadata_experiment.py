@@ -14,6 +14,7 @@ from run_experiment import ROOT, run, sha
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--validate-only', action='store_true')
     args = parser.parse_args()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
@@ -42,6 +43,14 @@ def main():
     for name, selected_env in [('normal', env), ('validation', {**env, 'MTL_DEBUG_LAYER': '1', 'MTL_SHADER_VALIDATION': '1'})]:
         manifest['commands'].append(run(base, output / f'{name}.log', selected_env))
         save()
+    if args.validate_only:
+        manifest['protocol'] = 'Normal and Metal-validation CPU-builder and indirect AQ consumer parity; no timing'
+        manifest['checks'] = {name: (output / f'{name}.log').read_text()
+                              for name in ('normal', 'validation')}
+        manifest['completed'] = True
+        save()
+        print(json.dumps(manifest['checks'], indent=2))
+        return
     rows = []
     for repetition in range(3):
         log = output / f'timing-{repetition}.jsonl'
