@@ -352,6 +352,22 @@ an intermediate build appear complete.
 
 ## Outstanding integration risks
 
+- The later Metal resident-CfL failure exposes a separate functional defect:
+  preparation validates but discards its supplied field/DC value, deriving the
+  supposedly invariant map from the next evaluation instead. The candidate fix
+  snapshots the field in existing policy scratch, derives its quantizer before
+  CfL, then uses the evaluation quantizer for coefficient coding. It adds no
+  device allocation or submission. Profile planning reserves the extra selector
+  dispatches. Regression coverage poisons the caller's field after preparation
+  and also evaluates host-provided raw quantization. Hosted validation is pending;
+  Windows validates the changed test syntax but cannot compile Metal internals.
+- A separate CUDA diagnostic reproduces CPU Gaussian accumulation order on the
+  device. On the keong fixture with CPU-reconstructed pixels, metric block error
+  falls from roughly 0.0002 to at most 3.6e-7. With CUDA reconstruction, residual
+  error still crosses AQ decision boundaries, changing 18 raw values after two
+  updates. The experiment is retained only in ignored diagnostic artifacts;
+  production convolution kernels and compiler flags remain unchanged.
+
 - At `156ee67`, hosted Metal C++23 passes 149/150 tests. Exact DC basis
   constants remove the earlier DC mismatch, and a precise mask logarithm
   clears the maximum-throughput pixel-mask check without changing tolerances.

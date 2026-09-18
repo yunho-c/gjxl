@@ -116,7 +116,7 @@ bool Counts() {
                                  .ok() &&
                              p.maximum_dispatches ==
                                  (iterations + size_t(final)) * per_score +
-                                     2 * families + 2 +
+                                     20 + 2 * families + 2 +
                                      size_t(!final) * (20 + 2 * families) + families &&
                              p.working.peak_bytes >=
                                  p.metadata.input.peak_bytes +
@@ -137,7 +137,7 @@ bool Counts() {
                    huge, huge, {4, true, true, true, 3},
                    AqProfileFrameOutput::kCompleted, &largest)
                        .ok() &&
-                   largest.maximum_dispatches == 643 &&
+                   largest.maximum_dispatches == 663 &&
                    ComputeAqAuxiliaryProfileStoragePlan(
                        {huge, huge, true, true, true, true}, &initial)
                        .ok() &&

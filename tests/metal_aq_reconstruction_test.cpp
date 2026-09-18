@@ -2002,6 +2002,9 @@ bool CheckResidentQuantizationPreparation(
     std::cerr << "Resident invariant CfL preparation allocated or submitted\n";
     return false;
   }
+  const auto retained_invariant_field = invariant_field;
+  std::fill(invariant_field.begin(), invariant_field.end(),
+            std::numeric_limits<float>::quiet_NaN());
   std::vector<float> block_distance(block_count, -1.0f);
   gjxl::Image3FBuffer reconstructed(kPixelExtent);
   gjxl::VarDctEncoderFrame frame;
@@ -2060,6 +2063,44 @@ bool CheckResidentQuantizationPreparation(
               << "->" << after_evaluation.successful_allocations
               << " submissions=" << before_evaluation.committed_submissions
               << "->" << after_evaluation.committed_submissions << '\n';
+    return false;
+  }
+
+  // Re-preparing CfL must also preserve a later host-supplied raw quantizer.
+  // The preparation snapshot cannot borrow the caller's field or overwrite
+  // the raw input while selecting the separate invariant quantizer.
+  std::vector<float> inverse_sigma(block_count);
+  if (!CheckStatus(gjxl::ComputeEpfInverseSigma(
+        strategies, {expected_raw.data(), kBlockExtent, kBlockExtent.width},
+        expected_quantizer,
+        {sharpness.data(), kBlockExtent, kBlockExtent.width},
+        evaluation_options.profile.epf_sigma,
+        {inverse_sigma.data(), kBlockExtent, kBlockExtent.width}),
+        "resident invariant-CfL host sigma") ||
+      !CheckStatus(prepared->PrepareInvariantColorCorrelationResident(
+        {retained_invariant_field.data(), kBlockExtent, kBlockExtent.width},
+        invariant_quant_dc), "resident invariant-CfL reprepare")) {
+    return false;
+  }
+  const auto before_host_evaluation = gpu->stats();
+  if (!CheckStatus(prepared->Evaluate(
+        {.raw_quant_field = {expected_raw.data(), kBlockExtent, kBlockExtent.width},
+         .quantizer = expected_quantizer.params(),
+         .epf_inverse_sigma = {inverse_sigma.data(), kBlockExtent, kBlockExtent.width}},
+        {.block_distance_map = {block_distance.data(), kBlockExtent, kBlockExtent.width},
+         .score = &score, .maximum_error = &maximum_error,
+         .quantizer = &actual_quantizer, .final = &final}),
+        "resident invariant-CfL host-quantized evaluation")) {
+    return false;
+  }
+  const auto after_host_evaluation = gpu->stats();
+  if (!frame.valid() || !maps_equal(frame.color_correlation(), invariant_color) ||
+      frame.quantizer().params().global_scale != expected_quantizer.params().global_scale ||
+      frame.quantizer().params().quant_dc != expected_quantizer.params().quant_dc ||
+      !std::isfinite(score) || score < 0.0 ||
+      after_host_evaluation.successful_allocations != before_host_evaluation.successful_allocations ||
+      after_host_evaluation.committed_submissions != before_host_evaluation.committed_submissions + 1) {
+    std::cerr << "Resident invariant CfL overwrote the host quantizer or resource contract\n";
     return false;
   }
 

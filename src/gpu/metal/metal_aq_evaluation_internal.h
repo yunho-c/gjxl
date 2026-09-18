@@ -638,9 +638,18 @@ private:
       ConstDevicePlaneView distance_map) const;
   void EncodeResidentQuantizer(MetalBackend& backend,
                                MTL::ComputeCommandEncoder* encoder) const;
+  void EncodeResidentQuantizer(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      DevicePlaneView quant_field, DevicePlaneView raw_quant,
+      AqInitialQuantSelectionParams params) const;
   void EncodeForwardCoefficients(MetalBackend& backend,
                                  MTL::ComputeCommandEncoder* encoder) const;
   void EncodeFinalColorCorrelation(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const;
+  void EncodeFinalColorCorrelation(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      DevicePlaneView raw_quant) const;
+  void EncodeInvariantColorCorrelation(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const;
   void EncodeMaximumErrorReduction(
       MetalBackend &backend, MTL::ComputeCommandEncoder *encoder) const;
@@ -739,6 +748,7 @@ private:
   float uniform_initial_quant_ = 0.0f;
   AqInitialQuantSelectionParams initial_quant_selection_params_{};
   AqInitialQuantSelectionParams resident_quant_selection_params_{};
+  float invariant_quant_dc_ = 0.0f;
   std::array<AqQuantFieldAdjustmentParams, 7>
     quant_field_adjustment_params_{};
   std::array<AqBlockReductionParams, 7> block_reduction_params_{};
