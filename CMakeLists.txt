@@ -603,6 +603,7 @@ if(GJXL_ENABLE_CUDA)
     src/gpu/cuda/cuda_aq_kernels.cu
     src/gpu/cuda/cuda_aq_exact.cpp
     src/gpu/cuda/cuda_aq_exact_kernels.cu
+    src/gpu/cuda/cuda_aq_cpu_order_kernels.cu
     src/gpu/cuda/cuda_aq_butteraugli_kernels.cu
     src/gpu/cuda/cuda_input_preparation.cpp
     src/gpu/cuda/cuda_aq_resident.cpp
@@ -2731,6 +2732,14 @@ if(GJXL_BUILD_TESTS)
       COMMAND gjxl_cuda_backend_test
     )
     set_tests_properties(cuda_backend PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_exact_arithmetic_test tests/cuda_exact_arithmetic_test.cpp)
+    target_link_libraries(gjxl_cuda_exact_arithmetic_test PRIVATE
+      gjxl_codestream gjxl_cuda gjxl_pfm_io CUDA::cudart)
+    target_compile_definitions(gjxl_cuda_exact_arithmetic_test PRIVATE
+      GJXL_SAMPLE_PFM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/testdata/codestream_sample.pfm")
+    add_test(NAME cuda_exact_arithmetic COMMAND gjxl_cuda_exact_arithmetic_test)
+    set_tests_properties(cuda_exact_arithmetic PROPERTIES SKIP_RETURN_CODE 77)
 
     add_executable(gjxl_cuda_profiling_test tests/cuda_profiling_test.cpp)
     target_link_libraries(gjxl_cuda_profiling_test PRIVATE gjxl_cuda)

@@ -350,56 +350,36 @@ an intermediate build appear complete.
   Hosted Windows and Linux C++20/C++23 and all three Rust jobs pass at this
   revision.
 
+- At `38d5fc5`, all six hosted native jobs (Windows/Linux/macOS, C++20 and
+  C++23) and all three Rust jobs pass. Both hosted Metal modes pass 150/150
+  tests, including the invariant-CfL snapshot and numerical fixes. These are
+  Apple Paravirtual runs; physical Apple GPU qualification remains open.
+
+- CUDA exact evaluation now uses CPU-order GPU reconstruction and Gaussian
+  filtering, with host-derived DCT/color constants and an admitted 10,752-byte
+  device basis buffer (plus alignment). No global FMA flag or CPU fallback is
+  introduced. The production implementation matches CPU raw quantization,
+  codestreams and RGB in all 20 photograph/update comparisons. The checked-in
+  regression covers 21 guarded DCT cases and 41 pipeline byte/pixel pairs;
+  mixed-transform/custom-filter direct reconstruction now requires identical
+  pixels. All 156 configured CUDA-build tests pass: 154 in the initial full run,
+  then the two compiler-subprocess checks after fixing the test shell's missing
+  MSVC environment. The public CLI additionally matches CPU hashes in all 16
+  photo/effort pairs (efforts 1/4/8/10); all 32 streams decode independently with
+  finite, pair-identical quality scores. Exact-arithmetic memcheck passes.
+  Thirty-two alternating latency-control processes (544 public calls) against
+  the immediate parent's arithmetic show about 3.5% exact-effort-8 overhead on
+  flower/keong; resident-effort-7 paired ratios are 0.984 and 1.004, with identical
+  bytes. The earlier older-control screen's +3.1% resident-keong signal does not
+  reproduce in this follow-up. These are single-device photographic controls. See
+  [the arithmetic record](cuda-exact-arithmetic-integration.md) for details.
+
 ## Outstanding integration risks
 
-- Further isolated CUDA controls identify a Windows host-library difference:
-  MSVC's `std::cbrt(float(0.0037930732552754493))` returns bits `3e1fb276`,
-  while CUDA's fixed inverse-color constant is `3e1fb275`. Matching the host
-  value, CPU-order Gaussian filters, double inverse-DCT accumulation, paired
-  Gaborish sums and serial block reduction produces identical reconstructed RGB,
-  raw quantization and codestream bytes in 20 comparisons: four photographs,
-  zero through four AQ updates, prediction-aware DC with smoothing. Remaining
-  metric block error is at most 3.6e-7. Changing only the color constant does
-  not fix the original decision discrepancy. These are diagnostic linked-object
-  overrides, not production changes or a performance qualification. The next
-  implementation must isolate CPU-compatible arithmetic to exact mode, obtain
-  platform-dependent constants from the host, preserve ordinary resident
-  arithmetic and account for any added storage. No CPU fallback is introduced.
-
-- The later Metal resident-CfL failure exposes a separate functional defect:
-  preparation validates but discards its supplied field/DC value, deriving the
-  supposedly invariant map from the next evaluation instead. The candidate fix
-  snapshots the field in existing policy scratch, derives its quantizer before
-  CfL, then uses the evaluation quantizer for coefficient coding. It adds no
-  device allocation or submission. Profile planning reserves the extra selector
-  dispatches. Regression coverage poisons the caller's field after preparation
-  and also evaluates host-provided raw quantization. Hosted validation is pending;
-  Windows validates the changed test syntax but cannot compile Metal internals.
-- A separate CUDA diagnostic reproduces CPU Gaussian accumulation order on the
-  device. On the keong fixture with CPU-reconstructed pixels, metric block error
-  falls from roughly 0.0002 to at most 3.6e-7. With CUDA reconstruction, residual
-  error still crosses AQ decision boundaries, changing 18 raw values after two
-  updates. The experiment is retained only in ignored diagnostic artifacts;
-  production convolution kernels and compiler flags remain unchanged.
-
-- At `156ee67`, hosted Metal C++23 passes 149/150 tests. Exact DC basis
-  constants remove the earlier DC mismatch, and a precise mask logarithm
-  clears the maximum-throughput pixel-mask check without changing tolerances.
-  Reconstruction now reaches a later resident quantizer/invariant-CfL check;
-  additional diagnostics distinguish its numerical and resource assertions.
-  Both Linux modes and all three Rust jobs pass at this revision; remaining
-  native jobs are still running. Physical Apple GPU validation remains open.
-- The keong photograph's exact-mode discrepancy is isolated further. With
-  legacy DC settings, the original CUDA branch (`6e8277b`) and integration
-  produce identical diagnostic results through four AQ updates, including
-  CPU-identical raw quantization. Under the new DC policy, supplying CPU
-  reconstructed pixels to the CUDA metric still leaves block-feedback errors
-  around 0.00018–0.00023 before quantization decisions diverge. A separate
-  CUDA build with implicit FMA contraction disabled still changes four raw
-  values after three updates and seven after four. That compiler flag is not
-  adopted. CPU and CUDA convolution accumulation order differs and is the
-  next numerical investigation; no exact-mode contract is relaxed.
-
+- Extend production exact-mode qualification beyond the current device;
+  the four-photo control is not a universal numerical or cross-toolchain
+  guarantee. Follow through on Linux CUDA and another GPU
+  architecture before broadening automatic selection.
 - Broaden public policy/DC/low-effort coverage to all efforts, controls and
   representative images. Verify dense effort-10 behavior against independent
   references and qualify the new effort-8 quality/performance tradeoff.
@@ -408,7 +388,6 @@ an intermediate build appear complete.
   explicit CUDA cache's complete-call performance and physical memory behavior.
 - Verify Metal behavior on appropriate hardware.
 - Finish hosted CI execution, GPU diagnostics parity, broader qualification
-  and matched performance/memory measurements. Merge checkpoint `7449d6c` is
-  published as draft PR #29; it is not ready to merge. The first native macOS
-  CI run reached shader compilation but lacked Xcode's separate Metal compiler
-  component. CI setup now installs that component before testing the build.
+  and matched performance/memory measurements. Integration remains published
+  as draft PR #29 and is not ready to merge. Hosted native and Rust CI are green
+  at `38d5fc5`; physical Apple GPU and broader NVIDIA qualification remain open.

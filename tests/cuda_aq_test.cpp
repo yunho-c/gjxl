@@ -765,7 +765,7 @@ bool CheckExactWorkflow(gjxl::GpuBackend& gpu, const ImageStorage& source,
       .score = &failed_score,
   };
   // Exercise GPU reconstruction from the stored frame directly. The exact AQ
-  // workflow may hand over an already reconstructed CPU image to pin decisions.
+  // workflow and the direct evaluator both reconstruct on the GPU.
   ImageStorage direct_reconstruction(kSourceExtent);
   gjxl::VarDctEncoderFrame direct_frame;
   gjxl::AqEvaluationOutput::Final direct_final{
@@ -778,8 +778,8 @@ bool CheckExactWorkflow(gjxl::GpuBackend& gpu, const ImageStorage& source,
   for (size_t c = 0; c < 3; ++c)
     for (size_t y = 0; y < kSourceExtent.height; ++y)
       for (size_t x = 0; x < kSourceExtent.width; ++x)
-        if (std::abs(direct_reconstruction.View().plane[c].Row(y)[x] -
-                     cpu_reconstruction.View().plane[c].Row(y)[x]) > 2.0e-3f) {
+        if (direct_reconstruction.View().plane[c].Row(y)[x] !=
+            cpu_reconstruction.View().plane[c].Row(y)[x]) {
           std::cerr << "CUDA direct exact reconstruction differs for DC policy " << dc_policy << '\n';
           return false;
         }

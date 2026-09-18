@@ -24,6 +24,7 @@
 #include "codec/chroma_from_luma.h"
 #include "codec/dc_conversion.h"
 #include "codec/dc_smoothing.h"
+#include "codec/dct_internal.h"
 #include "codec/quantization.h"
 #include "codec/vardct_frame.h"
 #include "core/ac_strategy.h"
@@ -31,6 +32,8 @@
 #include "core/image_ops.h"
 #include "core/quantizer.h"
 #include "gpu/cuda/cuda_aq_exact_kernels.h"
+#include "gpu/cuda/cuda_aq_cpu_order_kernels.h"
+#include "gpu/cuda/cuda_butteraugli_internal.h"
 #include "core/managed_allocator.h"
 #include "gpu/cuda/cuda_backend_internal.h"
 #include "gpu/cuda/cuda_kernels.h"
@@ -389,6 +392,18 @@ class CudaPreparedExactAqEvaluation final : public PreparedAqEvaluation {
                            {2 * block_count_, 1}, 2 * block_count_,
                            &anchors_device_);
     if (!status.ok()) return status;
+    status = AllocatePlane(persistent_, DeviceElementType::kI32,
+                           {kCudaCpuOrderBasisWords, 1}, kCudaCpuOrderBasisWords,
+                           &inverse_basis_device_);
+    if (!status.ok()) return status;
+    size_t basis_offset = inverse_basis_device_.offset_bytes;
+    for (size_t length : {8u, 16u, 32u}) {
+      const auto basis = dct_internal::InverseBasis(length);
+      status = backend_->CopyHostToDevice(*inverse_basis_device_.buffer,
+          basis.data(), basis.size_bytes(), basis_offset);
+      if (!status.ok()) return status;
+      basis_offset += basis.size_bytes();
+    }
     status = AllocatePlane(staging_, DeviceElementType::kF32,
                            {coefficient_count_, 1}, coefficient_count_,
                            &coefficients_device_);
@@ -440,7 +455,7 @@ class CudaPreparedExactAqEvaluation final : public PreparedAqEvaluation {
     anchor_count_ = metadata.device_anchors.size();
 
     if (options_.metric == AqEvaluationMetric::kButteraugli) {
-      status = PrepareDeviceButteraugli(
+      status = PrepareCudaCpuOrderButteraugli(
           *backend_,
           {.reference_linear_rgb = ConstImage(original_),
            .options = options_.butteraugli},
@@ -942,6 +957,10 @@ class CudaPreparedExactAqEvaluation final : public PreparedAqEvaluation {
                        2 * block_count_, &persistent_bytes);
     if (!status.ok()) return status;
 
+    status = PlanPlane(DeviceElementType::kI32, {kCudaCpuOrderBasisWords, 1},
+                       kCudaCpuOrderBasisWords, &persistent_bytes);
+    if (!status.ok()) return status;
+
     size_t staging_bytes = 0;
     status = PlanPlane(DeviceElementType::kF32, {coefficient_count_, 1},
                        coefficient_count_, &staging_bytes);
@@ -1115,12 +1134,13 @@ class CudaPreparedExactAqEvaluation final : public PreparedAqEvaluation {
     if (!context.exact_linear) {
       for (const CudaAqExactBatch& batch : self.batches_) {
         if (batch.anchor_count == 0) continue;
-        status = LaunchCudaDct(
-            false,
+        status = LaunchCudaCpuOrderInverseDct(
             Pointer(self.coefficients_device_) + batch.coefficient_offset,
             Pointer(self.inverse_device_) + batch.coefficient_offset,
             3 * static_cast<size_t>(batch.anchor_count), batch.pixel_width,
-            batch.pixel_height, backend.state_->stream);
+            batch.pixel_height,
+            reinterpret_cast<const double*>(Pointer(self.inverse_basis_device_)),
+            backend.state_->stream);
         if (status != cudaSuccess) return status;
         status = LaunchCudaAqScatterReconstruction(
             AnchorPointer(self.anchors_device_), Pointer(self.inverse_device_),
@@ -1156,7 +1176,7 @@ class CudaPreparedExactAqEvaluation final : public PreparedAqEvaluation {
     size_t stage = 0;
     cudaError_t status = cudaSuccess;
     if (options_.profile.loop_filter.gaborish) {
-      status = LaunchCudaAqGaborish(ConstPointers(current),
+      status = LaunchCudaCpuOrderGaborish(ConstPointers(current),
                                     MutablePointers(filter_scratch_[0]),
                                     ErrorPointer(error_device_),
                                     gaborish_params_, backend.state_->stream);
@@ -1177,9 +1197,10 @@ class CudaPreparedExactAqEvaluation final : public PreparedAqEvaluation {
       current = destination;
       ++stage;
     }
-    return LaunchCudaAqOpsinToLinear(
+    return LaunchCudaCpuOrderOpsinToLinear(
         ConstPointers(current), MutablePointers(reconstructed_linear_),
-        ErrorPointer(error_device_), color_params_, backend.state_->stream);
+        ErrorPointer(error_device_), color_params_, bias_cuberoot_,
+        backend.state_->stream);
   }
 
   static cudaError_t EncodeBlockReduction(CudaBackend& backend,
@@ -1191,7 +1212,7 @@ class CudaPreparedExactAqEvaluation final : public PreparedAqEvaluation {
                         backend.state_->stream);
     if (status != cudaSuccess) return status;
     for (const CudaAqExactBatch& batch : self.batches_) {
-      status = LaunchCudaAqReduceButteraugli(
+      status = LaunchCudaCpuOrderReduceButteraugli(
           Pointer(self.distance_device_),
           static_cast<uint32_t>(self.source_extent_.width),
           AnchorPointer(self.anchors_device_), Pointer(self.block_device_),
@@ -1206,6 +1227,9 @@ class CudaPreparedExactAqEvaluation final : public PreparedAqEvaluation {
   }
 
   void InitializeKernelParams() {
+    // Use the same host library as OpsinToLinearRgb. For this input, MSVC's
+    // float cbrt and the fixed CUDA constant differ by one representable value.
+    bias_cuberoot_ = std::cbrt(0.0037930732552754493f);
     gaborish_params_.width = static_cast<uint32_t>(source_extent_.width);
     gaborish_params_.height = static_cast<uint32_t>(source_extent_.height);
     gaborish_params_.input_stride = static_cast<uint32_t>(coding_extent_.width);
@@ -1340,6 +1364,7 @@ class CudaPreparedExactAqEvaluation final : public PreparedAqEvaluation {
   std::array<std::array<DevicePlaneView, 3>, 2> filter_scratch_{};
   std::array<DevicePlaneView, 3> reconstructed_linear_{};
   DevicePlaneView anchors_device_{};
+  DevicePlaneView inverse_basis_device_{};
   DevicePlaneView coefficients_device_{};
   DevicePlaneView inverse_device_{};
   DevicePlaneView inverse_sigma_device_{};
@@ -1375,6 +1400,7 @@ class CudaPreparedExactAqEvaluation final : public PreparedAqEvaluation {
   CudaAqGaborishParams gaborish_params_{};
   std::array<CudaAqEpfParams, 3> epf_params_{};
   CudaAqColorParams color_params_{};
+  float bias_cuberoot_ = 0;
   AqEvaluationMemoryStats memory_stats_{};
   std::mutex mutex_;
   bool invalid_ = false;

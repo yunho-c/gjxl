@@ -47,6 +47,8 @@ struct CudaButteraugliPlan {
   float x_multiplier = 1.0f;
   float intensity_target = 255.0f;
   CudaButteraugliLowMediumWeights low_medium_weights{};
+  // Scalar CPU convolution order, used only by exact-coefficient AQ.
+  uint32_t cpu_order = 0;
 };
 
 // One scaled Malta response, including the caller's initialization/addition
@@ -102,6 +104,8 @@ struct CudaButteraugliFrequencyParams {
   uint32_t input_stride = 0;
   uint32_t output_stride = 0;
   uint32_t channel = 0;
+  // Scalar CPU convolution order, used only by exact-coefficient AQ.
+  uint32_t cpu_order = 0;
 };
 
 [[nodiscard]] cudaError_t LaunchCudaButteraugliBlurAndSplit(
@@ -132,6 +136,8 @@ struct CudaButteraugliOpsinPlan {
   uint32_t height = 0;
   uint32_t output_stride = 0;
   float intensity_target = 255.0f;
+  // Scalar CPU convolution order, used only by exact-coefficient AQ.
+  uint32_t cpu_order = 0;
 };
 
 [[nodiscard]] cudaError_t LaunchCudaButteraugliOpsin(
@@ -163,6 +169,8 @@ struct CudaButteraugliLowMediumPlan {
   uint32_t input_stride = 0;
   uint32_t blurred_stride = 0;
   uint32_t output_stride = 0;
+  // Scalar CPU convolution order, used only by exact-coefficient AQ.
+  uint32_t cpu_order = 0;
 };
 
 // Zero selects the plain 48-row tile. Large planes amortize rolling chunks;

@@ -10,6 +10,14 @@
 
 namespace gjxl::cuda_internal {
 
+class CudaBackend;
+
+// Exact AQ retains scalar CPU tap pairing while sharing the resident storage
+// recipe. Choose the arithmetic before preparing the cached reference.
+[[nodiscard]] Status PrepareCudaCpuOrderButteraugli(
+    CudaBackend& backend, const DeviceButteraugliPrepareDescriptor& descriptor,
+    std::unique_ptr<PreparedDeviceButteraugli>* prepared);
+
 // Encodes a validated comparison into an already active CUDA submission.
 // This is intentionally internal: the public prepared operation retains its
 // synchronous, non-reentrant Compare contract.

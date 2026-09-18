@@ -60,6 +60,11 @@ jobs:
           & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool memcheck --error-exitcode 86 "$env:GITHUB_WORKSPACE/build/cuda-ci/gjxl_cuda_profiling_test.exe" "$env:GITHUB_WORKSPACE/build/cuda-ci/profile-memcheck-complete.txt"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ((Get-Content build/cuda-ci/profile-memcheck-complete.txt -Raw).Trim() -ne 'PASS CUDA stage/dispatch profiling checks') { throw 'Instrumented profiling test did not complete' }
+      - name: Check exact arithmetic memory accesses
+        run: |
+          & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool memcheck --error-exitcode 86 "$env:GITHUB_WORKSPACE/build/cuda-ci/gjxl_cuda_exact_arithmetic_test.exe" --quick "$env:GITHUB_WORKSPACE/build/cuda-ci/exact-arithmetic-memcheck-complete.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-Content build/cuda-ci/exact-arithmetic-memcheck-complete.txt -Raw).Trim() -ne 'PASS CUDA exact arithmetic') { throw 'Instrumented exact arithmetic test did not complete' }
       - name: Test CUDA Rust bindings
         working-directory: rust
         run: cargo test --workspace --features cuda

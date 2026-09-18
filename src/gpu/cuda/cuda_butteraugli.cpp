@@ -137,8 +137,11 @@ Status ComputeCudaButteraugliStoragePlan(
 class CudaPreparedDeviceButteraugli final : public PreparedDeviceButteraugli {
  public:
   CudaPreparedDeviceButteraugli(CudaBackend& backend,
-                                DeviceButteraugliPrepareDescriptor descriptor)
-      : PreparedDeviceButteraugli(backend, descriptor), backend_(backend) {}
+                                DeviceButteraugliPrepareDescriptor descriptor,
+                                bool cpu_order)
+      : PreparedDeviceButteraugli(backend, descriptor), backend_(backend) {
+    plan_.cpu_order = cpu_order;
+  }
 
   [[nodiscard]] Status PrepareStorage() {
     const Extent2D requested = extent();
@@ -425,25 +428,21 @@ class CudaPreparedDeviceButteraugli final : public PreparedDeviceButteraugli {
   size_t peak_comparison_scratch_bytes_ = 0;
 };
 
-Status CudaBackend::Prepare(
-    GpuBackend& backend, const DeviceButteraugliPrepareDescriptor& descriptor,
-    std::unique_ptr<PreparedDeviceButteraugli>* prepared) {
+static Status PrepareCudaButteraugli(
+    CudaBackend& backend, const DeviceButteraugliPrepareDescriptor& descriptor,
+    bool cpu_order, std::unique_ptr<PreparedDeviceButteraugli>* prepared) {
   const resource_budget_internal::ManagedHostScope resources(
       resource_budget_internal::ResourceClass::kButteraugli);
   if (prepared == nullptr) {
     return Status::InvalidArgument("CUDA Butteraugli prepared output is null");
   }
   prepared->reset();
-  if (&backend != this) {
-    return Status::InvalidArgument(
-        "CUDA Butteraugli operation received another backend");
-  }
   Status status =
       ValidateDeviceButteraugliPrepareDescriptor(backend, descriptor);
   if (!status.ok()) return status;
   try {
     auto candidate =
-        std::make_unique<CudaPreparedDeviceButteraugli>(*this, descriptor);
+        std::make_unique<CudaPreparedDeviceButteraugli>(backend, descriptor, cpu_order);
     status = candidate->PrepareStorage();
     if (!status.ok()) return status;
     status = candidate->PrepareReference();
@@ -456,6 +455,23 @@ Status CudaBackend::Prepare(
     return Status::OutOfMemory(
         "Unable to allocate CUDA Butteraugli prepared state");
   }
+}
+
+Status CudaBackend::Prepare(
+    GpuBackend& backend, const DeviceButteraugliPrepareDescriptor& descriptor,
+    std::unique_ptr<PreparedDeviceButteraugli>* prepared) {
+  if (&backend != this) {
+    if (prepared != nullptr) prepared->reset();
+    return Status::InvalidArgument(
+        "CUDA Butteraugli operation received another backend");
+  }
+  return PrepareCudaButteraugli(*this, descriptor, false, prepared);
+}
+
+Status PrepareCudaCpuOrderButteraugli(
+    CudaBackend& backend, const DeviceButteraugliPrepareDescriptor& descriptor,
+    std::unique_ptr<PreparedDeviceButteraugli>* prepared) {
+  return PrepareCudaButteraugli(backend, descriptor, true, prepared);
 }
 
 cudaError_t EncodePreparedCudaButteraugli(

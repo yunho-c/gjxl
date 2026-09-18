@@ -2572,12 +2572,89 @@ __global__ void ConvolutionHorizontalReferenceKernel(
       StoreConvolution{output, output_stride});
 }
 
+// Match scalar CPU tap pairing and rounding for exact-coefficient AQ.
+template <unsigned K, bool H>
+__global__ void CpuOrderConvolutionKernel(const float* input,
+                                          const float* weights, float* output,
+                                          unsigned width, unsigned height,
+                                          unsigned input_stride,
+                                          unsigned output_stride) {
+  const size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (i >= size_t(width) * height) return;
+  const unsigned y = unsigned(i / width), x = unsigned(i % width);
+  constexpr int radius = K / 2;
+  const int center = H ? int(x) : int(y);
+  const int limit = H ? int(width) : int(height);
+  float norm = 0;
+  for (unsigned t = 0; t < K; ++t) norm = __fadd_rn(norm, weights[t]);
+  const float scale = 1.0f / norm;
+  float values[K];
+  for (int t = 0; t < int(K); ++t) {
+    int c = center + t - radius;
+    if constexpr (K == 5) c = MirrorCoordinate(c, limit);
+    values[t] = c < 0 || c >= limit
+                    ? 0
+                    : input[size_t(H ? y : c) * input_stride + (H ? c : x)];
+  }
+  float sum;
+  if constexpr (K == 5) {
+    sum = __fmul_rn(values[2], __fmul_rn(weights[2], scale));
+    sum = UnfusedMultiplyAdd(__fadd_rn(values[1], values[3]),
+                             __fmul_rn(weights[1], scale), sum);
+    sum = UnfusedMultiplyAdd(__fadd_rn(values[0], values[4]),
+                             __fmul_rn(weights[0], scale), sum);
+  } else if (center >= radius && center + radius < limit) {
+    float partial[4] = {};
+    for (int t = 0; t < radius; ++t) {
+      const float value = __fmul_rn(__fadd_rn(values[t], values[K - 1 - t]),
+                                    __fmul_rn(weights[t], scale));
+      if (t < 4)
+        partial[t] = value;
+      else
+        partial[t % 4] = __fadd_rn(partial[t % 4], value);
+    }
+    sum = __fmul_rn(values[radius], __fmul_rn(weights[radius], scale));
+    for (int t = 0; t < (radius < 4 ? radius : 4); ++t)
+      sum = __fadd_rn(sum, partial[t]);
+  } else {
+    float total = 0;
+    sum = 0;
+    for (int t = 0; t < int(K); ++t) {
+      const int c = center + t - radius;
+      if (c >= 0 && c < limit) {
+        total = __fadd_rn(total, weights[t]);
+        sum = UnfusedMultiplyAdd(values[t], weights[t], sum);
+      }
+    }
+    sum = __fmul_rn(sum, 1.0f / total);
+  }
+  output[size_t(y) * output_stride + x] = sum;
+}
+
 template <unsigned int KernelSize, bool ReferenceHorizontal = false>
 [[nodiscard]] cudaError_t LaunchBlur(const float* input, uint32_t input_stride,
                                      const float* weights, float* intermediate,
                                      float* output, uint32_t output_stride,
                                      uint32_t width, uint32_t height,
-                                     cudaStream_t stream) {
+                                     cudaStream_t stream, bool cpu_order = false) {
+  if (cpu_order) {
+    const unsigned blocks = PlaneBlocks(width, height);
+    if (CudaKernelProfileScope profile{"CpuOrderConvolutionKernel<true>",
+                                       blocks, kPlaneThreads, stream}; profile) {
+      CpuOrderConvolutionKernel<KernelSize, true>
+          <<<blocks, kPlaneThreads, 0, stream>>>(
+              input, weights, intermediate, width, height, input_stride, width);
+    }
+    const cudaError_t error = CheckLaunch();
+    if (error != cudaSuccess) return error;
+    if (CudaKernelProfileScope profile{"CpuOrderConvolutionKernel<false>",
+                                       blocks, kPlaneThreads, stream}; profile) {
+      CpuOrderConvolutionKernel<KernelSize, false>
+          <<<blocks, kPlaneThreads, 0, stream>>>(
+              intermediate, weights, output, width, height, width, output_stride);
+    }
+    return CheckLaunch();
+  }
   if constexpr (KernelSize == 5) {
     const unsigned int blocks = PlaneBlocks(width, height);
     if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"MirroredConvolution5Kernel<true>", blocks, kPlaneThreads, stream}; profile_scope) {
@@ -2627,6 +2704,7 @@ template <unsigned int KernelSize, bool ReferenceHorizontal = false>
     uint32_t psycho_stride, uint32_t width, uint32_t height,
     cudaStream_t stream) {
   CudaButteraugliOpsinPlan opsin;
+  opsin.cpu_order = plan.cpu_order;
   opsin.input = input;
   opsin.input_stride = input_stride;
   opsin.weights = plan.kernels[0];
@@ -2637,21 +2715,25 @@ template <unsigned int KernelSize, bool ReferenceHorizontal = false>
   for (size_t channel = 0; channel < 3; ++channel) {
     opsin.intermediate[channel] = psycho[7 + channel];
     opsin.output[channel] = plan.planes[kImage + channel];
+    opsin.blurred[channel] = opsin.output[channel];
   }
   // Original RGB is external or staged in the not-yet-produced low outputs.
   // High-frequency outputs 7-9 are not produced until the later split passes.
   // Use their storage for three packed horizontal RGB planes, then XYB planes.
   // Even a packed reference subscale has width*height elements per plane.
-  cudaError_t error = LaunchCudaButteraugliOpsin(opsin, stream);
+  cudaError_t error = (plan.cpu_order ? LaunchCudaButteraugliOpsinReference(opsin, stream)
+                       : LaunchCudaButteraugliOpsin(opsin, stream));
   if (error != cudaSuccess) return error;
 
   CudaButteraugliLowMediumPlan low_medium;
+  low_medium.cpu_order = plan.cpu_order;
   for (size_t channel = 0; channel < 3; ++channel) {
     low_medium.input[channel] = plan.planes[kImage + channel];
     // The earlier RGB intermediates are dead; retain three distinct packed
     // horizontal XYB planes until the joint vertical/low-medium pass.
     low_medium.intermediate[channel] = psycho[7 + channel];
     low_medium.low[channel] = psycho[channel];
+    low_medium.blurred[channel] = psycho[channel];
     low_medium.medium[channel] = psycho[3 + channel];
   }
   low_medium.device_weights = plan.kernels[1];
@@ -2660,21 +2742,28 @@ template <unsigned int KernelSize, bool ReferenceHorizontal = false>
   low_medium.height = height;
   low_medium.input_stride = plan.working_width;
   low_medium.output_stride = psycho_stride;
-  error = LaunchCudaButteraugliLowMedium(low_medium, stream);
+  low_medium.blurred_stride = psycho_stride;
+  error = (plan.cpu_order ? LaunchCudaButteraugliLowMediumReference(low_medium, stream)
+                          : LaunchCudaButteraugliLowMedium(low_medium, stream));
   if (error != cudaSuccess) return error;
 
   for (size_t channel = 0; channel < 2; ++channel) {
     const CudaButteraugliFrequencyParams frequency{
         width, height, psycho_stride, psycho_stride,
-        static_cast<uint32_t>(channel)};
-    error = LaunchCudaButteraugliBlurAndSplit(
-        psycho[3 + channel], plan.kernels[2], plan.planes[kPsychoWork],
-        psycho[6 + channel], frequency, stream);
+        static_cast<uint32_t>(channel), plan.cpu_order};
+    error = plan.cpu_order
+        ? LaunchCudaButteraugliBlurAndSplitReference(
+              psycho[3 + channel], plan.kernels[2], plan.planes[kPsychoWork],
+              plan.planes[kImage], plan.working_width,
+              psycho[6 + channel], frequency, stream)
+        : LaunchCudaButteraugliBlurAndSplit(
+              psycho[3 + channel], plan.kernels[2], plan.planes[kPsychoWork],
+              psycho[6 + channel], frequency, stream);
     if (error != cudaSuccess) return error;
   }
   error = LaunchBlur<15>(psycho[5], psycho_stride, plan.kernels[2],
                          plan.planes[kPsychoWork], psycho[5], psycho_stride,
-                         width, height, stream);
+                         width, height, stream, plan.cpu_order);
   if (error != cudaSuccess) return error;
 
   const PlaneParams suppress{width, height, psycho_stride, psycho_stride};
@@ -2688,10 +2777,15 @@ template <unsigned int KernelSize, bool ReferenceHorizontal = false>
   for (size_t channel = 0; channel < 2; ++channel) {
     const CudaButteraugliFrequencyParams frequency{
         width, height, psycho_stride, psycho_stride,
-        static_cast<uint32_t>(channel + 3)};
-    error = LaunchCudaButteraugliBlurAndSplit(
-        psycho[6 + channel], plan.kernels[3], plan.planes[kPsychoWork],
-        psycho[8 + channel], frequency, stream);
+        static_cast<uint32_t>(channel + 3), plan.cpu_order};
+    error = plan.cpu_order
+        ? LaunchCudaButteraugliBlurAndSplitReference(
+              psycho[6 + channel], plan.kernels[3], plan.planes[kPsychoWork],
+              plan.planes[kImage], plan.working_width,
+              psycho[8 + channel], frequency, stream)
+        : LaunchCudaButteraugliBlurAndSplit(
+              psycho[6 + channel], plan.kernels[3], plan.planes[kPsychoWork],
+              psycho[8 + channel], frequency, stream);
     if (error != cudaSuccess) return error;
   }
   return cudaSuccess;
@@ -2794,7 +2888,7 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
   error =
       LaunchBlur<13>(plan.planes[kMaskInput], plan.working_width, plan.kernels[4],
                      plan.planes[kMaskIntermediate], plan.planes[kDistortedMask],
-                     plan.working_width, width, height, stream);
+                     plan.working_width, width, height, stream, plan.cpu_order);
   if (error != cudaSuccess) return error;
 
   const float* reference_mask = cached_reference_mask;
@@ -2808,7 +2902,7 @@ ConstPsycho(const std::array<T, kCudaButteraugliPsychoPlaneCount>& input) {
     error =
         LaunchBlur<13>(plan.planes[kReferenceMask], plan.working_width, plan.kernels[4],
                        plan.planes[kMaskIntermediate], plan.planes[kReferenceMask],
-                       plan.working_width, width, height, stream);
+                       plan.working_width, width, height, stream, plan.cpu_order);
     if (error != cudaSuccess) return error;
     reference_mask = plan.planes[kReferenceMask];
   }
@@ -2886,7 +2980,7 @@ cudaError_t LaunchOpsinImpl(const CudaButteraugliOpsinPlan& plan,
     if (reference) {
       error = LaunchBlur<5>(plan.input[channel], plan.input_stride[channel],
           plan.weights, plan.intermediate[channel], plan.blurred[channel],
-          plan.output_stride, plan.width, plan.height, stream);
+          plan.output_stride, plan.width, plan.height, stream, plan.cpu_order);
     } else {
       if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"MirroredConvolution5Kernel<true>", PlaneBlocks(plan.width, plan.height), kPlaneThreads, stream}; profile_scope) {
         MirroredConvolution5Kernel<true>
@@ -2997,7 +3091,7 @@ cudaError_t LaunchLowMediumImpl(const CudaButteraugliLowMediumPlan& plan,
       const cudaError_t error = LaunchBlur<33>(
           plan.input[channel], plan.input_stride, plan.device_weights,
           plan.intermediate[channel], plan.blurred[channel], plan.blurred_stride,
-          plan.width, plan.height, stream);
+          plan.width, plan.height, stream, plan.cpu_order);
       if (error != cudaSuccess) return error;
     }
   } else {
@@ -3233,9 +3327,9 @@ cudaError_t LaunchCudaButteraugliBlurAndSplitReference(
   if (params.width == 0 || params.height == 0) return cudaSuccess;
   const cudaError_t error = params.channel < 2
       ? LaunchBlur<15, true>(input, params.input_stride, weights, intermediate,
-                       blurred, blurred_stride, params.width, params.height, stream)
+                       blurred, blurred_stride, params.width, params.height, stream, params.cpu_order)
       : LaunchBlur<7, true>(input, params.input_stride, weights, intermediate,
-                      blurred, blurred_stride, params.width, params.height, stream);
+                      blurred, blurred_stride, params.width, params.height, stream, params.cpu_order);
   if (error != cudaSuccess) return error;
   const FrequencyParams frequency{params.width, params.height, params.input_stride,
                                    blurred_stride, params.output_stride, params.channel};
@@ -3425,7 +3519,7 @@ cudaError_t LaunchCudaButteraugliPrepare(const CudaButteraugliPlan& plan,
   error =
       LaunchBlur<13>(plan.planes[20], plan.working_width, plan.kernels[4],
                      plan.planes[kPsychoWork], plan.planes[20], plan.working_width,
-                     plan.working_width, plan.working_height, stream);
+                     plan.working_width, plan.working_height, stream, plan.cpu_order);
   if (error != cudaSuccess || plan.multiscale == 0) return error;
 
   error = LaunchSubsample(plan.reference, plan.reference_stride,
