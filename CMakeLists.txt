@@ -9,6 +9,8 @@ project(
   LANGUAGES C CXX
 )
 
+option(GJXL_BUILD_FRONTIER_EXPERIMENT "Build the isolated frontier-DP experiment and capture hook" OFF)
+
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
@@ -3125,4 +3127,23 @@ if(GJXL_BUILD_BENCHMARKS)
     gjxl_metal_shaders
   )
 
+endif()
+
+if(GJXL_BUILD_FRONTIER_EXPERIMENT)
+  target_compile_definitions(gjxl_gpu_ops PRIVATE GJXL_FRONTIER_EXPERIMENT=1)
+  target_sources(gjxl_gpu_ops PRIVATE tools/frontier_dp/capture.cpp)
+  add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/frontier.metallib"
+    COMMAND xcrun -sdk macosx metal -std=metal3.1 -fno-fast-math
+      -c "${CMAKE_CURRENT_SOURCE_DIR}/tools/frontier_dp/frontier.metal"
+      -o "${CMAKE_CURRENT_BINARY_DIR}/frontier.air"
+    COMMAND xcrun -sdk macosx metallib "${CMAKE_CURRENT_BINARY_DIR}/frontier.air"
+      -o "${CMAKE_CURRENT_BINARY_DIR}/frontier.metallib"
+    DEPENDS tools/frontier_dp/frontier.metal VERBATIM)
+  add_custom_target(gjxl_frontier_shaders DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/frontier.metallib")
+  add_executable(gjxl_frontier_probe tools/frontier_dp/probe.cpp)
+  target_link_libraries(gjxl_frontier_probe PRIVATE gjxl_metal)
+  target_include_directories(gjxl_frontier_probe PRIVATE third_party/metal-cpp)
+  target_compile_definitions(gjxl_frontier_probe PRIVATE
+    FRONTIER_METALLIB_PATH="${CMAKE_CURRENT_BINARY_DIR}/frontier.metallib")
+  add_dependencies(gjxl_frontier_probe gjxl_frontier_shaders)
 endif()

@@ -1,0 +1,28 @@
+{
+  "files": {
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/tools/frontier_dp/graph.h": "dbf89eff7b46f6403f9bce46f9b72548ebb24ceaf46810d3199e26a179af141a",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/tools/frontier_dp/probe.cpp": "ea673c06ae54534dba3aa2c7f36f7aab754f8b848bb350c52e2959c3da7a3477",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/tools/frontier_dp/frontier.metal": "dce2fd62693c05e63985afc361337b45730d0c53099e0bda4f4e4f6574962367",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/tools/frontier_dp/compare_selectors.py": "54da0150d984e0a18a3b00035a0f16bbbbb1f7fd5fa3b7ff8dc9056c054d27e9",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/tools/frontier_dp/run_experiment.py": "1cdff838cf405a79a841b82ce6fde9fe852cc8f5694dbbf344a7ee23c15ea273",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/gjxl_frontier_probe": "a4a6d9c6fab3d644419a2e95fb19cf100c2ec233ba84481e8b6674d7598f03eb",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/frontier.metallib": "988ea36637c2012fb456ac745139e60fbc919669bc895022353c1760fcd349e3",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/kernel-probe-20260917/manifest.json": "2e6d273e1446895069d1e2309d27ffeead0a7bf9b71a856844ab08993d0e7477",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/kernel-probe-20260917/alpine_24mp/capture-0.gfc": "ec63b610bfe465a9f71cd70ee053a139afaa88c3beeb9bc6d69c726eab9d85af",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/kernel-probe-20260917/alpine_3mp/capture-0.gfc": "d6e77956867ef66b55651bbc90eef43a23cbbe69fdfe24f5a1d36c0e59cd4c9e",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/kernel-probe-20260917/campus_24mp/capture-0.gfc": "94c198a9b39216a7bb2eaaea6bc34a3bd9276abef40e9d4cc6c6db93fd8793ba",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/kernel-probe-20260917/forest_24mp/capture-0.gfc": "2acf46a4c3bc64b095716c5f8a7f025cbc5bb0f75d46e632ad90ad1e732af218",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/kernel-probe-20260917/synthetic_4k/capture-0.gfc": "132aa9ab0c4e8547991766beb486c51c126e2fce092d217470e0cd546a33e911",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/kernel-probe-20260917/alpine_24mp/capture-0.json": "629e6718a64c837ec090e73dd71c607cfdd8724c5a345447150e074660394072",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/kernel-probe-20260917/alpine_3mp/capture-0.json": "7263391f944360bdabdfd8c218a7e8997961f09396dfe577797668df0b693ec1",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/kernel-probe-20260917/campus_24mp/capture-0.json": "122c60d198b5173aef2896ffcff9780e89031273438994af27bbd20770e860b8",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/kernel-probe-20260917/forest_24mp/capture-0.json": "413bac3ad685e42ba14647b50806ded9d2db464edcee9468daf61952d095c80b",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/kernel-probe-20260917/synthetic_4k/capture-0.json": "2919aabd572c0b001cd5184658069d60c5f3e30e76e46dcbb40023eb7581cca1"
+  },
+  "revision": "bb7b714e858ffe7668a84c8588745a99b7015f39",
+  "completed": true,
+  "boundary": "Resident captured inputs; preparation, selection and required wide fallback; excludes scoring, host upload, graph setup, AQ metadata and encoder. CPU timings are the earlier capture controls, not concurrent paired samples.",
+  "repetitions": 3,
+  "samples": 7,
+  "warmups": 3
+}

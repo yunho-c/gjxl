@@ -1,0 +1,80 @@
+{
+  "revision": "bb7b714e858ffe7668a84c8588745a99b7015f39",
+  "binary": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/rate-pilot-20260917/frozen/gjxl_quality_benchmark",
+  "tools": {
+    "djxl": "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/libjxl/tools/djxl",
+    "butteraugli": "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/libjxl/tools/butteraugli_main",
+    "scorer": "/Users/yunhocho/GitHub/libjxl/tools/scripts/quality_metric/target/release/cjxl-quality-metric"
+  },
+  "files": {
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/rate-pilot-20260917/frozen/gjxl_quality_benchmark": "562c488f534e4e36c9083cb2779fce81ae2f1fc573d9231b558ad6b199e50cd9",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/metal/gjxl.metallib": "fa7d5559655eee643a646da197f1302c5044ba5eb4369a8af3d7c9f42eca763b",
+    "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/libjxl/tools/djxl": "69a0c82fbc251e02be7b861f5598b66482ed54b6d775674767791b246f02cefb",
+    "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/libjxl/tools/butteraugli_main": "a0b266b71618940a3136d527a2e337dbbebeb119ed693e85ca3b5b9ac2ff23bc",
+    "/Users/yunhocho/GitHub/libjxl/tools/scripts/quality_metric/target/release/cjxl-quality-metric": "fefbd733bbad133ff12489d19bcf7a218f27f3252257a6092f1e3de5cce3125d",
+    "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/01.pfm": "85de56c3dbb999e135db21f4944a7d1e9ba0307d0499946721aa021fc0bfeb96",
+    "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/12.pfm": "690cfe2d630ba858269a36f28085d6810c9fa507f3325c88a74295fa1c65b793",
+    "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/24.pfm": "ce0776b0b54649604611645a26cef19899e83856cfd72b3808c80a75adcb958a",
+    "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777.pfm": "77aecbd6afc55bc5cb736f91aec30fdcb9a2a8f6a83acd2d740e8134ed5ac500",
+    "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/60430844748882ff66b9a5598ef06dd6.pfm": "44624e7c9fe5e5318c7a0f5d76885c92b0a004b68a64f156194870733eca94b5",
+    "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/ef576c4ed599d75d72145a8f34b58ccb.pfm": "0e4766f8f838a821ead4898bbae1250e4520aad81adde4f4b4f232ef12541a6a"
+  },
+  "sources": {
+    "CMakeLists.txt": "d36e6f6091754bd294a635852e3ef1879d962640b891523ecad1353d6c56c11b",
+    "src/gpu/ops/ac_strategy_search.cpp": "90127e7262603e8cc8344d6eecd56c6f0000569a7f6f5b0372ab9b3d6de47b34",
+    "src/gpu/ops/ac_strategy_capture_internal.h": "627bff7a8210b1319a5ba4c3ca34fa5914a9548ceddbe1c1b5a02e3ad5d55355",
+    "src/codec/ac_strategy_search_policy.h": "5a56665a2e5f1a669c289168b50bd27a5eef65285f03b44747541dd4200f0698",
+    "tools/frontier_dp/capture.cpp": "843d2f2201df61edacce74675b0cdc386ff56fcf47c7bbeb17c3a32d0801f574",
+    "tools/frontier_dp/graph.h": "4ce7d1c95eff1dbdc230739909d06128eeb223186391c274e817bd525e3a8684",
+    "tools/frontier_dp/rate_experiment.py": "82c73f4ad1855e11a91be16b52ff1a3bbf767ac3044c12716a1a9699e64df114"
+  },
+  "images": [
+    {
+      "id": "kodak/01",
+      "path": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/01.pfm"
+    },
+    {
+      "id": "kodak/12",
+      "path": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/12.pfm"
+    },
+    {
+      "id": "kodak/24",
+      "path": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/24.pfm"
+    },
+    {
+      "id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "path": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777.pfm"
+    },
+    {
+      "id": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "path": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/60430844748882ff66b9a5598ef06dd6.pfm"
+    },
+    {
+      "id": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "path": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/ef576c4ed599d75d72145a8f34b58ccb.pfm"
+    }
+  ],
+  "selection": "Kodak 1,12,24; first, middle, last lexically sorted CLIC PFM; chosen before observations",
+  "distances": [
+    0.7,
+    1.2,
+    2.0,
+    4.0,
+    7.0
+  ],
+  "efforts": [
+    5,
+    8
+  ],
+  "arms": [
+    "greedy",
+    "frontier",
+    "rectangle"
+  ],
+  "policy": "Frozen FP32 additive costs; exact integer sums; retain greedy on ties or rectangle losses",
+  "timing": "Diagnostic CPU override and one sample; not a speed qualification",
+  "expected": 180,
+  "created": 1789702102.698206,
+  "completed": true,
+  "finished": 1789702214.075441
+}

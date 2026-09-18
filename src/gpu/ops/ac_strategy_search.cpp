@@ -27,6 +27,9 @@
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/ac_strategy_search_profile_internal.h"
 #include "gpu/ops/ac_strategy_storage_plan.h"
+#ifdef GJXL_FRONTIER_EXPERIMENT
+#include "gpu/ops/ac_strategy_capture_internal.h"
+#endif
 
 namespace gjxl {
 using resource_budget_internal::ManagedVector;
@@ -560,6 +563,13 @@ static Status FindAcStrategyGridGpuImpl(
     if (stats != nullptr) {
       *stats = result_stats;
     }
+#ifdef GJXL_FRONTIER_EXPERIMENT
+    status = frontier_experiment::Capture(
+      opsin_extent, quant_field, color_correlation, options, table, *out);
+    if (!status.ok()) return status;
+    status = frontier_experiment::SelectDiagnostic(options, table, out);
+    if (!status.ok()) return status;
+#endif
     return Status::Ok();
   } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
     return failure.status();
