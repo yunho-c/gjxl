@@ -13,6 +13,12 @@ runs:
         xcrun clang++ --version
         xcrun --show-sdk-version
         brew install cmake ninja
+        # Hosted Xcode images may contain the metal launcher without the
+        # separately downloadable compiler component.
+        if ! xcrun --sdk macosx metal --version; then
+          xcodebuild -downloadComponent MetalToolchain
+        fi
+        xcrun --sdk macosx metal --version
     - name: Install audited GNU packages
       if: runner.os == 'Linux'
       shell: bash

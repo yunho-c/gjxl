@@ -215,5 +215,7 @@ an intermediate build appear complete.
   explicit CUDA cache's complete-call performance and physical memory behavior.
 - Verify Metal behavior on appropriate hardware.
 - Finish hosted CI execution, GPU diagnostics parity, broader qualification
-  and matched performance/memory measurements. The merge index has no unresolved
-  entries, but the merge remains uncommitted and final review is outstanding.
+  and matched performance/memory measurements. Merge checkpoint `7449d6c` is
+  published as draft PR #29; it is not ready to merge. The first native macOS
+  CI run reached shader compilation but lacked Xcode's separate Metal compiler
+  component. CI setup now installs that component before testing the build.
