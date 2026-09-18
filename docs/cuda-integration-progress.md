@@ -352,6 +352,24 @@ an intermediate build appear complete.
 
 ## Outstanding integration risks
 
+- At `156ee67`, hosted Metal C++23 passes 149/150 tests. Exact DC basis
+  constants remove the earlier DC mismatch, and a precise mask logarithm
+  clears the maximum-throughput pixel-mask check without changing tolerances.
+  Reconstruction now reaches a later resident quantizer/invariant-CfL check;
+  additional diagnostics distinguish its numerical and resource assertions.
+  Both Linux modes and all three Rust jobs pass at this revision; remaining
+  native jobs are still running. Physical Apple GPU validation remains open.
+- The keong photograph's exact-mode discrepancy is isolated further. With
+  legacy DC settings, the original CUDA branch (`6e8277b`) and integration
+  produce identical diagnostic results through four AQ updates, including
+  CPU-identical raw quantization. Under the new DC policy, supplying CPU
+  reconstructed pixels to the CUDA metric still leaves block-feedback errors
+  around 0.00018–0.00023 before quantization decisions diverge. A separate
+  CUDA build with implicit FMA contraction disabled still changes four raw
+  values after three updates and seven after four. That compiler flag is not
+  adopted. CPU and CUDA convolution accumulation order differs and is the
+  next numerical investigation; no exact-mode contract is relaxed.
+
 - Broaden public policy/DC/low-effort coverage to all efforts, controls and
   representative images. Verify dense effort-10 behavior against independent
   references and qualify the new effort-8 quality/performance tradeoff.

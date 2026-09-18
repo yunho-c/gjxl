@@ -2045,7 +2045,21 @@ bool CheckResidentQuantizationPreparation(
       after_evaluation.committed_submissions !=
         before_evaluation.committed_submissions + 1) {
     std::cerr << "Resident device quantizer, invariant CfL, or resource "
-                 "contract differs\n";
+                 "contract differs: quantizer="
+              << actual_quantizer.global_scale << ',' << actual_quantizer.quant_dc
+              << " expected=" << expected_quantizer.params().global_scale << ','
+              << expected_quantizer.params().quant_dc
+              << " frame=" << frame.quantizer().params().global_scale << ','
+              << frame.quantizer().params().quant_dc
+              << " invariant_cfl="
+              << maps_equal(frame.color_correlation(), invariant_color)
+              << " evaluation_cfl="
+              << maps_equal(frame.color_correlation(), evaluation_color)
+              << " valid=" << frame.valid() << " score=" << score
+              << " allocations=" << before_evaluation.successful_allocations
+              << "->" << after_evaluation.successful_allocations
+              << " submissions=" << before_evaluation.committed_submissions
+              << "->" << after_evaluation.committed_submissions << '\n';
     return false;
   }
 
