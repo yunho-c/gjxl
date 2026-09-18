@@ -177,10 +177,10 @@ bool RunCase(Extent2D extent, bool deferred_frontend = false,
         if (!Check(AcStrategyGrid::Create(blocks, &strategies)) ||
             !Check(strategies.Set(0, 0, AcStrategyType::kDct32x32)) ||
             !Check(strategies.Set(4, 0, AcStrategyType::kDct32x16)) ||
-            !Check(strategies.Set(6, 0, AcStrategyType::kDct16x32)) ||
-            !Check(strategies.Set(10, 0, AcStrategyType::kDct16x16)) ||
-            !Check(strategies.Set(6, 2, AcStrategyType::kDct16x8)) ||
-            !Check(strategies.Set(7, 2, AcStrategyType::kDct8x16)))
+            !Check(strategies.Set(4, 4, AcStrategyType::kDct16x32)) ||
+            !Check(strategies.Set(8, 0, AcStrategyType::kDct16x16)) ||
+            !Check(strategies.Set(10, 0, AcStrategyType::kDct16x8)) ||
+            !Check(strategies.Set(10, 2, AcStrategyType::kDct8x16)))
           return false;
         strategies.fill_empty_dct8();
       }

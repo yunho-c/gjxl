@@ -286,6 +286,15 @@ an intermediate build appear complete.
 
 ## Outstanding integration risks
 
+- Hosted CI at `3a8da47` passes Linux C++20/C++23 and all three Rust jobs.
+  Metal's five remaining failures reproduce at that revision. Mixed-frame
+  fixtures now keep every transform within its color tile; resident AQ tests
+  check atomic rejection when timestamps are unavailable and keep ordinary
+  execution/materialization coverage. The three changed test sources pass
+  MSVC syntax checks. The next hosted diagnostic runs pinned main with only
+  the scalar-DCT launch-width portability patch, allowing numerical controls
+  to reach execution on the paravirtual GPU. Numerical tolerances are unchanged.
+
 - Broaden public policy/DC/low-effort coverage to all efforts, controls and
   representative images. Verify dense effort-10 behavior against independent
   references and qualify the new effort-8 quality/performance tradeoff.

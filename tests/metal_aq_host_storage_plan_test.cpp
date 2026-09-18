@@ -257,10 +257,10 @@ struct Fixture {
            std::array<std::tuple<size_t, size_t, AcStrategyType>, 6>{
                {{0, 0, AcStrategyType::kDct32x32},
                 {4, 0, AcStrategyType::kDct32x16},
-                {6, 0, AcStrategyType::kDct16x32},
-                {10, 0, AcStrategyType::kDct16x16},
-                {6, 2, AcStrategyType::kDct16x8},
-                {7, 2, AcStrategyType::kDct8x16}}})
+                {4, 4, AcStrategyType::kDct16x32},
+                {8, 0, AcStrategyType::kDct16x16},
+                {10, 0, AcStrategyType::kDct16x8},
+                {10, 2, AcStrategyType::kDct8x16}}})
         if (!Ok(mixed.Set(x, y, type)))
           return false;
     } else if (blocks.width >= 2 && blocks.height >= 2) {

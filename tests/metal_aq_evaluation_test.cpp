@@ -55,6 +55,14 @@ struct MemoryObservation {
 
 std::vector<MemoryObservation> g_memory_observations;
 
+bool SupportsStageProfiling(gjxl::GpuBackend& gpu) {
+  const auto* profiler = dynamic_cast<
+    gjxl::gpu_profile_internal::GpuSubmissionProfiler*>(&gpu);
+  if (profiler == nullptr) return false;
+  const auto capabilities = profiler->QueryGpuProfilingCapabilities();
+  return capabilities.timestamp_counter && capabilities.stage_boundary;
+}
+
 bool CheckStatus(gjxl::Status status, std::string_view operation) {
   if (status.ok()) return true;
   std::cerr << operation << " failed: " << status.message() << '\n';
@@ -1507,6 +1515,25 @@ bool CheckResidentButteraugliPolicy(
     std::cerr << "Metal resident policy profiler is unavailable\n";
     return false;
   }
+  if (!SupportsStageProfiling(gpu)) {
+    std::vector<double> scores{-91.0};
+    gjxl::gpu_profile_internal::GpuExecutionProfile profile;
+    profile.wall_stages.push_back({.stage_id = "sentinel"});
+    const auto expected = profile;
+    const auto before = gpu.stats().committed_submissions;
+    if (!ExpectCode(profiler->EvaluateResidentButteraugliPolicyProfiled(
+          {.adjusted_initial_quant_field = {initial.data(), blocks, blocks.width},
+           .quant_dc = setup.quant_dc, .butteraugli_target = kTarget,
+           .lower_bound = setup.lower_bound, .upper_bound = setup.upper_bound,
+           .iterations = kIterations},
+          {.score_history = &scores},
+          gjxl::gpu_profile_internal::GpuProfilingMode::kStage, &profile),
+          gjxl::StatusCode::kUnavailable, "unsupported resident policy profile") ||
+        scores != std::vector<double>{-91.0} || profile != expected ||
+        gpu.stats().committed_submissions != before) return false;
+    std::cout << "Resident policy timestamp checks skipped: counters unavailable\n";
+    return true;
+  }
   std::vector<float> profiled_quant(stride * blocks.height, kPoison);
   std::vector<float> profiled_block(stride * blocks.height, kPoison);
   std::vector<double> profiled_scores;
@@ -1918,29 +1945,33 @@ bool CheckResidentPolicyMaterialization(gjxl::GpuBackend& gpu) {
   auto* profiler = dynamic_cast<
     gjxl::gpu_profile_internal::PreparedAqEvaluationProfiler*>(
       prepared.get());
-  std::vector<double> profiled_scores;
-  gjxl::VarDctEncoderFrame profiled_frame;
-  gjxl::gpu_profile_internal::GpuExecutionProfile handoff_profile;
-  if (profiler == nullptr ||
-      !CheckStatus(profiler->EvaluateResidentButteraugliPolicyProfiled(
-        input,
-        {.score_history = &profiled_scores, .frame = &profiled_frame},
-        gjxl::gpu_profile_internal::GpuProfilingMode::kStage,
-        &handoff_profile), "profiled resident frame handoff") ||
-      profiled_scores != lean_scores ||
-      !QuantizedCoefficientsEqual(profiled_frame, lean_frame) ||
-      handoff_profile.wall_stages.size() != 2 ||
-      handoff_profile.wall_stages[0].stage_id !=
-        "resident.frame_mapping" ||
-      handoff_profile.wall_stages[0].kind !=
-        gjxl::gpu_profile_internal::GpuWallStageKind::kReadback ||
-      handoff_profile.wall_stages[1].stage_id !=
-        "resident.frame_assembly" ||
-      handoff_profile.wall_stages[1].kind !=
-        gjxl::gpu_profile_internal::GpuWallStageKind::kHost ||
-      handoff_profile.wall_stages[1].wall_nanoseconds == 0) {
-    std::cerr << "Profiled resident frame handoff differs\n";
-    return false;
+  if (SupportsStageProfiling(gpu)) {
+    std::vector<double> profiled_scores;
+    gjxl::VarDctEncoderFrame profiled_frame;
+    gjxl::gpu_profile_internal::GpuExecutionProfile handoff_profile;
+    if (profiler == nullptr ||
+        !CheckStatus(profiler->EvaluateResidentButteraugliPolicyProfiled(
+          input,
+          {.score_history = &profiled_scores, .frame = &profiled_frame},
+          gjxl::gpu_profile_internal::GpuProfilingMode::kStage,
+          &handoff_profile), "profiled resident frame handoff") ||
+        profiled_scores != lean_scores ||
+        !QuantizedCoefficientsEqual(profiled_frame, lean_frame) ||
+        handoff_profile.wall_stages.size() != 2 ||
+        handoff_profile.wall_stages[0].stage_id !=
+          "resident.frame_mapping" ||
+        handoff_profile.wall_stages[0].kind !=
+          gjxl::gpu_profile_internal::GpuWallStageKind::kReadback ||
+        handoff_profile.wall_stages[1].stage_id !=
+          "resident.frame_assembly" ||
+        handoff_profile.wall_stages[1].kind !=
+          gjxl::gpu_profile_internal::GpuWallStageKind::kHost ||
+        handoff_profile.wall_stages[1].wall_nanoseconds == 0) {
+      std::cerr << "Profiled resident frame handoff differs\n";
+      return false;
+    }
+  } else {
+    std::cout << "Resident handoff timestamp checks skipped: counters unavailable\n";
   }
 
   HostImage failed_reconstruction(
@@ -2026,6 +2057,10 @@ bool CheckEvaluationFreePolicy(gjxl::GpuBackend& gpu) {
   // Both first-use execution modes must construct forward coefficients and
   // final CfL; a reused evaluator must produce exactly the same integers.
   for (int mode = 0; mode < 3; ++mode) {
+    if (mode == 2 && !SupportsStageProfiling(gpu)) {
+      std::cout << "Zero-update timestamp checks skipped: counters unavailable\n";
+      continue;
+    }
     auto options = MakeOptions();
     options.evaluation_free = mode != 0;
     input.evaluate_final_field = !options.evaluation_free;
