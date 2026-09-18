@@ -429,6 +429,24 @@ an intermediate build appear complete.
   determinism. Logs and hashes are in `build/integration-evidence/` under
   `test-linux-cuda*`, `rust-linux-cuda`, `linux-exact-memcheck*` and
   `linux-photo-controls/`.
+- The standalone resident qualification driver again compiles against main's
+  historical `metal_aq_mode` field as well as current `gpu_aq_mode` headers.
+  The pre-fix main-header compile failed on that rename; post-fix syntax checks
+  pass against `ec4d4c5`, main and current headers. The Linux CUDA driver rebuild
+  and a 24-image, two-caller finite-budget run pass, including post-trim zero
+  counters; the historical controller's ten protocol tests also pass.
+- A [physical Metal check](../tools/resident_qualification/README.md#physical-metal-integration-check)
+  now builds the shared driver, runs the complete native suite and focused
+  Metal API/shader validation, and retains finite-budget 4K/concurrent evidence.
+  It rejects Apple Paravirtual and requires real stage timestamp captures.
+  Dispatch capture is required only where supported; stage-only hardware such
+  as the recorded M4 Pro is explicitly identified. A manual workflow supports
+  an existing self-hosted runner. Bash/YAML syntax checks pass, but this new
+  physical-device script has not yet been run on a Mac. The historical
+  same-metallib comparison protocol is unchanged and remains distinct.
+- All ten hosted jobs pass at `0dfa1c8`: Windows/Linux/macOS native builds in
+  C++20/C++23, three Rust jobs, and the CUDA 12.6 compile job. The new Metal
+  qualification executable still needs its subsequent hosted compilation.
 
 ## Outstanding integration risks
 
@@ -442,9 +460,13 @@ an intermediate build appear complete.
   intentional; tightening them requires new allocation evidence. The completed
   dense effort-10 oracle, all-effort public matrix, policy-quality controls and
   whole-call memory/performance runs are recorded above.
-- Verify Metal behavior on appropriate hardware.
-- Finish hosted CI execution, GPU diagnostics parity, broader qualification
-  and matched performance/memory measurements. Integration remains published
-  as draft PR #29 and is not ready to merge. Hosted native and Rust CI are green
-  at `24e25cc`; the new hosted CUDA 12.6 compile job passes at `955ed7e`.
-  Physical Apple GPU and broader NVIDIA qualification remain open.
+- Run the physical Metal runtime/resource and timestamp check on appropriate
+  hardware. Hosted Apple Paravirtual does not supply this evidence.
+- CUDA and Metal share diagnostic APIs and JSON publication, but CUDA's stage
+  records aggregate whole submissions. Individual dispatch timings are present;
+  finer semantic stage aggregation remains a documented difference. Do not
+  treat these stage records as interchangeable cross-backend measurements.
+- Finish final-head hosted CI and acceptance review. Integration remains
+  published as draft PR #29 and is not ready to merge. The bounded matched
+  performance/memory and policy-quality evidence is recorded above; physical
+  Apple GPU and broader NVIDIA qualification remain open.

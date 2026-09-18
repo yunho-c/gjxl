@@ -3538,6 +3538,11 @@ if(GJXL_BUILD_BENCHMARKS)
   endif()
 
   if(GJXL_ENABLE_METAL)
+    add_executable(gjxl_metal_qualification tools/resident_qualification/driver.cpp)
+    target_compile_definitions(gjxl_metal_qualification PRIVATE GJXL_FINAL_SCHEDULER)
+    target_link_libraries(gjxl_metal_qualification PRIVATE
+      gjxl_codestream gjxl_metal gjxl_pfm_io)
+
     add_executable(
       gjxl_metal_butteraugli_benchmark
       benchmarks/metal_butteraugli_benchmark.cpp

@@ -47,6 +47,16 @@
 
 namespace {
 using Clock = std::chrono::steady_clock;
+// The same driver is compiled against frozen Metal revisions and current
+// headers. Keep the historical field spelling confined to this adapter.
+template <typename Options>
+void SelectFullyResident(Options& options) {
+  if constexpr (requires { options.gpu_aq_mode; }) {
+    options.gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
+  } else {
+    options.metal_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
+  }
+}
 struct ImageStorage {
   explicit ImageStorage(gjxl::Extent2D image_extent) : extent(image_extent) {
     size_t pixel_count = 0;
@@ -215,7 +225,7 @@ int main(int argc, char** argv) try {
 #else
   options.backend = gjxl::VarDctBackendPreference::kMetal;
 #endif
-  options.gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
+  SelectFullyResident(options);
   Check(effort >= 1 && effort <= 10, "Effort must be in [1, 10]");
   options.effort = static_cast<int32_t>(effort);
   options.butteraugli_target = 1.2f; options.cpu_thread_count = threads;
