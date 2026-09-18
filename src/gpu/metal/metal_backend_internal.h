@@ -156,6 +156,9 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> resident_quant_small;
   NS::SharedPtr<MTL::ComputePipelineState> resident_policy_initialize;
   NS::SharedPtr<MTL::ComputePipelineState> resident_policy_update;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_policy_bounds_reset;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_policy_extrema;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_policy_bounds;
   NS::SharedPtr<MTL::ComputePipelineState> gather_transform_pixels;
   NS::SharedPtr<MTL::ComputePipelineState> select_adjusted_quantization;
   NS::SharedPtr<MTL::ComputePipelineState> select_adjusted_quantization_parallel;

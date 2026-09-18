@@ -61,7 +61,8 @@ selected maps are unchanged, so this implementation carries no rate-quality
 policy improvement. The independent rectangle/frontier alternatives and their
 small mixed rate-quality effects remain documented in SELECTORS.md.
 
-Next: keep quant-field adjustment and bound reduction in the AQ submission,
-then build strategy-dependent anchor/CfL/dispatch metadata on device and defer
-map materialization to final frame completion. Final qualification and new paper
-study sessions remain pending.
+The next checkpoint keeps quant-field adjustment and bound reduction in the AQ
+submission; see [AQ-INITIALIZATION.md](AQ-INITIALIZATION.md). Device-generated
+anchor/CfL/dispatch metadata and deferred map materialization remain open, scoped
+in [HANDOFF.md](HANDOFF.md). Final qualification and new paper study sessions
+remain pending.

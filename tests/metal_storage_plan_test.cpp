@@ -92,6 +92,7 @@ bool CheckAqSlices(const AqStoragePlanOptions &p, const AqStoragePlan &plan) {
   staging.push_back(plan.resident_quant_field);
   staging.push_back(plan.resident_policy_initial_field);
   staging.push_back(plan.resident_policy_scores);
+  staging.push_back(plan.resident_policy_bounds);
   staging.push_back(plan.resident_quant_histogram);
   staging.push_back(plan.resident_quant_selection_state);
   staging.push_back(plan.resident_quant_statistics);
@@ -180,10 +181,12 @@ bool CheckAqAndInputMatrix() {
         std::pair<size_t, size_t> expected;
         if (!Ok(ComputeAqStoragePlan(p, &plan)) ||
             !Ok(test::storage_plan_oracle::AqCapacity(p, &expected)) ||
-            !Check(
-                plan.persistent_bytes == expected.first &&
-                    plan.staging_bytes == expected.second,
-                "AQ capacities differ from the frozen pre-extraction recipe") ||
+            !Check(plan.persistent_bytes == expected.first &&
+                       plan.staging_bytes ==
+                           expected.second +
+                               (p.resident_quantization ? 256 : 0),
+                   "AQ capacities differ from the frozen recipe plus resident "
+                   "bounds") ||
             !CheckAqSlices(p, plan))
           return false;
         ++cases;

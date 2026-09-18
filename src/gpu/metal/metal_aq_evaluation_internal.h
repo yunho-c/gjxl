@@ -101,6 +101,7 @@ struct AqResidentPolicyUpdateParams {
   float butteraugli_target;
   float lower_bound;
   float upper_bound;
+  uint32_t use_device_bounds;
 };
 
 struct AqInitialCflParams {
@@ -342,6 +343,10 @@ public:
   Status EvaluateResidentButteraugliPolicy(
       AqResidentButteraugliPolicyInput input,
       AqResidentButteraugliPolicyOutput output) override;
+  bool SupportsResidentPolicyInitialization() const noexcept override {
+    return resident_quantization_ && !frame_only_ &&
+           !final_transform_metadata_pending_;
+  }
   Status EvaluateResidentButteraugliPolicyProfiled(
       AqResidentButteraugliPolicyInput input,
       AqResidentButteraugliPolicyOutput output,
@@ -397,6 +402,7 @@ public:
   Status FailNextResidentStaging();
   Status SetWaitObserver(bool *observed);
   Status GetReadbackStats(MetalAqReadbackStatsForTesting* stats) const;
+  Status GetResidentPolicyBounds(float *lower, float *upper) const;
   Status RunBlockReduction(ConstPlaneF32View distance_map,
                            PlaneF32View block_distance_map);
 
@@ -492,6 +498,7 @@ private:
       PlaneF32View output,
       gpu_profile_internal::GpuProfilingMode mode,
       gpu_profile_internal::GpuExecutionProfile* profile);
+  Status PrepareQuantFieldAdjustmentParams(float butteraugli_target);
   Status ComputeInitialQuantizationImpl(
       InitialQuantizationOptions options,
       InitialQuantFieldOutput output,
@@ -636,8 +643,10 @@ private:
   void EncodeBlockReduction(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
       ConstDevicePlaneView distance_map) const;
-  void EncodeResidentQuantizer(MetalBackend& backend,
-                               MTL::ComputeCommandEncoder* encoder) const;
+  void EncodeResidentQuantizer(MetalBackend &backend,
+                               MTL::ComputeCommandEncoder *encoder) const;
+  void EncodeResidentPolicyBounds(MetalBackend &backend,
+                                  MTL::ComputeCommandEncoder *encoder) const;
   void EncodeForwardCoefficients(MetalBackend& backend,
                                  MTL::ComputeCommandEncoder* encoder) const;
   void EncodeFinalColorCorrelation(
@@ -676,6 +685,7 @@ private:
   DevicePlaneView initial_quantizer_params_;
   DevicePlaneView resident_quant_field_;
   DevicePlaneView resident_policy_initial_field_;
+  DevicePlaneView resident_policy_bounds_;
   DevicePlaneView resident_policy_scores_;
   DevicePlaneView resident_quant_histogram_;
   DevicePlaneView resident_quant_selection_state_;
@@ -731,6 +741,7 @@ private:
   AqResetParams reset_params_{};
   AqResidentPolicyInitializeParams resident_policy_initialize_params_{};
   AqResidentPolicyUpdateParams resident_policy_update_params_{};
+  bool resident_policy_adjust_initial_field_ = false;
   AqInitialCflParams initial_cfl_params_{};
   AqFinalCflParams final_cfl_params_{};
   AqInitialQuantGradientParams initial_quant_gradient_params_{};

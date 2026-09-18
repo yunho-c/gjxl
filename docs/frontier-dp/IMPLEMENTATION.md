@@ -37,10 +37,12 @@ Remaining work and evidence gates:
    of the committed implementation, with independent lifetime, bounded/resumable
    ledgers and no overlapping benchmark jobs. Report exact revision and coverage.
 
-Current source dependencies found: FindAcStrategyGridGpuImpl waits and reads
-costs; MetalPreparedAqEvaluation::Reconfigure builds grouped anchors, batch
-offsets and CfL records on the CPU; AdjustQuantFieldResident reads back the
-adjusted field; PrepareButteraugliPolicy computes global bounds on the CPU.
+Current source dependencies: ordinary FindAcStrategyGridGpuImpl now scores and
+selects on device but waits and reads the selected map.
+MetalPreparedAqEvaluation::Reconfigure still builds grouped anchors, batch
+offsets and CfL records on the CPU. Unprofiled resident Butteraugli AQ now adjusts
+the quant field and computes bounds inside the AQ submission; profiled and
+maximum-error paths retain the separate adjustment path.
 GPU reconstruction, inverse transforms, block reduction and Butteraugli sinks
 currently receive host batch counts, so resident metadata needs device parameter
 bindings and indirect dispatch or a justified bounded dispatch implementation.
@@ -54,5 +56,10 @@ Start production integration with GPU greedy; retain rectangle + greedy as an
 experimental alternative and full frontier as a reference. This decision
 preserves the existing policy while testing the residency benefit.
 
-Progress: active. Production data ownership, resident metadata/bounds, complete
-pipeline parity/timing, final commits and fresh paper studies remain open.
+Native policy-preserving GPU selection is committed in `7ab1db3`; its complete
+encode parity and timing are in NATIVE-SELECTION.md. Fused AQ initialization is
+qualified separately in AQ-INITIALIZATION.md. The remaining metadata handoff and
+its consumers are detailed in HANDOFF.md.
+
+Progress: active. Device metadata, deferred completion, profiling the executing
+new paths, final combined qualification and fresh paper studies remain open.

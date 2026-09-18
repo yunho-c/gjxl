@@ -207,7 +207,7 @@ static_assert(std::is_trivially_copyable_v<AqReconstructionParams>);
 static_assert(sizeof(AqReconstructionParams) == 148);
 static_assert(sizeof(AqResetParams) == 32);
 static_assert(sizeof(AqResidentPolicyInitializeParams) == 20);
-static_assert(sizeof(AqResidentPolicyUpdateParams) == 44);
+static_assert(sizeof(AqResidentPolicyUpdateParams) == 48);
 static_assert(std::is_standard_layout_v<AqInitialCflParams>);
 static_assert(std::is_trivially_copyable_v<AqInitialCflParams>);
 static_assert(sizeof(AqInitialCflParams) == 24);
@@ -1190,6 +1190,10 @@ Status MetalPreparedAqEvaluation::Prepare(
     if (!status.ok()) return status;
     status = staging_.BindPlane(storage_plan.resident_policy_scores, &resident_policy_scores_);
     if (!status.ok()) return status;
+    status = staging_.BindPlane(storage_plan.resident_policy_bounds,
+                                &resident_policy_bounds_);
+    if (!status.ok())
+      return status;
     status = staging_.BindPlane(storage_plan.resident_quant_histogram, &resident_quant_histogram_);
     if (!status.ok()) return status;
     status = staging_.BindPlane(storage_plan.resident_quant_selection_state, &resident_quant_selection_state_);
@@ -2013,10 +2017,13 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       !std::isfinite(input.quant_dc) || input.quant_dc <= 0.0f ||
       !std::isfinite(input.butteraugli_target) ||
       input.butteraugli_target <= 0.0f ||
-      !std::isfinite(input.lower_bound) || input.lower_bound <= 0.0f ||
-      !std::isfinite(input.upper_bound) ||
-      input.upper_bound < input.lower_bound ||
-      input.upper_bound / input.lower_bound >= 253.0f) {
+      (input.adjust_initial_field &&
+       (profiling || !SupportsResidentPolicyInitialization())) ||
+      (!input.adjust_initial_field &&
+       (!std::isfinite(input.lower_bound) || input.lower_bound <= 0.0f ||
+        !std::isfinite(input.upper_bound) ||
+        input.upper_bound < input.lower_bound ||
+        input.upper_bound / input.lower_bound >= 253.0f))) {
     return Status::InvalidArgument(
       "Resident Butteraugli policy input is invalid");
   }
@@ -2193,6 +2200,17 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     input.butteraugli_target;
   resident_policy_update_params_.lower_bound = input.lower_bound;
   resident_policy_update_params_.upper_bound = input.upper_bound;
+  resident_policy_adjust_initial_field_ = input.adjust_initial_field;
+  resident_policy_update_params_.use_device_bounds = input.adjust_initial_field;
+  if (input.adjust_initial_field) {
+    status = PrepareQuantFieldAdjustmentParams(input.butteraugli_target);
+    if (!status.ok()) {
+      Invalidate();
+      return status;
+    }
+    initial_quant_gradient_params_.test_error_mask =
+        fail_numeric ? 262144u : 0u;
+  }
 
   std::unique_ptr<GpuSubmission> submission;
   if (profiling) {
@@ -3769,6 +3787,25 @@ Status MetalPreparedAqEvaluation::GetReadbackStats(
   return Status::Ok();
 }
 
+Status MetalPreparedAqEvaluation::GetResidentPolicyBounds(float *lower,
+                                                          float *upper) const {
+  std::unique_lock lock(mutex_, std::try_to_lock);
+  if (!lock.owns_lock() || state_ != State::kReady ||
+      !resident_policy_adjust_initial_field_ || lower == nullptr ||
+      upper == nullptr) {
+    return Status::FailedPrecondition("Resident policy bounds are unavailable");
+  }
+  float bounds[2];
+  Status status = backend_->CopyDeviceToHost(
+      *resident_policy_bounds_.buffer, bounds, sizeof(bounds),
+      resident_policy_bounds_.offset_bytes);
+  if (status.ok()) {
+    *lower = bounds[0];
+    *upper = bounds[1];
+  }
+  return status;
+}
+
 Status MetalPreparedAqEvaluation::ValidatePreparation(
     const AqEvaluationPreparation& preparation,
     bool host_images_are_finite) const {
@@ -4644,6 +4681,10 @@ void MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission(
     const void* context) {
   auto& self = *static_cast<MetalPreparedAqEvaluation*>(
     const_cast<void*>(context));
+  if (self.resident_policy_adjust_initial_field_) {
+    EncodeQuantFieldAdjustmentSubmission(backend, encoder, context);
+    self.EncodeResidentPolicyBounds(backend, encoder);
+  }
   const size_t evaluation_count =
     self.resident_policy_iterations_ +
     static_cast<size_t>(self.resident_evaluate_final_field_);
@@ -4703,7 +4744,8 @@ void MetalPreparedAqEvaluation::EncodeResidentReconstruction(
     uint32_t iteration) {
   write_completed_coefficients_ = completed_coefficients_.buffer != nullptr &&
     iteration == resident_policy_iterations_;
-  reset_params_.preserve_error = iteration == 0 ? 0u : 1u;
+  reset_params_.preserve_error =
+      iteration == 0 && !resident_policy_adjust_initial_field_ ? 0u : 1u;
   reset_params_.preserve_forward_coefficients =
     iteration == 0 && !resident_forward_coefficients_ready_ ? 0u : 1u;
   const bool prepared_color_correlation =
@@ -4720,7 +4762,8 @@ void MetalPreparedAqEvaluation::EncodeResidentFrame(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) {
   write_completed_coefficients_ = completed_coefficients_.buffer != nullptr;
   const bool first_pass = resident_policy_iterations_ == 0;
-  reset_params_.preserve_error = first_pass ? 0u : 1u;
+  reset_params_.preserve_error =
+      first_pass && !resident_policy_adjust_initial_field_ ? 0u : 1u;
   reset_params_.preserve_forward_coefficients =
     first_pass && !resident_forward_coefficients_ready_ ? 0u : 1u;
   if (first_pass) EncodeReconstructionReset(backend, encoder);
@@ -4741,6 +4784,30 @@ void MetalPreparedAqEvaluation::EncodeResidentFrame(
     EncodeReconstructionCoefficientBatch(backend, encoder, batch_index, false);
   }
   EncodeDcQuantization(backend, encoder);
+}
+
+void MetalPreparedAqEvaluation::EncodeResidentPolicyBounds(
+    MetalBackend &backend, MTL::ComputeCommandEncoder *encoder) const {
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.resident_policy_bounds_reset.get());
+  BindPlane(encoder, resident_policy_bounds_, 0);
+  DispatchThreads1d(encoder, 1);
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.resident_policy_extrema.get());
+  BindPlane(encoder, resident_quant_field_, 0);
+  BindPlane(encoder, resident_policy_bounds_, 1);
+  BindPlane(encoder, reconstruction_error_, 2);
+  encoder->setBytes(&resident_policy_initialize_params_,
+                    sizeof(resident_policy_initialize_params_), 3);
+  DispatchMetalThreadgroups(
+      encoder,
+      MTL::Size(std::min<size_t>(64, (block_count_ + 255) / 256), 1, 1),
+      MTL::Size(256, 1, 1));
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.resident_policy_bounds.get());
+  BindPlane(encoder, resident_policy_bounds_, 0);
+  BindPlane(encoder, reconstruction_error_, 1);
+  DispatchThreads1d(encoder, 1);
 }
 
 void MetalPreparedAqEvaluation::EncodeResidentPolicyInitialize(
@@ -4776,6 +4843,7 @@ void MetalPreparedAqEvaluation::EncodeResidentPolicyUpdate(
   encoder->setBytes(
     &resident_policy_update_params_,
     sizeof(resident_policy_update_params_), 7);
+  BindPlane(encoder, resident_policy_bounds_, 8);
   DispatchThreads1d(encoder, block_count_);
 }
 
@@ -4911,69 +4979,83 @@ Status CreateAqPipelines(
       "Metal cannot launch the AQ maximum-error threadgroup");
   }
   const std::array<
-    std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>, 43>
-    reconstruction = {{
-      {"gjxl_aq_reset_exact_evaluation", &pipelines.reset_exact_evaluation},
-      {"gjxl_aq_reset_exact_coefficients", &pipelines.reset_exact_coefficients},
-      {"gjxl_aq_reset_reconstruction", &pipelines.reset_reconstruction},
-      {"gjxl_aq_reset_frame_encoding", &pipelines.reset_frame_encoding},
-      {"gjxl_aq_initial_cfl", &pipelines.initial_cfl},
-      {"gjxl_aq_final_cfl", &pipelines.final_cfl},
-      {"gjxl_aq_reset_initial_quant", &pipelines.reset_initial_quant},
-      {"gjxl_aq_resident_input_transform", &pipelines.resident_input_transform},
-      {"gjxl_aq_resident_input_statistics",
-       &pipelines.resident_input_statistics},
-      {"gjxl_aq_initial_quant_gradient", &pipelines.initial_quant_gradient},
-      {"gjxl_aq_initial_quant_fuzzy_erosion",
-       &pipelines.initial_quant_fuzzy_erosion},
-      {"gjxl_aq_validate_initial_mask", &pipelines.validate_initial_mask},
-      {"gjxl_aq_initial_quant_modulation", &pipelines.initial_quant_modulation},
-      {"gjxl_aq_uniform_initial_quant", &pipelines.uniform_initial_quant},
-      {"gjxl_aq_initial_quant_sort_prepare",
-       &pipelines.initial_quant_sort_prepare},
-      {"gjxl_aq_initial_quant_sort_step", &pipelines.initial_quant_sort_step},
-      {"gjxl_aq_initial_quant_capture_median",
-       &pipelines.initial_quant_capture_median},
-      {"gjxl_aq_initial_quant_deviation_prepare",
-       &pipelines.initial_quant_deviation_prepare},
-      {"gjxl_aq_initial_quant_finalize_quantizer",
-       &pipelines.initial_quant_finalize_quantizer},
-      {"gjxl_aq_initial_quant_raw_quant", &pipelines.initial_quant_raw_quant},
-      {"gjxl_aq_adjust_quant_field", &pipelines.adjust_quant_field},
-      {"gjxl_aq_resident_quant_small", &pipelines.resident_quant_small},
-      {"gjxl_aq_resident_quant_select_initialize",
-       &pipelines.resident_quant_select_initialize},
-      {"gjxl_aq_resident_quant_histogram", &pipelines.resident_quant_histogram},
-      {"gjxl_aq_resident_quant_select_bucket",
-       &pipelines.resident_quant_select_bucket},
-      {"gjxl_aq_resident_quant_finalize_quantizer",
-       &pipelines.resident_quant_finalize_quantizer},
-      {"gjxl_aq_resident_policy_initialize",
-       &pipelines.resident_policy_initialize},
-      {"gjxl_aq_resident_policy_update", &pipelines.resident_policy_update},
-      {"gjxl_aq_gather_transform_pixels", &pipelines.gather_transform_pixels},
-      {"gjxl_aq_select_adjusted_quantization",
-       &pipelines.select_adjusted_quantization},
-      {"gjxl_aq_select_adjusted_quantization_parallel",
-       &pipelines.select_adjusted_quantization_parallel},
-      {"gjxl_aq_encode_reconstruction_coefficients",
-       &pipelines.encode_reconstruction_coefficients},
-      {"gjxl_aq_encode_scored_coefficients",
-       &pipelines.encode_scored_coefficients},
-      {"gjxl_aq_count_coefficient_zeros", &pipelines.count_coefficient_zeros},
-      {"gjxl_aq_encode_final_coefficients",
-       &pipelines.encode_final_coefficients},
-      {"gjxl_aq_dc_quantize", &pipelines.dc_quantize},
-      {"gjxl_aq_dc_quantize_simd_wave", &pipelines.dc_quantize_simd_wave},
-      {"gjxl_aq_dc_smooth", &pipelines.dc_smooth},
-      {"gjxl_aq_dc_low_frequencies", &pipelines.dc_low_frequencies},
-      {"gjxl_aq_encode_frame_coefficients",
-       &pipelines.encode_frame_coefficients},
-      {"gjxl_aq_scatter_reconstructed_pixels",
-       &pipelines.scatter_reconstructed_pixels},
-      {"gjxl_aq_quantization_probe", &pipelines.quantization_probe},
-      {"gjxl_aq_adjustment_probe", &pipelines.adjustment_probe},
-    }};
+      std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,
+      46>
+      reconstruction = {{
+          {"gjxl_aq_reset_exact_evaluation", &pipelines.reset_exact_evaluation},
+          {"gjxl_aq_reset_exact_coefficients",
+           &pipelines.reset_exact_coefficients},
+          {"gjxl_aq_reset_reconstruction", &pipelines.reset_reconstruction},
+          {"gjxl_aq_reset_frame_encoding", &pipelines.reset_frame_encoding},
+          {"gjxl_aq_initial_cfl", &pipelines.initial_cfl},
+          {"gjxl_aq_final_cfl", &pipelines.final_cfl},
+          {"gjxl_aq_reset_initial_quant", &pipelines.reset_initial_quant},
+          {"gjxl_aq_resident_input_transform",
+           &pipelines.resident_input_transform},
+          {"gjxl_aq_resident_input_statistics",
+           &pipelines.resident_input_statistics},
+          {"gjxl_aq_initial_quant_gradient", &pipelines.initial_quant_gradient},
+          {"gjxl_aq_initial_quant_fuzzy_erosion",
+           &pipelines.initial_quant_fuzzy_erosion},
+          {"gjxl_aq_validate_initial_mask", &pipelines.validate_initial_mask},
+          {"gjxl_aq_initial_quant_modulation",
+           &pipelines.initial_quant_modulation},
+          {"gjxl_aq_uniform_initial_quant", &pipelines.uniform_initial_quant},
+          {"gjxl_aq_initial_quant_sort_prepare",
+           &pipelines.initial_quant_sort_prepare},
+          {"gjxl_aq_initial_quant_sort_step",
+           &pipelines.initial_quant_sort_step},
+          {"gjxl_aq_initial_quant_capture_median",
+           &pipelines.initial_quant_capture_median},
+          {"gjxl_aq_initial_quant_deviation_prepare",
+           &pipelines.initial_quant_deviation_prepare},
+          {"gjxl_aq_initial_quant_finalize_quantizer",
+           &pipelines.initial_quant_finalize_quantizer},
+          {"gjxl_aq_initial_quant_raw_quant",
+           &pipelines.initial_quant_raw_quant},
+          {"gjxl_aq_adjust_quant_field", &pipelines.adjust_quant_field},
+          {"gjxl_aq_resident_quant_small", &pipelines.resident_quant_small},
+          {"gjxl_aq_resident_quant_select_initialize",
+           &pipelines.resident_quant_select_initialize},
+          {"gjxl_aq_resident_quant_histogram",
+           &pipelines.resident_quant_histogram},
+          {"gjxl_aq_resident_quant_select_bucket",
+           &pipelines.resident_quant_select_bucket},
+          {"gjxl_aq_resident_quant_finalize_quantizer",
+           &pipelines.resident_quant_finalize_quantizer},
+          {"gjxl_aq_resident_policy_initialize",
+           &pipelines.resident_policy_initialize},
+          {"gjxl_aq_resident_policy_update", &pipelines.resident_policy_update},
+          {"gjxl_aq_resident_policy_bounds_reset",
+           &pipelines.resident_policy_bounds_reset},
+          {"gjxl_aq_resident_policy_extrema",
+           &pipelines.resident_policy_extrema},
+          {"gjxl_aq_resident_policy_bounds", &pipelines.resident_policy_bounds},
+          {"gjxl_aq_gather_transform_pixels",
+           &pipelines.gather_transform_pixels},
+          {"gjxl_aq_select_adjusted_quantization",
+           &pipelines.select_adjusted_quantization},
+          {"gjxl_aq_select_adjusted_quantization_parallel",
+           &pipelines.select_adjusted_quantization_parallel},
+          {"gjxl_aq_encode_reconstruction_coefficients",
+           &pipelines.encode_reconstruction_coefficients},
+          {"gjxl_aq_encode_scored_coefficients",
+           &pipelines.encode_scored_coefficients},
+          {"gjxl_aq_count_coefficient_zeros",
+           &pipelines.count_coefficient_zeros},
+          {"gjxl_aq_encode_final_coefficients",
+           &pipelines.encode_final_coefficients},
+          {"gjxl_aq_dc_quantize", &pipelines.dc_quantize},
+          {"gjxl_aq_dc_quantize_simd_wave", &pipelines.dc_quantize_simd_wave},
+          {"gjxl_aq_dc_smooth", &pipelines.dc_smooth},
+          {"gjxl_aq_dc_low_frequencies", &pipelines.dc_low_frequencies},
+          {"gjxl_aq_encode_frame_coefficients",
+           &pipelines.encode_frame_coefficients},
+          {"gjxl_aq_scatter_reconstructed_pixels",
+           &pipelines.scatter_reconstructed_pixels},
+          {"gjxl_aq_quantization_probe", &pipelines.quantization_probe},
+          {"gjxl_aq_adjustment_probe", &pipelines.adjustment_probe},
+      }};
   for (const auto &[name, pipeline] : reconstruction) {
     status = CreateAqPipeline(device, library, name, pipeline);
     if (!status.ok()) {
@@ -5300,6 +5382,14 @@ Status GetMetalAqReadbackStatsForTesting(
       "AQ readback stats require a Metal prepared evaluation");
   }
   return metal->GetReadbackStats(stats);
+}
+
+Status GetMetalAqResidentPolicyBoundsForTesting(PreparedAqEvaluation &prepared,
+                                                float *lower, float *upper) {
+  auto *metal = dynamic_cast<MetalPreparedAqEvaluation *>(&prepared);
+  if (metal == nullptr)
+    return Status::InvalidArgument("AQ state is not Metal");
+  return metal->GetResidentPolicyBounds(lower, upper);
 }
 
 Status ValidateMetalAqGeometryForTesting(

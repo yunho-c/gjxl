@@ -162,6 +162,10 @@ struct AqResidentButteraugliPolicyInput {
   /// optimization; diagnostic block-map and reconstruction outputs are not
   /// available for the unevaluated final field.
   bool evaluate_final_field = true;
+  /// Treats the field above as unadjusted and performs strategy adjustment and
+  /// bound construction inside this unprofiled submission. Host lower/upper bounds are
+  /// ignored. Requires SupportsResidentPolicyInitialization().
+  bool adjust_initial_field = false;
 };
 
 struct AqResidentButteraugliPolicyOutput {
@@ -241,6 +245,13 @@ public:
     (void)nonlinear_iterations;
     return Status::Unavailable(
       "Prepared resident color correlation is unavailable");
+  }
+
+  /// Whether the resident policy can also adjust its initial quant field and
+  /// construct the policy bounds in the same submission.
+  [[nodiscard]] virtual bool
+  SupportsResidentPolicyInitialization() const noexcept {
+    return false;
   }
 
   /// Applies the prepared strategy grid's adjustment to one host field using

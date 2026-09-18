@@ -1049,6 +1049,35 @@ Status MetalPreparedAqEvaluation::AdjustQuantFieldResidentProfiled(
     butteraugli_target, input, output, mode, profile);
 }
 
+Status MetalPreparedAqEvaluation::PrepareQuantFieldAdjustmentParams(
+    float butteraugli_target) {
+  float mean_max_mixer = 1.0f;
+  constexpr float kMixerLimit = 1.54138f;
+  constexpr float kMixerSlope = 0.56391f;
+  if (butteraugli_target > kMixerLimit) {
+    mean_max_mixer =
+        std::max(0.0f, mean_max_mixer -
+                           (butteraugli_target - kMixerLimit) * kMixerSlope);
+  }
+  for (size_t batch_index = 0; batch_index < batches_.size(); ++batch_index) {
+    const AqStrategyBatch &batch = batches_[batch_index];
+    const AcStrategyInfo *info = GetAcStrategyInfo(batch.strategy);
+    if (info == nullptr) {
+      return Status::Internal("Resident quant-field strategy disappeared");
+    }
+    quant_field_adjustment_params_[batch_index] = {
+        static_cast<uint32_t>(resident_quant_field_.row_stride),
+        static_cast<uint32_t>(batch.anchor_offset),
+        static_cast<uint32_t>(batch.anchor_count),
+        static_cast<uint32_t>(info->covered_blocks.width),
+        static_cast<uint32_t>(info->covered_blocks.height),
+        mean_max_mixer,
+    };
+  }
+
+  return Status::Ok();
+}
+
 Status MetalPreparedAqEvaluation::AdjustQuantFieldResidentImpl(
     float butteraugli_target, ConstPlaneF32View input, PlaneF32View output,
     gpu_profile_internal::GpuProfilingMode profiling_mode,
@@ -1083,35 +1112,13 @@ Status MetalPreparedAqEvaluation::AdjustQuantFieldResidentImpl(
     }
   }
 
-  float mean_max_mixer = 1.0f;
-  constexpr float kMixerLimit = 1.54138f;
-  constexpr float kMixerSlope = 0.56391f;
-  if (butteraugli_target > kMixerLimit) {
-    mean_max_mixer = std::max(
-      0.0f,
-      mean_max_mixer -
-        (butteraugli_target - kMixerLimit) * kMixerSlope);
-  }
-  for (size_t batch_index = 0; batch_index < batches_.size();
-       ++batch_index) {
-    const AqStrategyBatch& batch = batches_[batch_index];
-    const AcStrategyInfo* info = GetAcStrategyInfo(batch.strategy);
-    if (info == nullptr) {
-      return Status::Internal(
-        "Resident quant-field strategy disappeared");
-    }
-    quant_field_adjustment_params_[batch_index] = {
-        static_cast<uint32_t>(resident_quant_field_.row_stride),
-        static_cast<uint32_t>(batch.anchor_offset),
-        static_cast<uint32_t>(batch.anchor_count),
-        static_cast<uint32_t>(info->covered_blocks.width),
-        static_cast<uint32_t>(info->covered_blocks.height),
-        mean_max_mixer,
-    };
-  }
-
   Status status = BeginOperation();
   if (!status.ok()) return status;
+  status = PrepareQuantFieldAdjustmentParams(butteraugli_target);
+  if (!status.ok()) {
+    CompleteOperation();
+    return status;
+  }
   bool fail_upload = false;
   bool fail_numeric = false;
   {

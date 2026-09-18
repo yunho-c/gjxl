@@ -70,6 +70,7 @@ struct AqStoragePlan {
   DevicePlaneLayout resident_quant_field;
   DevicePlaneLayout resident_policy_initial_field;
   DevicePlaneLayout resident_policy_scores;
+  DevicePlaneLayout resident_policy_bounds;
   DevicePlaneLayout resident_quant_histogram;
   DevicePlaneLayout resident_quant_selection_state;
   DevicePlaneLayout resident_quant_statistics;

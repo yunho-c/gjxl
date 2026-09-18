@@ -27,6 +27,11 @@ def main():
              'src/gpu/ops/ac_strategy_selection.h', 'src/gpu/metal/metal_ac_strategy.cpp',
              'src/gpu/metal/metal_backend_internal.h', 'src/gpu/metal/kernels/ac_strategy_select.metal',
              'tools/frontier_dp/check_native_encodes.py']
+    files += ['src/gpu/metal/' + p for p in [
+        'kernels/aq_reconstruction.metal', 'metal_aq_evaluation.cpp',
+        'metal_aq_evaluation_internal.h', 'metal_aq_reconstruction.cpp',
+        'metal_storage_plan.cpp', 'metal_storage_plan.h']]
+    files += ['src/gpu/ops/adaptive_quantization.cpp', 'src/gpu/ops/aq_evaluation.h']
     for path in files:
         target = output / 'source' / path
         target.parent.mkdir(parents=True, exist_ok=True)

@@ -542,11 +542,15 @@ Status RunGpuAdaptiveQuantizationImpl(
   try {
     ManagedVector<float> adjusted_initial;
     ConstPlaneF32View policy_initial = initial_quant_field;
+    const bool fused_policy_initialization =
+        resident_quantization && !profiling &&
+        options.control_mode == AdaptiveQuantizationControlMode::kButteraugli &&
+        prepared->SupportsResidentPolicyInitialization();
     const float adjustment_target =
       options.control_mode == AdaptiveQuantizationControlMode::kMaximumError
         ? 1.0f
         : options.butteraugli_target;
-    if (resident_quantization) {
+    if (resident_quantization && !fused_policy_initialization) {
       size_t block_count = 0;
       if (!strategies.extent().try_area(&block_count)) {
         return Status::InvalidArgument(
@@ -614,8 +618,11 @@ Status RunGpuAdaptiveQuantizationImpl(
         options.control_mode ==
           AdaptiveQuantizationControlMode::kButteraugli) {
       aqi::ButteraugliPolicySetup setup;
-      status = aqi::PrepareButteraugliPolicy(
-        policy_initial, options.butteraugli_target, &setup);
+      status = fused_policy_initialization
+                   ? ComputeInitialQuantDc(options.butteraugli_target,
+                                           &setup.quant_dc)
+                   : aqi::PrepareButteraugliPolicy(
+                         policy_initial, options.butteraugli_target, &setup);
       if (!status.ok()) return status;
 
       size_t block_count = 0;
@@ -666,8 +673,8 @@ Status RunGpuAdaptiveQuantizationImpl(
           .lower_bound = setup.lower_bound,
           .upper_bound = setup.upper_bound,
           .iterations = options.iterations,
-          .evaluate_final_field =
-            materialization.final_perceptual_evaluation,
+          .evaluate_final_field = materialization.final_perceptual_evaluation,
+          .adjust_initial_field = fused_policy_initialization,
       };
       if (profiling) {
         const auto policy_begin =

@@ -75,6 +75,11 @@ struct MetalAqReadbackStatsForTesting {
   PreparedAqEvaluation& prepared,
   MetalAqReadbackStatsForTesting* stats);
 
+/// Reads the bounds from the last successful fused policy initialization.
+[[nodiscard]] Status
+GetMetalAqResidentPolicyBoundsForTesting(PreparedAqEvaluation &prepared,
+                                         float *lower, float *upper);
+
 /// Exercises checked geometry limits without requiring correspondingly large
 /// host allocations.
 [[nodiscard]] Status ValidateMetalAqGeometryForTesting(

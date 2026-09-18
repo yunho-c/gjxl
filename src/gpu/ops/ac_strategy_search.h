@@ -85,8 +85,10 @@ private:
   AcStrategyGrid* out,
   AcStrategyGpuSearchStats* stats = nullptr);
 
-/// Runs the same CPU merge policy while candidate evaluation consumes the
+/// Preserves the CPU merge policy while candidate evaluation consumes the
 /// prepared opsin, quant field, and pixel mask directly from device memory.
+/// Ordinary Metal selection also executes on device; the selected grid is
+/// materialized synchronously before return. Dense search retains CPU selection.
 /// The host quant field remains a search-policy input. The host pixel mask may
 /// be entirely empty: candidate costs already consumed the resident mask and
 /// the CPU merge does not use its pixels. The host Opsin view may also be empty

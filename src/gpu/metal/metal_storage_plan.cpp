@@ -239,6 +239,11 @@ Status ComputeAqStoragePlan(const AqStoragePlanOptions &options,
                               &candidate.resident_policy_scores);
     if (!status.ok())
       return status;
+    status = staging.AddPlane(DeviceElementType::kF32, {2, 1}, 2,
+                              kAqStorageAlignment,
+                              &candidate.resident_policy_bounds);
+    if (!status.ok())
+      return status;
     status = staging.AddPlane(DeviceElementType::kI32, {256, 1}, 256,
                               kAqStorageAlignment,
                               &candidate.resident_quant_histogram);
