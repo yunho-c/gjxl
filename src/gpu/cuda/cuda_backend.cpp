@@ -786,6 +786,12 @@ Status CudaBackend::SubmitCompute(
     return Status::Internal("CUDA submission callback is null");
   }
   using gpu_profile_internal::GpuProfilingMode;
+  CudaProfileCapture* capture = mode == GpuProfilingMode::kDisabled
+    ? CudaProfileCapture::Current(*this) : nullptr;
+  if (capture != nullptr) {
+    mode = GpuProfilingMode::kStage;
+    stage_id = capture->operation();
+  }
   const bool profiling = mode == GpuProfilingMode::kStage;
   if (mode == GpuProfilingMode::kDispatch) {
     return Status::Unavailable("CUDA dispatch profiling is not implemented");
@@ -860,6 +866,10 @@ Status CudaBackend::SubmitCompute(
       error, "Submit CUDA compute sequence", StatusCode::kSubmissionFailed);
   }
   RecordCommittedSubmission();
+  if (capture != nullptr) {
+    const Status status = capture->Append(*pending);
+    if (!status.ok()) return status;
+  }
   *submission = std::move(pending);
   return Status::Ok();
 }

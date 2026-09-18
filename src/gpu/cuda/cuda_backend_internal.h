@@ -158,12 +158,41 @@ class CudaPreparedResidentAqEvaluation;
 class CudaPreparedDeviceButteraugli;
 
 class CudaPreparedLinearRgbOpsin;
+class CudaBackend;
+
+// Diagnostic-only, synchronous capture of submissions made by one operation.
+// Thread-local and backend-specific: concurrent callers cannot capture each
+// other's work. Resolve/append failures propagate before an operation publishes
+// host outputs. The ordinary path never constructs a capture.
+class CudaProfileCapture {
+ public:
+  CudaProfileCapture(CudaBackend& backend, std::string_view operation);
+  ~CudaProfileCapture();
+  CudaProfileCapture(const CudaProfileCapture&) = delete;
+  CudaProfileCapture& operator=(const CudaProfileCapture&) = delete;
+  static CudaProfileCapture* Current(const CudaBackend& backend) noexcept;
+  std::string_view operation() const noexcept { return operation_; }
+  Status Append(CudaSubmission& submission);
+  gpu_profile_internal::GpuExecutionProfile Finish() && {
+    return std::move(session_).Finish();
+  }
+ private:
+  CudaBackend& backend_;
+  std::string_view operation_;
+  gpu_profile_internal::GpuProfilingSession session_;
+  CudaProfileCapture* previous_;
+  static thread_local CudaProfileCapture* current_;
+};
+
+Status ValidateCudaProfileRequest(gpu_profile_internal::GpuProfilingMode mode,
+                                 const gpu_profile_internal::GpuExecutionProfile* profile);
 
 class CudaBackend final : public GpuBackend,
                           public GpuImagePrimitives,
                           public gpu_profile_internal::GpuSubmissionProfiler,
                           public gpu_profile_internal::GpuImagePrimitivesProfiler,
                           public gpu_profile_internal::GpuAcStrategyEvaluationProfiler,
+                          public gpu_profile_internal::GpuAqEvaluationProfiler,
                           public GpuAcStrategyEvaluation,
                           public DeviceButteraugliOperation,
                           public GpuAqEvaluation,
@@ -227,6 +256,11 @@ class CudaBackend final : public GpuBackend,
   Status PrepareAqEvaluation(
       const AqEvaluationPreparation& preparation,
       std::unique_ptr<PreparedAqEvaluation>* prepared) override;
+  Status PrepareAqEvaluationProfiled(
+      const AqEvaluationPreparation& preparation,
+      gpu_profile_internal::GpuProfilingMode mode,
+      std::unique_ptr<PreparedAqEvaluation>* prepared,
+      gpu_profile_internal::GpuExecutionProfile* profile) override;
   Status PrepareLinearRgbOpsin(ConstImage3FView linear_rgb,
     LinearRgbOpsinPreparationOptions options,
     std::unique_ptr<PreparedGpuLinearRgbOpsin>* prepared) override;

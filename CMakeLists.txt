@@ -2730,6 +2730,8 @@ if(GJXL_BUILD_TESTS)
     target_include_directories(gjxl_cuda_profiling_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
     add_test(NAME cuda_profiling COMMAND gjxl_cuda_profiling_test)
     set_tests_properties(cuda_profiling PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(NAME cuda_aq_profile COMMAND gjxl_cuda_aq_test --profile-only)
+    set_tests_properties(cuda_aq_profile PROPERTIES SKIP_RETURN_CODE 77)
 
     add_executable(
       gjxl_gpu_primitives_cuda_test
@@ -3431,6 +3433,10 @@ if(GJXL_BUILD_TESTS)
       "-DGJXL_TEST_CONFIG=$<CONFIG>"
       "-DGJXL_INSTALL_INCLUDEDIR=${CMAKE_INSTALL_INCLUDEDIR}"
       "-DGJXL_TEST_GENERATOR=${CMAKE_GENERATOR}"
+      "-DGJXL_TEST_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+      "-DGJXL_TEST_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+      "-DGJXL_TEST_GENERATOR_INSTANCE=${CMAKE_GENERATOR_INSTANCE}"
+      "-DGJXL_TEST_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
       "-DGJXL_TEST_COMPILER_ID=${CMAKE_CXX_COMPILER_ID}"
       "-DGJXL_TEST_C_COMPILER=${CMAKE_C_COMPILER}"
       "-DGJXL_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"

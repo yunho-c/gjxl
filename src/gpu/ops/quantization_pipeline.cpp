@@ -410,8 +410,18 @@ Status PrepareResidentFrontend(
     ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
     : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
   if (encoding_initial != nullptr) {
-    status = encoding_initial->ComputeInitialQuantizationForEncoding(
-      initial_options);
+    if (profiling_session == nullptr) {
+      status = encoding_initial->ComputeInitialQuantizationForEncoding(initial_options);
+    } else {
+      auto* profiler = dynamic_cast<gpu_profile_internal::PreparedAqEncodingProfiler*>(
+        state.evaluation.get());
+      if (profiler == nullptr)
+        return Status::Unavailable("Resident encoding frontend cannot collect GPU diagnostics");
+      gpu_profile_internal::GpuExecutionProfile child;
+      status = profiler->ComputeInitialQuantizationForEncodingProfiled(
+        initial_options, profiling_session->mode(), &child);
+      if (status.ok()) status = profiling_session->Append(std::move(child));
+    }
     *resident_only_initial = status.ok();
     if (status.ok() && profiling_session != nullptr) {
       status = profiling_session->EndWallStage(

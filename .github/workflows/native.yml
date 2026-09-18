@@ -40,9 +40,9 @@ jobs:
           git fetch --depth=1 origin "$BASE_SHA"
           git worktree add --detach build/main-reference "$BASE_SHA"
           git -C build/main-reference submodule update --init --recursive
-          cmake -S build/main-reference -B build/main-reference-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=OFF -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF
-          cmake --build build/main-reference-build --parallel 4 --target gjxl_dct_test gjxl_ac_strategy_gpu_search_test gjxl_worker_launch_failure_test
-          ctest --test-dir build/main-reference-build --output-on-failure -R '^(metal_dct|metal_ac_strategy_search|worker_launch_failure_forward)$'
+          cmake -S build/main-reference -B build/main-reference-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF
+          cmake --build build/main-reference-build --parallel 4 --target gjxl_codestream_encoder_test gjxl_metal_aq_evaluation_test gjxl_metal_aq_reconstruction_test gjxl_quantization_gpu_pipeline_test gjxl_encoding_benchmark
+          ctest --test-dir build/main-reference-build --output-on-failure -R '^(codestream_encoder|metal_aq_evaluation|metal_aq_reconstruction|metal_quantization_pipeline|encoding_benchmark_cli)$'
       - name: Retain test diagnostics
         if: always()
         uses: actions/upload-artifact@v4

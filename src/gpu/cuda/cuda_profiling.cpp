@@ -18,6 +18,59 @@ constexpr GpuProfilingCapabilities kCapabilities{
 };
 }  // namespace
 
+thread_local CudaProfileCapture* CudaProfileCapture::current_ = nullptr;
+
+CudaProfileCapture::CudaProfileCapture(CudaBackend& backend, std::string_view operation)
+  : backend_(backend), operation_(operation),
+    session_(GpuProfilingMode::kStage, kCapabilities), previous_(current_) {
+  current_ = this;
+}
+
+CudaProfileCapture::~CudaProfileCapture() { current_ = previous_; }
+
+CudaProfileCapture* CudaProfileCapture::Current(const CudaBackend& backend) noexcept {
+  for (auto* capture = current_; capture != nullptr; capture = capture->previous_) {
+    if (&capture->backend_ == &backend) return capture;
+  }
+  return nullptr;
+}
+
+Status CudaProfileCapture::Append(CudaSubmission& submission) {
+  GpuExecutionProfile child;
+  Status status = backend_.ResolveGpuSubmissionProfile(
+    submission, operation_, GpuProfilingMode::kStage, &child);
+  if (!status.ok()) return status;
+  return session_.Append(std::move(child));
+}
+
+Status ValidateCudaProfileRequest(GpuProfilingMode mode,
+                                 const GpuExecutionProfile* profile) {
+  if (profile == nullptr) return Status::InvalidArgument("CUDA profile output is null");
+  if (mode == GpuProfilingMode::kDispatch)
+    return Status::Unavailable("CUDA dispatch profiling is not implemented");
+  if (mode != GpuProfilingMode::kStage)
+    return Status::InvalidArgument("CUDA operation requires stage profiling");
+  return Status::Ok();
+}
+
+Status CudaBackend::PrepareAqEvaluationProfiled(
+  const AqEvaluationPreparation& preparation, GpuProfilingMode mode,
+  std::unique_ptr<PreparedAqEvaluation>* prepared, GpuExecutionProfile* profile) {
+  Status status = ValidateCudaProfileRequest(mode, profile);
+  if (!status.ok()) return status;
+  if (prepared == nullptr)
+    return Status::InvalidArgument("CUDA prepared AQ output pointer is null");
+  if (preparation.frame_only || !preparation.resident_quantization)
+    return Status::Unavailable("CUDA AQ profiling requires resident quantization");
+  CudaProfileCapture capture(*this, "aq.prepare_reference");
+  std::unique_ptr<PreparedAqEvaluation> candidate;
+  status = PrepareAqEvaluation(preparation, &candidate);
+  if (!status.ok()) return status;
+  *prepared = std::move(candidate);
+  *profile = std::move(capture).Finish();
+  return Status::Ok();
+}
+
 gpu_profile_internal::GpuProfilingCapabilities
 CudaBackend::QueryGpuProfilingCapabilities() const {
   return kCapabilities;

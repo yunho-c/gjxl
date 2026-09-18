@@ -648,9 +648,21 @@ Status RunGpuAdaptiveQuantizationImpl(
         ? gpu_profile_internal::GpuProfilingSession::BeginWallStage()
         : gpu_profile_internal::GpuProfilingSession::TimePoint{};
       aq_evaluation_internal::ResidentEncodingPolicySetup setup;
-      status = encoding_initial->PrepareResidentEncodingPolicy(
-        options.butteraugli_target, &setup,
-        options.fast_color_correlation ? 0 : options.color_correlation_iterations);
+      const uint32_t cfl_iterations =
+        options.fast_color_correlation ? 0 : options.color_correlation_iterations;
+      if (!profiling) {
+        status = encoding_initial->PrepareResidentEncodingPolicy(
+          options.butteraugli_target, &setup, cfl_iterations);
+      } else {
+        auto* profiler = dynamic_cast<gpu_profile_internal::PreparedAqEncodingProfiler*>(prepared);
+        if (profiler == nullptr)
+          return Status::Unavailable("Resident encoding policy cannot collect GPU diagnostics");
+        gpu_profile_internal::GpuExecutionProfile child;
+        status = profiler->PrepareResidentEncodingPolicyProfiled(
+          options.butteraugli_target, &setup, cfl_iterations,
+          profiling_session->mode(), &child);
+        if (status.ok()) status = profiling_session->Append(std::move(child));
+      }
       if (status.ok() && profiling) {
         status = profiling_session->EndWallStage(
           "frontend.quant_adjustment",

@@ -247,6 +247,29 @@ an intermediate build appear complete.
   counters; unsupported-profile output preservation remains tested. Such skips
   do not qualify Metal timestamp behavior on physical hardware.
 
+- Resident CUDA AQ stage capture now covers reference preparation, initial
+  quantization, resident policy setup/evaluation and optional sparse packing.
+  The encoding-only path preserves device-owned fields. Eighty fresh/reused
+  byte-and-score comparisons pass across two fixtures, efforts 1/4/7/8/10,
+  both resident modes and score toggles. Concurrent/nested capture tests pass
+  with finite diagnostic reservations, backend/thread isolation and retained
+  ownership checks; the focused profiling/AQ suite passes all three tests.
+  Public GPU-profile admission remains closed pending full workflow planning
+  and dispatch instrumentation remains unfinished.
+- At `1d1530b`, hosted Linux C++20/C++23 and all three Rust jobs pass. Both
+  hosted Mac modes now pass scalar DCT and AC search; remaining failures expose
+  missing Metal color-tile validation, timestamp capability assumptions,
+  benchmark timing assumptions and numerical comparisons. Metal preparation
+  and reconfiguration now reject crossing strategies before GPU work; hosted
+  validation of this fix is pending. Remaining numerical checks are being
+  compared with pinned main, without relaxing tolerances.
+- The Windows installed-consumer failure came from switching the working
+  Ninja/MSVC toolchain to a different Visual Studio generator. The fixture now
+  reuses the parent generator, compiler and build/resource tools. Its complete
+  local installed-header/consumer check passes in 68 seconds; hosted rerun is
+  pending. Serializer failure diagnostics now distinguish byte, participant,
+  accounting and fallback-domain failures.
+
 ## Outstanding integration risks
 
 - Broaden public policy/DC/low-effort coverage to all efforts, controls and

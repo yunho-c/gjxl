@@ -18,17 +18,19 @@ if(NOT DEFINED GJXL_INSTALL_INCLUDEDIR)
 endif()
 file(REMOVE_RECURSE "${test_root}")
 
-if(GJXL_TEST_COMPILER_ID STREQUAL "MSVC")
-  string(REGEX MATCH "/MSVC/([^/]+)/" toolset_match "${GJXL_TEST_CXX_COMPILER}")
-  if(NOT toolset_match)
-    message(FATAL_ERROR "Cannot determine the audited MSVC toolset from compiler path")
+# Reuse the parent toolchain. An installed MSVC compiler can work with Ninja
+# without being discoverable by a different Visual Studio generator/instance.
+set(consumer_generator_arguments -G "${GJXL_TEST_GENERATOR}"
+  "-DCMAKE_C_COMPILER=${GJXL_TEST_C_COMPILER}"
+  "-DCMAKE_CXX_COMPILER=${GJXL_TEST_CXX_COMPILER}")
+foreach(setting IN ITEMS GENERATOR_PLATFORM GENERATOR_TOOLSET GENERATOR_INSTANCE
+                         MAKE_PROGRAM RC_COMPILER MT)
+  if(DEFINED GJXL_TEST_${setting} AND NOT "${GJXL_TEST_${setting}}" STREQUAL ""
+     AND NOT "${GJXL_TEST_${setting}}" MATCHES "-NOTFOUND$")
+    list(APPEND consumer_generator_arguments
+      "-DCMAKE_${setting}=${GJXL_TEST_${setting}}")
   endif()
-  set(consumer_generator_arguments -G "Visual Studio 17 2022" -A x64 -T "version=${CMAKE_MATCH_1}")
-else()
-  set(consumer_generator_arguments -G "${GJXL_TEST_GENERATOR}"
-    "-DCMAKE_C_COMPILER=${GJXL_TEST_C_COMPILER}"
-    "-DCMAKE_CXX_COMPILER=${GJXL_TEST_CXX_COMPILER}")
-endif()
+endforeach()
 set(consumer_suffix "")
 if(WIN32)
   set(consumer_suffix ".exe")

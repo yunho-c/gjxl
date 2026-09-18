@@ -2,12 +2,14 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include <array>
+#include <barrier>
 #include <exception>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "gpu/cuda/cuda_backend_internal.h"
@@ -29,6 +31,116 @@ void Empty(const ResourceBudget& budget) {
   Require(s.committed_bytes() == 0 && s.total.backing_count == 0 &&
     s.total.pending_count == 0 && s.open_reservations == 0,
     "Profile backing survived destruction");
+}
+
+void RunCaptures(cuda_internal::CudaBackend& gpu) {
+  constexpr size_t submissions = 8;
+  constexpr std::array<std::string_view, 2> labels{"capture.left", "capture.right"};
+  constexpr size_t label_length = labels[1].size();
+  const auto prepare = [](cuda_internal::CudaBackend& backend,
+                          std::unique_ptr<DeviceBuffer>* buffer) {
+    const float initial = 1.0f;
+    Check(backend.Allocate(sizeof(float), buffer));
+    Check(backend.CopyHostToDevice(**buffer, &initial, sizeof(float), 0));
+    const DevicePlaneView plane{buffer->get(), 0, DeviceElementType::kF32, {1, 1}, 1};
+    return std::array<ImagePrimitiveCommand, 1>{
+      PointwiseAffineCommand{plane, plane, 1.0f, 0.0f}};
+  };
+  std::unique_ptr<DeviceBuffer> buffer;
+  const auto commands = prepare(gpu, &buffer);
+  HostStorageBound bound;
+  Check(ComputeProfileStorageBound({.submissions = submissions,
+    .stages = submissions, .maximum_id_length = label_length}, &bound));
+  SubmissionProfileStoragePlan child;
+  Check(ComputeSubmissionProfileStoragePlan({.stages = 1,
+    .maximum_stage_id_length = label_length,
+    .maximum_submission_id_length = label_length}, &child));
+  Require(bound.Add(child.resolution), "Capture bound overflow");
+  std::barrier rendezvous(2);
+  std::array<std::exception_ptr, 2> errors;
+  std::array<std::thread, 2> workers;
+  for (size_t side = 0; side < workers.size(); ++side) {
+    workers[side] = std::thread([&, side] {
+      // Capture construction allocates no backing. Both scopes overlap before
+      // any submission, so a process-global capture would mix these graphs.
+      cuda_internal::CudaProfileCapture capture(gpu, labels[side]);
+      rendezvous.arrive_and_wait();
+      try {
+        ResourceBudget budget(bound.peak_bytes);
+        ResourceReservation reservation;
+        Check(budget.TryReserve(bound.peak_bytes, &reservation));
+        GpuExecutionProfile profile;
+        {
+          ResourceContextScope scope({&reservation, ResourceClass::kDiagnostics});
+          for (size_t i = 0; i < submissions; ++i) {
+            std::unique_ptr<GpuSubmission> submission;
+            Check(gpu.SubmitImagePrimitiveSequence(commands, &submission));
+            Check(submission->Wait());
+          }
+          profile = std::move(capture).Finish();
+        }
+        Require(profile.submissions.size() == submissions,
+          "Concurrent capture mixed submission counts");
+        for (size_t i = 0; i < submissions; ++i) {
+          const auto& s = profile.submissions[i];
+          Require(s.submission_id == labels[side] && s.invocation == i &&
+            s.stages.size() == 1 && s.stages[0].stage_id == labels[side],
+            "Concurrent capture mixed operation identities");
+        }
+        reservation.Reset();
+        Require(budget.snapshot().committed_bytes() > 0 &&
+          budget.snapshot().peak_backing_bytes <= bound.peak_bytes,
+          "Capture graph escaped its finite diagnostic domain");
+        profile = {};
+        Empty(budget);
+      } catch (...) { errors[side] = std::current_exception(); }
+    });
+  }
+  for (auto& worker : workers) worker.join();
+  for (auto& error : errors) if (error) std::rethrow_exception(error);
+
+  std::unique_ptr<GpuBackend> other;
+  Check(CreateCudaBackend(&other));
+  auto& foreign = dynamic_cast<cuda_internal::CudaBackend&>(*other);
+  std::unique_ptr<DeviceBuffer> foreign_buffer;
+  const auto foreign_commands = prepare(foreign, &foreign_buffer);
+  GpuExecutionProfile outer, inner, foreign_profile;
+  const auto submit = [&](cuda_internal::CudaBackend& backend) {
+    std::unique_ptr<GpuSubmission> submission;
+    Check(backend.SubmitImagePrimitiveSequence(
+      &backend == &gpu ? commands : foreign_commands, &submission));
+    Check(submission->Wait());
+  };
+  {
+    cuda_internal::CudaProfileCapture capture(gpu, "outer");
+    submit(gpu);
+    {
+      cuda_internal::CudaProfileCapture other_capture(foreign, "foreign");
+      submit(gpu); // Finds the matching outer scope beneath another backend.
+      submit(foreign);
+      {
+        cuda_internal::CudaProfileCapture nested(gpu, "inner");
+        submit(gpu);
+        inner = std::move(nested).Finish();
+      }
+      foreign_profile = std::move(other_capture).Finish();
+    }
+    submit(gpu);
+    outer = std::move(capture).Finish();
+  }
+  Require(outer.submissions.size() == 3 && inner.submissions.size() == 1 &&
+    inner.submissions[0].submission_id == "inner" &&
+    foreign_profile.submissions.size() == 1 &&
+    foreign_profile.submissions[0].submission_id == "foreign" &&
+    cuda_internal::CudaProfileCapture::Current(gpu) == nullptr &&
+    cuda_internal::CudaProfileCapture::Current(foreign) == nullptr,
+    "Nested capture failed to restore its backend-specific scope");
+  std::unique_ptr<GpuSubmission> ordinary;
+  Check(gpu.SubmitImagePrimitiveSequence(commands, &ordinary));
+  Check(ordinary->Wait());
+  Require(!gpu.ResolveGpuSubmissionProfile(*ordinary, "ordinary",
+    GpuProfilingMode::kStage, &outer).ok(),
+    "Capture leaked into a later ordinary submission");
 }
 
 void Run(cuda_internal::CudaBackend& gpu) {
@@ -150,6 +262,7 @@ int main(int argc, char** argv) {
     if (status.code() == StatusCode::kUnavailable) return 77;
     Check(status);
     Run(dynamic_cast<cuda_internal::CudaBackend&>(*gpu));
+    RunCaptures(dynamic_cast<cuda_internal::CudaBackend&>(*gpu));
     std::cout << "CUDA stage timing, output, accounting and failure checks passed\n";
     // Sanitizer console redirection can hide child output on Windows. This
     // marker proves the instrumented child reached the end of every check.

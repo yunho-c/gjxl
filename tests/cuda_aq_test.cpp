@@ -35,6 +35,7 @@
 #include "gpu/ops/aq_evaluation_internal.h"
 #include "gpu/ops/input_preparation.h"
 #include "gpu/ops/quantization_pipeline.h"
+#include "gpu/ops/quantization_pipeline_profile_internal.h"
 #include "coefficient_order_population_fixture.h"
 
 namespace {
@@ -152,6 +153,132 @@ bool ColorMapsEqual(const gjxl::ColorCorrelationMap& left,
       return false;
     }
   }
+  return true;
+}
+
+bool CheckResidentStageProfiles(gjxl::GpuBackend& gpu, const ImageStorage& source) {
+  namespace pipeline = gjxl::quantization_pipeline_internal;
+  namespace diagnostic = gjxl::gpu_profile_internal;
+  namespace policy = gjxl::codestream_internal;
+  auto* capability = gjxl::QueryGpuLinearRgbOpsinPreparation(gpu);
+  std::unique_ptr<gjxl::PreparedGpuLinearRgbOpsin> input;
+  if (capability == nullptr || !Check(capability->PrepareLinearRgbOpsin(
+      source.View(), {.padded_extent = kPaddedExtent}, &input),
+      "Prepare profiled source")) return false;
+  size_t pairs = 0;
+  for (int effort : {1, 4, 7, 8, 10}) {
+    gjxl::VarDctEncodingOptions encoding;
+    encoding.effort = effort;
+    gjxl::CpuQuantizationPipelineOptions options;
+    policy::ConfigureInitialQuantizationPolicy(encoding, &options);
+    options.fixed_dct8 = policy::UseFixedDct8Strategy(encoding);
+    options.dense_dct32_search = policy::UseDenseDct32Search(encoding);
+    options.adaptive_quantization.iterations = policy::AdaptiveQuantizationIterations(encoding);
+    options.adaptive_quantization.dc_quantization = gjxl::ResolveDcQuantization(encoding);
+    options.adaptive_quantization.profile.extra_dc_precision =
+      options.adaptive_quantization.dc_quantization == gjxl::DcQuantizationMode::kPredictionAware ? 1 : 0;
+    options.adaptive_quantization.profile.adaptive_dc_smoothing =
+      gjxl::ResolveAdaptiveDcSmoothing(encoding);
+    const auto cfl_iterations = policy::FinalColorCorrelationIterations(encoding, true);
+    if (cfl_iterations != 0) {
+      options.adaptive_quantization.fast_color_correlation = false;
+      options.adaptive_quantization.color_correlation_iterations = cfl_iterations;
+    }
+    for (auto mode : {gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+                     gjxl::GpuAdaptiveQuantizationMode::kThroughput}) {
+      for (bool score : {false, true}) {
+        std::array<pipeline::PreparedQuantizationPipeline, 2> prepared;
+        std::array<gjxl::adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization, 2> aq;
+        for (auto& p : prepared) {
+          if (!Check(pipeline::PrepareResidentQuantizationPipeline(source.View(),
+              kPaddedExtent, input->original_linear_rgb(), input->coding_opsin(),
+              options, &p), "Prepare profiling comparison")) return false;
+        }
+        // Reuse each preparation to exercise both fresh and cached references.
+        for (size_t repeat = 0; repeat < 2; ++repeat) {
+          std::array<std::vector<uint8_t>, 2> bytes;
+          std::array<std::vector<double>, 2> scores;
+          diagnostic::GpuExecutionProfile profile;
+          for (size_t side = 0; side < 2; ++side) {
+            gjxl::VarDctEncoderFrame frame;
+            const pipeline::GpuEncodingQuantizationPipelineOutput output{
+              .frame = &frame, .score_history = &scores[side],
+              .collect_final_butteraugli_score = score};
+            const auto status = side == 0
+              ? pipeline::RunPreparedGpuQuantizationPipelineForEncoding(gpu,
+                  source.View(), prepared[side], options, mode, output, nullptr, &aq[side])
+              : pipeline::RunPreparedGpuQuantizationPipelineForEncodingProfiled(gpu,
+                  source.View(), prepared[side], options, mode, output, &aq[side],
+                  diagnostic::GpuProfilingMode::kStage, &profile);
+            if (!Check(status, "Run profiled pipeline") ||
+                !Check(gjxl::EncodeVarDctCodestream(frame, &bytes[side]),
+                  "Serialize profiled frame")) return false;
+          }
+          if (bytes[0] != bytes[1] || scores[0] != scores[1]) {
+            std::cerr << "Profiling changed CUDA bytes/scores: effort=" << effort
+                      << " score=" << score << " repeat=" << repeat << '\n';
+            return false;
+          }
+          bool initial = false, policy_stage = false, adjustment = false;
+          for (const auto& submission : profile.submissions) {
+            initial |= submission.submission_id == "aq.initial_quantization";
+            policy_stage |= submission.submission_id == "aq.resident_policy";
+            adjustment |= submission.submission_id == "aq.prepare_encoding_policy";
+            if (submission.stages.empty() || submission.command_buffer_gpu_nanoseconds == 0)
+              return false;
+          }
+          if (!initial || !policy_stage || !adjustment || profile.wall_stages.empty()) {
+            std::cerr << "Profiled CUDA pipeline omitted an operation\n"; return false;
+          }
+          if (prepared[1].initial_quant.capacity() || prepared[1].strategy_mask.capacity() ||
+              prepared[1].pixel_mask.capacity()) {
+            std::cerr << "CUDA profiling materialized encoding-only host fields\n";
+            return false;
+          }
+          ++pairs;
+          if (effort == 7 && score && repeat == 1 &&
+              mode == gjxl::GpuAdaptiveQuantizationMode::kFullyResident) {
+            // Exercise a failure after real GPU submission. The prepared
+            // object may invalidate itself, but neither caller output moves.
+            const auto old_profile = profile;
+            auto* prepared_profiler = dynamic_cast<diagnostic::PreparedAqEvaluationProfiler*>(
+              aq[1].evaluation.get());
+            if (prepared_profiler == nullptr) return false;
+            const gjxl::Extent2D blocks{kPaddedExtent.width / 8, kPaddedExtent.height / 8};
+            std::vector<float> quant(blocks.width * blocks.height, -17.0f);
+            std::vector<float> mask(quant.size(), -17.0f);
+            std::vector<float> pixel(kPaddedExtent.width * kPaddedExtent.height, -17.0f);
+            const gjxl::InitialQuantFieldOutput initial_output{
+              {quant.data(), blocks, blocks.width}, {mask.data(), blocks, blocks.width},
+              {pixel.data(), kPaddedExtent, kPaddedExtent.width}};
+            if (!Check(gjxl::ArmNextCudaSubmissionFailureForTest(gpu, false, true),
+                "Arm profiled initial failure")) return false;
+            const auto failed = prepared_profiler->ComputeInitialQuantizationProfiled(
+              {}, initial_output, nullptr, 0.0f, nullptr,
+              diagnostic::GpuProfilingMode::kStage, &profile);
+            if (failed.code() != gjxl::StatusCode::kDeviceError || profile != old_profile ||
+                !std::ranges::all_of(quant, [](float v) { return v == -17.0f; }) ||
+                !std::ranges::all_of(mask, [](float v) { return v == -17.0f; }) ||
+                !std::ranges::all_of(pixel, [](float v) { return v == -17.0f; })) {
+              std::cerr << "Failed profiled AQ changed caller outputs: " << failed.message() << '\n';
+              return false;
+            }
+            auto* preparation_profiler = dynamic_cast<diagnostic::GpuAqEvaluationProfiler*>(&gpu);
+            const auto* retained = aq[1].evaluation.get();
+            gjxl::AqEvaluationPreparation invalid;
+            invalid.resident_quantization = true;
+            if (preparation_profiler == nullptr ||
+                preparation_profiler->PrepareAqEvaluationProfiled(
+                  invalid, diagnostic::GpuProfilingMode::kStage, &aq[1].evaluation, &profile).ok() ||
+                aq[1].evaluation.get() != retained || profile != old_profile) {
+              std::cerr << "Failed profiled preparation replaced old owners\n"; return false;
+            }
+          }
+        }
+      }
+    }
+  }
+  std::cout << "CUDA profiled pipelines: " << pairs << " exact byte/score pairs passed\n";
   return true;
 }
 
@@ -2251,7 +2378,7 @@ bool CheckConcurrentPublicWorkflow(gjxl::GpuBackend& gpu) {
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
   std::unique_ptr<gjxl::GpuBackend> gpu;
   const gjxl::Status factory = gjxl::CreateCudaBackend(&gpu);
   if (!factory.ok()) {
@@ -2270,6 +2397,10 @@ int main() {
   ImageStorage noisy_opsin(kPaddedExtent);
   FillLinear(&source, &padded);
   FillNoisyLinear(&noisy_source, &noisy_padded);
+  if (argc == 2 && std::string_view(argv[1]) == "--profile-only") {
+    return CheckResidentStageProfiles(*gpu, source) &&
+           CheckResidentStageProfiles(*gpu, noisy_source) ? EXIT_SUCCESS : EXIT_FAILURE;
+  }
   if (!Check(gjxl::LinearRgbToOpsin(
                std::as_const(padded).View(), 255.0f, opsin.View()),
         "Prepare CUDA AQ opsin") ||

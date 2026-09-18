@@ -260,16 +260,34 @@ bool RunCase(Extent2D extent, bool deferred_frontend = false,
         std::vector<double> profiled_scores;
         gpu_profile_internal::GpuExecutionProfile profile;
         const auto before_profile = gpu->stats();
-        if (!Check(profiler->EvaluateResidentButteraugliPolicyProfiled(
+        const Status profile_status = profiler->EvaluateResidentButteraugliPolicyProfiled(
               input, {.score_history = &profiled_scores,
                       .completed_frame = &profiled.frame},
-              gpu_profile_internal::GpuProfilingMode::kStage, &profile)) ||
+              gpu_profile_internal::GpuProfilingMode::kStage, &profile);
+        auto* submission_profiler = dynamic_cast<
+          gpu_profile_internal::GpuSubmissionProfiler*>(gpu);
+        if (submission_profiler == nullptr) return false;
+        const auto capabilities = submission_profiler->QueryGpuProfilingCapabilities();
+        if (!capabilities.timestamp_counter || !capabilities.stage_boundary) {
+          if (profile_status.code() != StatusCode::kUnavailable ||
+              profiled.frame != nullptr || !profiled_scores.empty() ||
+              profile != gpu_profile_internal::GpuExecutionProfile{} ||
+              gpu->stats().committed_submissions != before_profile.committed_submissions ||
+              gpu->stats().successful_allocations != before_profile.successful_allocations)
+            return false;
+          static std::atomic<bool> reported{false};
+          if (!reported.exchange(true)) {
+            std::cout << "SKIP completed-frame timestamp parity: device lacks stage counters\n";
+          }
+        } else {
+          if (!Check(profile_status) ||
             profiled.frame == nullptr || profiled_scores != expected_scores ||
             profile.submissions.size() != 1 ||
             gpu->stats().committed_submissions !=
               before_profile.committed_submissions + 1 ||
             !SerializeEqual(profiled)) return false;
-        retained.push_back(std::move(profiled));
+          retained.push_back(std::move(profiled));
+        }
         retained.push_back(std::move(next));
         if (shared_gpu == nullptr && configuration == 1 && iterations == 2 &&
             !final_score) {
