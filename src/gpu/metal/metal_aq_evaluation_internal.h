@@ -402,6 +402,7 @@ public:
   Status FailNextResidentStaging();
   Status SetWaitObserver(bool *observed);
   Status GetReadbackStats(MetalAqReadbackStatsForTesting* stats) const;
+  Status GetStrategyMetadataSnapshot(MetalAqStrategyMetadataSnapshot *output);
   Status GetResidentPolicyBounds(float *lower, float *upper) const;
   Status RunBlockReduction(ConstPlaneF32View distance_map,
                            PlaneF32View block_distance_map);

@@ -3,10 +3,26 @@
 
 #pragma once
 
+#include <array>
+#include <vector>
+
 #include "core/geometry.h"
 #include "gpu/ops/aq_evaluation.h"
 
 namespace gjxl::metal_internal {
+
+struct MetalAqStrategyMetadataSnapshot {
+  std::array<uint32_t, 35> families{};
+  std::array<uint32_t, 4> control{};
+  std::vector<uint32_t> strategies, anchors, color_records, color_offsets,
+      destinations;
+};
+
+/// Captures authoritative CPU-prepared metadata, including the production
+/// completed-frame destination builder, without evaluating any image content.
+[[nodiscard]] Status
+GetMetalAqStrategyMetadataForTesting(PreparedAqEvaluation &prepared,
+                                     MetalAqStrategyMetadataSnapshot *output);
 
 struct MetalAqReadbackStatsForTesting {
   size_t control_bytes = 0;

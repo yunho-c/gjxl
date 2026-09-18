@@ -126,6 +126,7 @@ struct PrimitivePipelines {
 };
 
 struct AqPipelines {
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 7> strategy_metadata;
   NS::SharedPtr<MTL::ComputePipelineState> block_reduction;
   NS::SharedPtr<MTL::ComputePipelineState> maximum_error_reduction;
   NS::SharedPtr<MTL::ComputePipelineState> reset_exact_evaluation;
@@ -463,6 +464,7 @@ private:
   friend Status ComputeAcSubmissionStoragePlan(
     const AcSubmissionStorageOptions&, AcSubmissionStoragePlan*);
   friend class MetalPreparedAqEvaluation;
+  friend class MetalAqStrategyMetadata;
   friend class MetalPreparedResidentInput;
   friend class MetalPreparedDeviceButteraugli;
   friend struct MetalCacheAdmissionTestAccess;

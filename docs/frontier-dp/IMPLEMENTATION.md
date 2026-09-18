@@ -61,5 +61,10 @@ encode parity and timing are in NATIVE-SELECTION.md. Fused AQ initialization is
 qualified separately in AQ-INITIALIZATION.md. The remaining metadata handoff and
 its consumers are detailed in HANDOFF.md.
 
-Progress: active. Device metadata, deferred completion, profiling the executing
-new paths, final combined qualification and fresh paper studies remain open.
+The standalone device metadata builder now matches the actual CPU builders in
+292 cases, including Metal validation; see METADATA.md. It is not yet consumed
+by ordinary AQ.
+
+Progress: active. Device parameter/consumer integration, deferred completion,
+profiling the executing new paths, final combined qualification and fresh paper
+studies remain open.

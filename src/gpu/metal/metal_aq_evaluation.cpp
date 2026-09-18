@@ -3787,6 +3787,70 @@ Status MetalPreparedAqEvaluation::GetReadbackStats(
   return Status::Ok();
 }
 
+Status MetalPreparedAqEvaluation::GetStrategyMetadataSnapshot(
+    MetalAqStrategyMetadataSnapshot *output) {
+  if (!output || !resident_quantization_ || final_transform_metadata_pending_)
+    return Status::InvalidArgument(
+        "AQ strategy metadata snapshot is unavailable");
+  Status status = BeginOperation();
+  if (!status.ok())
+    return status;
+  try {
+    MetalAqStrategyMetadataSnapshot candidate;
+    for (size_t f = 0; f < batches_.size(); ++f) {
+      const auto &b = batches_[f];
+      const std::array<uint32_t, 5> words{
+          uint32_t(b.strategy), uint32_t(b.anchor_offset),
+          uint32_t(b.anchor_count), uint32_t(b.coefficient_offset),
+          uint32_t(b.coefficient_count)};
+      std::copy(words.begin(), words.end(), candidate.families.begin() + 5 * f);
+    }
+    const auto read = [&](ConstDevicePlaneView plane, size_t n,
+                          std::vector<uint32_t> *out) {
+      out->resize(n);
+      return backend_->CopyDeviceToHost(*plane.buffer, out->data(), 4 * n,
+                                        plane.offset_bytes);
+    };
+    status = read(strategies_, 2 * block_count_, &candidate.strategies);
+    if (status.ok())
+      status = read(anchors_, 2 * anchor_count_, &candidate.anchors);
+    if (status.ok())
+      status = read(color_transform_records_, 6 * anchor_count_,
+                    &candidate.color_records);
+    if (status.ok())
+      status = read(color_tile_offsets_,
+                    tile_extent_.width * tile_extent_.height + 1,
+                    &candidate.color_offsets);
+    std::unique_ptr<MetalCompletedVarDctFrame> frame;
+    if (status.ok())
+      status = PrepareCompletedFrame(&frame);
+    if (status.ok())
+      status =
+          read(completed_destinations_, anchor_count_, &candidate.destinations);
+    if (status.ok()) {
+      candidate.control = {0u, uint32_t(anchor_count_),
+                           frame->population.present_mask,
+                           uint32_t(coefficient_value_count_)};
+      *output = std::move(candidate);
+    }
+    // These borrowed views must not outlive the snapshot's temporary owner.
+    completed_coefficients_ = {};
+    completed_destinations_ = {};
+    completed_order_population_ = {};
+    completed_order_samples_ = {};
+    completed_sample_dct8_ = false;
+  } catch (const std::bad_alloc &) {
+    status = Status::OutOfMemory("AQ metadata snapshot allocation failed");
+    completed_coefficients_ = {};
+    completed_destinations_ = {};
+    completed_order_population_ = {};
+    completed_order_samples_ = {};
+    completed_sample_dct8_ = false;
+  }
+  CompleteOperation();
+  return status;
+}
+
 Status MetalPreparedAqEvaluation::GetResidentPolicyBounds(float *lower,
                                                           float *upper) const {
   std::unique_lock lock(mutex_, std::try_to_lock);
@@ -4947,6 +5011,17 @@ Status CreateAqPipelines(
     return Status::InvalidArgument("AQ pipeline output is null");
   }
   AqPipelines pipelines;
+  const std::array metadata_names{
+      "gjxl_aq_metadata_reset",       "gjxl_aq_metadata_count",
+      "gjxl_aq_metadata_tile_count",  "gjxl_aq_metadata_prefix",
+      "gjxl_aq_metadata_scatter",     "gjxl_aq_metadata_cfl",
+      "gjxl_aq_metadata_destinations"};
+  for (size_t i = 0; i < metadata_names.size(); ++i) {
+    Status metadata_status = CreateAqPipeline(
+        device, library, metadata_names[i], &pipelines.strategy_metadata[i]);
+    if (!metadata_status.ok())
+      return metadata_status;
+  }
   Status status = CreateAqPipeline(
     device, library, "gjxl_aq_reduce_block_distance_f32",
     &pipelines.block_reduction);
@@ -5382,6 +5457,15 @@ Status GetMetalAqReadbackStatsForTesting(
       "AQ readback stats require a Metal prepared evaluation");
   }
   return metal->GetReadbackStats(stats);
+}
+
+Status
+GetMetalAqStrategyMetadataForTesting(PreparedAqEvaluation &prepared,
+                                     MetalAqStrategyMetadataSnapshot *output) {
+  auto *metal = AsMetalPrepared(prepared);
+  if (!metal)
+    return Status::InvalidArgument("AQ metadata requires Metal preparation");
+  return metal->GetStrategyMetadataSnapshot(output);
 }
 
 Status GetMetalAqResidentPolicyBoundsForTesting(PreparedAqEvaluation &prepared,

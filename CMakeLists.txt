@@ -633,6 +633,8 @@ set(
 set(GJXL_AC_SELECTION_METAL_SOURCE
   "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/ac_strategy_select.metal")
 set(GJXL_AC_SELECTION_METAL_IR "${GJXL_METAL_DIR}/ac_strategy_select.ir")
+set(GJXL_AQ_METADATA_METAL_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/aq_strategy_metadata.metal")
+set(GJXL_AQ_METADATA_METAL_IR "${GJXL_METAL_DIR}/aq_strategy_metadata.ir")
 
 set(
   GJXL_PRIMITIVES_METAL_IR
@@ -891,6 +893,13 @@ add_custom_command(
 
 # .ir -> .metallib
 
+add_custom_command(OUTPUT "${GJXL_AQ_METADATA_METAL_IR}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${GJXL_METAL_DIR}"
+  COMMAND "${XCRUN_EXECUTABLE}" -sdk macosx metal -std=metal3.1
+    ${GJXL_METAL_PROFILING_FLAGS} -c "${GJXL_AQ_METADATA_METAL_SOURCE}" -o "${GJXL_AQ_METADATA_METAL_IR}"
+  DEPENDS "${GJXL_AQ_METADATA_METAL_SOURCE}"
+  COMMENT "Compiling Metal AQ strategy metadata" VERBATIM)
+
 add_custom_command(OUTPUT "${GJXL_AC_SELECTION_METAL_IR}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${GJXL_METAL_DIR}"
   COMMAND "${XCRUN_EXECUTABLE}" -sdk macosx metal -std=metal3.1
@@ -912,6 +921,7 @@ add_custom_command(
     "${GJXL_DCT_METAL_IR}"
     "${GJXL_AC_STRATEGY_METAL_IR}"
     "${GJXL_AC_SELECTION_METAL_IR}"
+    "${GJXL_AQ_METADATA_METAL_IR}"
     "${GJXL_PRIMITIVES_METAL_IR}"
     "${GJXL_AQ_REDUCTION_METAL_IR}"
     "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
@@ -922,6 +932,7 @@ add_custom_command(
     "${GJXL_DCT_METAL_IR}"
     "${GJXL_AC_STRATEGY_METAL_IR}"
     "${GJXL_AC_SELECTION_METAL_IR}"
+    "${GJXL_AQ_METADATA_METAL_IR}"
     "${GJXL_PRIMITIVES_METAL_IR}"
     "${GJXL_AQ_REDUCTION_METAL_IR}"
     "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
@@ -1023,6 +1034,7 @@ add_library(
   src/gpu/metal/metal_aq_profile_storage_plan.cpp
   src/gpu/metal/metal_aq_postprocess.cpp
   src/gpu/metal/metal_aq_reconstruction.cpp
+  src/gpu/metal/metal_aq_strategy_metadata.cpp
   src/gpu/metal/metal_butteraugli.cpp
   src/gpu/metal/metal_primitives.cpp
   src/gpu/metal/metal_submission.cpp
@@ -2733,6 +2745,13 @@ if(GJXL_BUILD_TESTS)
     gjxl_quantization_gpu_pipeline_test
     tests/quantization_gpu_pipeline_test.cpp
   )
+
+  add_executable(gjxl_metal_aq_strategy_metadata_test tests/metal_aq_strategy_metadata_test.cpp)
+  target_link_libraries(gjxl_metal_aq_strategy_metadata_test PRIVATE gjxl_metal gjxl_codec)
+  target_include_directories(gjxl_metal_aq_strategy_metadata_test PRIVATE third_party/metal-cpp)
+  target_compile_definitions(gjxl_metal_aq_strategy_metadata_test PRIVATE GJXL_METALLIB_PATH="${GJXL_METALLIB}")
+  add_dependencies(gjxl_metal_aq_strategy_metadata_test gjxl_metal_shaders)
+  add_test(NAME metal_aq_strategy_metadata COMMAND gjxl_metal_aq_strategy_metadata_test)
 
   target_link_libraries(
     gjxl_quantization_gpu_pipeline_test

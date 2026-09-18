@@ -1,0 +1,82 @@
+{
+  "revision": "d32625944a5a5093e8e9f2fe050bc252fb6b0b44",
+  "files": {
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/metadata-builder-20260918/metadata-test": "29fea3bd4e9101405aec40169d26bc8438bdacfe7ff0a222b6160908907e17d9",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/metadata-builder-20260918/gjxl.metallib": "188f679cec299ed30f43b9303cfceb3c7fa3db6e6109e1241853933fe832ecf4"
+  },
+  "sources": {
+    "CMakeLists.txt": "d16bd11366bab0f70a8d989ecb71963269d701aa24405b9b45c754ab4aba36c7",
+    "src/gpu/metal/kernels/aq_strategy_metadata.metal": "46103125398e61a76a77169b8fec7bf0fd201fdfde5a0705c4cf51341f03b4e8",
+    "src/gpu/metal/metal_aq_evaluation.cpp": "462289cb6b6fe9235931a6f6b8ba9e46622aac85fdc7cdc4f3fd5e807b83eba3",
+    "src/gpu/metal/metal_aq_evaluation_internal.h": "7493ab68080a33bdbe8e3358eb6cdaadba3ce076b3067acb9695fd1193b7264b",
+    "src/gpu/metal/metal_aq_evaluation_test.h": "52d6862cc36187e299a66c53d018951b31df5839b0461494fd9e2ff89f0df3c2",
+    "src/gpu/metal/metal_aq_strategy_metadata.cpp": "067b31995305edca659abd668cde3b6de452caf130cdc618c8a52404f1c69e38",
+    "src/gpu/metal/metal_aq_strategy_metadata.h": "f052b61a0fdf7b04a4d6154ae8987cb95e649d768dc0260982eb2bb1d6f84227",
+    "src/gpu/metal/metal_backend_internal.h": "112099c0c62e6ee8377ec15336f15e22184f9115df7af16654deb5705220cd58",
+    "tests/metal_aq_strategy_metadata_test.cpp": "eca2e48a4d84b989b9e4d31ff4e328073165a467387bc3e03d09307f1ef3c892",
+    "tools/frontier_dp/metadata_experiment.py": "2cb5970ef486ab565b2547a55479605c82e0d02321976e71ed77d7c98671a96c"
+  },
+  "commands": [
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/metadata-builder-20260918/metadata-test",
+        "--metallib",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/metadata-builder-20260918/gjxl.metallib"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/metadata-builder-20260918/normal.log",
+      "started_unix": 1789707102.17961,
+      "finished_unix": 1789707102.5159318
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/metadata-builder-20260918/metadata-test",
+        "--metallib",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/metadata-builder-20260918/gjxl.metallib"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/metadata-builder-20260918/validation.log",
+      "started_unix": 1789707102.516216,
+      "finished_unix": 1789707102.8606699
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/metadata-builder-20260918/metadata-test",
+        "--metallib",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/metadata-builder-20260918/gjxl.metallib",
+        "--benchmark",
+        "--rotate",
+        "0"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/metadata-builder-20260918/timing-0.jsonl",
+      "started_unix": 1789707102.8609438,
+      "finished_unix": 1789707103.011273
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/metadata-builder-20260918/metadata-test",
+        "--metallib",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/metadata-builder-20260918/gjxl.metallib",
+        "--benchmark",
+        "--rotate",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/metadata-builder-20260918/timing-1.jsonl",
+      "started_unix": 1789707103.011829,
+      "finished_unix": 1789707103.15285
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/metadata-builder-20260918/metadata-test",
+        "--metallib",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/metadata-builder-20260918/gjxl.metallib",
+        "--benchmark",
+        "--rotate",
+        "2"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/metadata-builder-20260918/timing-2.jsonl",
+      "started_unix": 1789707103.153152,
+      "finished_unix": 1789707103.305006
+    }
+  ],
+  "completed": true,
+  "protocol": "Normal and Metal-validation CPU-builder parity; 3 independent timing processes, rotated size order, 3 warmups and 21 GPU timestamp samples per size; same deterministic mixed cover; device metadata only, excludes selection and AQ"
+}
