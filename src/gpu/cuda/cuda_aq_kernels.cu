@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include "gpu/cuda/cuda_kernel_profile.h"
 #include <cuda_runtime.h>
 
 #include <cmath>
@@ -916,8 +917,10 @@ cudaError_t LaunchCudaAqUniformInitialField(
   const dim3 threads(16, 16);
   const dim3 grid((geometry.block_width + 15) / 16,
                   (geometry.block_height + 15) / 16);
-  UniformInitialFieldKernel<<<grid, threads, 0, stream>>>(
-      quant_field, strategy_mask, pixel_mask, geometry, quant);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"UniformInitialFieldKernel", grid, threads, stream}; profile_scope) {
+    UniformInitialFieldKernel<<<grid, threads, 0, stream>>>(
+        quant_field, strategy_mask, pixel_mask, geometry, quant);
+  }
   return CheckLaunch();
 }
 
@@ -932,8 +935,10 @@ cudaError_t LaunchCudaAqInitialField(
   const dim3 threads2d(16, 16);
   const dim3 gradient_grid((geometry.width / 4 + 15) / 16,
                            (geometry.height / 4 + 15) / 16);
-  InitialGradientKernel<<<gradient_grid, threads2d, 0, stream>>>(
-      coding_y, unblurred_pixel_mask, pre_erosion, error, geometry);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"InitialGradientKernel", gradient_grid, threads2d, stream}; profile_scope) {
+    InitialGradientKernel<<<gradient_grid, threads2d, 0, stream>>>(
+        coding_y, unblurred_pixel_mask, pre_erosion, error, geometry);
+  }
   if ((status = CheckLaunch()) != cudaSuccess) return status;
 
   constexpr float kBase[4] = {0.125f, 0.1f, 0.09f, 0.06f};
@@ -950,9 +955,11 @@ cudaError_t LaunchCudaAqInitialField(
   for (float& weight : weights) weight *= kTotal / sum;
   const dim3 block_grid((geometry.block_width + 15) / 16,
                         (geometry.block_height + 15) / 16);
-  FuzzyErosionKernel<<<block_grid, threads2d, 0, stream>>>(
-      pre_erosion, quant_field, strategy_mask, error, geometry, weights[0],
-      weights[1], weights[2], weights[3]);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"FuzzyErosionKernel", block_grid, threads2d, stream}; profile_scope) {
+    FuzzyErosionKernel<<<block_grid, threads2d, 0, stream>>>(
+        pre_erosion, quant_field, strategy_mask, error, geometry, weights[0],
+        weights[1], weights[2], weights[3]);
+  }
   if ((status = CheckLaunch()) != cudaSuccess) return status;
 
   const float scale = 0.765f / butteraugli_target * rescale;
@@ -961,9 +968,11 @@ cudaError_t LaunchCudaAqInitialField(
   if (butteraugli_target >= 2.0f) {
     dampen = fmaxf(1.0f - (butteraugli_target - 2.0f) / 12.0f, 0.0f);
   }
-  ModulationKernel<<<block_grid, threads2d, 0, stream>>>(
-      coding_x, coding_y, coding_b, quant_field, error, geometry,
-      scale * dampen, (1.0f - dampen) * base_level);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ModulationKernel", block_grid, threads2d, stream}; profile_scope) {
+    ModulationKernel<<<block_grid, threads2d, 0, stream>>>(
+        coding_x, coding_y, coding_b, quant_field, error, geometry,
+        scale * dampen, (1.0f - dampen) * base_level);
+  }
   if ((status = CheckLaunch()) != cudaSuccess) return status;
 
   if (pixel_mask == nullptr) return cudaSuccess;
@@ -1005,10 +1014,13 @@ cudaError_t LaunchCudaAqInitialCflReference(
     signed char* y_to_x, signed char* y_to_b, unsigned int* error,
     CudaAqGeometry geometry, cudaStream_t stream) {
   const unsigned int tile_count = geometry.tile_width * geometry.tile_height;
-  InitialCflKernel<<<(tile_count + kCflTilesPerBlock - 1) /
-                         kCflTilesPerBlock,
-                     kCflThreads, 0, stream>>>(coding_x, coding_y, coding_b,
-                                               y_to_x, y_to_b, error, geometry);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"InitialCflKernel", (tile_count + kCflTilesPerBlock - 1) /
+                         kCflTilesPerBlock, kCflThreads, stream}; profile_scope) {
+    InitialCflKernel<<<(tile_count + kCflTilesPerBlock - 1) /
+                           kCflTilesPerBlock,
+                       kCflThreads, 0, stream>>>(coding_x, coding_y, coding_b,
+                                                 y_to_x, y_to_b, error, geometry);
+  }
   return CheckLaunch();
 }
 
@@ -1023,10 +1035,13 @@ cudaError_t LaunchCudaAqInitialCfl(const float* coding_x, const float* coding_y,
   }
   constexpr unsigned kPrefetchedTiles = 8;
   const unsigned tile_count = geometry.tile_width * geometry.tile_height;
-  PrefetchedInitialCflKernel<<<(tile_count + kPrefetchedTiles - 1) /
-                                  kPrefetchedTiles,
-                              4 * kPrefetchedTiles, 0, stream>>>(
-      coding_x, coding_y, coding_b, y_to_x, y_to_b, error, geometry);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"PrefetchedInitialCflKernel", (tile_count + kPrefetchedTiles - 1) /
+                                  kPrefetchedTiles, 4 * kPrefetchedTiles, stream}; profile_scope) {
+    PrefetchedInitialCflKernel<<<(tile_count + kPrefetchedTiles - 1) /
+                                    kPrefetchedTiles,
+                                4 * kPrefetchedTiles, 0, stream>>>(
+        coding_x, coding_y, coding_b, y_to_x, y_to_b, error, geometry);
+  }
   return CheckLaunch();
 }
 
@@ -1040,26 +1055,36 @@ cudaError_t LaunchCudaAqSelectResidentQuantizer(
   const unsigned int grid = (block_count + kThreads - 1) / kThreads;
   cudaError_t status = cudaSuccess;
   for (unsigned int deviation = 0; deviation < 2; ++deviation) {
-    SelectionInitializeKernel<<<1, kThreads, 0, stream>>>(
-        selection_state, histogram, block_count / 2);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"SelectionInitializeKernel", 1, kThreads, stream}; profile_scope) {
+      SelectionInitializeKernel<<<1, kThreads, 0, stream>>>(
+          selection_state, histogram, block_count / 2);
+    }
     if ((status = CheckLaunch()) != cudaSuccess) return status;
     for (unsigned int shift : kShifts) {
-      SelectionHistogramKernel<<<grid, kThreads, 0, stream>>>(
-          quant_field, statistics, histogram, selection_state, block_count,
-          shift, deviation != 0);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"SelectionHistogramKernel", grid, kThreads, stream}; profile_scope) {
+        SelectionHistogramKernel<<<grid, kThreads, 0, stream>>>(
+            quant_field, statistics, histogram, selection_state, block_count,
+            shift, deviation != 0);
+      }
       if ((status = CheckLaunch()) != cudaSuccess) return status;
-      SelectionBucketKernel<<<1, kThreads, 0, stream>>>(
-          histogram, selection_state, statistics, shift, deviation != 0);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"SelectionBucketKernel", 1, kThreads, stream}; profile_scope) {
+        SelectionBucketKernel<<<1, kThreads, 0, stream>>>(
+            histogram, selection_state, statistics, shift, deviation != 0);
+      }
       if ((status = CheckLaunch()) != cudaSuccess) return status;
     }
   }
   const unsigned int scaled_quant_dc = static_cast<unsigned int>(
       static_cast<int>(static_cast<double>(quant_dc * 4096.0f) * 1.6));
-  FinalizeQuantizerKernel<<<1, 1, 0, stream>>>(
-      statistics, quantizer_params, error, scaled_quant_dc, quant_dc);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"FinalizeQuantizerKernel", 1, 1, stream}; profile_scope) {
+    FinalizeQuantizerKernel<<<1, 1, 0, stream>>>(
+        statistics, quantizer_params, error, scaled_quant_dc, quant_dc);
+  }
   if ((status = CheckLaunch()) != cudaSuccess) return status;
-  RawQuantKernel<<<grid, kThreads, 0, stream>>>(quant_field, quantizer_params,
-                                                raw_quant, error, block_count);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"RawQuantKernel", grid, kThreads, stream}; profile_scope) {
+    RawQuantKernel<<<grid, kThreads, 0, stream>>>(quant_field, quantizer_params,
+                                                  raw_quant, error, block_count);
+  }
   return CheckLaunch();
 }
 
@@ -1081,25 +1106,32 @@ cudaError_t LaunchCudaAqEncodeFrame(
   const size_t pixel_count =
       static_cast<size_t>(geometry.width) * geometry.height;
   const size_t gathered_count = 3 * pixel_count;
-  GatherDct8Kernel<<<static_cast<unsigned int>((gathered_count + kThreads - 1) /
-                                               kThreads),
-                     kThreads, 0, stream>>>(transform_x, transform_y,
-                                            transform_b, gathered, geometry);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"GatherDct8Kernel", static_cast<unsigned int>((gathered_count + kThreads - 1) /
+                                               kThreads), kThreads, stream}; profile_scope) {
+    GatherDct8Kernel<<<static_cast<unsigned int>((gathered_count + kThreads - 1) /
+                                                 kThreads),
+                       kThreads, 0, stream>>>(transform_x, transform_y,
+                                              transform_b, gathered, geometry);
+  }
   if ((status = CheckLaunch()) != cudaSuccess) return status;
   const unsigned int block_count = geometry.block_width * geometry.block_height;
   status = LaunchCudaDct(true, gathered, forward_coefficients, 3 * block_count,
                          8, 8, stream);
   if (status != cudaSuccess) return status;
-  AdjustQuantKernel<<<(block_count + kThreads - 1) / kThreads, kThreads, 0,
-                      stream>>>(forward_coefficients, quant_tables, raw_quant,
-                                quantizer_params, y_thresholds, error,
-                                block_count, x_matrix_multiplier,
-                                b_matrix_multiplier);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"AdjustQuantKernel", (block_count + kThreads - 1) / kThreads, kThreads, stream}; profile_scope) {
+    AdjustQuantKernel<<<(block_count + kThreads - 1) / kThreads, kThreads, 0,
+                        stream>>>(forward_coefficients, quant_tables, raw_quant,
+                                  quantizer_params, y_thresholds, error,
+                                  block_count, x_matrix_multiplier,
+                                  b_matrix_multiplier);
+  }
   if ((status = CheckLaunch()) != cudaSuccess) return status;
-  EncodeFrameKernel<<<block_count, 64, 0, stream>>>(
-      forward_coefficients, quant_tables, raw_quant, quantizer_params, y_to_x,
-      y_to_b, y_thresholds, quantized_ac, quantized_dc, error, geometry,
-      x_matrix_multiplier, b_matrix_multiplier, deferred_dc ? gathered : nullptr);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"EncodeFrameKernel", block_count, 64, stream}; profile_scope) {
+    EncodeFrameKernel<<<block_count, 64, 0, stream>>>(
+        forward_coefficients, quant_tables, raw_quant, quantizer_params, y_to_x,
+        y_to_b, y_thresholds, quantized_ac, quantized_dc, error, geometry,
+        x_matrix_multiplier, b_matrix_multiplier, deferred_dc ? gathered : nullptr);
+  }
   if ((status = CheckLaunch()) != cudaSuccess || !deferred_dc) return status;
   // The forward transform has finished consuming gathered pixels. Reuse the
   // first three block planes for DC without allocating another arena slice.

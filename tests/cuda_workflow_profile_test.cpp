@@ -73,7 +73,7 @@ void Plans() {
         DisarmManagedHostAllocationFailureForTest();
         Check(status);
         Require(pending && plan.profile_shape.submissions > 0 &&
-          plan.profile_shape.dispatches == 0 && plan.diagnostics.peak_bytes > 0 &&
+          plan.profile_shape.dispatches > 0 && plan.diagnostics.peak_bytes > 0 &&
           plan.output.peak_bytes <= plan.working.peak_bytes,
           "CUDA profile planning allocated or lost its diagnostic bound");
       }
@@ -125,28 +125,55 @@ void Cases(GpuBackend& gpu) {
           o.execution_domain = domain;
           const auto fallback_peak = DefaultResourceBudget().snapshot().peak_backing_bytes;
           Result actual;
-          for (size_t repeat = 0; repeat < 2; ++repeat) {
-            Check(Encode(gpu, image.const_view(), o, &actual));
-            Require(actual.bytes == reference.bytes && actual.summary == reference.summary,
-              "Profiled CUDA workflow changed bytes or summary");
-            Require(actual.gpu.mode == GpuProfilingMode::kStage &&
-              actual.gpu.submissions.size() <= plan.profile_shape.submissions &&
-              actual.gpu.wall_stages.size() <= plan.profile_shape.wall_stages &&
-              !actual.gpu.submissions.empty(), "CUDA profile exceeded its planned graph");
-            for (const auto& s : actual.gpu.submissions) {
-              Require(s.stages.size() == 1 && s.stages[0].dispatches.empty() &&
-                s.submission_id.size() <= plan.profile_shape.maximum_id_length &&
-                s.stages[0].stage_id.size() <= plan.profile_shape.maximum_id_length,
-                "CUDA submission profile exceeded its planned shape");
+          for (auto profile_mode : {GpuProfilingMode::kStage, GpuProfilingMode::kDispatch}) {
+            for (size_t repeat = 0; repeat < 2; ++repeat) {
+              Check(Encode(gpu, image.const_view(), o, &actual, profile_mode));
+              Require(actual.bytes == reference.bytes && actual.summary == reference.summary,
+                "Profiled CUDA workflow changed bytes or summary");
+              Require(actual.gpu.mode == profile_mode &&
+                actual.gpu.submissions.size() <= plan.profile_shape.submissions &&
+                actual.gpu.wall_stages.size() <= plan.profile_shape.wall_stages &&
+                !actual.gpu.submissions.empty(), "CUDA profile exceeded its planned graph");
+              size_t dispatches = 0;
+              for (const auto& s : actual.gpu.submissions) {
+                Require(s.stages.size() == 1 && !s.stages[0].dispatches.empty() &&
+                  s.submission_id.size() <= plan.profile_shape.maximum_id_length &&
+                  s.stages[0].stage_id.size() <= plan.profile_shape.maximum_id_length,
+                  "CUDA submission profile exceeded its planned shape");
+                uint64_t previous_end = 0;
+                const auto& stage = s.stages.front();
+                dispatches += stage.dispatches.size();
+                for (const auto& dispatch : stage.dispatches) {
+                  Require(!dispatch.kernel_id.empty() &&
+                    dispatch.kernel_id.size() <= plan.profile_shape.maximum_id_length &&
+                    dispatch.kind == GpuDispatchKind::kThreadgroups &&
+                    dispatch.grid.width > 0 && dispatch.grid.height > 0 && dispatch.grid.depth > 0 &&
+                    dispatch.threads_per_threadgroup.width > 0 &&
+                    dispatch.threads_per_threadgroup.height > 0 &&
+                    dispatch.threads_per_threadgroup.depth > 0,
+                    "CUDA dispatch metadata is invalid");
+                  Require(dispatch.begin_timestamp >= previous_end &&
+                    dispatch.end_timestamp >= dispatch.begin_timestamp &&
+                    dispatch.end_timestamp <= stage.end_timestamp &&
+                    dispatch.gpu_nanoseconds == dispatch.end_timestamp - dispatch.begin_timestamp,
+                    "CUDA dispatch timeline is outside its enclosing stage");
+                  if (profile_mode == GpuProfilingMode::kStage)
+                    Require(dispatch.begin_timestamp == 0 && dispatch.end_timestamp == 0,
+                      "Stage profiling unexpectedly recorded dispatch timestamps");
+                  previous_end = dispatch.end_timestamp;
+                }
+              }
+              Require(dispatches > 0 && dispatches <= plan.profile_shape.dispatches,
+                "CUDA workflow exceeded its planned dispatch count");
+              for (const auto& wall : actual.gpu.wall_stages)
+                Require(wall.stage_id.size() <= plan.profile_shape.maximum_id_length,
+                  "CUDA wall-stage label exceeded its planned shape");
+              Require(domain->snapshot().peak_backing_bytes <= plan.working.peak_bytes,
+                "Profiled CUDA workflow exceeded admission");
+              Require(DefaultResourceBudget().snapshot().peak_backing_bytes == fallback_peak,
+                "Profiled CUDA workflow escaped to the default resource domain");
+              ++cases;
             }
-            for (const auto& wall : actual.gpu.wall_stages)
-              Require(wall.stage_id.size() <= plan.profile_shape.maximum_id_length,
-                "CUDA wall-stage label exceeded its planned shape");
-            Require(domain->snapshot().peak_backing_bytes <= plan.working.peak_bytes,
-              "Profiled CUDA workflow exceeded admission");
-            Require(DefaultResourceBudget().snapshot().peak_backing_bytes == fallback_peak,
-              "Profiled CUDA workflow escaped to the default resource domain");
-            ++cases;
           }
           Check(gpu.TrimPreparationCache());
           Empty(*domain); // Published graphs and codestreams still exist.
@@ -172,11 +199,11 @@ void Failures(GpuBackend& gpu) {
   sentinel.gpu.mode = GpuProfilingMode::kDispatch;
   size_t failures = 0;
   bool finished = false, after_submission = false;
-  for (size_t skip = 0; skip < 128; ++skip) {
+  for (size_t skip = 0; skip < 4096; ++skip) {
     Result actual = sentinel;
     const auto before = gpu.stats();
     ArmManagedHostClassAllocationFailureAfterForTest(ResourceClass::kDiagnostics, skip);
-    const Status status = Encode(gpu, image.const_view(), o, &actual);
+    const Status status = Encode(gpu, image.const_view(), o, &actual, GpuProfilingMode::kDispatch);
     const bool pending = ManagedHostAllocationFailurePendingForTest();
     DisarmManagedHostAllocationFailureForTest();
     Check(gpu.TrimPreparationCache());
@@ -194,9 +221,8 @@ void Failures(GpuBackend& gpu) {
   Require(finished && failures > 10 && after_submission,
     "CUDA diagnostic failure sweep did not reach every allocation boundary");
   Result actual = sentinel;
-  Require(Encode(gpu, image.const_view(), o, &actual, GpuProfilingMode::kDispatch).code() ==
-      StatusCode::kUnavailable && actual == sentinel,
-    "Unsupported CUDA dispatch profiling changed caller outputs");
+  Require(!Encode(gpu, image.const_view(), o, &actual, static_cast<GpuProfilingMode>(255)).ok() &&
+      actual == sentinel, "Invalid CUDA profiling mode changed caller outputs");
   Check(gpu.TrimPreparationCache());
   Empty(*domain);
   std::shared_ptr<const ExecutionDomain> tiny;

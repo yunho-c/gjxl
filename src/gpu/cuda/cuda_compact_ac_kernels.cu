@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
+#include "gpu/cuda/cuda_kernel_profile.h"
 #include "gpu/cuda/cuda_compact_ac_kernels.h"
 #include <cuda_runtime.h>
 
@@ -44,7 +45,9 @@ cudaError_t LaunchCudaCompactAc(const int32_t *source, uint32_t count,
     return cudaErrorInvalidValue;
   const uint32_t work = count / 4 + (count % 4 != 0);
   const uint32_t grid = work / 256 + (work % 256 != 0);
-  CompactAcKernel<<<grid, 256, 0, stream>>>(source, count, bytes, words, flags);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"CompactAcKernel", grid, 256, stream}; profile_scope) {
+    CompactAcKernel<<<grid, 256, 0, stream>>>(source, count, bytes, words, flags);
+  }
   return cudaGetLastError();
 }
 } // namespace gjxl

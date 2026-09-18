@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include "gpu/cuda/cuda_kernel_profile.h"
 #include "gpu/cuda/cuda_coefficient_order_kernels.h"
 
 #include <cuda_runtime.h>
@@ -94,11 +95,15 @@ cudaError_t LaunchCudaCoefficientOrderPopulation(
   if (!source || !populations || (pure_dct8 && (!sampled_dct8 || list.count != 1)))
     return cudaErrorInvalidValue;
   if (pure_dct8) {
-    CoefficientOrderPopulationKernel<true><<<static_cast<uint32_t>(tiles), dim3(32, 8), 0, stream>>>(
-      source, list, sampled_dct8, populations);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"CoefficientOrderPopulationKernel<true>", static_cast<uint32_t>(tiles), dim3(32, 8), stream}; profile_scope) {
+      CoefficientOrderPopulationKernel<true><<<static_cast<uint32_t>(tiles), dim3(32, 8), 0, stream>>>(
+        source, list, sampled_dct8, populations);
+    }
   } else {
-    CoefficientOrderPopulationKernel<false><<<static_cast<uint32_t>(tiles), dim3(32, 8), 0, stream>>>(
-      source, list, nullptr, populations);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"CoefficientOrderPopulationKernel<false>", static_cast<uint32_t>(tiles), dim3(32, 8), stream}; profile_scope) {
+      CoefficientOrderPopulationKernel<false><<<static_cast<uint32_t>(tiles), dim3(32, 8), 0, stream>>>(
+        source, list, nullptr, populations);
+    }
   }
   return cudaGetLastError();
 }

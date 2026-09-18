@@ -14,15 +14,17 @@ namespace {
 using namespace gpu_profile_internal;
 constexpr GpuProfilingCapabilities kCapabilities{
   .timestamp_counter = true, .stage_boundary = true,
-  .dispatch_boundary = false,
+  .dispatch_boundary = true,
 };
 }  // namespace
 
 thread_local CudaProfileCapture* CudaProfileCapture::current_ = nullptr;
+thread_local const CudaKernelProfileHooks* cuda_kernel_profile_hooks = nullptr;
 
-CudaProfileCapture::CudaProfileCapture(CudaBackend& backend, std::string_view operation)
+CudaProfileCapture::CudaProfileCapture(CudaBackend& backend, std::string_view operation,
+                                     GpuProfilingMode mode)
   : backend_(backend), operation_(operation),
-    session_(GpuProfilingMode::kStage, kCapabilities), previous_(current_) {
+    session_(mode, kCapabilities), previous_(current_) {
   current_ = this;
 }
 
@@ -38,18 +40,69 @@ CudaProfileCapture* CudaProfileCapture::Current(const CudaBackend& backend) noex
 Status CudaProfileCapture::Append(CudaSubmission& submission) {
   GpuExecutionProfile child;
   Status status = backend_.ResolveGpuSubmissionProfile(
-    submission, operation_, GpuProfilingMode::kStage, &child);
+    submission, operation_, mode(), &child);
   if (!status.ok()) return status;
   return session_.Append(std::move(child));
+}
+
+bool CudaSubmission::BeginKernelProfile(const char* id, dim3 grid, dim3 block,
+                                        cudaStream_t stream) noexcept {
+  if (!kernel_profile_status_.ok() || kernel_event_error_ != cudaSuccess) return false;
+  if (stream != state_->stream || profile_.stages.size() != 1) {
+    kernel_profile_status_ = Status::InvalidArgument("Profile stream");
+    return false;
+  }
+  try {
+    auto& dispatches = profile_.stages.front().dispatches;
+    if (dispatches.size() >= std::numeric_limits<uint32_t>::max()) {
+      kernel_profile_status_ = Status::InvalidArgument("Profile count");
+      return false;
+    }
+    uint32_t invocation = 0;
+    for (const auto& previous : dispatches)
+      if (previous.kernel_id == std::string_view(id)) ++invocation;
+    dispatches.push_back({.kernel_id = ProfileString(id),
+      .kind = GpuDispatchKind::kThreadgroups,
+      .grid = {grid.x, grid.y, grid.z},
+      .threads_per_threadgroup = {block.x, block.y, block.z},
+      .invocation = invocation});
+    if (profile_mode_ == GpuProfilingMode::kDispatch) {
+      auto& events = kernel_events_.emplace_back();
+      kernel_event_error_ = cudaEventCreate(&events.begin);
+      if (kernel_event_error_ == cudaSuccess)
+        kernel_event_error_ = cudaEventCreate(&events.end);
+      if (kernel_event_error_ == cudaSuccess)
+        kernel_event_error_ = cudaEventRecord(events.begin, stream);
+    }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    // These short messages fit the audited libraries' inline string storage;
+    // failure latching itself must not allocate inside the noexcept hook.
+    kernel_profile_status_ = failure.status().resource_plan_exceeded()
+      ? Status::ResourcePlanExceeded("Profile bound") : Status::OutOfMemory("Profile OOM");
+  } catch (const std::bad_alloc&) {
+    kernel_profile_status_ = Status::OutOfMemory("Profile OOM");
+  } catch (const std::length_error&) {
+    kernel_profile_status_ = Status::InvalidArgument("Profile length");
+  }
+  return kernel_profile_status_.ok() && kernel_event_error_ == cudaSuccess;
+}
+
+void CudaSubmission::EndKernelProfile(cudaStream_t stream) noexcept {
+  if (profile_mode_ == GpuProfilingMode::kDispatch &&
+      kernel_event_error_ == cudaSuccess && kernel_profile_status_.ok())
+    kernel_event_error_ = cudaEventRecord(kernel_events_.back().end, stream);
+}
+
+Status CudaSubmission::KernelProfileStatus() const {
+  if (!kernel_profile_status_.ok()) return kernel_profile_status_;
+  return CudaRuntimeStatus(kernel_event_error_, "Record CUDA dispatch timestamp");
 }
 
 Status ValidateCudaProfileRequest(GpuProfilingMode mode,
                                  const GpuExecutionProfile* profile) {
   if (profile == nullptr) return Status::InvalidArgument("CUDA profile output is null");
-  if (mode == GpuProfilingMode::kDispatch)
-    return Status::Unavailable("CUDA dispatch profiling is not implemented");
-  if (mode != GpuProfilingMode::kStage)
-    return Status::InvalidArgument("CUDA operation requires stage profiling");
+  if (mode != GpuProfilingMode::kStage && mode != GpuProfilingMode::kDispatch)
+    return Status::InvalidArgument("CUDA operation requires stage or dispatch profiling");
   return Status::Ok();
 }
 
@@ -62,7 +115,7 @@ Status CudaBackend::PrepareAqEvaluationProfiled(
     return Status::InvalidArgument("CUDA prepared AQ output pointer is null");
   if (preparation.frame_only || !preparation.resident_quantization)
     return Status::Unavailable("CUDA AQ profiling requires resident quantization");
-  CudaProfileCapture capture(*this, "aq.prepare_reference");
+  CudaProfileCapture capture(*this, "aq.prepare_reference", mode);
   std::unique_ptr<PreparedAqEvaluation> candidate;
   status = PrepareAqEvaluation(preparation, &candidate);
   if (!status.ok()) return status;
@@ -79,7 +132,7 @@ CudaBackend::QueryGpuProfilingCapabilities() const {
 Status CudaBackend::ResolveGpuSubmissionProfile(
   GpuSubmission& submission, std::string_view submission_id,
   GpuProfilingMode mode, GpuExecutionProfile* profile) {
-  if (mode != GpuProfilingMode::kStage || profile == nullptr ||
+  if ((mode != GpuProfilingMode::kStage && mode != GpuProfilingMode::kDispatch) || profile == nullptr ||
       submission_id.empty()) {
     return Status::InvalidArgument("CUDA submission profile request is invalid");
   }
@@ -87,14 +140,14 @@ Status CudaBackend::ResolveGpuSubmissionProfile(
   if (cuda == nullptr) {
     return Status::InvalidArgument("Submission is not a CUDA submission");
   }
-  return cuda->ResolveProfile(state_.get(), submission_id, profile);
+  return cuda->ResolveProfile(state_.get(), submission_id, mode, profile);
 }
 
 Status CudaSubmission::ResolveProfile(
-  const CudaDeviceState* state, std::string_view submission_id,
+  const CudaDeviceState* state, std::string_view submission_id, GpuProfilingMode mode,
   GpuExecutionProfile* profile) {
   if (state != state_.get() || profile_begin_ == nullptr ||
-      profile_.stages.size() != 1) {
+      profile_.stages.size() != 1 || mode != profile_mode_) {
     return Status::InvalidArgument(
       "CUDA submission is unprofiled or belongs to another backend");
   }
@@ -116,7 +169,7 @@ Status CudaSubmission::ResolveProfile(
   }
   try {
     GpuExecutionProfile candidate;
-    candidate.mode = GpuProfilingMode::kStage;
+    candidate.mode = mode;
     candidate.capabilities = kCapabilities;
     candidate.submissions.reserve(1);
     candidate.submissions.push_back(profile_);
@@ -130,6 +183,25 @@ Status CudaSubmission::ResolveProfile(
     stage.begin_timestamp = 0;
     stage.end_timestamp = resolved.command_buffer_gpu_nanoseconds;
     stage.gpu_nanoseconds = resolved.command_buffer_gpu_nanoseconds;
+    if (mode == GpuProfilingMode::kDispatch) {
+      if (kernel_events_.size() != stage.dispatches.size())
+        return Status::Internal("CUDA dispatch event count differs from metadata");
+      for (size_t i = 0; i < kernel_events_.size(); ++i) {
+        float start = 0.0f, end = 0.0f;
+        auto event_status = cudaEventElapsedTime(&start, profile_begin_, kernel_events_[i].begin);
+        if (event_status == cudaSuccess)
+          event_status = cudaEventElapsedTime(&end, profile_begin_, kernel_events_[i].end);
+        if (event_status != cudaSuccess)
+          return CudaRuntimeStatus(event_status, "Resolve CUDA dispatch timestamps");
+        if (!std::isfinite(start) || !std::isfinite(end) || start < 0 || end < start ||
+            end > milliseconds)
+          return Status::DeviceError("CUDA dispatch timestamps are invalid");
+        auto& dispatch = stage.dispatches[i];
+        dispatch.begin_timestamp = static_cast<uint64_t>(static_cast<double>(start) * 1000000.0);
+        dispatch.end_timestamp = static_cast<uint64_t>(static_cast<double>(end) * 1000000.0);
+        dispatch.gpu_nanoseconds = dispatch.end_timestamp - dispatch.begin_timestamp;
+      }
+    }
     *profile = std::move(candidate);
   } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
     return failure.status();

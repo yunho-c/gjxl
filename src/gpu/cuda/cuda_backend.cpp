@@ -398,9 +398,10 @@ CudaSubmission::CudaSubmission(
   cudaEvent_t event,
   bool fail_completion,
   cudaEvent_t profile_begin,
-  gpu_profile_internal::GpuSubmissionProfile profile)
+  gpu_profile_internal::GpuSubmissionProfile profile,
+  gpu_profile_internal::GpuProfilingMode mode)
   : state_(std::move(state)), event_(event),
-    profile_begin_(profile_begin), profile_(std::move(profile)),
+    profile_begin_(profile_begin), profile_(std::move(profile)), profile_mode_(mode),
     fail_completion_(fail_completion) {}
 
 CudaSubmission::~CudaSubmission() {
@@ -410,6 +411,12 @@ CudaSubmission::~CudaSubmission() {
   }
   if (device.status() == cudaSuccess && profile_begin_ != nullptr) {
     (void)cudaEventDestroy(profile_begin_);
+  }
+  if (device.status() == cudaSuccess) {
+    for (const auto& events : kernel_events_) {
+      if (events.begin != nullptr) (void)cudaEventDestroy(events.begin);
+      if (events.end != nullptr) (void)cudaEventDestroy(events.end);
+    }
   }
 }
 
@@ -789,13 +796,10 @@ Status CudaBackend::SubmitCompute(
   CudaProfileCapture* capture = mode == GpuProfilingMode::kDisabled
     ? CudaProfileCapture::Current(*this) : nullptr;
   if (capture != nullptr) {
-    mode = GpuProfilingMode::kStage;
+    mode = capture->mode();
     stage_id = capture->operation();
   }
-  const bool profiling = mode == GpuProfilingMode::kStage;
-  if (mode == GpuProfilingMode::kDispatch) {
-    return Status::Unavailable("CUDA dispatch profiling is not implemented");
-  }
+  const bool profiling = mode == GpuProfilingMode::kStage || mode == GpuProfilingMode::kDispatch;
   if ((mode != GpuProfilingMode::kDisabled && !profiling) ||
       (profiling && stage_id.empty())) {
     return Status::InvalidArgument("CUDA profiling mode or stage ID is invalid");
@@ -846,21 +850,41 @@ Status CudaBackend::SubmitCompute(
       state_, event,
       test_fail_completion_ ||
         fail_next_completion_.exchange(false, std::memory_order_relaxed),
-      begin, std::move(recorded)));
+      begin, std::move(recorded), mode));
   } catch (const std::bad_alloc&) {
     (void)cudaEventDestroy(event);
     if (begin != nullptr) (void)cudaEventDestroy(begin);
     return Status::OutOfMemory("Allocate CUDA submission owner");
   }
 
+  Status profile_status;
   {
     std::lock_guard lock(state_->submission_mutex);
+    const CudaKernelProfileHooks hooks{
+      pending.get(),
+      [](void* context, const char* id, dim3 grid, dim3 block, cudaStream_t stream) noexcept {
+        return static_cast<CudaSubmission*>(context)->BeginKernelProfile(id, grid, block, stream);
+      },
+      [](void* context, cudaStream_t stream) noexcept {
+        static_cast<CudaSubmission*>(context)->EndKernelProfile(stream);
+      }};
+    struct RestoreHooks {
+      const CudaKernelProfileHooks* previous;
+      ~RestoreHooks() { cuda_kernel_profile_hooks = previous; }
+    } restore{cuda_kernel_profile_hooks};
+    cuda_kernel_profile_hooks = profiling ? &hooks : nullptr;
     if (profiling) error = cudaEventRecord(begin, state_->stream);
     if (error == cudaSuccess) error = encode(*this, context);
-    if (error == cudaSuccess) {
+    if (profiling) profile_status = pending->KernelProfileStatus();
+    if (error == cudaSuccess && profile_status.ok()) {
       error = cudaEventRecord(event, state_->stream);
     }
+    // A late launch/metadata failure can follow successfully queued kernels.
+    // Drain them before the caller can destroy their input or output owners.
+    if (error != cudaSuccess || !profile_status.ok())
+      (void)cudaStreamSynchronize(state_->stream);
   }
+  if (!profile_status.ok()) return profile_status;
   if (error != cudaSuccess) {
     return CudaStatus(
       error, "Submit CUDA compute sequence", StatusCode::kSubmissionFailed);

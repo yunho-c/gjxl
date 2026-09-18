@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include "gpu/cuda/cuda_kernel_profile.h"
 #include "gpu/cuda/cuda_sparse_ac_kernels.h"
 #include <cuda_runtime.h>
 
@@ -50,8 +51,10 @@ template <typename T>
 cudaError_t Dispatch(const void* source, uint32_t count, uint64_t* masks,
     uint32_t* offsets, void* values, uint32_t* total, cudaStream_t stream) {
   const uint32_t grid = count / kThreads + (count % kThreads != 0);
-  SparseAc<T><<<grid, kThreads, 0, stream>>>(static_cast<const T*>(source),
-      count, masks, offsets, static_cast<T*>(values), total);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"SparseAc<T>", grid, kThreads, stream}; profile_scope) {
+    SparseAc<T><<<grid, kThreads, 0, stream>>>(static_cast<const T*>(source),
+        count, masks, offsets, static_cast<T*>(values), total);
+  }
   return cudaGetLastError();
 }
 }  // namespace

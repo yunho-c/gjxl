@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 #include "codestream/cuda_workflow_storage_plan.h"
+#include "gpu/cuda/cuda_profile_storage_plan.h"
 
 #include "codec/coefficient_order_population_internal.h"
 #include "codec/frontend_storage_plan.h"
@@ -188,7 +189,7 @@ Status ComputeCudaWorkflowStoragePlan(Extent2D source,
     // AQ iterations execute inside the policy callback, so they do not add
     // submissions. These bounds follow the call graph, not measured counts.
     const size_t submissions = 4 + size_t(!fixed) + size_t(p.score_count != 0);
-    size_t id_length = 0;
+    size_t id_length = cuda_internal::kCudaKernelProfileIdLength;
     for (std::string_view id : {
            "aq.prepare_reference", "aq.initial_quantization", "aq.prepare_encoding_policy",
            "aq.resident_policy", "ac_strategy.candidates", "frontend.ac_strategy",
@@ -197,8 +198,41 @@ Status ComputeCudaWorkflowStoragePlan(Extent2D source,
            "resident.aq", "frontend.ac_strategy.prepare", "frontend.ac_strategy.wait",
            "frontend.ac_strategy.readback", "frontend.ac_strategy.merge"})
       id_length = std::max(id_length, id.size());
+    // Launch bounds for the resident workflow (not arbitrary low-level
+    // submissions). One batch per selected transform family, at most seven.
+    // Quantizer selection has two deviations, four radix bytes, histogram +
+    // bucket per byte, then finalization and raw quantization: 2*(1+4*2)+2.
+    constexpr size_t quantizer = 20;
+    const size_t families = fixed ? 1 : 7;
+    // Psycho: opsin <=7, low/medium <=7 (including unfused variants), four
+    // two-pass splits, one two-pass blur and suppression. Reference preparation
+    // has at most two scales, expansion/subsampling and a three-launch mask.
+    constexpr size_t psycho = 7 + 7 + 4 * 2 + 2 + 1;
+    constexpr size_t reference = 3 + 2 * psycho + 3 + 3;
+    // Difference: six Malta, two precompute+blur masks, one final kernel.
+    // Compare includes both scales, expansion/subsampling, crop/composition,
+    // <=4 radix-256 maximum reductions over a uint32 count, and one block
+    // reduction/composition launch per family. Geometry changes grid sizes.
+    constexpr size_t difference = 6 + 2 * 3 + 1;
+    const size_t compare = 3 + 2 * (psycho + difference) + 3 + 1 + 1 + 4 + families;
+    // Reconstruction selects/encodes coefficients and rebuilds LLF/inverse
+    // per family, <=3 DC kernels and <=5 filter/color kernels. Forward/CfL
+    // occurs once. A score iteration adds initialize/update (initialize once).
+    const size_t reconstruction = quantizer + 4 * families + 3 + 5;
+    const size_t frame_only = quantizer + 2 * families + 3;
+    const size_t packing = 1 + families + 1; // population, AC packing, compact
+    const size_t policy = families + quantizer + 1 + 1 +
+      p.score_count * (reconstruction + compare + 1) +
+      (e.collect_final_butteraugli_score ? 0 : frame_only) + packing;
+    const size_t initial = fixed ? 2 : 4 + 3 + 1; // field, inverse Gaborish, CfL
+    const size_t setup = families + 2; // adjustment, positive-range initialize/reduce
+    const size_t ac = fixed ? 0 : 7 * 3; // norms, fused evaluation, final cost
+    const size_t dispatches = (p.score_count == 0 ? 0 : reference) +
+      initial + setup + ac + policy + 1; // optional separate sparse pack
+    const size_t child_dispatches = std::max({reference, initial, setup, ac, policy});
     p.profile_shape = {.wall_stages = 6 + (fixed ? 0u : 4u),
                        .submissions = submissions, .stages = submissions,
+                       .dispatches = dispatches,
                        .maximum_id_length = id_length};
     status = gpu_profile_internal::ComputeProfileStorageBound(p.profile_shape, &p.profile_output);
     if (!status.ok()) return status;
@@ -207,11 +241,14 @@ Status ComputeCudaWorkflowStoragePlan(Extent2D source,
     // submission recordings: policy's owner remains alive during sparse pack.
     HostStorageBound capture;
     status = gpu_profile_internal::ComputeProfileStorageBound(
-      {.submissions = 2, .stages = 2, .maximum_id_length = id_length}, &capture);
+      {.submissions = 2, .stages = 2, .dispatches = child_dispatches + 1,
+       .maximum_id_length = id_length}, &capture);
     if (!status.ok()) return status;
     gpu_profile_internal::SubmissionProfileStoragePlan child;
-    status = gpu_profile_internal::ComputeSubmissionProfileStoragePlan(
-      {.stages = 1, .maximum_stage_id_length = id_length,
+    status = cuda_internal::ComputeCudaSubmissionProfileStoragePlan(
+      {.stages = 1, .dispatches = child_dispatches,
+       .maximum_stage_id_length = id_length,
+       .maximum_kernel_id_length = cuda_internal::kCudaKernelProfileIdLength,
        .maximum_submission_id_length = id_length}, &child);
     if (!status.ok()) return status;
     p.diagnostics = p.profile_output;

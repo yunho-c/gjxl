@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // CUDA implementation of the shared DC quantization/prediction/smoothing
 // policy.
+#include "gpu/cuda/cuda_kernel_profile.h"
 #include "gpu/cuda/cuda_dc_processing_kernels.h"
 #include <cmath>
 #include <cstdint>
@@ -307,13 +308,17 @@ cudaError_t LaunchCudaDcQuantization(float *dc, int *quantized,
   const unsigned int groups =
       ((params.width - 1u) / 256u + 1u) * ((params.height - 1u) / 256u + 1u);
   const unsigned int threads = params.height < 256u ? params.height : 256u;
-  QuantizeDcKernel<<<dim3(groups, 2), threads, 0, stream>>>(
-      dc, quantized, error, params, quantizer, 0);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"QuantizeDcKernel", dim3(groups, 2), threads, stream}; profile_scope) {
+    QuantizeDcKernel<<<dim3(groups, 2), threads, 0, stream>>>(
+        dc, quantized, error, params, quantizer, 0);
+  }
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess)
     return status;
-  QuantizeDcKernel<<<groups, threads, 0, stream>>>(dc, quantized, error, params,
-                                                   quantizer, 2);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"QuantizeDcKernel", groups, threads, stream}; profile_scope) {
+    QuantizeDcKernel<<<groups, threads, 0, stream>>>(dc, quantized, error, params,
+                                                     quantizer, 2);
+  }
   return cudaGetLastError();
 }
 cudaError_t LaunchCudaDcSmoothing(const float *dc, float *smoothed,
@@ -328,8 +333,10 @@ cudaError_t LaunchCudaDcSmoothing(const float *dc, float *smoothed,
            : (!params.global_scale || !params.quant_dc)))
     return cudaErrorInvalidValue;
   const uint64_t area = uint64_t(params.width) * params.height;
-  SmoothDcKernel<<<static_cast<unsigned int>((area + 255) / 256), 256, 0,
-                   stream>>>(dc, smoothed, error, params, quantizer);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"SmoothDcKernel", static_cast<unsigned int>((area + 255) / 256), 256, stream}; profile_scope) {
+    SmoothDcKernel<<<static_cast<unsigned int>((area + 255) / 256), 256, 0,
+                     stream>>>(dc, smoothed, error, params, quantizer);
+  }
   return cudaGetLastError();
 }
 } // namespace gjxl::cuda_internal

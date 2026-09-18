@@ -156,7 +156,8 @@ bool ColorMapsEqual(const gjxl::ColorCorrelationMap& left,
   return true;
 }
 
-bool CheckResidentStageProfiles(gjxl::GpuBackend& gpu, const ImageStorage& source) {
+bool CheckResidentStageProfiles(gjxl::GpuBackend& gpu, const ImageStorage& source,
+                                gjxl::gpu_profile_internal::GpuProfilingMode profile_mode) {
   namespace pipeline = gjxl::quantization_pipeline_internal;
   namespace diagnostic = gjxl::gpu_profile_internal;
   namespace policy = gjxl::codestream_internal;
@@ -209,7 +210,7 @@ bool CheckResidentStageProfiles(gjxl::GpuBackend& gpu, const ImageStorage& sourc
                   source.View(), prepared[side], options, mode, output, nullptr, &aq[side])
               : pipeline::RunPreparedGpuQuantizationPipelineForEncodingProfiled(gpu,
                   source.View(), prepared[side], options, mode, output, &aq[side],
-                  diagnostic::GpuProfilingMode::kStage, &profile);
+                  profile_mode, &profile);
             if (!Check(status, "Run profiled pipeline") ||
                 !Check(gjxl::EncodeVarDctCodestream(frame, &bytes[side]),
                   "Serialize profiled frame")) return false;
@@ -255,7 +256,7 @@ bool CheckResidentStageProfiles(gjxl::GpuBackend& gpu, const ImageStorage& sourc
                 "Arm profiled initial failure")) return false;
             const auto failed = prepared_profiler->ComputeInitialQuantizationProfiled(
               {}, initial_output, nullptr, 0.0f, nullptr,
-              diagnostic::GpuProfilingMode::kStage, &profile);
+              profile_mode, &profile);
             if (failed.code() != gjxl::StatusCode::kDeviceError || profile != old_profile ||
                 !std::ranges::all_of(quant, [](float v) { return v == -17.0f; }) ||
                 !std::ranges::all_of(mask, [](float v) { return v == -17.0f; }) ||
@@ -269,7 +270,7 @@ bool CheckResidentStageProfiles(gjxl::GpuBackend& gpu, const ImageStorage& sourc
             invalid.resident_quantization = true;
             if (preparation_profiler == nullptr ||
                 preparation_profiler->PrepareAqEvaluationProfiled(
-                  invalid, diagnostic::GpuProfilingMode::kStage, &aq[1].evaluation, &profile).ok() ||
+                  invalid, profile_mode, &aq[1].evaluation, &profile).ok() ||
                 aq[1].evaluation.get() != retained || profile != old_profile) {
               std::cerr << "Failed profiled preparation replaced old owners\n"; return false;
             }
@@ -279,6 +280,13 @@ bool CheckResidentStageProfiles(gjxl::GpuBackend& gpu, const ImageStorage& sourc
     }
   }
   std::cout << "CUDA profiled pipelines: " << pairs << " exact byte/score pairs passed\n";
+  return true;
+}
+
+bool CheckResidentStageProfiles(gjxl::GpuBackend& gpu, const ImageStorage& source) {
+  for (auto mode : {gjxl::gpu_profile_internal::GpuProfilingMode::kStage,
+                    gjxl::gpu_profile_internal::GpuProfilingMode::kDispatch})
+    if (!CheckResidentStageProfiles(gpu, source, mode)) return false;
   return true;
 }
 

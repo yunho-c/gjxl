@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include "gpu/cuda/cuda_kernel_profile.h"
 #include <cuda_runtime.h>
 
 #include <cmath>
@@ -1576,12 +1577,14 @@ cudaError_t LaunchResidentCoefficientShapes(
     unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
     cudaStream_t stream) {
   const auto generic = [&] {
-    EncodeResidentCoefficientsKernelBounded<true, true, true, MaterializeOnly>
-        <<<batch.anchor_count, kThreads, 0, stream>>>(
-        anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
-        quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
-        inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
-        batch, params);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"EncodeResidentCoefficientsKernelBounded<true, true, true, MaterializeOnly>", batch.anchor_count, kThreads, stream}; profile_scope) {
+      EncodeResidentCoefficientsKernelBounded<true, true, true, MaterializeOnly>
+          <<<batch.anchor_count, kThreads, 0, stream>>>(
+          anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
+          quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
+          inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
+          batch, params);
+    }
     return cudaGetLastError();
   };
   const auto launch = [&](auto shape) {
@@ -1593,12 +1596,14 @@ cudaError_t LaunchResidentCoefficientShapes(
         batch.coefficient_count != width * height ||
         batch.covered_width != width / 8 || batch.covered_height != height / 8)
       return generic();
-    EncodeResidentCoefficientsShapeKernel<width, height, threads, MaterializeOnly>
-        <<<batch.anchor_count, threads, 0, stream>>>(
-        anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
-        quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
-        inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
-        batch, params);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"EncodeResidentCoefficientsShapeKernel<width, height, threads, MaterializeOnly>", batch.anchor_count, threads, stream}; profile_scope) {
+      EncodeResidentCoefficientsShapeKernel<width, height, threads, MaterializeOnly>
+          <<<batch.anchor_count, threads, 0, stream>>>(
+          anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
+          quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
+          inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
+          batch, params);
+    }
     return cudaGetLastError();
   };
   switch (params.strategy) {
@@ -1730,8 +1735,10 @@ cudaError_t LaunchCudaAqDcLowFrequencies(
     cudaStream_t stream) {
   const uint32_t count = batch.anchor_count * 3u * batch.covered_width * batch.covered_height;
   if (!count) return cudaSuccess;
-  DcLowFrequenciesKernel<<<(count + kThreads - 1) / kThreads, kThreads, 0, stream>>>(
-      anchors, dc, coefficients, batch, block_width, block_height);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"DcLowFrequenciesKernel", (count + kThreads - 1) / kThreads, kThreads, stream}; profile_scope) {
+    DcLowFrequenciesKernel<<<(count + kThreads - 1) / kThreads, kThreads, 0, stream>>>(
+        anchors, dc, coefficients, batch, block_width, block_height);
+  }
   return cudaGetLastError();
 }
 
@@ -1740,20 +1747,26 @@ cudaError_t LaunchCudaAqAdjustQuantField(
     uint32_t quant_stride, CudaAqExactBatch batch, float mean_max_mixer,
     cudaStream_t stream) {
   const uint32_t blocks = (batch.anchor_count + kThreads - 1) / kThreads;
-  AdjustQuantFieldKernel<<<blocks, kThreads, 0, stream>>>(
-      anchors, quant_field, error, quant_stride, batch, mean_max_mixer);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"AdjustQuantFieldKernel", blocks, kThreads, stream}; profile_scope) {
+    AdjustQuantFieldKernel<<<blocks, kThreads, 0, stream>>>(
+        anchors, quant_field, error, quant_stride, batch, mean_max_mixer);
+  }
   return cudaGetLastError();
 }
 
 cudaError_t LaunchCudaAqPositiveRange(
     const float* values, uint32_t count, float* range, unsigned int* error,
     cudaStream_t stream) {
-  InitializePositiveRangeKernel<<<1, 1, 0, stream>>>(range);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"InitializePositiveRangeKernel", 1, 1, stream}; profile_scope) {
+    InitializePositiveRangeKernel<<<1, 1, 0, stream>>>(range);
+  }
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess) return status;
   const uint32_t blocks = (count + kThreads - 1) / kThreads;
-  ReducePositiveRangeKernel<<<blocks, kThreads, 0, stream>>>(
-      values, count, range, error);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ReducePositiveRangeKernel", blocks, kThreads, stream}; profile_scope) {
+    ReducePositiveRangeKernel<<<blocks, kThreads, 0, stream>>>(
+        values, count, range, error);
+  }
   return cudaGetLastError();
 }
 
@@ -1765,8 +1778,10 @@ cudaError_t LaunchCudaAqGatherTransformPixels(
       3 * static_cast<size_t>(batch.anchor_count) * batch.coefficient_count;
   const uint32_t blocks =
       static_cast<uint32_t>((count + kThreads - 1) / kThreads);
-  GatherTransformPixelsKernel<<<blocks, kThreads, 0, stream>>>(
-      coding_x, coding_y, coding_b, anchors, gathered, batch, coding_stride);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"GatherTransformPixelsKernel", blocks, kThreads, stream}; profile_scope) {
+    GatherTransformPixelsKernel<<<blocks, kThreads, 0, stream>>>(
+        coding_x, coding_y, coding_b, anchors, gathered, batch, coding_stride);
+  }
   return cudaGetLastError();
 }
 
@@ -1776,9 +1791,11 @@ cudaError_t LaunchCudaAqFinalColorCorrelationReference(
     const int* raw_quant, const unsigned int* quantizer, signed char* y_to_x,
     signed char* y_to_b, unsigned int* error, uint32_t tile_count,
     cudaStream_t stream) {
-  FinalColorCorrelationKernel<<<tile_count, 4, 0, stream>>>(
-      transforms, tile_offsets, quant_tables, forward_coefficients, raw_quant,
-      quantizer, y_to_x, y_to_b, error, tile_count);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"FinalColorCorrelationKernel", tile_count, 4, stream}; profile_scope) {
+    FinalColorCorrelationKernel<<<tile_count, 4, 0, stream>>>(
+        transforms, tile_offsets, quant_tables, forward_coefficients, raw_quant,
+        quantizer, y_to_x, y_to_b, error, tile_count);
+  }
   return cudaGetLastError();
 }
 
@@ -1792,9 +1809,11 @@ cudaError_t LaunchCudaAqFinalColorCorrelation(
   // occupancy without packing divergent tile loops into one warp.
   constexpr unsigned kTilesPerBlock = 2;
   const uint32_t blocks = (tile_count + kTilesPerBlock - 1) / kTilesPerBlock;
-  CooperativeFinalCflKernel<kTilesPerBlock><<<blocks, 32 * kTilesPerBlock, 0, stream>>>(
-      transforms, tile_offsets, quant_tables, forward_coefficients, raw_quant,
-      quantizer, y_to_x, y_to_b, error, tile_count);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"CooperativeFinalCflKernel<kTilesPerBlock>", blocks, 32 * kTilesPerBlock, stream}; profile_scope) {
+    CooperativeFinalCflKernel<kTilesPerBlock><<<blocks, 32 * kTilesPerBlock, 0, stream>>>(
+        transforms, tile_offsets, quant_tables, forward_coefficients, raw_quant,
+        quantizer, y_to_x, y_to_b, error, tile_count);
+  }
   return cudaGetLastError();
 }
 
@@ -1806,9 +1825,11 @@ cudaError_t LaunchCudaAqFinalColorCorrelationNonlinear(
     uint32_t nonlinear_iterations, cudaStream_t stream) {
   if (nonlinear_iterations == 0 || nonlinear_iterations > 20 || tile_count == 0)
     return cudaErrorInvalidValue;
-  NonlinearFinalCflKernel<<<tile_count, 128, 0, stream>>>(
-      transforms, tile_offsets, quant_tables, forward_coefficients, raw_quant,
-      quantizer, y_to_x, y_to_b, error, tile_count, nonlinear_iterations);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"NonlinearFinalCflKernel", tile_count, 128, stream}; profile_scope) {
+    NonlinearFinalCflKernel<<<tile_count, 128, 0, stream>>>(
+        transforms, tile_offsets, quant_tables, forward_coefficients, raw_quant,
+        quantizer, y_to_x, y_to_b, error, tile_count, nonlinear_iterations);
+  }
   return cudaGetLastError();
 }
 
@@ -1818,9 +1839,11 @@ cudaError_t LaunchCudaAqSelectAdjustedQuantizationScalar(
     const unsigned int* quantizer, unsigned int* error, CudaAqExactBatch batch,
     CudaAqResidentParams params, cudaStream_t stream) {
   const uint32_t blocks = (batch.anchor_count + kThreads - 1) / kThreads;
-  SelectAdjustedQuantizationKernel<<<blocks, kThreads, 0, stream>>>(
-      anchors, quant_tables, raw_quant, forward_coefficients,
-      adjustment_thresholds, quantizer, error, batch, params);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"SelectAdjustedQuantizationKernel", blocks, kThreads, stream}; profile_scope) {
+    SelectAdjustedQuantizationKernel<<<blocks, kThreads, 0, stream>>>(
+        anchors, quant_tables, raw_quant, forward_coefficients,
+        adjustment_thresholds, quantizer, error, batch, params);
+  }
   return cudaGetLastError();
 }
 
@@ -1839,34 +1862,44 @@ cudaError_t LaunchCudaAqSelectAdjustedQuantization(
   // Keep the old wrapper's behavior for other internal batch configurations.
   if (width == 8 && height == 8 && batch.coefficient_count == 64 &&
       params.strategy == 0) {
-    SelectAdjustedQuantizationCooperativeKernel<8, 8, 1>
-        <<<batch.anchor_count, 96, 0, stream>>>(
-            anchors, quant_tables, raw_quant, forward_coefficients,
-            adjustment_thresholds, quantizer, error, batch, params);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"SelectAdjustedQuantizationCooperativeKernel<8, 8, 1>", batch.anchor_count, 96, stream}; profile_scope) {
+      SelectAdjustedQuantizationCooperativeKernel<8, 8, 1>
+          <<<batch.anchor_count, 96, 0, stream>>>(
+              anchors, quant_tables, raw_quant, forward_coefficients,
+              adjustment_thresholds, quantizer, error, batch, params);
+    }
   } else if (width == 16 && height == 8 && batch.coefficient_count == 128 &&
              (params.strategy == 6 || params.strategy == 7)) {
-    SelectAdjustedQuantizationCooperativeKernel<16, 8, 1>
-        <<<batch.anchor_count, 96, 0, stream>>>(
-            anchors, quant_tables, raw_quant, forward_coefficients,
-            adjustment_thresholds, quantizer, error, batch, params);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"SelectAdjustedQuantizationCooperativeKernel<16, 8, 1>", batch.anchor_count, 96, stream}; profile_scope) {
+      SelectAdjustedQuantizationCooperativeKernel<16, 8, 1>
+          <<<batch.anchor_count, 96, 0, stream>>>(
+              anchors, quant_tables, raw_quant, forward_coefficients,
+              adjustment_thresholds, quantizer, error, batch, params);
+    }
   } else if (width == 16 && height == 16 && batch.coefficient_count == 256 &&
              params.strategy == 4) {
-    SelectAdjustedQuantizationCooperativeKernel<16, 16, 1>
-        <<<batch.anchor_count, 96, 0, stream>>>(
-            anchors, quant_tables, raw_quant, forward_coefficients,
-            adjustment_thresholds, quantizer, error, batch, params);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"SelectAdjustedQuantizationCooperativeKernel<16, 16, 1>", batch.anchor_count, 96, stream}; profile_scope) {
+      SelectAdjustedQuantizationCooperativeKernel<16, 16, 1>
+          <<<batch.anchor_count, 96, 0, stream>>>(
+              anchors, quant_tables, raw_quant, forward_coefficients,
+              adjustment_thresholds, quantizer, error, batch, params);
+    }
   } else if (width == 32 && height == 16 && batch.coefficient_count == 512 &&
              (params.strategy == 10 || params.strategy == 11)) {
-    SelectAdjustedQuantizationCooperativeKernel<32, 16, 1>
-        <<<batch.anchor_count, 96, 0, stream>>>(
-            anchors, quant_tables, raw_quant, forward_coefficients,
-            adjustment_thresholds, quantizer, error, batch, params);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"SelectAdjustedQuantizationCooperativeKernel<32, 16, 1>", batch.anchor_count, 96, stream}; profile_scope) {
+      SelectAdjustedQuantizationCooperativeKernel<32, 16, 1>
+          <<<batch.anchor_count, 96, 0, stream>>>(
+              anchors, quant_tables, raw_quant, forward_coefficients,
+              adjustment_thresholds, quantizer, error, batch, params);
+    }
   } else if (width == 32 && height == 32 && batch.coefficient_count == 1024 &&
              params.strategy == 5) {
-    SelectAdjustedQuantizationCooperativeKernel<32, 32, 1>
-        <<<batch.anchor_count, 96, 0, stream>>>(
-            anchors, quant_tables, raw_quant, forward_coefficients,
-            adjustment_thresholds, quantizer, error, batch, params);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"SelectAdjustedQuantizationCooperativeKernel<32, 32, 1>", batch.anchor_count, 96, stream}; profile_scope) {
+      SelectAdjustedQuantizationCooperativeKernel<32, 32, 1>
+          <<<batch.anchor_count, 96, 0, stream>>>(
+              anchors, quant_tables, raw_quant, forward_coefficients,
+              adjustment_thresholds, quantizer, error, batch, params);
+    }
   } else {
     return LaunchCudaAqSelectAdjustedQuantizationScalar(
         anchors, quant_tables, raw_quant, forward_coefficients,
@@ -1916,12 +1949,14 @@ cudaError_t LaunchCudaAqEncodeResidentCoefficientsGeneric(
     const unsigned int* quantizer, const float* adjustment_thresholds,
     unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
     cudaStream_t stream) {
-  EncodeResidentCoefficientsKernelBounded<true, true, true>
-      <<<batch.anchor_count, kThreads, 0, stream>>>(
-      anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
-      quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
-      inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
-      batch, params);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"EncodeResidentCoefficientsKernelBounded<true, true, true>", batch.anchor_count, kThreads, stream}; profile_scope) {
+    EncodeResidentCoefficientsKernelBounded<true, true, true>
+        <<<batch.anchor_count, kThreads, 0, stream>>>(
+        anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
+        quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
+        inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
+        batch, params);
+  }
   return cudaGetLastError();
 }
 
@@ -1934,12 +1969,14 @@ cudaError_t LaunchCudaAqMaterializeResidentCoefficientsGeneric(
     const unsigned int* quantizer, const float* adjustment_thresholds,
     unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
     cudaStream_t stream) {
-  EncodeResidentCoefficientsKernelBounded<true, true, true, true>
-      <<<batch.anchor_count, kThreads, 0, stream>>>(
-      anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
-      quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
-      inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
-      batch, params);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"EncodeResidentCoefficientsKernelBounded<true, true, true, true>", batch.anchor_count, kThreads, stream}; profile_scope) {
+    EncodeResidentCoefficientsKernelBounded<true, true, true, true>
+        <<<batch.anchor_count, kThreads, 0, stream>>>(
+        anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
+        quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
+        inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
+        batch, params);
+  }
   return cudaGetLastError();
 }
 
@@ -1952,12 +1989,14 @@ cudaError_t LaunchCudaAqEncodeResidentCoefficientsReference(
     const unsigned int* quantizer, const float* adjustment_thresholds,
     unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
     cudaStream_t stream) {
-  EncodeResidentCoefficientsKernel<false, false, false>
-      <<<batch.anchor_count, kThreads, 0, stream>>>(
-      anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
-      quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
-      inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
-      batch, params);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"EncodeResidentCoefficientsKernel<false, false, false>", batch.anchor_count, kThreads, stream}; profile_scope) {
+    EncodeResidentCoefficientsKernel<false, false, false>
+        <<<batch.anchor_count, kThreads, 0, stream>>>(
+        anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
+        quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
+        inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
+        batch, params);
+  }
   return cudaGetLastError();
 }
 
@@ -1970,12 +2009,14 @@ cudaError_t LaunchCudaAqEncodeResidentCoefficientsUnfused(
     const unsigned int* quantizer, const float* adjustment_thresholds,
     unsigned int* error, CudaAqExactBatch batch, CudaAqResidentParams params,
     cudaStream_t stream) {
-  EncodeResidentCoefficientsKernel<true, true, false>
-      <<<batch.anchor_count, kThreads, 0, stream>>>(
-      anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
-      quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
-      inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
-      batch, params);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"EncodeResidentCoefficientsKernel<true, true, false>", batch.anchor_count, kThreads, stream}; profile_scope) {
+    EncodeResidentCoefficientsKernel<true, true, false>
+        <<<batch.anchor_count, kThreads, 0, stream>>>(
+        anchors, quant_tables, raw_quant, y_to_x, y_to_b, forward_coefficients,
+        quantized_coefficients, reconstruction_coefficients, dc, quantized_dc,
+        inverse_sigma, epf_sharpness, quantizer, adjustment_thresholds, error,
+        batch, params);
+  }
   return cudaGetLastError();
 }
 
@@ -1985,8 +2026,10 @@ cudaError_t LaunchCudaAqResidentPolicyInitialize(
     cudaStream_t stream) {
   const uint32_t count = max(params.block_count, params.score_count);
   const uint32_t blocks = (count + kThreads - 1) / kThreads;
-  ResidentPolicyInitializeKernel<<<blocks, kThreads, 0, stream>>>(
-      quant_field, initial_quant_field, scores, error, params);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ResidentPolicyInitializeKernel", blocks, kThreads, stream}; profile_scope) {
+    ResidentPolicyInitializeKernel<<<blocks, kThreads, 0, stream>>>(
+        quant_field, initial_quant_field, scores, error, params);
+  }
   return cudaGetLastError();
 }
 
@@ -1996,9 +2039,11 @@ cudaError_t LaunchCudaAqResidentPolicyUpdate(
     const unsigned int* quantizer, unsigned int* error,
     CudaAqResidentPolicyParams params, cudaStream_t stream) {
   const uint32_t blocks = (params.block_count + kThreads - 1) / kThreads;
-  ResidentPolicyUpdateKernel<<<blocks, kThreads, 0, stream>>>(
-      quant_field, initial_quant_field, block_distance, score, scores,
-      quantizer, error, params);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ResidentPolicyUpdateKernel", blocks, kThreads, stream}; profile_scope) {
+    ResidentPolicyUpdateKernel<<<blocks, kThreads, 0, stream>>>(
+        quant_field, initial_quant_field, block_distance, score, scores,
+        quantizer, error, params);
+  }
   return cudaGetLastError();
 }
 

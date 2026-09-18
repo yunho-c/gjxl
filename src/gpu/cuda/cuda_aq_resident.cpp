@@ -265,7 +265,7 @@ class CudaPreparedResidentAqEvaluation final
       gpu_profile_internal::GpuExecutionProfile* profile) override {
     Status status = ValidateCudaProfileRequest(mode, profile);
     if (!status.ok()) return status;
-    CudaProfileCapture capture(*backend_, "aq.initial_quantization");
+    CudaProfileCapture capture(*backend_, "aq.initial_quantization", mode);
     status = ComputeInitialQuantizationForEncoding(options, nullptr, 0.0f);
     if (!status.ok()) return status;
     *profile = std::move(capture).Finish();
@@ -278,7 +278,7 @@ class CudaPreparedResidentAqEvaluation final
       gpu_profile_internal::GpuExecutionProfile* profile) override {
     Status status = ValidateCudaProfileRequest(mode, profile);
     if (!status.ok()) return status;
-    CudaProfileCapture capture(*backend_, "aq.prepare_encoding_policy");
+    CudaProfileCapture capture(*backend_, "aq.prepare_encoding_policy", mode);
     status = PrepareResidentEncodingPolicy(butteraugli_target, setup, nonlinear_iterations);
     if (!status.ok()) return status;
     *profile = std::move(capture).Finish();
@@ -293,7 +293,7 @@ class CudaPreparedResidentAqEvaluation final
       gpu_profile_internal::GpuExecutionProfile* profile) override {
     Status status = ValidateCudaProfileRequest(mode, profile);
     if (!status.ok()) return status;
-    CudaProfileCapture capture(*backend_, "aq.initial_quantization");
+    CudaProfileCapture capture(*backend_, "aq.initial_quantization", mode);
     status = ComputeInitialQuantization(
       options, output, quantizer, quant_dc, initial_color_correlation);
     if (!status.ok()) return status;
@@ -307,7 +307,7 @@ class CudaPreparedResidentAqEvaluation final
       gpu_profile_internal::GpuExecutionProfile* profile) override {
     Status status = ValidateCudaProfileRequest(mode, profile);
     if (!status.ok()) return status;
-    CudaProfileCapture capture(*backend_, "aq.adjust_quant_field");
+    CudaProfileCapture capture(*backend_, "aq.adjust_quant_field", mode);
     status = AdjustQuantFieldResident(butteraugli_target, input, output);
     if (!status.ok()) return status;
     *profile = std::move(capture).Finish();
@@ -321,7 +321,7 @@ class CudaPreparedResidentAqEvaluation final
       gpu_profile_internal::GpuExecutionProfile* profile) override {
     Status status = ValidateCudaProfileRequest(mode, profile);
     if (!status.ok()) return status;
-    CudaProfileCapture capture(*backend_, "aq.resident_policy");
+    CudaProfileCapture capture(*backend_, "aq.resident_policy", mode);
     status = EvaluateResidentButteraugliPolicy(input, output);
     if (!status.ok()) return status;
     *profile = std::move(capture).Finish();

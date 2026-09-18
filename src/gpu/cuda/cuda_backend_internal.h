@@ -19,6 +19,7 @@
 #include "core/resource_context.h"
 #include "gpu/backend.h"
 #include "gpu/cuda/cuda_kernels.h"
+#include "gpu/cuda/cuda_kernel_profile.h"
 #include "gpu/image.h"
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/aq_evaluation.h"
@@ -133,20 +134,32 @@ class CudaSubmission final : public GpuSubmission {
  public:
   CudaSubmission(std::shared_ptr<CudaDeviceState> state, cudaEvent_t event,
                  bool fail_completion, cudaEvent_t profile_begin = nullptr,
-                 gpu_profile_internal::GpuSubmissionProfile profile = {});
+                 gpu_profile_internal::GpuSubmissionProfile profile = {},
+                 gpu_profile_internal::GpuProfilingMode mode =
+                   gpu_profile_internal::GpuProfilingMode::kDisabled);
   ~CudaSubmission() override;
 
   Status Wait() override;
 
   Status ResolveProfile(const CudaDeviceState* state,
                         std::string_view submission_id,
+                        gpu_profile_internal::GpuProfilingMode mode,
                         gpu_profile_internal::GpuExecutionProfile* profile);
+  bool BeginKernelProfile(const char* id, dim3 grid, dim3 block, cudaStream_t stream) noexcept;
+  void EndKernelProfile(cudaStream_t stream) noexcept;
+  Status KernelProfileStatus() const;
 
  private:
   std::shared_ptr<CudaDeviceState> state_;
   cudaEvent_t event_ = nullptr;
   cudaEvent_t profile_begin_ = nullptr;
   gpu_profile_internal::GpuSubmissionProfile profile_;
+  struct KernelEvents { cudaEvent_t begin = nullptr; cudaEvent_t end = nullptr; };
+  static_assert(sizeof(KernelEvents) == sizeof(std::array<void*, 2>));
+  gpu_profile_internal::ProfileStorage<KernelEvents> kernel_events_;
+  gpu_profile_internal::GpuProfilingMode profile_mode_;
+  Status kernel_profile_status_;
+  cudaError_t kernel_event_error_ = cudaSuccess;
   bool fail_completion_ = false;
   std::once_flag wait_once_;
   Status completion_status_;
@@ -166,12 +179,14 @@ class CudaBackend;
 // host outputs. The ordinary path never constructs a capture.
 class CudaProfileCapture {
  public:
-  CudaProfileCapture(CudaBackend& backend, std::string_view operation);
+  CudaProfileCapture(CudaBackend& backend, std::string_view operation,
+    gpu_profile_internal::GpuProfilingMode mode = gpu_profile_internal::GpuProfilingMode::kStage);
   ~CudaProfileCapture();
   CudaProfileCapture(const CudaProfileCapture&) = delete;
   CudaProfileCapture& operator=(const CudaProfileCapture&) = delete;
   static CudaProfileCapture* Current(const CudaBackend& backend) noexcept;
   std::string_view operation() const noexcept { return operation_; }
+  gpu_profile_internal::GpuProfilingMode mode() const noexcept { return session_.mode(); }
   Status Append(CudaSubmission& submission);
   gpu_profile_internal::GpuExecutionProfile Finish() && {
     return std::move(session_).Finish();

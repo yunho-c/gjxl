@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
+#include "gpu/cuda/cuda_kernel_profile.h"
 #include "gpu/cuda/cuda_aq_butteraugli_kernels.h"
 #include <cuda_runtime.h>
 
@@ -124,10 +125,14 @@ cudaError_t LaunchCudaAqComposeReduction(CudaAqComposeReductionPlan plan,
   if (plan.batch.anchor_count == 0)
     return cudaSuccess;
   if (plan.batch.pixel_width == 8 && plan.batch.pixel_height == 8) {
-    ComposeDct8ReductionKernel<4>
-        <<<(plan.batch.anchor_count + 3) / 4, 128, 0, stream>>>(plan);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ComposeDct8ReductionKernel<4>", (plan.batch.anchor_count + 3) / 4, 128, stream}; profile_scope) {
+      ComposeDct8ReductionKernel<4>
+          <<<(plan.batch.anchor_count + 3) / 4, 128, 0, stream>>>(plan);
+    }
   } else {
-    ComposeReductionKernel<<<plan.batch.anchor_count, 256, 0, stream>>>(plan);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ComposeReductionKernel", plan.batch.anchor_count, 256, stream}; profile_scope) {
+      ComposeReductionKernel<<<plan.batch.anchor_count, 256, 0, stream>>>(plan);
+    }
   }
   return cudaGetLastError();
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
+#include "gpu/cuda/cuda_kernel_profile.h"
 #include "gpu/cuda/cuda_direct_ac_pack_kernels.h"
 #include <cuda_runtime.h>
 #include <cstddef>
@@ -58,9 +59,11 @@ cudaError_t LaunchCudaPackCompactAcGroups(
       reinterpret_cast<uintptr_t>(words) % 8 != 0)
     return cudaErrorInvalidValue;
   const uint32_t threads = min(256u, max(32u, batch.coefficient_count / 4));
-  PackCompactAcGroupsKernel<<<batch.anchor_count, threads, 0, stream>>>(
-      anchors, destination_offsets, source, bytes, words, flags, batch,
-      block_width, block_height);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"PackCompactAcGroupsKernel", batch.anchor_count, threads, stream}; profile_scope) {
+    PackCompactAcGroupsKernel<<<batch.anchor_count, threads, 0, stream>>>(
+        anchors, destination_offsets, source, bytes, words, flags, batch,
+        block_width, block_height);
+  }
   return cudaGetLastError();
 }
 }  // namespace gjxl::cuda_internal

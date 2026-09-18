@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include "gpu/cuda/cuda_kernel_profile.h"
 #include "gpu/cuda/cuda_kernels.h"
 
 #include <cstddef>
@@ -176,8 +177,10 @@ cudaError_t LaunchCudaAcStrategyBatch(
   // FinalizeCostKernel reads the norm before writing its final result.
   const unsigned int norm_blocks =
     (params.candidate_count + kQuantNormThreads - 1) / kQuantNormThreads;
-  PrepareQuantNormsKernel<<<norm_blocks, kQuantNormThreads, 0, stream>>>(
-    typed_candidates, quant_field, costs, params);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"PrepareQuantNormsKernel", norm_blocks, kQuantNormThreads, stream}; profile_scope) {
+    PrepareQuantNormsKernel<<<norm_blocks, kQuantNormThreads, 0, stream>>>(
+      typed_candidates, quant_field, costs, params);
+  }
   cudaError_t error = cudaGetLastError();
   if (error != cudaSuccess) return error;
 
@@ -189,9 +192,11 @@ cudaError_t LaunchCudaAcStrategyBatch(
 
   const unsigned int cost_blocks =
     (params.candidate_count + kCostThreads - 1) / kCostThreads;
-  FinalizeCostKernel<<<cost_blocks, kCostThreads, 0, stream>>>(
-    scratch_a, typed_candidates, static_cast<const ChannelRate*>(rate_scratch),
-    costs, params);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"FinalizeCostKernel", cost_blocks, kCostThreads, stream}; profile_scope) {
+    FinalizeCostKernel<<<cost_blocks, kCostThreads, 0, stream>>>(
+      scratch_a, typed_candidates, static_cast<const ChannelRate*>(rate_scratch),
+      costs, params);
+  }
   return cudaGetLastError();
 }
 

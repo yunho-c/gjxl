@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include "gpu/cuda/cuda_kernel_profile.h"
 #include <cuda_runtime_api.h>
 
 #include <array>
@@ -677,9 +678,11 @@ cudaError_t LaunchCudaAqScatterReconstruction(
   if (count == 0) return cudaSuccess;
   const unsigned int blocks =
       static_cast<unsigned int>((count + kThreads - 1) / kThreads);
-  ScatterReconstructionKernel<<<blocks, kThreads, 0, stream>>>(
-      anchors, inverse, reconstructed[0], reconstructed[1], reconstructed[2],
-      coding_stride, batch);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ScatterReconstructionKernel", blocks, kThreads, stream}; profile_scope) {
+    ScatterReconstructionKernel<<<blocks, kThreads, 0, stream>>>(
+        anchors, inverse, reconstructed[0], reconstructed[1], reconstructed[2],
+        coding_stride, batch);
+  }
   return cudaGetLastError();
 }
 
@@ -691,9 +694,11 @@ cudaError_t LaunchCudaAqGaborish(std::array<const float*, 3> input,
   const size_t count = static_cast<size_t>(params.width) * params.height;
   const unsigned int blocks =
       static_cast<unsigned int>((count + kThreads - 1) / kThreads);
-  GaborishKernel<<<blocks, kThreads, 0, stream>>>(input[0], input[1], input[2],
-                                                  output[0], output[1],
-                                                  output[2], error, params);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"GaborishKernel", blocks, kThreads, stream}; profile_scope) {
+    GaborishKernel<<<blocks, kThreads, 0, stream>>>(input[0], input[1], input[2],
+                                                    output[0], output[1],
+                                                    output[2], error, params);
+  }
   return cudaGetLastError();
 }
 
@@ -715,9 +720,11 @@ cudaError_t LaunchCudaAqGaborishEpf(
   const size_t blocks = static_cast<size_t>(tiles_per_row) *
       ((static_cast<size_t>(epf.height) + kEpfTileHeight - 1) / kEpfTileHeight);
   if (blocks > 0x7fffffffu) return cudaErrorInvalidValue;
-  GaborishEpfKernel<<<static_cast<unsigned int>(blocks), kThreads, 0, stream>>>(
-      input[0], input[1], input[2], inverse_sigma, output[0], output[1],
-      output[2], error, epf, tiles_per_row, gaborish);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"GaborishEpfKernel", static_cast<unsigned int>(blocks), kThreads, stream}; profile_scope) {
+    GaborishEpfKernel<<<static_cast<unsigned int>(blocks), kThreads, 0, stream>>>(
+        input[0], input[1], input[2], inverse_sigma, output[0], output[1],
+        output[2], error, epf, tiles_per_row, gaborish);
+  }
   return cudaGetLastError();
 }
 
@@ -732,19 +739,25 @@ cudaError_t LaunchCudaAqEpf(std::array<const float*, 3> input,
     ((static_cast<size_t>(params.height) + kEpfTileHeight - 1) / kEpfTileHeight));
   switch (params.pass) {
     case 0:
-      EpfTiledKernel<0, false><<<blocks, kThreads, 0, stream>>>(
-        input[0], input[1], input[2], inverse_sigma, output[0], output[1],
-        output[2], error, params, tiles_per_row, {});
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"EpfTiledKernel<0, false>", blocks, kThreads, stream}; profile_scope) {
+        EpfTiledKernel<0, false><<<blocks, kThreads, 0, stream>>>(
+          input[0], input[1], input[2], inverse_sigma, output[0], output[1],
+          output[2], error, params, tiles_per_row, {});
+      }
       break;
     case 1:
-      EpfTiledKernel<1, false><<<blocks, kThreads, 0, stream>>>(
-        input[0], input[1], input[2], inverse_sigma, output[0], output[1],
-        output[2], error, params, tiles_per_row, {});
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"EpfTiledKernel<1, false>", blocks, kThreads, stream}; profile_scope) {
+        EpfTiledKernel<1, false><<<blocks, kThreads, 0, stream>>>(
+          input[0], input[1], input[2], inverse_sigma, output[0], output[1],
+          output[2], error, params, tiles_per_row, {});
+      }
       break;
     case 2:
-      EpfTiledKernel<2, false><<<blocks, kThreads, 0, stream>>>(
-        input[0], input[1], input[2], inverse_sigma, output[0], output[1],
-        output[2], error, params, tiles_per_row, {});
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"EpfTiledKernel<2, false>", blocks, kThreads, stream}; profile_scope) {
+        EpfTiledKernel<2, false><<<blocks, kThreads, 0, stream>>>(
+          input[0], input[1], input[2], inverse_sigma, output[0], output[1],
+          output[2], error, params, tiles_per_row, {});
+      }
       break;
     default:
       return cudaErrorInvalidValue;
@@ -771,13 +784,17 @@ cudaError_t LaunchCudaAqEpfToLinear(
     ((static_cast<size_t>(epf.height) + kEpfTileHeight - 1) / kEpfTileHeight);
   if (blocks > 0x7fffffffu) return cudaErrorInvalidValue;
   if (epf.pass == 1) {
-    EpfTiledKernel<1, true><<<static_cast<unsigned int>(blocks), kThreads, 0, stream>>>(
-        input[0], input[1], input[2], inverse_sigma, output[0], output[1],
-        output[2], error, epf, tiles_per_row, color);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"EpfTiledKernel<1, true>", static_cast<unsigned int>(blocks), kThreads, stream}; profile_scope) {
+      EpfTiledKernel<1, true><<<static_cast<unsigned int>(blocks), kThreads, 0, stream>>>(
+          input[0], input[1], input[2], inverse_sigma, output[0], output[1],
+          output[2], error, epf, tiles_per_row, color);
+    }
   } else {
-    EpfTiledKernel<2, true><<<static_cast<unsigned int>(blocks), kThreads, 0, stream>>>(
-        input[0], input[1], input[2], inverse_sigma, output[0], output[1],
-        output[2], error, epf, tiles_per_row, color);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"EpfTiledKernel<2, true>", static_cast<unsigned int>(blocks), kThreads, stream}; profile_scope) {
+      EpfTiledKernel<2, true><<<static_cast<unsigned int>(blocks), kThreads, 0, stream>>>(
+          input[0], input[1], input[2], inverse_sigma, output[0], output[1],
+          output[2], error, epf, tiles_per_row, color);
+    }
   }
   return cudaGetLastError();
 }
@@ -790,9 +807,11 @@ cudaError_t LaunchCudaAqOpsinToLinear(std::array<const float*, 3> input,
   const size_t count = static_cast<size_t>(params.width) * params.height;
   const unsigned int blocks =
       static_cast<unsigned int>((count + kThreads - 1) / kThreads);
-  OpsinToLinearKernel<<<blocks, kThreads, 0, stream>>>(
-      input[0], input[1], input[2], output[0], output[1], output[2], error,
-      params);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"OpsinToLinearKernel", blocks, kThreads, stream}; profile_scope) {
+    OpsinToLinearKernel<<<blocks, kThreads, 0, stream>>>(
+        input[0], input[1], input[2], output[0], output[1], output[2], error,
+        params);
+  }
   return cudaGetLastError();
 }
 
@@ -808,14 +827,16 @@ cudaError_t LaunchCudaLinearRgbToOpsin(
     static_cast<size_t>(params.padded_width) * params.padded_height;
   const unsigned int padded_blocks =
     static_cast<unsigned int>((padded_count + kThreads - 1) / kThreads);
-  LinearRgbToOpsinKernel<<<padded_blocks, kThreads, 0, stream>>>(input[0],
-    input[1],
-    input[2],
-    output[0],
-    output[1],
-    output[2],
-    error,
-    params);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"LinearRgbToOpsinKernel", padded_blocks, kThreads, stream}; profile_scope) {
+    LinearRgbToOpsinKernel<<<padded_blocks, kThreads, 0, stream>>>(input[0],
+      input[1],
+      input[2],
+      output[0],
+      output[1],
+      output[2],
+      error,
+      params);
+  }
   cudaError_t status = cudaGetLastError();
   if (status != cudaSuccess || !params.compute_matrix_scale_stats) {
     return status;
@@ -824,8 +845,10 @@ cudaError_t LaunchCudaLinearRgbToOpsin(
     static_cast<size_t>(params.source_width) * params.source_height;
   const unsigned int source_blocks =
     static_cast<unsigned int>((source_count + kThreads - 1) / kThreads);
-  OpsinMatrixScaleStatsKernel<<<source_blocks, kThreads, 0, stream>>>(
-    output[0], output[1], output[2], matrix_scale_stats, error, params);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"OpsinMatrixScaleStatsKernel", source_blocks, kThreads, stream}; profile_scope) {
+    OpsinMatrixScaleStatsKernel<<<source_blocks, kThreads, 0, stream>>>(
+      output[0], output[1], output[2], matrix_scale_stats, error, params);
+  }
   return cudaGetLastError();
 }
 
@@ -835,9 +858,11 @@ cudaError_t LaunchCudaAqReduceButteraugli(
     unsigned int* error, uint32_t source_width, uint32_t source_height,
     CudaAqExactBatch batch, cudaStream_t stream) {
   if (batch.anchor_count == 0) return cudaSuccess;
-  ReduceButteraugliKernel<<<batch.anchor_count, kThreads, 0, stream>>>(
-      distance_map, distance_stride, anchors, block_distance, block_stride,
-      error, source_width, source_height, batch);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ReduceButteraugliKernel", batch.anchor_count, kThreads, stream}; profile_scope) {
+    ReduceButteraugliKernel<<<batch.anchor_count, kThreads, 0, stream>>>(
+        distance_map, distance_stride, anchors, block_distance, block_stride,
+        error, source_width, source_height, batch);
+  }
   return cudaGetLastError();
 }
 
@@ -849,12 +874,14 @@ cudaError_t LaunchCudaAqReduceMaximumError(
     unsigned int* error, uint32_t source_width, uint32_t source_height,
     std::array<float, 3> limits, CudaAqExactBatch batch, cudaStream_t stream) {
   if (batch.anchor_count == 0) return cudaSuccess;
-  ReduceMaximumErrorKernel<<<batch.anchor_count, kThreads, 0, stream>>>(
-      reference[0], reference[1], reference[2], reconstructed[0],
-      reconstructed[1], reconstructed[2], reference_stride,
-      reconstruction_stride, anchors, block_error, block_stride,
-      transform_channel_maximum, error, source_width, source_height, limits[0],
-      limits[1], limits[2], batch);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ReduceMaximumErrorKernel", batch.anchor_count, kThreads, stream}; profile_scope) {
+    ReduceMaximumErrorKernel<<<batch.anchor_count, kThreads, 0, stream>>>(
+        reference[0], reference[1], reference[2], reconstructed[0],
+        reconstructed[1], reconstructed[2], reference_stride,
+        reconstruction_stride, anchors, block_error, block_stride,
+        transform_channel_maximum, error, source_width, source_height, limits[0],
+        limits[1], limits[2], batch);
+  }
   return cudaGetLastError();
 }
 

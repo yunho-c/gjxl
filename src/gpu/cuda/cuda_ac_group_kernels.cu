@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include "gpu/cuda/cuda_kernel_profile.h"
 #include "gpu/cuda/cuda_ac_group_kernels.h"
 
 #include <cuda_runtime.h>
@@ -44,8 +45,10 @@ cudaError_t LaunchCudaPackAcGroups(
       destination == nullptr || block_width == 0 || block_height == 0 ||
       batch.coefficient_count == 0) return cudaErrorInvalidValue;
   const uint32_t threads = batch.coefficient_count < 256 ? batch.coefficient_count : 256;
-  PackAcGroupsKernel<<<batch.anchor_count, threads, 0, stream>>>(
-      anchors, destination_offsets, source, destination, batch, block_width, block_height);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"PackAcGroupsKernel", batch.anchor_count, threads, stream}; profile_scope) {
+    PackAcGroupsKernel<<<batch.anchor_count, threads, 0, stream>>>(
+        anchors, destination_offsets, source, destination, batch, block_width, block_height);
+  }
   return cudaGetLastError();
 }
 

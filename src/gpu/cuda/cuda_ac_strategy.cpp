@@ -525,11 +525,10 @@ Status CudaBackend::EvaluateAcStrategyCandidateBatchesProfiled(
   std::span<const AcStrategyCandidateBatch> batches,
   gpu_profile_internal::GpuProfilingMode mode,
   std::unique_ptr<GpuSubmission>* submission) {
-  if (mode != gpu_profile_internal::GpuProfilingMode::kStage) {
+  if (mode != gpu_profile_internal::GpuProfilingMode::kStage &&
+      mode != gpu_profile_internal::GpuProfilingMode::kDispatch) {
     if (submission != nullptr) submission->reset();
-    return mode == gpu_profile_internal::GpuProfilingMode::kDispatch
-      ? Status::Unavailable("CUDA dispatch profiling is not implemented")
-      : Status::InvalidArgument("Profiled CUDA AC search requires stage profiling");
+    return Status::InvalidArgument("Profiled CUDA AC search requires stage or dispatch profiling");
   }
   return EvaluateAcStrategyCandidateBatchesImpl(batches, submission, mode);
 }

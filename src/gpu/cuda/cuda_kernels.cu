@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include "gpu/cuda/cuda_kernel_profile.h"
 #include "gpu/cuda/cuda_kernels.h"
 
 #include <array>
@@ -1422,11 +1423,15 @@ cudaError_t LaunchCudaDct(
     const unsigned int blocks = static_cast<unsigned int>(
       (transform_count + kTransforms - 1) / kTransforms);
     if (forward) {
-      ForwardDctFactoredKernel<kWidth, kHeight>
-        <<<blocks, kFactoredDctThreads, 0, stream>>>(input, output, transform_count);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ForwardDctFactoredKernel<kWidth, kHeight>", blocks, kFactoredDctThreads, stream}; profile_scope) {
+        ForwardDctFactoredKernel<kWidth, kHeight>
+          <<<blocks, kFactoredDctThreads, 0, stream>>>(input, output, transform_count);
+      }
     } else {
-      InverseDctFactoredKernel<kWidth, kHeight>
-        <<<blocks, kFactoredDctThreads, 0, stream>>>(input, output, transform_count);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"InverseDctFactoredKernel<kWidth, kHeight>", blocks, kFactoredDctThreads, stream}; profile_scope) {
+        InverseDctFactoredKernel<kWidth, kHeight>
+          <<<blocks, kFactoredDctThreads, 0, stream>>>(input, output, transform_count);
+      }
     }
   };
   using N8 = std::integral_constant<unsigned int, 8>;
@@ -1462,16 +1467,20 @@ cudaError_t LaunchAqImageDct(
     if constexpr (Forward) {
       const AqDctImageSource<kWidth> source{
         {coding[0], coding[1], coding[2]}, anchors, batch, stride};
-      ForwardDctFactoredKernel<kWidth, kHeight>
-        <<<blocks, kFactoredDctThreads, 0, stream>>>(
-          source, output + batch.coefficient_offset, count);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ForwardDctFactoredKernel<kWidth, kHeight>", blocks, kFactoredDctThreads, stream}; profile_scope) {
+        ForwardDctFactoredKernel<kWidth, kHeight>
+          <<<blocks, kFactoredDctThreads, 0, stream>>>(
+            source, output + batch.coefficient_offset, count);
+      }
     } else {
       const AqDctImageOutput destination{
         {reconstructed[0], reconstructed[1], reconstructed[2]}, anchors,
         batch, stride};
-      InverseDctFactoredKernel<kWidth, kHeight>
-        <<<blocks, kFactoredDctThreads, 0, stream>>>(
-          input + batch.coefficient_offset, destination, count);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"InverseDctFactoredKernel<kWidth, kHeight>", blocks, kFactoredDctThreads, stream}; profile_scope) {
+        InverseDctFactoredKernel<kWidth, kHeight>
+          <<<blocks, kFactoredDctThreads, 0, stream>>>(
+            input + batch.coefficient_offset, destination, count);
+      }
     }
   };
   using N8 = std::integral_constant<unsigned int, 8>;
@@ -1537,63 +1546,95 @@ cudaError_t LaunchCudaDctMatrix(
     (transform_count + packed_transforms - 1) / packed_transforms));
   if (forward) {
     if (width == 8 && height == 8) {
-      ForwardDctPackedKernel<8, 8, 4 * kPackedDctOutputsPerThread>
-        <<<packed_grid, block, shared_bytes, stream>>>(
-          input, output, transform_count);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ForwardDctPackedKernel<8, 8, 4 * kPackedDctOutputsPerThread>", packed_grid, block, stream}; profile_scope) {
+        ForwardDctPackedKernel<8, 8, 4 * kPackedDctOutputsPerThread>
+          <<<packed_grid, block, shared_bytes, stream>>>(
+            input, output, transform_count);
+      }
     } else if (width == 16 && height == 8) {
-      ForwardDctPackedKernel<16, 8, 2 * kPackedDctOutputsPerThread>
-        <<<packed_grid, block, shared_bytes, stream>>>(
-          input, output, transform_count);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ForwardDctPackedKernel<16, 8, 2 * kPackedDctOutputsPerThread>", packed_grid, block, stream}; profile_scope) {
+        ForwardDctPackedKernel<16, 8, 2 * kPackedDctOutputsPerThread>
+          <<<packed_grid, block, shared_bytes, stream>>>(
+            input, output, transform_count);
+      }
     } else if (width == 8 && height == 16) {
-      ForwardDctPackedKernel<8, 16, 2 * kPackedDctOutputsPerThread>
-        <<<packed_grid, block, shared_bytes, stream>>>(
-          input, output, transform_count);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ForwardDctPackedKernel<8, 16, 2 * kPackedDctOutputsPerThread>", packed_grid, block, stream}; profile_scope) {
+        ForwardDctPackedKernel<8, 16, 2 * kPackedDctOutputsPerThread>
+          <<<packed_grid, block, shared_bytes, stream>>>(
+            input, output, transform_count);
+      }
     } else if (width == 16 && height == 16) {
-      ForwardDctPackedKernel<16, 16, kPackedDctOutputsPerThread>
-        <<<packed_grid, block, shared_bytes, stream>>>(
-          input, output, transform_count);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ForwardDctPackedKernel<16, 16, kPackedDctOutputsPerThread>", packed_grid, block, stream}; profile_scope) {
+        ForwardDctPackedKernel<16, 16, kPackedDctOutputsPerThread>
+          <<<packed_grid, block, shared_bytes, stream>>>(
+            input, output, transform_count);
+      }
     } else if (width == 32 && height == 32) {
-      ForwardDctSpecializedKernel<32, 32>
-        <<<grid, block, shared_bytes, stream>>>(input, output);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ForwardDctSpecializedKernel<32, 32>", grid, block, stream}; profile_scope) {
+        ForwardDctSpecializedKernel<32, 32>
+          <<<grid, block, shared_bytes, stream>>>(input, output);
+      }
     } else if (width == 32 && height == 16) {
-      ForwardDctSpecializedKernel<32, 16>
-        <<<grid, block, shared_bytes, stream>>>(input, output);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ForwardDctSpecializedKernel<32, 16>", grid, block, stream}; profile_scope) {
+        ForwardDctSpecializedKernel<32, 16>
+          <<<grid, block, shared_bytes, stream>>>(input, output);
+      }
     } else if (width == 16 && height == 32) {
-      ForwardDctSpecializedKernel<16, 32>
-        <<<grid, block, shared_bytes, stream>>>(input, output);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ForwardDctSpecializedKernel<16, 32>", grid, block, stream}; profile_scope) {
+        ForwardDctSpecializedKernel<16, 32>
+          <<<grid, block, shared_bytes, stream>>>(input, output);
+      }
     } else {
-      ForwardDctKernel<<<grid, block, shared_bytes, stream>>>(
-        input, output, width, height);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ForwardDctKernel", grid, block, stream}; profile_scope) {
+        ForwardDctKernel<<<grid, block, shared_bytes, stream>>>(
+          input, output, width, height);
+      }
     }
   } else {
     if (width == 8 && height == 8) {
-      InverseDctPackedKernel<8, 8, 4 * kPackedDctOutputsPerThread>
-        <<<packed_grid, block, shared_bytes, stream>>>(
-          input, output, transform_count);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"InverseDctPackedKernel<8, 8, 4 * kPackedDctOutputsPerThread>", packed_grid, block, stream}; profile_scope) {
+        InverseDctPackedKernel<8, 8, 4 * kPackedDctOutputsPerThread>
+          <<<packed_grid, block, shared_bytes, stream>>>(
+            input, output, transform_count);
+      }
     } else if (width == 16 && height == 8) {
-      InverseDctPackedKernel<16, 8, 2 * kPackedDctOutputsPerThread>
-        <<<packed_grid, block, shared_bytes, stream>>>(
-          input, output, transform_count);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"InverseDctPackedKernel<16, 8, 2 * kPackedDctOutputsPerThread>", packed_grid, block, stream}; profile_scope) {
+        InverseDctPackedKernel<16, 8, 2 * kPackedDctOutputsPerThread>
+          <<<packed_grid, block, shared_bytes, stream>>>(
+            input, output, transform_count);
+      }
     } else if (width == 8 && height == 16) {
-      InverseDctPackedKernel<8, 16, 2 * kPackedDctOutputsPerThread>
-        <<<packed_grid, block, shared_bytes, stream>>>(
-          input, output, transform_count);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"InverseDctPackedKernel<8, 16, 2 * kPackedDctOutputsPerThread>", packed_grid, block, stream}; profile_scope) {
+        InverseDctPackedKernel<8, 16, 2 * kPackedDctOutputsPerThread>
+          <<<packed_grid, block, shared_bytes, stream>>>(
+            input, output, transform_count);
+      }
     } else if (width == 16 && height == 16) {
-      InverseDctPackedKernel<16, 16, kPackedDctOutputsPerThread>
-        <<<packed_grid, block, shared_bytes, stream>>>(
-          input, output, transform_count);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"InverseDctPackedKernel<16, 16, kPackedDctOutputsPerThread>", packed_grid, block, stream}; profile_scope) {
+        InverseDctPackedKernel<16, 16, kPackedDctOutputsPerThread>
+          <<<packed_grid, block, shared_bytes, stream>>>(
+            input, output, transform_count);
+      }
     } else if (width == 32 && height == 32) {
-      InverseDctSpecializedKernel<32, 32>
-        <<<grid, block, shared_bytes, stream>>>(input, output);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"InverseDctSpecializedKernel<32, 32>", grid, block, stream}; profile_scope) {
+        InverseDctSpecializedKernel<32, 32>
+          <<<grid, block, shared_bytes, stream>>>(input, output);
+      }
     } else if (width == 32 && height == 16) {
-      InverseDctSpecializedKernel<32, 16>
-        <<<grid, block, shared_bytes, stream>>>(input, output);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"InverseDctSpecializedKernel<32, 16>", grid, block, stream}; profile_scope) {
+        InverseDctSpecializedKernel<32, 16>
+          <<<grid, block, shared_bytes, stream>>>(input, output);
+      }
     } else if (width == 16 && height == 32) {
-      InverseDctSpecializedKernel<16, 32>
-        <<<grid, block, shared_bytes, stream>>>(input, output);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"InverseDctSpecializedKernel<16, 32>", grid, block, stream}; profile_scope) {
+        InverseDctSpecializedKernel<16, 32>
+          <<<grid, block, shared_bytes, stream>>>(input, output);
+      }
     } else {
-      InverseDctKernel<<<grid, block, shared_bytes, stream>>>(
-        input, output, width, height);
+      if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"InverseDctKernel", grid, block, stream}; profile_scope) {
+        InverseDctKernel<<<grid, block, shared_bytes, stream>>>(
+          input, output, width, height);
+      }
     }
   }
   return cudaGetLastError();
@@ -1614,8 +1655,10 @@ cudaError_t LaunchCudaAcStrategyForward(
     constexpr unsigned int kTransforms = kFactoredDctThreads / kLocal;
     const unsigned int blocks = static_cast<unsigned int>(
       (transform_count + kTransforms - 1) / kTransforms);
-    ForwardDctFactoredKernel<kWidth, kHeight>
-      <<<blocks, kFactoredDctThreads, 0, stream>>>(input, output, transform_count);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"ForwardDctFactoredKernel<kWidth, kHeight>", blocks, kFactoredDctThreads, stream}; profile_scope) {
+      ForwardDctFactoredKernel<kWidth, kHeight>
+        <<<blocks, kFactoredDctThreads, 0, stream>>>(input, output, transform_count);
+    }
   };
   using N8 = std::integral_constant<unsigned int, 8>;
   using N16 = std::integral_constant<unsigned int, 16>;
@@ -1656,8 +1699,10 @@ cudaError_t LaunchAcStrategyInverseLossImpl(
     constexpr unsigned int kTransforms = kFactoredDctThreads / kLocal;
     const unsigned int blocks = static_cast<unsigned int>(
       (transform_count + kTransforms - 1) / kTransforms);
-    InverseDctFactoredKernel<kWidth, kHeight>
-      <<<blocks, kFactoredDctThreads, 0, stream>>>(input, output, transform_count);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"InverseDctFactoredKernel<kWidth, kHeight>", blocks, kFactoredDctThreads, stream}; profile_scope) {
+      InverseDctFactoredKernel<kWidth, kHeight>
+        <<<blocks, kFactoredDctThreads, 0, stream>>>(input, output, transform_count);
+    }
   };
   using N8 = std::integral_constant<unsigned int, 8>;
   using N16 = std::integral_constant<unsigned int, 16>;
@@ -1725,8 +1770,10 @@ cudaError_t LaunchCudaAcStrategyFused(
       opsin_x, opsin_y, opsin_b, descriptors, params};
     const AcStrategyDctLossOutput<kWidth, kHeight> output{
       pixel_mask, descriptors, losses, params};
-    FusedAcStrategyKernel<kWidth, kHeight>
-      <<<blocks, kFusedAcThreads, 0, stream>>>(input, residual, output, transform_count);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"FusedAcStrategyKernel<kWidth, kHeight>", blocks, kFusedAcThreads, stream}; profile_scope) {
+      FusedAcStrategyKernel<kWidth, kHeight>
+        <<<blocks, kFusedAcThreads, 0, stream>>>(input, residual, output, transform_count);
+    }
   };
   using N8 = std::integral_constant<unsigned int, 8>;
   using N16 = std::integral_constant<unsigned int, 16>;
@@ -1764,8 +1811,10 @@ cudaError_t LaunchCudaPointwiseAffine(
   const size_t count = static_cast<size_t>(width) * height;
   const unsigned int blocks = static_cast<unsigned int>(
     (count + kPrimitiveThreads - 1) / kPrimitiveThreads);
-  PointwiseAffineKernel<<<blocks, kPrimitiveThreads, 0, stream>>>(
-    input, output, width, height, input_stride, output_stride, scale, bias);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"PointwiseAffineKernel", blocks, kPrimitiveThreads, stream}; profile_scope) {
+    PointwiseAffineKernel<<<blocks, kPrimitiveThreads, 0, stream>>>(
+      input, output, width, height, input_stride, output_stride, scale, bias);
+  }
   return cudaGetLastError();
 }
 
@@ -1784,15 +1833,19 @@ cudaError_t LaunchCudaSeparableConvolutionPass(
   const unsigned int blocks = static_cast<unsigned int>(
     (count + kPrimitiveThreads - 1) / kPrimitiveThreads);
   if (horizontal) {
-    SeparableConvolutionKernel<true>
-      <<<blocks, kPrimitiveThreads, 0, stream>>>(
-        input, kernel, output, width, height, input_stride, output_stride,
-        kernel_size);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"SeparableConvolutionKernel<true>", blocks, kPrimitiveThreads, stream}; profile_scope) {
+      SeparableConvolutionKernel<true>
+        <<<blocks, kPrimitiveThreads, 0, stream>>>(
+          input, kernel, output, width, height, input_stride, output_stride,
+          kernel_size);
+    }
   } else {
-    SeparableConvolutionKernel<false>
-      <<<blocks, kPrimitiveThreads, 0, stream>>>(
-        input, kernel, output, width, height, input_stride, output_stride,
-        kernel_size);
+    if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"SeparableConvolutionKernel<false>", blocks, kPrimitiveThreads, stream}; profile_scope) {
+      SeparableConvolutionKernel<false>
+        <<<blocks, kPrimitiveThreads, 0, stream>>>(
+          input, kernel, output, width, height, input_stride, output_stride,
+          kernel_size);
+    }
   }
   return cudaGetLastError();
 }
@@ -1814,9 +1867,11 @@ cudaError_t LaunchCudaSymmetric5Convolution(
   const size_t count = static_cast<size_t>(width) * height;
   const unsigned int blocks = static_cast<unsigned int>(
     (count + kPrimitiveThreads - 1) / kPrimitiveThreads);
-  Symmetric5ConvolutionKernel<<<blocks, kPrimitiveThreads, 0, stream>>>(
-    input, output, width, height, input_stride, output_stride,
-    distance0, distance1, distance2, distance4, distance8, distance5);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"Symmetric5ConvolutionKernel", blocks, kPrimitiveThreads, stream}; profile_scope) {
+    Symmetric5ConvolutionKernel<<<blocks, kPrimitiveThreads, 0, stream>>>(
+      input, output, width, height, input_stride, output_stride,
+      distance0, distance1, distance2, distance4, distance8, distance5);
+  }
   return cudaGetLastError();
 }
 
@@ -1829,8 +1884,10 @@ cudaError_t LaunchCudaMaximumReduction(
   cudaStream_t stream) {
   const unsigned int blocks =
     (input_count + kPrimitiveThreads - 1) / kPrimitiveThreads;
-  MaximumReductionKernel<<<blocks, kPrimitiveThreads, 0, stream>>>(
-    input, output, width, input_stride, input_count);
+  if (::gjxl::cuda_internal::CudaKernelProfileScope profile_scope{"MaximumReductionKernel", blocks, kPrimitiveThreads, stream}; profile_scope) {
+    MaximumReductionKernel<<<blocks, kPrimitiveThreads, 0, stream>>>(
+      input, output, width, input_stride, input_count);
+  }
   return cudaGetLastError();
 }
 
