@@ -116,7 +116,7 @@ struct AqDcWavefrontState {
     for (unsigned int i = 0; i < 4; ++i) {
       const uint64_t magnitude = (llabs(predictions[i] - scaled) + 3u) >> 3u;
       valid = valid && magnitude <= 4294967295ull;
-      errors[i * kDcWaveValues + index] = unsigned int(magnitude);
+      errors[i * kDcWaveValues + index] = static_cast<unsigned int>(magnitude);
     }
     return valid;
   }
@@ -174,8 +174,9 @@ __global__ void QuantizeDcKernel(float *dc, int *quantized, unsigned int *error,
     int *plane = quantized + c * area;
     for (unsigned int wave = 0; wave < waves; ++wave) {
       const int column = int(wave) - int(row_step * row_index);
-      if (row_index < height && column >= 0 && unsigned int(column) < width) {
-        const unsigned int x = unsigned int(column), y = row_index;
+      if (row_index < height && column >= 0 &&
+          static_cast<unsigned int>(column) < width) {
+        const unsigned int x = static_cast<unsigned int>(column), y = row_index;
         const unsigned int index = (gy + y) * params.width + gx + x;
         float value = dc[c * area + index];
         if (c == 2u) {

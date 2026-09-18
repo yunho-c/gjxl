@@ -24,13 +24,13 @@ The original CUDA worktree and its frozen artifacts remain available.
 - [x] CUDA prediction-aware DC quantization, decoder-equivalent smoothing and
       reconstruction, including exact mode.
 - [x] CUDA nonlinear resident final CfL and dense effort-10 candidate placement.
-- [ ] CUDA host/device/pool backing and retained output charged to shared domains;
+- [x] CUDA host/device/pool backing and retained output charged to shared domains;
       finite memory admission, CPU scheduling, trim, failure and batch contracts.
-- [ ] Efforts 1–10, four AQ modes, score toggles, distance/maximum-error/size
+- [x] Efforts 1–10, four AQ modes, score toggles, distance/maximum-error/size
       controls, odd/tall/large images and concurrent contexts verified.
-- [ ] Independent decoder, exact CPU/CUDA comparisons and resident determinism;
+- [x] Independent decoder, exact CPU/CUDA comparisons and resident determinism;
       rate/decoded-quality qualification for deliberate policy changes.
-- [ ] Whole-public-call warm/cold/batch performance and memory measurements.
+- [x] Whole-public-call warm/cold/batch performance and memory measurements.
 - [ ] Portable and real-GPU CI; Metal regression validation; sanitizer coverage.
 - [ ] Final audit, reviewable changes and integration-ready branch/PR.
 
@@ -388,6 +388,25 @@ an intermediate build appear complete.
   content. The Windows CUDA check passes for both native objects; all 12 CUDA
   Rust tests and clippy with warnings denied pass. CI runs this check on every
   native Rust platform and in the explicit CUDA qualification workflow.
+- The current resident implementation reproduces all 40 retained photographic
+  matched-size candidates byte-for-byte. Sixteen low-effort CPU controls at the
+  selected distances have identical reported decoded Butteraugli scores;
+  15/16 streams are identical and the remaining size delta is 0.0287%.
+  The integration retains main's accepted effort defaults and explicitly
+  reports their low-effort error increases relative to old CUDA. This closes
+  the policy-attribution question for the measured sample, not a universal
+  quality guarantee. See [policy qualification](cuda-integration-policy-qualification.md).
+- All six hosted native and all three Rust jobs pass at `ab22c89`. The Rust
+  source-watch change at `24e25cc` passes on all three hosted platforms;
+  macOS verifies both C++ and Metal shader recompilation.
+- Linux CUDA qualification is now possible on the same physical SM86 device
+  through WSL Ubuntu 24.04, using pinned CUDA 12.6.3 build components and the
+  audited GCC 13.3 toolchain. The complete native/test/benchmark build passes
+  after replacing three nonportable casts, adding a direct `<cmath>` include,
+  and selecting the graph-instantiation API available in both CUDA 11.8/12.6.
+  Windows retains all 378 exact DC comparisons after the cast correction.
+  A hosted Ubuntu CUDA compile job now builds all these targets on every PR;
+  it makes no GPU runtime claim. The local 157-test Linux CUDA run is pending.
 
 ## Outstanding integration risks
 
@@ -395,14 +414,13 @@ an intermediate build appear complete.
   the four-photo control is not a universal numerical or cross-toolchain
   guarantee. Follow through on Linux CUDA and another GPU
   architecture before broadening automatic selection.
-- Broaden public policy/DC/low-effort coverage to all efforts, controls and
-  representative images. Verify dense effort-10 behavior against independent
-  references and qualify the new effort-8 quality/performance tradeoff.
-- Qualify storage recipes on larger images and all optional policies; tighten
-  conservative compatibility bounds only with allocation evidence. Check the
-  explicit CUDA cache's complete-call performance and physical memory behavior.
+- The measured corpus and 4K pressure cases are bounded qualification, not
+  proof for every input or device. Conservative compatibility bounds remain
+  intentional; tightening them requires new allocation evidence. The completed
+  dense effort-10 oracle, all-effort public matrix, policy-quality controls and
+  whole-call memory/performance runs are recorded above.
 - Verify Metal behavior on appropriate hardware.
 - Finish hosted CI execution, GPU diagnostics parity, broader qualification
   and matched performance/memory measurements. Integration remains published
   as draft PR #29 and is not ready to merge. Hosted native and Rust CI are green
-  at `38d5fc5`; physical Apple GPU and broader NVIDIA qualification remain open.
+  at `ab22c89`; physical Apple GPU and broader NVIDIA qualification remain open.

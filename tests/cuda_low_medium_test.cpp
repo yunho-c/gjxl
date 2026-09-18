@@ -199,7 +199,7 @@ struct OwnedCase {
     CheckCuda(cudaStreamEndCapture(stream,&graph));size_t nodes=0;
     CheckCuda(cudaGraphGetNodes(graph,nullptr,&nodes));
     if(nodes!=8)throw std::runtime_error("Ownership graph node count mismatch");
-    CheckCuda(cudaGraphInstantiate(&executable,graph,nullptr,nullptr,0));
+    CheckCuda(cudaGraphInstantiateWithFlags(&executable,graph,0));
     std::fill(std::begin(temporary.weights.taps),std::end(temporary.weights.taps),-9876.0f);
     std::fill(std::begin(device.plan.weights.taps),std::end(device.plan.weights.taps),-5432.0f);
   }

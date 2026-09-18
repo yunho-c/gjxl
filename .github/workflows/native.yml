@@ -10,6 +10,29 @@ permissions:
   contents: read
 
 jobs:
+  cuda-compile:
+    name: Ubuntu CUDA 12.6 compile
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-native-toolchain
+      - name: Install pinned CUDA build components
+        run: python3 .github/actions/setup-cuda-linux/setup.py "$RUNNER_TEMP/gjxl-cuda"
+      - name: Configure CUDA libraries, tests and benchmarks
+        run: >-
+          cmake -S . -B build/cuda-compile -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CUDA_COMPILER="$RUNNER_TEMP/gjxl-cuda/toolkit/bin/nvcc"
+          -DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-13
+          -DCUDAToolkit_ROOT="$RUNNER_TEMP/gjxl-cuda/toolkit"
+          -DCMAKE_CUDA_ARCHITECTURES=86
+          -DGJXL_ENABLE_METAL=OFF -DGJXL_ENABLE_CUDA=ON
+          -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON
+          -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF
+      - name: Build CUDA targets (hosted runner has no GPU)
+        run: cmake --build build/cuda-compile --parallel 4
+
   test:
     name: ${{ matrix.os }} C++${{ matrix.standard }}
     runs-on: ${{ matrix.os }}
