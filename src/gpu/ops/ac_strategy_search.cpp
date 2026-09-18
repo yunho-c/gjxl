@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <new>
@@ -25,6 +26,7 @@
 #include "core/geometry.h"
 #include "gpu/buffer.h"
 #include "gpu/ops/ac_strategy.h"
+#include "gpu/ops/ac_strategy_selection.h"
 #include "gpu/ops/ac_strategy_search_profile_internal.h"
 #include "gpu/ops/ac_strategy_storage_plan.h"
 #ifdef GJXL_FRONTIER_EXPERIMENT
@@ -355,6 +357,16 @@ static Status FindAcStrategyGridGpuImpl(
       }
     }
 
+    auto* device_selector = resident != nullptr && !options.dense_dct32_search &&
+        profiling_session == nullptr
+      ? dynamic_cast<GpuAcStrategySelection*>(&gpu) : nullptr;
+#ifdef GJXL_FRONTIER_EXPERIMENT
+    // The experiment's CPU controls and alternate policies require the frozen
+    // candidate table. Normal builds do not consult these diagnostic variables.
+    if (std::getenv("GJXL_FRONTIER_CAPTURE_DIR") != nullptr ||
+        std::getenv("GJXL_AC_SEARCH_EXPERIMENT") != nullptr)
+      device_selector = nullptr;
+#endif
     const auto stages =
       ac_strategy_internal::CandidateStages(options.dense_dct32_search);
     auto& resources = state.resources;
@@ -382,11 +394,14 @@ static Status FindAcStrategyGridGpuImpl(
       if (resource.matrices.size() != stage_plan.matrix_bytes / sizeof(float)) {
         return Status::Internal("GPU AC-strategy matrices disagree with storage plan");
       }
-      resource.costs.resize(resource.candidates.size());
+      if (device_selector == nullptr || i == 0)
+        resource.costs.resize(resource.candidates.size());
       const size_t strategy_index =
         static_cast<size_t>(resource.staged.strategy);
-      cost_storage[strategy_index].assign(
-        block_count, std::numeric_limits<float>::quiet_NaN());
+      if (device_selector == nullptr) {
+        cost_storage[strategy_index].assign(
+          block_count, std::numeric_limits<float>::quiet_NaN());
+      }
       result_stats.candidate_counts[strategy_index] =
         resource.candidates.size();
       result_stats.total_candidate_count += resource.candidates.size();
@@ -459,7 +474,10 @@ static Status FindAcStrategyGridGpuImpl(
       };
     }
     std::unique_ptr<GpuSubmission> submission;
-    if (profiling_session == nullptr) {
+    if (device_selector != nullptr) {
+      status = device_selector->EvaluateAndSelectAcStrategyCandidateBatches(
+        batches, {block_extent, state.rate_scratch.get(), 0}, &submission);
+    } else if (profiling_session == nullptr) {
       status = EvaluateAcStrategyCandidateBatches(
         gpu, batches, &submission);
     } else {
@@ -514,6 +532,50 @@ static Status FindAcStrategyGridGpuImpl(
     const auto readback_begin = profiling_session == nullptr
       ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
       : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
+    if (device_selector != nullptr) {
+      // Scoring no longer needs rate scratch. Its selected byte map and error
+      // flags fit inside the existing DCT8 readback owner; no new backing is
+      // needed beyond the conservative search storage plan.
+      const size_t tile_count = tile_extent.width * tile_extent.height;
+      const size_t bytes = block_count + tile_count;
+      if (bytes > resources[0].costs.size() * sizeof(float))
+        return Status::Internal("Device AC selection exceeds its readback owner");
+      status = gpu.CopyDeviceToHost(*state.rate_scratch,
+        resources[0].costs.data(), bytes);
+      if (!status.ok()) return status;
+      const auto* cells = reinterpret_cast<const uint8_t*>(resources[0].costs.data());
+      for (size_t tile = 0; tile < tile_count; ++tile) {
+        if (cells[block_count + tile] != 0)
+          return Status::Internal("Device AC selection encountered an invalid candidate cost");
+      }
+      AcStrategyGrid result;
+      status = AcStrategyGrid::Create(block_extent, &result);
+      if (!status.ok()) return status;
+      for (size_t y = 0; y < block_extent.height; ++y) {
+        for (size_t x = 0; x < block_extent.width; ++x) {
+          const uint8_t cell = cells[y * block_extent.width + x];
+          if ((cell & 1u) != 0) {
+            status = result.Set(x, y, static_cast<AcStrategyType>(cell >> 1));
+            if (!status.ok()) return Status::Internal("Device AC selection produced an invalid cover");
+          }
+        }
+      }
+      if (!result.complete())
+        return Status::Internal("Device AC selection produced an incomplete cover");
+      for (size_t y = 0; y < block_extent.height; ++y) {
+        for (size_t x = 0; x < block_extent.width; ++x) {
+          AcStrategyCell cell;
+          status = result.Get(x, y, &cell);
+          if (!status.ok() || cells[y * block_extent.width + x] !=
+              ((static_cast<uint8_t>(cell.strategy) << 1) | cell.is_anchor))
+            return Status::Internal("Device AC selection produced inconsistent cells");
+        }
+      }
+      *out = std::move(result);
+      result_stats.device_selection = true;
+      if (stats != nullptr) *stats = result_stats;
+      return Status::Ok();
+    }
     for (StrategyResources& resource : resources) {
       if (!resource.candidates.empty()) {
         status = gpu.CopyDeviceToHost(*resource.device_costs,

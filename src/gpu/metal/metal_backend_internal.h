@@ -27,6 +27,7 @@
 #include "gpu/metal/metal_backend.h"
 #include "gpu/metal/metal_submission_storage_plan.h"
 #include "gpu/ops/ac_strategy.h"
+#include "gpu/ops/ac_strategy_selection.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/aq_evaluation_internal.h"
 #include "gpu/ops/butteraugli.h"
@@ -196,6 +197,7 @@ struct AcStrategyPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> residual;
   NS::SharedPtr<MTL::ComputePipelineState> cost;
   NS::SharedPtr<MTL::ComputePipelineState> cost_from_loss;
+  NS::SharedPtr<MTL::ComputePipelineState> select_greedy;
   std::array<FusedStages, kAcStrategyCount> fused;
   NS::UInteger gather_threads_per_threadgroup = 0;
 };
@@ -308,6 +310,7 @@ private:
 class MetalBackend final
   : public GpuBackend,
     public GpuAcStrategyEvaluation,
+    public GpuAcStrategySelection,
     public gpu_profile_internal::GpuAcStrategyEvaluationProfiler,
     public gpu_profile_internal::GpuSubmissionProfiler,
     public GpuImagePrimitives,
@@ -385,6 +388,11 @@ public:
 
   Status EvaluateAcStrategyCandidateBatches(
     std::span<const AcStrategyCandidateBatch> batches,
+    std::unique_ptr<GpuSubmission>* submission) override;
+
+  Status EvaluateAndSelectAcStrategyCandidateBatches(
+    std::span<const AcStrategyCandidateBatch> batches,
+    AcStrategyDeviceSelection selection,
     std::unique_ptr<GpuSubmission>* submission) override;
 
   Status EvaluateAcStrategyCandidateBatchesProfiled(
@@ -551,6 +559,16 @@ private:
 
   struct AcStrategyEncodeContext {
     std::span<const ValidatedAcStrategyBatch> batches;
+    struct Selection {
+      std::array<const MetalBuffer*, 7> costs{};
+      MetalBuffer* output = nullptr;
+      size_t offset_bytes = 0;
+      struct Params {
+        uint32_t width, height, tiles_x, tiles_y;
+        float multiplier;
+      } params{};
+    };
+    const Selection* selection = nullptr;
   };
 
   struct AcStrategyProfileContext {
@@ -600,7 +618,13 @@ private:
   Status SubmitAcStrategyCandidatesImpl(
     std::span<const AcStrategyCandidateBatch> batches,
     gpu_profile_internal::GpuProfilingMode mode,
-    std::unique_ptr<GpuSubmission>* submission);
+    std::unique_ptr<GpuSubmission>* submission,
+    const AcStrategyDeviceSelection* selection = nullptr);
+
+  Status ValidateAcStrategySelection(
+    std::span<const AcStrategyCandidateBatch> batches,
+    AcStrategyDeviceSelection selection,
+    AcStrategyEncodeContext::Selection* validated) const;
 
   Status SubmitCompute(
     const char* label,

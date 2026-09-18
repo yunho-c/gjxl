@@ -20,6 +20,7 @@ struct Prepared;
 struct AcStrategyGpuSearchStats {
   std::array<size_t, kAcStrategyCount> candidate_counts{};
   size_t total_candidate_count = 0;
+  bool device_selection = false;
 };
 
 struct ResidentAcStrategySearchInputs {

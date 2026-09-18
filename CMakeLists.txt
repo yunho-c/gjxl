@@ -630,6 +630,9 @@ set(
   GJXL_AC_STRATEGY_METAL_IR
   "${GJXL_METAL_DIR}/ac_strategy.ir"
 )
+set(GJXL_AC_SELECTION_METAL_SOURCE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/ac_strategy_select.metal")
+set(GJXL_AC_SELECTION_METAL_IR "${GJXL_METAL_DIR}/ac_strategy_select.ir")
 
 set(
   GJXL_PRIMITIVES_METAL_IR
@@ -888,6 +891,14 @@ add_custom_command(
 
 # .ir -> .metallib
 
+add_custom_command(OUTPUT "${GJXL_AC_SELECTION_METAL_IR}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${GJXL_METAL_DIR}"
+  COMMAND "${XCRUN_EXECUTABLE}" -sdk macosx metal -std=metal3.1
+    -fno-fast-math -ffp-contract=off ${GJXL_METAL_PROFILING_FLAGS}
+    -c "${GJXL_AC_SELECTION_METAL_SOURCE}" -o "${GJXL_AC_SELECTION_METAL_IR}"
+  DEPENDS "${GJXL_AC_SELECTION_METAL_SOURCE}"
+  COMMENT "Compiling policy-preserving Metal AC selection" VERBATIM)
+
 add_custom_command(
   OUTPUT
     "${GJXL_METALLIB}"
@@ -900,6 +911,7 @@ add_custom_command(
     "${GJXL_METALLIB}"
     "${GJXL_DCT_METAL_IR}"
     "${GJXL_AC_STRATEGY_METAL_IR}"
+    "${GJXL_AC_SELECTION_METAL_IR}"
     "${GJXL_PRIMITIVES_METAL_IR}"
     "${GJXL_AQ_REDUCTION_METAL_IR}"
     "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
@@ -909,6 +921,7 @@ add_custom_command(
   DEPENDS
     "${GJXL_DCT_METAL_IR}"
     "${GJXL_AC_STRATEGY_METAL_IR}"
+    "${GJXL_AC_SELECTION_METAL_IR}"
     "${GJXL_PRIMITIVES_METAL_IR}"
     "${GJXL_AQ_REDUCTION_METAL_IR}"
     "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"

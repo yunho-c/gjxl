@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include "gpu/metal/metal_backend_internal.h"
+#include "codec/ac_strategy_search_policy.h"
 
 #include <algorithm>
 #include <array>
@@ -187,6 +188,9 @@ Status CreateAcStrategyPipelines(
   status = CreatePipeline(device, library, "gjxl_ac_strategy_cost_from_loss",
                           &pipelines.cost_from_loss);
   if (!status.ok()) return status;
+  status = CreatePipeline(device, library, "gjxl_ac_strategy_select_greedy",
+                          &pipelines.select_greedy);
+  if (!status.ok()) return status;
 
   for (const FusedStageSpec& spec : kFusedStageSpecs) {
     const size_t strategy_index = static_cast<size_t>(spec.strategy);
@@ -363,6 +367,83 @@ Status MetalBackend::EvaluateAcStrategyCandidateBatches(
   return SubmitAcStrategyCandidatesImpl(
     batches, gpu_profile_internal::GpuProfilingMode::kDisabled,
     submission);
+}
+
+Status MetalBackend::EvaluateAndSelectAcStrategyCandidateBatches(
+  std::span<const AcStrategyCandidateBatch> batches,
+  AcStrategyDeviceSelection selection,
+  std::unique_ptr<GpuSubmission>* submission) {
+  return SubmitAcStrategyCandidatesImpl(
+    batches, gpu_profile_internal::GpuProfilingMode::kDisabled,
+    submission, &selection);
+}
+
+Status MetalBackend::ValidateAcStrategySelection(
+  std::span<const AcStrategyCandidateBatch> batches,
+  AcStrategyDeviceSelection selection,
+  AcStrategyEncodeContext::Selection* validated) const {
+  const Extent2D blocks = selection.block_extent;
+  const Extent2D tiles = blocks.ceil_div(8);
+  size_t block_count = 0, tile_count = 0;
+  if (batches.size() != ac_strategy_internal::kCandidateStages.size() ||
+      blocks.empty() || !blocks.try_area(&block_count) ||
+      !tiles.try_area(&tile_count) ||
+      blocks.width > std::numeric_limits<uint32_t>::max() / 8 ||
+      blocks.height > std::numeric_limits<uint32_t>::max() / 8 ||
+      block_count > std::numeric_limits<uint32_t>::max() / 64 ||
+      selection.offset_bytes > std::numeric_limits<size_t>::max() - block_count - tile_count) {
+    return Status::InvalidArgument("Device AC selection geometry is invalid");
+  }
+  const auto positions = [](size_t n, size_t covered, size_t step) {
+    const auto in_tile = [=](size_t length) {
+      return length < covered ? size_t{0} : (length - covered) / step + 1;
+    };
+    return (n / 8) * in_tile(8) + in_tile(n % 8);
+  };
+  AcStrategyEncodeContext::Selection result;
+  Status status = RequireMetalBuffer(selection.output,
+    selection.offset_bytes + block_count + tile_count,
+    "AC selection output", &result.output);
+  if (!status.ok()) return status;
+  for (size_t i = 0; i < batches.size(); ++i) {
+    const auto& batch = batches[i];
+    const auto& stage = ac_strategy_internal::kCandidateStages[i];
+    const auto covered = GetAcStrategyInfo(stage.strategy)->covered_blocks;
+    const size_t count = positions(blocks.width, covered.width, stage.anchor_step) *
+      positions(blocks.height, covered.height, stage.anchor_step);
+    if (batch.strategy != stage.strategy || batch.candidate_count != count ||
+        batch.pixel_extent != Extent2D{blocks.width * 8, blocks.height * 8} ||
+        batch.butteraugli_target != batches[0].butteraugli_target) {
+      return Status::InvalidArgument("Device AC selection requires the ordinary candidate bank");
+    }
+    // Rate scratch may be overwritten after scoring. Every other input/output
+    // must remain independent, including all family cost buffers.
+    const DeviceBuffer* forbidden[] = {batch.opsin, batch.pixel_mask,
+      batch.matrices, batch.candidates, batch.costs, batch.scratch_a, batch.scratch_b,
+      batch.resident_opsin.plane[0].buffer, batch.resident_opsin.plane[1].buffer,
+      batch.resident_opsin.plane[2].buffer, batch.resident_pixel_mask.buffer,
+      batch.resident_quant_field.buffer};
+    for (const auto* buffer : forbidden) {
+      if (buffer != nullptr && selection.output == buffer)
+        return Status::InvalidArgument("AC selection output aliases an input or cost buffer");
+    }
+    if (count != 0) {
+      status = RequireMetalBuffer(batch.costs, count * sizeof(float),
+        "AC selection costs", &result.costs[i]);
+      if (!status.ok()) return status;
+    } else {
+      result.costs[i] = result.costs[0];  // Never indexed by an empty family.
+    }
+  }
+  const float target = batches[0].butteraugli_target;
+  if (!std::isfinite(target) || target <= 0)
+    return Status::InvalidArgument("Device AC selection distance is invalid");
+  result.offset_bytes = selection.offset_bytes;
+  result.params = {static_cast<uint32_t>(blocks.width), static_cast<uint32_t>(blocks.height),
+    static_cast<uint32_t>(tiles.width), static_cast<uint32_t>(tiles.height),
+    1.0f + -0.4f / (target + 1.4f)};
+  *validated = result;
+  return Status::Ok();
 }
 
 Status MetalBackend::EvaluateAcStrategyCandidateBatchesProfiled(
@@ -798,6 +879,17 @@ void MetalBackend::EncodeAcStrategySubmission(
   for (const ValidatedAcStrategyBatch& batch : ac.batches) {
     backend.EncodeAcStrategyCandidateBatch(encoder, batch);
   }
+  if (ac.selection != nullptr) {
+    const auto& selection = *ac.selection;
+    encoder->setComputePipelineState(backend.ac_strategy_pipelines_.select_greedy.get());
+    for (size_t i = 0; i < selection.costs.size(); ++i)
+      encoder->setBuffer(selection.costs[i]->handle(), 0, i);
+    encoder->setBuffer(selection.output->handle(), selection.offset_bytes, 7);
+    encoder->setBytes(&selection.params, sizeof(selection.params), 8);
+    DispatchMetalThreads(encoder,
+      MTL::Size(selection.params.tiles_x * selection.params.tiles_y, 1, 1),
+      MTL::Size(64, 1, 1));
+  }
 }
 
 void MetalBackend::EncodeAcStrategyProfileStage(
@@ -961,7 +1053,8 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
 Status MetalBackend::SubmitAcStrategyCandidatesImpl(
   std::span<const AcStrategyCandidateBatch> batches,
   gpu_profile_internal::GpuProfilingMode mode,
-  std::unique_ptr<GpuSubmission>* submission) {
+  std::unique_ptr<GpuSubmission>* submission,
+  const AcStrategyDeviceSelection* selection) {
 
   if (submission == nullptr) {
     return Status::InvalidArgument(
@@ -996,11 +1089,18 @@ Status MetalBackend::SubmitAcStrategyCandidatesImpl(
       "Too many AC-strategy candidate batches");
   }
 
+  AcStrategyEncodeContext::Selection validated_selection;
+  if (selection != nullptr) {
+    if (mode != gpu_profile_internal::GpuProfilingMode::kDisabled)
+      return Status::Unsupported("Device AC selection profiling is not implemented");
+    Status status = ValidateAcStrategySelection(batches, *selection, &validated_selection);
+    if (!status.ok()) return status;
+  }
   if (validated_batches.empty()) {
     return Status::Ok();
   }
-
-  const AcStrategyEncodeContext context{validated_batches};
+  const AcStrategyEncodeContext context{
+    validated_batches, selection == nullptr ? nullptr : &validated_selection};
   if (mode == gpu_profile_internal::GpuProfilingMode::kDisabled) {
     return SubmitCompute(
       "gjxl staged AC candidate evaluation",
