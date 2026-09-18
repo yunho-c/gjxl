@@ -467,7 +467,7 @@ mod tests {
             CompressionMode::Automatic
         );
         assert_eq!(distance_from_quality(100.0), 0.0);
-        assert!((distance_from_quality(80.0) - 1.9).abs() < 1.0e-6);
+        assert_eq!(distance_from_quality(80.0), 1.9);
     }
 
     #[test]

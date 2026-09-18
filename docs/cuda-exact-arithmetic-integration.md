@@ -73,6 +73,17 @@ screen against `6c90d83` also covered exact effort 4; its 3.1% resident-keong
 increase did not reproduce against the immediate-parent control. Logs, hashes,
 source identities and all cold/warm samples remain in integration evidence.
 
+The same physical SM86 device also passes Linux-userland qualification under
+WSL Ubuntu 24.04, GCC 13.3 and CUDA 12.6.85. The 41-pair arithmetic fixture and
+all other configured CUDA tests pass; a separate 21-DCT/36-pair memcheck reports
+zero errors and writes its completion marker. The four photographs at efforts
+1/4/8/10 produce identical Linux CPU/CUDA hashes in all 16 pairs, with 32 pinned
+decoder outputs and pair-identical finite quality scores. This verifies a
+second host compiler/toolkit combination, not a second GPU architecture or a
+native Linux driver. Cross-toolchain CPU streams themselves can differ: keong
+effort 8 is 35,387 bytes with GCC and 35,375 with MSVC. Exact CUDA agrees with
+its corresponding CPU control in each case.
+
 Run the checked-in arithmetic test with an additional photographic PFM using
 `gjxl_cuda_exact_arithmetic_test --photo IMAGE.pfm`. The default test only needs
 tracked test data. `--quick REPORT.txt` runs the synthetic/DCT cases and writes

@@ -12,10 +12,10 @@ The original CUDA worktree and its frozen artifacts remain available.
 
 ## Required work and evidence
 
-- [ ] Reconcile all merge conflicts and inspect automatically merged interfaces.
+- [x] Reconcile all merge conflicts and inspect automatically merged interfaces.
 - [x] Windows/MSVC and Linux standard-library storage bounds, allocation tests,
       language/toolchain rejection tests, and installed C/C++ consumers.
-- [ ] Conditional CPU/Metal/CUDA builds, native Rust features and CLI compatibility.
+- [x] Conditional CPU/Metal/CUDA builds, native Rust features and CLI compatibility.
 - [x] Main's shared effort, entropy/DC/context-map/ANS policies retained.
 - [x] CUDA sparse/compact coefficient ownership, order-population cache, native
       token consumers and packed ANS benefits retained without duplicate work.
@@ -406,14 +406,37 @@ an intermediate build appear complete.
   and selecting the graph-instantiation API available in both CUDA 11.8/12.6.
   Windows retains all 378 exact DC comparisons after the cast correction.
   A hosted Ubuntu CUDA compile job now builds all these targets on every PR;
-  it makes no GPU runtime claim. The local 157-test Linux CUDA run is pending.
+  it makes no GPU runtime claim and passes at `955ed7e`.
+- All 157 configured Linux CUDA tests have passing evidence: 156 in the full
+  run (767 seconds), then the installed consumer in 46 seconds after forwarding
+  the explicitly configured toolkit root to its downstream CMake invocation.
+  The package continues to discover CUDA as a dependency; no local toolkit path
+  is embedded in its installation. This run includes all CUDA modes, finite
+  admission, pools, exact arithmetic, profiling, dense/sparse candidates,
+  graph ownership, tall geometries and benchmark CLIs.
+- Linux CUDA Rust 1.98.1 passes all 12 wrapper tests, formatting, native C++/CUDA
+  incremental rebuilding and clippy with warnings denied. Its setup first
+  requires a successful real-device backend check. The Rust quality-80 assertion
+  now requires exactly 1.9, matching the corrected C API; that assertion passes
+  on both Windows CUDA and Linux CUDA.
+- Linux CUDA exact-mode memcheck passes 21 guarded DCT cases and 36 synthetic
+  CPU byte/pixel pipeline comparisons with zero errors and a completion marker.
+  The full suite includes the 41-pair fixture. All 16 additional public photo
+  pairs (four photos, efforts 1/4/8/10) match the Linux CPU codestream hashes;
+  all 32 streams decode independently with finite, pair-identical quality scores.
+  CPU bytes may differ across host toolchains (e.g. keong effort 8 is 35,387
+  bytes on GCC versus 35,375 on MSVC); this does not claim cross-toolchain
+  determinism. Logs and hashes are in `build/integration-evidence/` under
+  `test-linux-cuda*`, `rust-linux-cuda`, `linux-exact-memcheck*` and
+  `linux-photo-controls/`.
 
 ## Outstanding integration risks
 
 - Extend production exact-mode qualification beyond the current device;
   the four-photo control is not a universal numerical or cross-toolchain
-  guarantee. Follow through on Linux CUDA and another GPU
-  architecture before broadening automatic selection.
+  guarantee. Linux userland/CUDA 12.6 is now exercised through WSL on the same
+  Windows NVIDIA driver; another physical GPU architecture and a native Linux
+  driver remain unqualified before broadening automatic selection.
 - The measured corpus and 4K pressure cases are bounded qualification, not
   proof for every input or device. Conservative compatibility bounds remain
   intentional; tightening them requires new allocation evidence. The completed
@@ -423,4 +446,5 @@ an intermediate build appear complete.
 - Finish hosted CI execution, GPU diagnostics parity, broader qualification
   and matched performance/memory measurements. Integration remains published
   as draft PR #29 and is not ready to merge. Hosted native and Rust CI are green
-  at `ab22c89`; physical Apple GPU and broader NVIDIA qualification remain open.
+  at `24e25cc`; the new hosted CUDA 12.6 compile job passes at `955ed7e`.
+  Physical Apple GPU and broader NVIDIA qualification remain open.

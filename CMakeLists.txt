@@ -3464,6 +3464,7 @@ if(GJXL_BUILD_TESTS)
       "-DGJXL_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
       "-DGJXL_TEST_RC_COMPILER=${CMAKE_RC_COMPILER}"
       "-DGJXL_TEST_MT=${CMAKE_MT}"
+      "-DGJXL_TEST_CUDA_TOOLKIT_ROOT=${CUDAToolkit_ROOT}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_installed_consumer.cmake"
   )
   # The fixture itself builds four compilation jobs and compiles every installed

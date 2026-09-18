@@ -31,6 +31,13 @@ foreach(setting IN ITEMS GENERATOR_PLATFORM GENERATOR_TOOLSET GENERATOR_INSTANCE
       "-DCMAKE_${setting}=${GJXL_TEST_${setting}}")
   endif()
 endforeach()
+if(DEFINED GJXL_TEST_CUDA_TOOLKIT_ROOT AND
+   NOT "${GJXL_TEST_CUDA_TOOLKIT_ROOT}" STREQUAL "")
+  # Preserve an explicitly selected toolkit for downstream find_dependency.
+  # This is a test configure hint, not an installed package absolute path.
+  list(APPEND consumer_generator_arguments
+    "-DCUDAToolkit_ROOT=${GJXL_TEST_CUDA_TOOLKIT_ROOT}")
+endif()
 set(consumer_suffix "")
 if(WIN32)
   set(consumer_suffix ".exe")

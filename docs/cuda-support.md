@@ -1,5 +1,11 @@
 # CUDA backend support analysis
 
+For the current main/CUDA integration results and remaining gates, see the
+[integration work record](cuda-integration-progress.md),
+[policy qualification](cuda-integration-policy-qualification.md), and
+[exact-arithmetic qualification](cuda-exact-arithmetic-integration.md).
+The dated analysis below retains the original backend implementation history.
+
 - Status: functionally complete for explicit CUDA selection; production
   qualification remains in progress
 - Date: 2026-09-03
