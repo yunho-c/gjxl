@@ -126,7 +126,7 @@ struct PrimitivePipelines {
 };
 
 struct AqPipelines {
-  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 8> strategy_metadata;
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 9> strategy_metadata;
   NS::SharedPtr<MTL::ComputePipelineState> block_reduction;
   NS::SharedPtr<MTL::ComputePipelineState> maximum_error_reduction;
   NS::SharedPtr<MTL::ComputePipelineState> reset_exact_evaluation;

@@ -118,6 +118,9 @@ bool CheckAqSlices(const AqStoragePlanOptions &p, const AqStoragePlan &plan) {
   staging.push_back(plan.quant_probe_input);
   staging.push_back(plan.quant_probe_quantized);
   staging.push_back(plan.quant_probe_dequantized);
+  for (const auto &plane : plan.strategy_metadata)
+    staging.push_back(plane);
+  staging.push_back(plan.strategy_dispatch);
 
   return CheckSlices(std::move(persistent), 256, plan.persistent_bytes) &&
          CheckSlices(std::move(staging), 256, plan.staging_bytes);
@@ -425,11 +428,46 @@ bool CheckFailureAndNoBacking() {
   return Check(budget.snapshot().committed_bytes() == 0,
                "Planning retained a reservation");
 }
+bool CheckResidentMetadataPlan() {
+  for (const Extent2D coding : {Extent2D{8, 8}, {552, 552}, {6000, 4000}}) {
+    const auto blocks = coding.ceil_div(8);
+    const auto tiles = blocks.ceil_div(8);
+    const size_t count = blocks.width * blocks.height;
+    AqStoragePlanOptions options{.source_extent = coding,
+                                 .coding_extent = coding,
+                                 .anchor_capacity_count = count,
+                                 .maximum_coefficient_count = 1024,
+                                 .resident_quantization = true,
+                                 .resident_strategy_metadata = true};
+    AqStoragePlan plan;
+    if (!Ok(ComputeAqStoragePlan(options, &plan)) ||
+        !CheckAqSlices(options, plan))
+      return false;
+    const std::array<size_t, 5> counts{count, 7 * ((count + 255) / 256),
+                                       tiles.width * tiles.height, 35, 4};
+    for (size_t i = 0; i < counts.size(); ++i)
+      if (!Check(plan.strategy_metadata[i].size_bytes == 4 * counts[i],
+                 "Resident metadata scratch size differs"))
+        return false;
+    if (!Check(plan.strategy_dispatch.size_bytes == 3808,
+               "Resident dispatch storage differs"))
+      return false;
+    const auto saved = plan;
+    options.resident_quantization = false;
+    if (!Check(ComputeAqStoragePlan(options, &plan).code() ==
+                       StatusCode::kInvalidArgument &&
+                   plan == saved,
+               "Invalid resident metadata plan changed output"))
+      return false;
+  }
+  return true;
+}
 } // namespace
 
 int main() {
-  return CheckAqAndInputMatrix() && CheckButteraugliMatrix() &&
-                 CheckCompletedFrames() && CheckFailureAndNoBacking() &&
+  return CheckResidentMetadataPlan() && CheckAqAndInputMatrix() &&
+                 CheckButteraugliMatrix() && CheckCompletedFrames() &&
+                 CheckFailureAndNoBacking() &&
                  Check(DefaultResourceBudget().snapshot().peak_backing_bytes ==
                            0,
                        "Planner escaped to default domain")

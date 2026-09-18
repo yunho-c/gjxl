@@ -100,6 +100,9 @@ struct AqEvaluationPreparation {
   /// and final CfL preparation fail until a successful Reconfigure supplies
   /// final strategy.
   bool defer_final_transform_metadata = false;
+  /// Reserves storage for a deferred device-selected strategy map. The backend
+  /// may expose ReconfigureResidentStrategies only with this capability.
+  bool resident_strategy_metadata = false;
 };
 
 struct ResidentAcStrategyInputs {
@@ -180,6 +183,10 @@ struct AqResidentButteraugliPolicyOutput {
   /// On success the lease is independent of this prepared operation/backend.
   std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame>*
     completed_frame = nullptr;
+  /// Optional authoritative selected grid, published with all other outputs.
+  /// Requires resident_strategy_metadata preparation. A deferred device
+  /// selection is never exposed before policy completion.
+  AcStrategyGrid *strategies = nullptr;
 };
 
 struct AqEvaluationMemoryStats {
@@ -275,6 +282,22 @@ public:
   [[nodiscard]] virtual Status Reconfigure(
     const AcStrategyGrid& strategies,
     ConstPlaneU8View epf_sharpness) = 0;
+
+  /// Binds a native selector's row-major byte map followed by tile error bytes.
+  /// No submission, wait or selected-map readback occurs here. The producer
+  /// must precede the next unprofiled resident policy on this backend's queue.
+  /// Borrow the selection buffer through that call (including failure). Only
+  /// that policy may consume a pending selection; caller outputs remain atomic.
+  [[nodiscard]] virtual bool SupportsResidentStrategies() const noexcept {
+    return false;
+  }
+  [[nodiscard]] virtual Status
+  ReconfigureResidentStrategies(ConstDevicePlaneView selection,
+                                ConstPlaneU8View epf_sharpness) {
+    (void)selection;
+    (void)epf_sharpness;
+    return Status::Unavailable("Resident strategy metadata is unavailable");
+  }
 
   /// Materializes only the quantized encoder frame. Backends may use this
   /// explicit fast path to omit inverse reconstruction and perceptual scoring.

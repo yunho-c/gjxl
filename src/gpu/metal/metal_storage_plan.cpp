@@ -3,6 +3,7 @@
 
 #include "gpu/metal/metal_storage_plan.h"
 #include "codec/coefficient_order_population_internal.h"
+#include "gpu/metal/kernels/aq_strategy_dispatch.h"
 
 #include <algorithm>
 #include <limits>
@@ -77,6 +78,12 @@ Status ComputeAqStoragePlan(const AqStoragePlanOptions &options,
        options.metric != AqEvaluationMetric::kMaximumError)) {
     return Status::InvalidArgument("AQ storage-plan policy counts are invalid");
   }
+  if (options.resident_strategy_metadata &&
+      (options.frame_only || !options.resident_quantization ||
+       options.anchor_capacity_count != block_count ||
+       options.metric != AqEvaluationMetric::kButteraugli))
+    return Status::InvalidArgument(
+        "Resident strategy storage requires complete resident AQ");
   AqStoragePlan candidate;
   DeviceScratchLayoutPlan persistent, staging;
   if (!options.frame_only && !options.evaluation_free &&
@@ -394,6 +401,26 @@ Status ComputeAqStoragePlan(const AqStoragePlanOptions &options,
       return status;
   }
 
+  if (options.resident_strategy_metadata) {
+    AqStrategyMetadataStoragePlan metadata;
+    status = ComputeAqStrategyMetadataStoragePlan(block_extent, &metadata);
+    if (!status.ok())
+      return status;
+    for (size_t i = 0; i < kMetadataScratchPlaneCount; ++i) {
+      const size_t n = metadata.elements[i];
+      status = staging.AddPlane(DeviceElementType::kI32, {n, 1}, n,
+                                kAqStorageAlignment,
+                                &candidate.strategy_metadata[i]);
+      if (!status.ok())
+        return status;
+    }
+    constexpr size_t words = 7 * sizeof(gjxl_aq_dispatch::Record) / 4;
+    status =
+        staging.AddPlane(DeviceElementType::kI32, {words, 1}, words,
+                         kAqStorageAlignment, &candidate.strategy_dispatch);
+    if (!status.ok())
+      return status;
+  }
   candidate.persistent_bytes = persistent.capacity_bytes();
   candidate.staging_bytes = staging.capacity_bytes();
   *plan = candidate;

@@ -868,6 +868,7 @@ Status MetalPreparedAqEvaluation::Prepare(
   frame_only_resident_quantizer_ =
       preparation.frame_only_resident_quantizer;
   resident_quantization_ = preparation.resident_quantization;
+  resident_strategy_metadata_enabled_ = preparation.resident_strategy_metadata;
   borrowed_original_linear_rgb_ =
     preparation.resident_original_linear_rgb.plane[0].buffer != nullptr;
   borrowed_coding_opsin_ =
@@ -1059,29 +1060,33 @@ Status MetalPreparedAqEvaluation::Prepare(
   }
 
   AqStoragePlan storage_plan;
-  status = ComputeAqStoragePlan({
-    .source_extent = source_extent_,
-    .coding_extent = coding_extent_,
-    .anchor_capacity_count = anchor_capacity_count,
-    .maximum_coefficient_count = maximum_coefficient_count_,
-    .initial_quant_sort_count = initial_quant_sort_count_,
-    .filter_scratch_image_count = filter_scratch_image_count_,
-    .frame_only = frame_only_,
-    .evaluation_free = options_.evaluation_free,
-    .borrowed_original_linear_rgb = borrowed_original_linear_rgb_,
-    .borrowed_coding_opsin = borrowed_coding_opsin_,
-    .needs_reconstructed = needs_reconstructed,
-    .frame_only_resident_initial_quant = frame_only_resident_initial_quant_,
-    .omit_initial_search_data = omit_initial_search_data_,
-    .frame_only_resident_quantizer = frame_only_resident_quantizer_,
-    .resident_quantization = resident_quantization_,
-    .uses_butteraugli_sinks = uses_butteraugli_sinks_,
-    .metric = options_.metric,
-    .dc_quantization = options_.dc_quantization,
-    .dc_prediction = options_.dc_prediction,
-    .extra_dc_precision = options_.profile.extra_dc_precision,
-    .adaptive_dc_smoothing = options_.profile.adaptive_dc_smoothing,
-  }, &storage_plan);
+  status = ComputeAqStoragePlan(
+      {
+          .source_extent = source_extent_,
+          .coding_extent = coding_extent_,
+          .anchor_capacity_count = anchor_capacity_count,
+          .maximum_coefficient_count = maximum_coefficient_count_,
+          .initial_quant_sort_count = initial_quant_sort_count_,
+          .filter_scratch_image_count = filter_scratch_image_count_,
+          .frame_only = frame_only_,
+          .evaluation_free = options_.evaluation_free,
+          .borrowed_original_linear_rgb = borrowed_original_linear_rgb_,
+          .borrowed_coding_opsin = borrowed_coding_opsin_,
+          .needs_reconstructed = needs_reconstructed,
+          .frame_only_resident_initial_quant =
+              frame_only_resident_initial_quant_,
+          .omit_initial_search_data = omit_initial_search_data_,
+          .frame_only_resident_quantizer = frame_only_resident_quantizer_,
+          .resident_quantization = resident_quantization_,
+          .uses_butteraugli_sinks = uses_butteraugli_sinks_,
+          .metric = options_.metric,
+          .dc_quantization = options_.dc_quantization,
+          .dc_prediction = options_.dc_prediction,
+          .extra_dc_precision = options_.profile.extra_dc_precision,
+          .adaptive_dc_smoothing = options_.profile.adaptive_dc_smoothing,
+          .resident_strategy_metadata = resident_strategy_metadata_enabled_,
+      },
+      &storage_plan);
   if (!status.ok()) return status;
   status = backend_->AcquireAqScratchArena(
     MetalAqScratchArena::kPersistent, storage_plan.persistent_bytes, &persistent_);
@@ -1278,6 +1283,19 @@ Status MetalPreparedAqEvaluation::Prepare(
     if (!status.ok())
       return status;
     status = staging_.BindPlane(storage_plan.quant_probe_dequantized, &quant_probe_dequantized_);
+    if (!status.ok())
+      return status;
+  }
+  if (resident_strategy_metadata_enabled_) {
+    resident_strategy_metadata_.blocks = block_extent_;
+    for (size_t i = 0; i < kMetadataScratchPlaneCount; ++i) {
+      status = staging_.BindPlane(storage_plan.strategy_metadata[i],
+                                  &resident_strategy_metadata_.planes[i]);
+      if (!status.ok())
+        return status;
+    }
+    status = staging_.BindPlane(storage_plan.strategy_dispatch,
+                                &resident_strategy_parameters_);
     if (!status.ok())
       return status;
   }
@@ -1672,6 +1690,13 @@ Status MetalPreparedAqEvaluation::Prepare(
 Status MetalPreparedAqEvaluation::Reconfigure(
   const AcStrategyGrid& strategies,
   ConstPlaneU8View epf_sharpness) {
+  return ReconfigureImpl(strategies, epf_sharpness, false);
+}
+
+Status
+MetalPreparedAqEvaluation::ReconfigureImpl(const AcStrategyGrid &strategies,
+                                           ConstPlaneU8View epf_sharpness,
+                                           bool metadata_on_device) {
 
   if (frame_only_) {
     return Status::FailedPrecondition(
@@ -1695,7 +1720,7 @@ Status MetalPreparedAqEvaluation::Reconfigure(
     }
   }
 
-  Status status = BeginOperation();
+  Status status = metadata_on_device ? Status::Ok() : BeginOperation();
   if (!status.ok()) {
     return status;
   }
@@ -1862,41 +1887,42 @@ Status MetalPreparedAqEvaluation::Reconfigure(
       transform_layouts.push_back(transform);
     }
 
-    status = UploadPlane(
-      *backend_,
-      ConstPlaneI32View{
-        strategy_records.data(), strategies_.extent, strategies_.row_stride},
-      strategies_);
-    if (status.ok()) {
-      status = UploadPlane(
-        *backend_,
-        ConstPlaneI32View{
-          anchor_records.data(), {2 * anchor_offset, 1}, 2 * anchor_offset},
-        anchors_);
-    }
-    if (status.ok()) {
-      status = UploadPlane(*backend_, epf_sharpness, epf_sharpness_);
-    }
-    if (status.ok() && resident_quantization_) {
-      status = UploadPlane(
-        *backend_,
-        ConstPlaneI32View{
-          color_transform_records.data(),
-          {color_transform_records.size(), 1},
-          color_transform_records.size()},
-        color_transform_records_);
-    }
-    if (status.ok() && resident_quantization_) {
-      status = UploadPlane(
-        *backend_,
-        ConstPlaneI32View{color_tile_offsets.data(),
-                          {tile_extent_.width * tile_extent_.height + 1, 1},
-                          color_tile_offsets.size()},
-        color_tile_offsets_);
-    }
-    if (!status.ok()) {
-      Invalidate();
-      return status;
+    if (!metadata_on_device) {
+      status = UploadPlane(*backend_,
+                           ConstPlaneI32View{strategy_records.data(),
+                                             strategies_.extent,
+                                             strategies_.row_stride},
+                           strategies_);
+      if (status.ok()) {
+        status = UploadPlane(*backend_,
+                             ConstPlaneI32View{anchor_records.data(),
+                                               {2 * anchor_offset, 1},
+                                               2 * anchor_offset},
+                             anchors_);
+      }
+      if (status.ok()) {
+        status = UploadPlane(*backend_, epf_sharpness, epf_sharpness_);
+      }
+      if (status.ok() && resident_quantization_) {
+        status =
+            UploadPlane(*backend_,
+                        ConstPlaneI32View{color_transform_records.data(),
+                                          {color_transform_records.size(), 1},
+                                          color_transform_records.size()},
+                        color_transform_records_);
+      }
+      if (status.ok() && resident_quantization_) {
+        status = UploadPlane(
+            *backend_,
+            ConstPlaneI32View{color_tile_offsets.data(),
+                              {tile_extent_.width * tile_extent_.height + 1, 1},
+                              color_tile_offsets.size()},
+            color_tile_offsets_);
+      }
+      if (!status.ok()) {
+        Invalidate();
+        return status;
+      }
     }
 
     strategies_host_ = strategies;
@@ -1908,16 +1934,22 @@ Status MetalPreparedAqEvaluation::Reconfigure(
     row_major_anchors_ = std::move(row_major_anchors);
     final_transform_layouts_ = std::move(transform_layouts);
     final_transform_metadata_pending_ = false;
-    strategy_dispatch_ = {};
-    strategy_dispatch_families_ = {};
+    if (!metadata_on_device) {
+      strategy_dispatch_ = {};
+      strategy_dispatch_families_ = {};
+      resident_strategy_pending_ = false;
+      resident_strategy_metadata_.selection = {};
+    }
     anchor_count_ = anchor_offset;
     final_cfl_params_.transform_count =
       static_cast<uint32_t>(anchor_count_);
-    invariant_color_correlation_ready_ = false;
-    resident_forward_coefficients_ready_ = false;
-    resident_color_correlation_pending_ = false;
-    resident_color_correlation_readback_needed_ = false;
-    CompleteOperation();
+    if (!metadata_on_device) {
+      invariant_color_correlation_ready_ = false;
+      resident_forward_coefficients_ready_ = false;
+      resident_color_correlation_pending_ = false;
+      resident_color_correlation_readback_needed_ = false;
+      CompleteOperation();
+    }
     return Status::Ok();
   } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
     Invalidate();
@@ -2044,9 +2076,9 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
   const bool reconstruction_requested = std::ranges::any_of(
     output.reconstructed_linear_rgb.plane,
     [](PlaneF32View plane) { return PlaneDescriptorSpecified(plane); });
-  if ((quant_field_requested &&
-       (!ValidHostPlaneLayout(output.quant_field) ||
-        output.quant_field.extent != block_extent_)) ||
+  if ((output.strategies && !resident_strategy_metadata_enabled_) ||
+      (quant_field_requested && (!ValidHostPlaneLayout(output.quant_field) ||
+                                 output.quant_field.extent != block_extent_)) ||
       (block_map_requested &&
        (!ValidHostPlaneLayout(output.block_distance_map) ||
         output.block_distance_map.extent != block_extent_)) ||
@@ -2136,6 +2168,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
 
   resource_budget_internal::PublicationVector<double> candidate_scores;
   VarDctEncoderFrame candidate_frame;
+  AcStrategyGrid candidate_strategies;
   std::unique_ptr<MetalCompletedVarDctFrame> candidate_completed_frame;
   uint64_t output_prepare_nanoseconds = 0;
   if (output.completed_frame != nullptr) {
@@ -2558,6 +2591,26 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
           std::to_string(device_error) + ")")
       : status;
   }
+  const bool materialized_strategy = resident_strategy_pending_;
+  if (materialized_strategy) {
+    status = FinishResidentStrategyMetadata(
+        output.strategies ? &candidate_strategies : nullptr);
+    if (!status.ok()) {
+      Invalidate();
+      return status;
+    }
+  } else if (output.strategies) {
+    try {
+      candidate_strategies = strategies_host_;
+    } catch (const resource_budget_internal::ManagedAllocationFailure &e) {
+      Invalidate();
+      return e.status();
+    } catch (const std::bad_alloc &) {
+      Invalidate();
+      return Status::OutOfMemory(
+          "Selected strategy snapshot allocation failed");
+    }
+  }
   if (resident_color_correlation_readback_needed_) {
     status = ReadbackColorCorrelation();
     if (!status.ok()) {
@@ -2567,6 +2620,9 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     resident_color_correlation_readback_needed_ = false;
   }
   candidate_readback_stats.control_bytes = sizeof(device_error);
+  if (materialized_strategy)
+    candidate_readback_stats.mapped_frame_bytes +=
+        block_count_ + tile_extent_.width * tile_extent_.height;
 
   if (score_count != 0) {
     status = backend_->CopyDeviceToHost(
@@ -2619,10 +2675,13 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     }
     if (status.ok()) {
       candidate_readback_stats.quantizer_bytes = sizeof(resident_quantizer);
-      candidate_readback_stats.mapped_frame_bytes =
-        ((candidate_completed_frame == nullptr ? coefficient_value_count_ :
-            completed_coefficients_.extent.width + completed_order_population_.extent.width) +
-          4 * block_count_) * sizeof(int32_t);
+      candidate_readback_stats.mapped_frame_bytes +=
+          ((candidate_completed_frame == nullptr
+                ? coefficient_value_count_
+                : completed_coefficients_.extent.width +
+                      completed_order_population_.extent.width) +
+           4 * block_count_) *
+          sizeof(int32_t);
     }
   }
   if (reconstruction_requested) {
@@ -2761,6 +2820,8 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     candidate_completed_frame->allocation_cache = backend_->registry_;
     *output.completed_frame = std::move(candidate_completed_frame);
   }
+  if (output.strategies)
+    *output.strategies = std::move(candidate_strategies);
   last_readback_stats_ = candidate_readback_stats;
   resident_forward_coefficients_ready_ = true;
   if (profiling) *profile = std::move(candidate_profile);
@@ -2839,7 +2900,7 @@ Status MetalPreparedAqEvaluation::PrepareInvariantColorCorrelationResident(
     return Status::InvalidArgument("Resident final CfL iteration limit is invalid");
 
   if (!resident_quantization_ || frame_only_ ||
-      final_transform_metadata_pending_) {
+      (final_transform_metadata_pending_ && !resident_strategy_pending_)) {
     return Status::FailedPrecondition(
       "Resident final color correlation was not prepared");
   }
@@ -3003,7 +3064,8 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
     auto frame = std::make_unique<MetalCompletedVarDctFrame>();
     status = FrameGeometry::Create(source_extent_, &frame->geometry);
     if (!status.ok()) return status;
-    frame->strategies = strategies_host_;
+    if (!resident_strategy_pending_)
+      frame->strategies = strategies_host_;
     frame->profile = options_.profile;
     frame->sharpness = epf_sharpness_host_;
     frame->raw_quant.resize(block_count_);
@@ -3014,41 +3076,55 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
     frame->group_extent = storage_plan.group_extent;
     const size_t group_count = storage_plan.group_count;
     frame->group_used.assign(group_count, 0);
-    ManagedVector<uint32_t> destinations(anchor_count_);
+    ManagedVector<uint32_t> destinations(
+        resident_strategy_pending_ ? 0 : anchor_count_);
     uint16_t present_mask = 0;
-    for (const auto& batch : batches_) {
-      if (batch.anchor_count != 0) {
-        const size_t family = vardct_frame_internal::OrderPopulationFamily(batch.coefficient_count);
-        if (family >= vardct_frame_internal::kOrderPopulationSizes.size()) {
-          return Status::Internal("Completed Metal population family is invalid");
+    if (resident_strategy_pending_) {
+      for (size_t gy = 0; gy < frame->group_extent.height; ++gy)
+        for (size_t gx = 0; gx < frame->group_extent.width; ++gx)
+          frame->group_used[gy * frame->group_extent.width + gx] =
+              64 * std::min(dim, block_extent_.width - gx * dim) *
+              std::min(dim, block_extent_.height - gy * dim);
+    } else {
+      for (const auto &batch : batches_) {
+        if (batch.anchor_count != 0) {
+          const size_t family = vardct_frame_internal::OrderPopulationFamily(
+              batch.coefficient_count);
+          if (family >= vardct_frame_internal::kOrderPopulationSizes.size()) {
+            return Status::Internal(
+                "Completed Metal population family is invalid");
+          }
+          present_mask |= uint16_t{1} << family;
         }
-        present_mask |= uint16_t{1} << family;
       }
-    }
-    // Build from the authoritative post-search anchors on every output
-    // request, not from the provisional preparation's strategy grid.
-    for (const AqAnchor& anchor : row_major_anchors_) {
-      const auto& batch = batches_[anchor.batch_index];
-      const auto* info = GetAcStrategyInfo(anchor.strategy);
-      const size_t gx = anchor.block_x / dim;
-      const size_t gy = anchor.block_y / dim;
-      if (info == nullptr ||
-          (anchor.block_x + info->covered_blocks.width - 1) / dim != gx ||
-          (anchor.block_y + info->covered_blocks.height - 1) / dim != gy) {
-        return Status::InvalidArgument("Completed Metal transform crosses a group");
+      // Build from the authoritative post-search anchors on every output
+      // request, not from the provisional preparation's strategy grid.
+      for (const AqAnchor &anchor : row_major_anchors_) {
+        const auto &batch = batches_[anchor.batch_index];
+        const auto *info = GetAcStrategyInfo(anchor.strategy);
+        const size_t gx = anchor.block_x / dim;
+        const size_t gy = anchor.block_y / dim;
+        if (info == nullptr ||
+            (anchor.block_x + info->covered_blocks.width - 1) / dim != gx ||
+            (anchor.block_y + info->covered_blocks.height - 1) / dim != gy) {
+          return Status::InvalidArgument(
+              "Completed Metal transform crosses a group");
+        }
+        const size_t group = gy * frame->group_extent.width + gx;
+        size_t &used = frame->group_used[group];
+        if (batch.coefficient_count > cap - used) {
+          return Status::Internal("Completed Metal group capacity overflow");
+        }
+        if (present_mask == 1 &&
+            batch.anchor_offset + anchor.index_in_batch !=
+                anchor.block_y * block_extent_.width + anchor.block_x) {
+          return Status::Internal(
+              "Completed Metal DCT8 sample mapping is invalid");
+        }
+        destinations[batch.anchor_offset + anchor.index_in_batch] =
+            static_cast<uint32_t>(group * 3 * cap + used);
+        used += batch.coefficient_count;
       }
-      const size_t group = gy * frame->group_extent.width + gx;
-      size_t& used = frame->group_used[group];
-      if (batch.coefficient_count > cap - used) {
-        return Status::Internal("Completed Metal group capacity overflow");
-      }
-      if (present_mask == 1 && batch.anchor_offset + anchor.index_in_batch !=
-            anchor.block_y * block_extent_.width + anchor.block_x) {
-        return Status::Internal("Completed Metal DCT8 sample mapping is invalid");
-      }
-      destinations[batch.anchor_offset + anchor.index_in_batch] =
-        static_cast<uint32_t>(group * 3 * cap + used);
-      used += batch.coefficient_count;
     }
     status = backend_->AcquireCompletedFrameAllocation(
       storage_plan.capacity_bytes, &frame->allocation);
@@ -3075,7 +3151,7 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
     std::fill_n(populations, vardct_frame_internal::kOrderPopulationCount, 0u);
     auto* samples = reinterpret_cast<uint8_t*>(base + storage_plan.order_samples.offset_bytes);
     std::fill_n(samples, anchor_count_, uint8_t{0});
-    if (present_mask == 1) {
+    if (resident_strategy_pending_ || present_mask == 1) {
       // Pure DCT8's single batch is raster-ordered. Generate decisions in the
       // encoder's AC-group-first order, then remap to the batch anchor index.
       uint64_t a = 0x94D049BB133111EBull, b = 0xBF58476D1CE4E5B9ull;
@@ -3113,6 +3189,14 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
       frame->allocation.get(), samples_plane.offset_bytes, samples_plane.element_type,
       samples_plane.extent, samples_plane.row_stride};
     completed_sample_dct8_ = present_mask == 1;
+    if (resident_strategy_pending_) {
+      resident_strategy_metadata_.planes[kMetadataDestinations] =
+          completed_destinations_;
+      status = MetalAqStrategyMetadata::Validate(*backend_,
+                                                 resident_strategy_metadata_);
+      if (!status.ok())
+        return status;
+    }
     *out = std::move(frame);
     return Status::Ok();
   } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
@@ -3145,6 +3229,22 @@ Status MetalPreparedAqEvaluation::FinishCompletedFrame(
   if (!status.ok()) return status;
   if (raw_quant.size() != block_count_ || quantized_dc.size() != 3 * block_count_) {
     return Status::Internal("Completed Metal metadata dimensions changed");
+  }
+  if (!frame.strategies.valid()) {
+    try {
+      frame.strategies = strategies_host_;
+    } catch (const resource_budget_internal::ManagedAllocationFailure &e) {
+      return e.status();
+    } catch (const std::bad_alloc &) {
+      return Status::OutOfMemory(
+          "Completed strategy snapshot allocation failed");
+    }
+    frame.population.present_mask = 0;
+    for (const auto &b : batches_)
+      if (b.anchor_count)
+        frame.population.present_mask |=
+            uint16_t{1} << vardct_frame_internal::OrderPopulationFamily(
+                b.coefficient_count);
   }
   // These block-resolution fields are snapshotted so temporary AQ storage can
   // be reused/destroyed immediately. The full-resolution AC plane is borrowed.
@@ -4056,7 +4156,7 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
 }
 
 Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
-  if (final_transform_metadata_pending_)
+  if (final_transform_metadata_pending_ && !resident_strategy_pending_)
     return Status::FailedPrecondition(
       "AQ transform metadata requires successful reconfiguration");
   const bool resident_field = input.quant_field.valid();
@@ -4774,6 +4874,8 @@ void MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission(
     const void* context) {
   auto& self = *static_cast<MetalPreparedAqEvaluation*>(
     const_cast<void*>(context));
+  if (self.resident_strategy_pending_)
+    self.EncodeResidentStrategyMetadata(backend, encoder);
   if (self.DeviceStrategyDispatch())
     self.EncodeStrategyDispatch(backend, encoder);
   if (self.resident_policy_adjust_initial_field_) {
@@ -4845,7 +4947,10 @@ void MetalPreparedAqEvaluation::EncodeResidentReconstruction(
   write_completed_coefficients_ = completed_coefficients_.buffer != nullptr &&
     iteration == resident_policy_iterations_;
   reset_params_.preserve_error =
-      iteration == 0 && !resident_policy_adjust_initial_field_ ? 0u : 1u;
+      iteration == 0 && !resident_policy_adjust_initial_field_ &&
+              !resident_strategy_pending_
+          ? 0u
+          : 1u;
   reset_params_.preserve_forward_coefficients =
     iteration == 0 && !resident_forward_coefficients_ready_ ? 0u : 1u;
   const bool prepared_color_correlation =
@@ -4863,7 +4968,10 @@ void MetalPreparedAqEvaluation::EncodeResidentFrame(
   write_completed_coefficients_ = completed_coefficients_.buffer != nullptr;
   const bool first_pass = resident_policy_iterations_ == 0;
   reset_params_.preserve_error =
-      first_pass && !resident_policy_adjust_initial_field_ ? 0u : 1u;
+      first_pass && !resident_policy_adjust_initial_field_ &&
+              !resident_strategy_pending_
+          ? 0u
+          : 1u;
   reset_params_.preserve_forward_coefficients =
     first_pass && !resident_forward_coefficients_ready_ ? 0u : 1u;
   if (first_pass) EncodeReconstructionReset(backend, encoder);
@@ -5056,7 +5164,8 @@ Status CreateAqPipelines(
       "gjxl_aq_metadata_reset",        "gjxl_aq_metadata_count",
       "gjxl_aq_metadata_tile_count",   "gjxl_aq_metadata_prefix",
       "gjxl_aq_metadata_scatter",      "gjxl_aq_metadata_cfl",
-      "gjxl_aq_metadata_destinations", "gjxl_aq_strategy_dispatch"};
+      "gjxl_aq_metadata_destinations", "gjxl_aq_strategy_dispatch",
+      "gjxl_aq_metadata_error"};
   for (size_t i = 0; i < metadata_names.size(); ++i) {
     Status metadata_status = CreateAqPipeline(
         device, library, metadata_names[i], &pipelines.strategy_metadata[i]);

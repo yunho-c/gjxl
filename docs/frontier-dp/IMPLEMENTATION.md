@@ -69,6 +69,10 @@ Device parameter bindings and indirect consumer dispatches now have an internal
 qualification path, including resident Butteraugli and completed populations;
 see DISPATCH.md. Ordinary encodes do not activate it yet.
 
-Progress: active. Production ownership/admission and deferred completion,
+The complete device-map consumer now builds metadata inside AQ and publishes
+the authoritative host grid after completion; see RESIDENT-AQ-METADATA.md.
+Producer composition and frontend activation remain open.
+
+Progress: active. Production ownership/admission and producer composition,
 profiling the executing new paths, final combined qualification and fresh paper
 studies remain open.

@@ -346,7 +346,7 @@ public:
       AqResidentButteraugliPolicyOutput output) override;
   bool SupportsResidentPolicyInitialization() const noexcept override {
     return resident_quantization_ && !frame_only_ &&
-           !final_transform_metadata_pending_;
+           (!final_transform_metadata_pending_ || resident_strategy_pending_);
   }
   Status EvaluateResidentButteraugliPolicyProfiled(
       AqResidentButteraugliPolicyInput input,
@@ -371,6 +371,9 @@ public:
       gpu_profile_internal::GpuExecutionProfile* profile) override;
   Status Reconfigure(const AcStrategyGrid& strategies,
                      ConstPlaneU8View epf_sharpness) override;
+  bool SupportsResidentStrategies() const noexcept override;
+  Status ReconfigureResidentStrategies(ConstDevicePlaneView selection,
+                                       ConstPlaneU8View epf_sharpness) override;
   Status EncodeFrame(AqEvaluationInput input,
                      VarDctEncoderFrame *frame) override;
   Status ComputeInitialQuantization(
@@ -503,6 +506,16 @@ private:
     kBusy,
     kInvalid,
   };
+
+  Status ReconfigureImpl(const AcStrategyGrid &, ConstPlaneU8View,
+                         bool metadata_on_device);
+  Status FinishResidentStrategyMetadata(AcStrategyGrid *);
+  void EncodeResidentStrategyMetadata(MetalBackend &,
+                                      MTL::ComputeCommandEncoder *);
+  bool resident_strategy_metadata_enabled_ = false;
+  bool resident_strategy_pending_ = false;
+  AqStrategyMetadataDescriptor resident_strategy_metadata_;
+  DevicePlaneView resident_strategy_parameters_;
 
   Status ValidatePreparation(
     const AqEvaluationPreparation& preparation,

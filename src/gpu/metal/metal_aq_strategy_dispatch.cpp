@@ -137,3 +137,159 @@ Status BindMetalAqStrategyDispatchForTesting(PreparedAqEvaluation &prepared,
   return metal->BindStrategyDispatchForTesting(families, parameters);
 }
 } // namespace gjxl::metal_internal
+
+namespace gjxl::metal_internal {
+bool MetalPreparedAqEvaluation::SupportsResidentStrategies() const noexcept {
+  if (!resident_strategy_metadata_enabled_ || !resident_quantization_ ||
+      frame_only_ || options_.metric != AqEvaluationMetric::kButteraugli)
+    return false;
+  for (auto type : kSupportedAqStrategies) {
+    const auto &p = backend_->transform_pipelines_[size_t(type)];
+    if (!p.forward_image.state || !p.inverse_image.state)
+      return false;
+  }
+  return true;
+}
+
+Status MetalPreparedAqEvaluation::ReconfigureResidentStrategies(
+    ConstDevicePlaneView selection, ConstPlaneU8View sharpness) {
+  if (!SupportsResidentStrategies())
+    return Status::Unavailable("Resident strategy metadata was not prepared");
+  if (!sharpness.valid() || sharpness.extent != block_extent_ ||
+      sharpness.stride < block_extent_.width ||
+      selection.buffer == persistent_.backing_buffer() ||
+      selection.buffer == staging_.backing_buffer())
+    return Status::InvalidArgument(
+        "Resident strategy input geometry or ownership is invalid");
+  auto descriptor = resident_strategy_metadata_;
+  descriptor.selection = selection;
+  auto flat = [](DevicePlaneView plane, size_t count) {
+    plane.extent = {count, 1};
+    plane.row_stride = count;
+    return plane;
+  };
+  descriptor.planes[kMetadataStrategies] = flat(strategies_, 2 * block_count_);
+  descriptor.planes[kMetadataAnchors] = flat(anchors_, 2 * block_count_);
+  descriptor.planes[kMetadataColorRecords] =
+      flat(color_transform_records_, 6 * block_count_);
+  descriptor.planes[kMetadataColorOffsets] = color_tile_offsets_;
+  // This destination is unused for owned-frame output; coefficient coding may
+  // overwrite it after metadata construction. Completed output replaces it.
+  descriptor.planes[kMetadataDestinations] =
+      flat(quantized_coefficients_, block_count_);
+  Status status = MetalAqStrategyMetadata::Validate(*backend_, descriptor);
+  if (!status.ok())
+    return status;
+  for (size_t y = 0; y < block_extent_.height; ++y)
+    for (size_t x = 0; x < block_extent_.width; ++x)
+      if (sharpness.Row(y)[x] >= 8)
+        return Status::InvalidArgument(
+            "Resident strategy sharpness is invalid");
+  status = BeginOperation();
+  if (!status.ok())
+    return status;
+  try {
+    resource_budget_internal::ManagedVector<uint8_t> packed(block_count_);
+    for (size_t y = 0; y < block_extent_.height; ++y)
+      std::copy_n(sharpness.Row(y), block_extent_.width,
+                  packed.data() + y * block_extent_.width);
+    status =
+        backend_->CopyHostToDevice(*epf_sharpness_.buffer, packed.data(),
+                                   block_count_, epf_sharpness_.offset_bytes);
+    if (!status.ok()) {
+      Invalidate();
+      return status;
+    }
+    epf_sharpness_host_ = std::move(packed);
+    resident_strategy_metadata_ = descriptor;
+    strategy_dispatch_families_ = descriptor.planes[kMetadataFamilies];
+    strategy_dispatch_ = resident_strategy_parameters_;
+    resident_strategy_pending_ = true;
+    final_transform_metadata_pending_ = true;
+    anchor_count_ = block_count_;
+    final_cfl_params_.transform_count = uint32_t(block_count_);
+    invariant_color_correlation_ready_ = false;
+    resident_forward_coefficients_ready_ = false;
+    resident_color_correlation_pending_ = false;
+    resident_color_correlation_readback_needed_ = false;
+    CompleteOperation();
+    return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure &e) {
+    Invalidate();
+    return e.status();
+  } catch (const std::bad_alloc &) {
+    Invalidate();
+    return Status::OutOfMemory("Resident strategy sharpness allocation failed");
+  }
+}
+
+void MetalPreparedAqEvaluation::EncodeResidentStrategyMetadata(
+    MetalBackend &backend, MTL::ComputeCommandEncoder *encoder) {
+  // Reset before importing the metadata error; all subsequent policy resets
+  // preserve it while resident_strategy_pending_ is true.
+  EncodeReconstructionReset(backend, encoder);
+  MetalAqStrategyMetadata::Encode(backend, encoder,
+                                  resident_strategy_metadata_);
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.strategy_metadata[8].get());
+  RecordMetalComputePipelineState(
+      backend.aq_pipelines_.strategy_metadata[8].get());
+  const auto control = resident_strategy_metadata_.planes[kMetadataControl];
+  encoder->setBuffer(MetalBackend::AsMetalBuffer(*control.buffer)->handle(),
+                     control.offset_bytes, 0);
+  encoder->setBuffer(
+      MetalBackend::AsMetalBuffer(*reconstruction_error_.buffer)->handle(),
+      reconstruction_error_.offset_bytes, 1);
+  DispatchMetalThreads(encoder, MTL::Size(1, 1, 1), MTL::Size(1, 1, 1));
+}
+
+Status MetalPreparedAqEvaluation::FinishResidentStrategyMetadata(
+    AcStrategyGrid *selected) {
+  const auto plane = resident_strategy_metadata_.selection;
+  const size_t tiles = tile_extent_.width * tile_extent_.height;
+  std::span<const std::byte> bytes;
+  Status status = backend_->BorrowCompletedReadOnly(
+      *plane.buffer, block_count_ + tiles, plane.offset_bytes, &bytes);
+  if (!status.ok())
+    return status;
+  const auto *cells = reinterpret_cast<const uint8_t *>(bytes.data());
+  for (size_t t = 0; t < tiles; ++t)
+    if (cells[block_count_ + t])
+      return Status::DeviceError(
+          "Resident strategy selector reported an invalid tile");
+  AcStrategyGrid grid;
+  status = AcStrategyGrid::Create(block_extent_, &grid);
+  if (!status.ok())
+    return status;
+  for (size_t y = 0; y < block_extent_.height; ++y)
+    for (size_t x = 0; x < block_extent_.width; ++x) {
+      const uint8_t cell = cells[y * block_extent_.width + x];
+      if (cell & 1u) {
+        status = grid.Set(x, y, AcStrategyType(cell >> 1));
+        if (!status.ok())
+          return Status::DeviceError("Resident strategy cover is invalid");
+      }
+    }
+  if (!grid.complete())
+    return Status::DeviceError("Resident strategy cover is incomplete");
+  for (size_t y = 0; y < block_extent_.height; ++y)
+    for (size_t x = 0; x < block_extent_.width; ++x) {
+      AcStrategyCell cell;
+      status = grid.Get(x, y, &cell);
+      if (!status.ok() || cells[y * block_extent_.width + x] !=
+                              ((uint8_t(cell.strategy) << 1) | cell.is_anchor))
+        return Status::DeviceError(
+            "Resident strategy ownership is inconsistent");
+    }
+  status = ReconfigureImpl(
+      grid, {epf_sharpness_host_.data(), block_extent_, block_extent_.width},
+      true);
+  if (!status.ok())
+    return status;
+  resident_strategy_pending_ = false;
+  resident_strategy_metadata_.selection = {};
+  if (selected)
+    *selected = std::move(grid);
+  return Status::Ok();
+}
+} // namespace gjxl::metal_internal

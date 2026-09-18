@@ -15,11 +15,14 @@
 #include "codec/vardct_frame.h"
 #include "codec/vardct_frame_view_internal.h"
 #include "core/ac_strategy.h"
+#include "core/resource_context.h"
 #include "gpu/metal/kernels/aq_strategy_dispatch.h"
 #include "gpu/metal/metal_aq_evaluation_test.h"
+#include "gpu/metal/metal_aq_host_storage_plan.h"
 #include "gpu/metal/metal_aq_strategy_metadata.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/metal/metal_backend_internal.h"
+#include "gpu/metal/metal_storage_plan.h"
 
 namespace {
 using namespace gjxl;
@@ -177,7 +180,7 @@ struct Oracle {
   std::vector<uint8_t> sharpness;
   std::unique_ptr<PreparedAqEvaluation> prepared;
   bool Prepare(GpuBackend &gpu, const AcStrategyGrid &grid,
-               bool evaluate = false) {
+               bool evaluate = false, bool resident_metadata = false) {
     const auto blocks = grid.extent();
     const Extent2D pixels{blocks.width * 8, blocks.height * 8};
     for (auto &p : image)
@@ -206,7 +209,8 @@ struct Oracle {
          .options = options,
          .resident_quantization = true,
          .coefficient_decision_mode =
-             AcCoefficientDecisionMode::kAdjustedSharedQuant},
+             AcCoefficientDecisionMode::kAdjustedSharedQuant,
+         .resident_strategy_metadata = resident_metadata},
         &prepared));
   }
   bool Get(const AcStrategyGrid &grid,
@@ -244,6 +248,32 @@ bool CheckShape(GpuBackend &gpu, Extent2D blocks, size_t *cases) {
   return true;
 }
 
+std::vector<uint8_t> InvalidCells(const std::vector<uint8_t> &valid,
+                                  Extent2D blocks, size_t failure) {
+  auto cells = valid;
+  if (failure == 0)
+    cells[0] = 255; // Unsupported strategy.
+  if (failure == 1)
+    cells[13] = 0; // Orphan non-anchor.
+  if (failure == 2)
+    cells[blocks.width - 1] = 9; // DCT16 crossing edge.
+  if (failure == 3)
+    cells[7] = 9; // DCT16 crossing tile.
+  if (failure == 4)
+    cells[blocks.width * blocks.height + 1] = 1; // Selector error.
+  if (failure == 5) { // Equal-area overlap plus hole; area alone cannot
+                      // validate a cover.
+    for (size_t dy = 0; dy < 2; ++dy)
+      for (size_t dx = 0; dx < 2; ++dx) {
+        cells[dy * blocks.width + 1 + dx] = 8;
+        cells[(1 + dy) * blocks.width + dx] = 8;
+      }
+    cells[1] = cells[blocks.width] = 9;
+    cells[0] = 0;
+  }
+  return cells;
+}
+
 bool CheckFailure(GpuBackend &gpu) {
   const Extent2D blocks{17, 19};
   Arena arena;
@@ -252,27 +282,7 @@ bool CheckFailure(GpuBackend &gpu) {
     return false;
   const auto valid = Cells(grid);
   for (size_t failure = 0; failure < 6; ++failure) {
-    auto cells = valid;
-    if (failure == 0)
-      cells[0] = 255; // Unsupported strategy.
-    if (failure == 1)
-      cells[13] = 0; // Orphan non-anchor.
-    if (failure == 2)
-      cells[blocks.width - 1] = 9; // DCT16 crossing edge.
-    if (failure == 3)
-      cells[7] = 9; // DCT16 crossing tile.
-    if (failure == 4)
-      cells[blocks.width * blocks.height + 1] = 1; // Selector error.
-    if (failure == 5) { // Equal-area overlap plus hole; area alone cannot
-                        // validate a cover.
-      for (size_t dy = 0; dy < 2; ++dy)
-        for (size_t dx = 0; dx < 2; ++dx) {
-          cells[dy * blocks.width + 1 + dx] = 8;
-          cells[(1 + dy) * blocks.width + dx] = 8;
-        }
-      cells[1] = cells[blocks.width] = 9;
-      cells[0] = 0;
-    }
+    auto cells = InvalidCells(valid, blocks, failure);
     if (!arena.Run(gpu, cells) || arena.result[kMetadataControl][0] == 0)
       return false;
     for (size_t i = 1; i < 4; ++i)
@@ -329,48 +339,58 @@ bool CheckFailure(GpuBackend &gpu) {
   return true;
 }
 
-bool QuantizedCoefficientsEqual(const auto &expected, const auto &actual) {
-  if (!expected.valid() || !actual.valid() ||
-      expected.ac_group_count() != actual.ac_group_count()) {
+bool QuantizedCoefficientsEqual(const auto &a, const auto &b) {
+  if (!a.valid() || !b.valid() ||
+      a.strategies().extent() != b.strategies().extent() ||
+      a.ac_group_count() != b.ac_group_count() ||
+      a.geometry().frame() != b.geometry().frame() ||
+      a.profile() != b.profile() ||
+      a.quantizer().params().global_scale !=
+          b.quantizer().params().global_scale ||
+      a.quantizer().params().quant_dc != b.quantizer().params().quant_dc ||
+      a.color_correlation().tile_extent() !=
+          b.color_correlation().tile_extent())
     return false;
-  }
-  const gjxl::ConstImage3I32View expected_dc = expected.quantized_dc();
-  const gjxl::ConstImage3I32View actual_dc = actual.quantized_dc();
-  if (expected_dc.extent() != actual_dc.extent())
-    return false;
-  for (size_t channel = 0; channel < 3; ++channel) {
-    for (size_t y = 0; y < expected_dc.extent().height; ++y) {
-      if (!std::equal(expected_dc.plane[channel].Row(y),
-                      expected_dc.plane[channel].Row(y) +
-                          expected_dc.extent().width,
-                      actual_dc.plane[channel].Row(y))) {
+  const auto blocks = a.strategies().extent();
+  for (size_t y = 0; y < blocks.height; ++y) {
+    for (size_t x = 0; x < blocks.width; ++x) {
+      AcStrategyCell ac, bc;
+      if (!Ok(a.strategies().Get(x, y, &ac)) ||
+          !Ok(b.strategies().Get(x, y, &bc)) || ac.strategy != bc.strategy ||
+          ac.is_anchor != bc.is_anchor)
         return false;
+      if (a.raw_quant_field().Row(y)[x] != b.raw_quant_field().Row(y)[x] ||
+          a.epf_sharpness().Row(y)[x] != b.epf_sharpness().Row(y)[x])
+        return false;
+      for (size_t c = 0; c < 3; ++c) {
+        if (a.quantized_dc().plane[c].Row(y)[x] !=
+                b.quantized_dc().plane[c].Row(y)[x] ||
+            a.dc().plane[c].Row(y)[x] != b.dc().plane[c].Row(y)[x])
+          return false;
       }
     }
   }
-  for (size_t group_index = 0; group_index < expected.ac_group_count();
-       ++group_index) {
-    gjxl::VarDctAcGroupView expected_group;
-    gjxl::VarDctAcGroupView actual_group;
-    if (!expected.GetAcGroup(group_index, &expected_group).ok() ||
-        !actual.GetAcGroup(group_index, &actual_group).ok() ||
-        expected_group.used_coefficient_count !=
-            actual_group.used_coefficient_count) {
+  const auto tiles = a.color_correlation().tile_extent();
+  for (size_t y = 0; y < tiles.height; ++y)
+    for (size_t x = 0; x < tiles.width; ++x)
+      if (a.color_correlation().y_to_x_map().Row(y)[x] !=
+              b.color_correlation().y_to_x_map().Row(y)[x] ||
+          a.color_correlation().y_to_b_map().Row(y)[x] !=
+              b.color_correlation().y_to_b_map().Row(y)[x])
+        return false;
+  for (size_t g = 0; g < a.ac_group_count(); ++g) {
+    VarDctAcGroupView av, bv;
+    if (!Ok(a.GetAcGroup(g, &av)) || !Ok(b.GetAcGroup(g, &bv)) ||
+        av.used_coefficient_count != bv.used_coefficient_count)
       return false;
-    }
-    for (size_t channel = 0; channel < 3; ++channel) {
-      if (!std::equal(expected_group.coefficients[channel].begin(),
-                      expected_group.coefficients[channel].end(),
-                      actual_group.coefficients[channel].begin())) {
+    for (size_t c = 0; c < 3; ++c)
+      if (!std::ranges::equal(av.coefficients[c], bv.coefficients[c]))
         return false;
-      }
-    }
   }
-
   return true;
 }
 
-bool CheckDispatchConsumers(GpuBackend &gpu) {
+bool CheckDispatchConsumers(GpuBackend &gpu, bool resident_metadata = false) {
   using gjxl_aq_dispatch::Record;
   for (size_t trial = 0; trial < 27; ++trial) {
     const Extent2D blocks = trial >= 24 ? Extent2D{1, trial - 23}
@@ -401,10 +421,11 @@ bool CheckDispatchConsumers(GpuBackend &gpu) {
             return false;
         }
     }
+    bool waited = false; // Must outlive the prepared evaluator observer.
     Arena metadata;
     Oracle oracle;
     if (!metadata.Prepare(gpu, blocks) || !metadata.Run(gpu, Cells(grid)) ||
-        !oracle.Prepare(gpu, grid, true))
+        !oracle.Prepare(gpu, grid, true, resident_metadata))
       return false;
     if (trial >= 6 && trial < 24 &&
         metadata.result[kMetadataFamilies][5 * ((trial - 3) / 3) + 2] !=
@@ -469,11 +490,32 @@ bool CheckDispatchConsumers(GpuBackend &gpu) {
             {.quant_field = {expected.data(), blocks, blocks.width},
              .score_history = &expected_scores,
              .frame = completed ? nullptr : &expected_frame,
-             .completed_frame = completed ? &expected_completed : nullptr})) ||
-        !Ok(BindMetalAqStrategyDispatchForTesting(
-            *oracle.prepared, metadata.descriptor.planes[kMetadataFamilies],
-            view)) ||
-        !Ok(oracle.prepared->PrepareInvariantColorCorrelationResident(
+             .completed_frame = completed ? &expected_completed : nullptr})))
+      return false;
+    AcStrategyGrid actual_grid;
+    if (resident_metadata) {
+      AcStrategyGrid provisional;
+      if (!Grid(blocks, 0, &provisional) ||
+          !Ok(oracle.prepared->Reconfigure(
+              provisional, {oracle.sharpness.data(), blocks, blocks.width})) ||
+          !oracle.prepared->SupportsResidentStrategies())
+        return false;
+      const auto before_bind = gpu.stats();
+      if (!Ok(SetMetalAqWaitObserverForTesting(*oracle.prepared, &waited)) ||
+          !Ok(oracle.prepared->ReconfigureResidentStrategies(
+              metadata.descriptor.selection,
+              {oracle.sharpness.data(), blocks, blocks.width})) ||
+          waited ||
+          gpu.stats().committed_submissions !=
+              before_bind.committed_submissions ||
+          gpu.stats().successful_allocations !=
+              before_bind.successful_allocations)
+        return false;
+    } else if (!Ok(BindMetalAqStrategyDispatchForTesting(
+                   *oracle.prepared,
+                   metadata.descriptor.planes[kMetadataFamilies], view)))
+      return false;
+    if (!Ok(oracle.prepared->PrepareInvariantColorCorrelationResident(
             quant, quant_dc)))
       return false;
     const auto before = gpu.stats();
@@ -482,7 +524,8 @@ bool CheckDispatchConsumers(GpuBackend &gpu) {
             {.quant_field = {actual.data(), blocks, blocks.width},
              .score_history = &actual_scores,
              .frame = completed ? nullptr : &actual_frame,
-             .completed_frame = completed ? &actual_completed : nullptr})) ||
+             .completed_frame = completed ? &actual_completed : nullptr,
+             .strategies = resident_metadata ? &actual_grid : nullptr})) ||
         expected != actual || expected_scores != actual_scores ||
         !(completed
               ? expected_completed && actual_completed &&
@@ -494,6 +537,10 @@ bool CheckDispatchConsumers(GpuBackend &gpu) {
          gpu.stats().successful_allocations != before.successful_allocations)) {
       std::cerr << "Indirect AQ dispatch changed output on trial " << trial
                 << '\n';
+      return false;
+    }
+    if (resident_metadata && Cells(actual_grid) != Cells(grid)) {
+      std::cerr << "Resident strategy publication differs\n";
       return false;
     }
     if (trial == 0) {
@@ -531,9 +578,20 @@ bool CheckDispatchConsumers(GpuBackend &gpu) {
       return false;
     }
     if (trial < 5) {
+      if (resident_metadata &&
+          !Ok(oracle.prepared->ReconfigureResidentStrategies(
+              metadata.descriptor.selection,
+              {oracle.sharpness.data(), blocks, blocks.width})))
+        return false;
+      if (resident_metadata &&
+          !Ok(oracle.prepared->PrepareInvariantColorCorrelationResident(
+              quant, quant_dc)))
+        return false;
       std::fill(actual.begin(), actual.end(), -123.0f);
       std::vector<double> failed_scores{-91.0};
       VarDctEncoderFrame failed_frame;
+      AcStrategyGrid failed_grid = grid;
+      const auto saved_grid = Cells(failed_grid);
       if (trial == 0 && !Ok(FailNextMetalAqUploadForTesting(*oracle.prepared)))
         return false;
       if (trial == 1 &&
@@ -550,12 +608,14 @@ bool CheckDispatchConsumers(GpuBackend &gpu) {
       const AqResidentButteraugliPolicyOutput out{
           .quant_field = {actual.data(), blocks, blocks.width},
           .score_history = &failed_scores,
-          .frame = &failed_frame};
+          .frame = &failed_frame,
+          .strategies = resident_metadata ? &failed_grid : nullptr};
       const auto status =
           oracle.prepared->EvaluateResidentButteraugliPolicy(input, out);
       if (status.code() != (trial == 1 ? StatusCode::kSubmissionFailed
                                        : StatusCode::kDeviceError) ||
-          failed_frame.valid() || failed_scores != std::vector<double>{-91.0} ||
+          Cells(failed_grid) != saved_grid || failed_frame.valid() ||
+          failed_scores != std::vector<double>{-91.0} ||
           !std::ranges::all_of(actual, [](float v) { return v == -123.0f; }) ||
           oracle.prepared->EvaluateResidentButteraugliPolicy(input, out)
                   .code() != StatusCode::kFailedPrecondition) {
@@ -569,8 +629,244 @@ bool CheckDispatchConsumers(GpuBackend &gpu) {
         return false;
     }
   }
-  std::cout << "27 GPU-family/indirect AQ consumer cases matched CPU dispatch "
-               "exactly\n";
+  std::cout << "27 "
+            << (resident_metadata ? "full device-metadata"
+                                  : "GPU-family/indirect")
+            << " AQ consumer cases matched CPU dispatch exactly\n";
+  return true;
+}
+
+bool CheckResidentMetadataFailure(GpuBackend &gpu) {
+  const Extent2D blocks{17, 19};
+  AcStrategyGrid grid;
+  Arena metadata;
+  if (!Grid(blocks, 0, &grid) || !metadata.Prepare(gpu, blocks))
+    return false;
+  const auto valid = Cells(grid);
+  for (size_t failure = 0; failure < 6; ++failure) {
+    if (!metadata.Run(gpu, InvalidCells(valid, blocks, failure)))
+      return false;
+    for (size_t iterations : {size_t{0}, size_t{2}}) {
+      Oracle oracle;
+      if (!oracle.Prepare(gpu, grid, true, true) ||
+          !Ok(oracle.prepared->ReconfigureResidentStrategies(
+              metadata.descriptor.selection,
+              {oracle.sharpness.data(), blocks, blocks.width})))
+        return false;
+      std::vector<float> initial(blocks.width * blocks.height, 1.0f),
+          actual(initial.size(), -123.0f);
+      const ConstPlaneF32View quant{initial.data(), blocks, blocks.width};
+      float quant_dc = 0;
+      if (!Ok(ComputeInitialQuantDc(2.4f, &quant_dc)) ||
+          !Ok(oracle.prepared->PrepareInvariantColorCorrelationResident(
+              quant, quant_dc)))
+        return false;
+      VarDctEncoderFrame frame;
+      std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame> completed;
+      std::vector<double> scores{-91.0};
+      AcStrategyGrid selected = grid;
+      const AqResidentButteraugliPolicyInput input{
+          .adjusted_initial_quant_field = quant,
+          .quant_dc = quant_dc,
+          .butteraugli_target = 2.4f,
+          .iterations = iterations,
+          .evaluate_final_field = iterations != 0,
+          .adjust_initial_field = true};
+      const AqResidentButteraugliPolicyOutput output{
+          .quant_field = {actual.data(), blocks, blocks.width},
+          .score_history = &scores,
+          .frame = iterations ? nullptr : &frame,
+          .completed_frame = iterations ? &completed : nullptr,
+          .strategies = &selected};
+      const auto before = gpu.stats().committed_submissions;
+      const auto status =
+          oracle.prepared->EvaluateResidentButteraugliPolicy(input, output);
+      if (status.code() != StatusCode::kDeviceError ||
+          (status.message().find("flag ") == std::string::npos ||
+           (std::stoul(std::string(
+                status.message().substr(status.message().find("flag ") + 5))) &
+            0x10000000u) == 0) ||
+          gpu.stats().committed_submissions != before + 1 || frame.valid() ||
+          completed || Cells(selected) != valid ||
+          scores != std::vector<double>{-91.0} ||
+          !std::ranges::all_of(actual, [](float v) { return v == -123.0f; }) ||
+          oracle.prepared->EvaluateResidentButteraugliPolicy(input, output)
+                  .code() != StatusCode::kFailedPrecondition) {
+        std::cerr << "Resident metadata failure was not atomic: " << failure
+                  << '/' << iterations << ' ' << status.message() << '\n';
+        return false;
+      }
+    }
+  }
+  std::cout << "12 malformed device maps rejected atomically through AQ\n";
+  return true;
+}
+
+bool CheckResidentMetadataAllocationFailures(GpuBackend &gpu) {
+  using namespace resource_budget_internal;
+  const Extent2D blocks{13, 11};
+  AcStrategyGrid grid;
+  Arena metadata;
+  if (!Grid(blocks, 19, &grid) || !metadata.Prepare(gpu, blocks) ||
+      !metadata.Run(gpu, Cells(grid)))
+    return false;
+  std::vector<float> initial(blocks.width * blocks.height, 1.0f);
+  const ConstPlaneF32View quant{initial.data(), blocks, blocks.width};
+  float quant_dc = 0;
+  if (!Ok(ComputeInitialQuantDc(2.4f, &quant_dc)))
+    return false;
+  const AqResidentButteraugliPolicyInput input{.adjusted_initial_quant_field =
+                                                   quant,
+                                               .quant_dc = quant_dc,
+                                               .butteraugli_target = 2.4f,
+                                               .iterations = 0,
+                                               .evaluate_final_field = false,
+                                               .adjust_initial_field = true};
+  size_t post_completion_failures = 0;
+  for (size_t count = 0; count < 64; ++count) {
+    bool waited = false;
+    Oracle oracle;
+    if (!oracle.Prepare(gpu, grid, true, true) ||
+        !Ok(oracle.prepared->ReconfigureResidentStrategies(
+            metadata.descriptor.selection,
+            {oracle.sharpness.data(), blocks, blocks.width})) ||
+        !Ok(oracle.prepared->PrepareInvariantColorCorrelationResident(
+            quant, quant_dc)) ||
+        !Ok(SetMetalAqWaitObserverForTesting(*oracle.prepared, &waited)))
+      return false;
+    AcStrategyGrid selected = grid;
+    const auto saved = Cells(selected);
+    std::vector<double> scores{-91.0};
+    std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame> completed;
+    Status status;
+    bool pending = false;
+    {
+      ManagedHostScope scope(ResourceClass::kPreparation);
+      ArmManagedHostAllocationFailureAfterForTest(count);
+      status = oracle.prepared->EvaluateResidentButteraugliPolicy(
+          input, {.score_history = &scores,
+                  .completed_frame = &completed,
+                  .strategies = &selected});
+      pending = ManagedHostAllocationFailurePendingForTest();
+      DisarmManagedHostAllocationFailureForTest();
+    }
+    if (status.ok()) {
+      if (!pending || !completed || Cells(selected) != saved ||
+          !scores.empty() || !post_completion_failures)
+        return false;
+      std::cout << count << " managed allocation failures rejected atomically ("
+                << post_completion_failures << " after completion)\n";
+      return true;
+    }
+    if (status.code() != StatusCode::kOutOfMemory || pending || completed ||
+        Cells(selected) != saved || scores != std::vector<double>{-91.0}) {
+      std::cerr << "Resident allocation failure escaped at " << count << ' '
+                << status.message() << '\n';
+      return false;
+    }
+    post_completion_failures += waited;
+  }
+  std::cerr << "Resident allocation failure sweep did not reach success\n";
+  return false;
+}
+
+bool CheckResidentMetadataAdmission(GpuBackend &gpu) {
+  using namespace resource_budget_internal;
+  for (const Extent2D blocks : {Extent2D{1, 1}, {13, 11}, {69, 69}}) {
+    const Extent2D pixels{blocks.width * 8, blocks.height * 8};
+    const size_t count = blocks.width * blocks.height;
+    AcStrategyGrid grid;
+    Arena metadata;
+    if (!Grid(blocks, 19, &grid) || !metadata.Prepare(gpu, blocks) ||
+        !metadata.Run(gpu, Cells(grid)))
+      return false;
+    const AqEvaluationOptions options;
+    const auto filters = options.profile.loop_filter;
+    const size_t images = std::min(
+        size_t{2}, size_t(filters.gaborish) + filters.epf_options.iterations);
+    const bool sinks = pixels.width >= 15 && pixels.height >= 15;
+    AqStoragePlan device;
+    AqHostStoragePlan host;
+    CompletedFrameStoragePlan completed_device;
+    CompletedFrameHostStoragePlan completed_host;
+    ButteraugliStoragePlan butter;
+    if (!Ok(ComputeAqStoragePlan(
+            {.source_extent = pixels,
+             .coding_extent = pixels,
+             .anchor_capacity_count = count,
+             .maximum_coefficient_count = 1024,
+             .filter_scratch_image_count = images,
+             .needs_reconstructed = true,
+             .resident_quantization = true,
+             .uses_butteraugli_sinks = sinks,
+             .adaptive_dc_smoothing = options.profile.adaptive_dc_smoothing,
+             .resident_strategy_metadata = true},
+            &device)) ||
+        !Ok(ComputeAqHostStoragePlan({.source_extent = pixels,
+                                      .coding_extent = pixels,
+                                      .resident_quantization = true,
+                                      .reconfigure = true,
+                                      .resident_strategy_metadata = true},
+                                     &host)) ||
+        !Ok(ComputeCompletedFrameStoragePlan(pixels, pixels, count,
+                                             &completed_device)) ||
+        !Ok(ComputeCompletedFrameHostStoragePlan(pixels, pixels, count,
+                                                 &completed_host)) ||
+        !Ok(ComputeButteraugliStoragePlan(pixels, sinks && images == 2,
+                                          &butter)))
+      return false;
+    const size_t capacity =
+        device.persistent_bytes + device.staging_bytes +
+        host.working.peak_bytes + completed_device.capacity_bytes +
+        completed_host.working.peak_bytes + butter.capacity_bytes;
+    if (!Ok(gpu.TrimPreparationCache()))
+      return false;
+    ResourceBudget budget(capacity);
+    ResourceReservation job;
+    if (!Ok(budget.TryReserve(capacity, &job)))
+      return false;
+    {
+      ResourceContextScope scope({&job, ResourceClass::kPreparation});
+      Oracle oracle;
+      if (!oracle.Prepare(gpu, grid, true, true) ||
+          !Ok(oracle.prepared->ReconfigureResidentStrategies(
+              metadata.descriptor.selection,
+              {oracle.sharpness.data(), blocks, blocks.width})))
+        return false;
+      std::vector<float> initial(count, 1.0f);
+      const ConstPlaneF32View quant{initial.data(), blocks, blocks.width};
+      float quant_dc = 0;
+      if (!Ok(ComputeInitialQuantDc(2.4f, &quant_dc)) ||
+          !Ok(oracle.prepared->PrepareInvariantColorCorrelationResident(
+              quant, quant_dc)))
+        return false;
+      std::vector<double> scores;
+      AcStrategyGrid selected;
+      std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame> completed;
+      if (!Ok(oracle.prepared->EvaluateResidentButteraugliPolicy(
+              {.adjusted_initial_quant_field = quant,
+               .quant_dc = quant_dc,
+               .butteraugli_target = 2.4f,
+               .iterations = 0,
+               .evaluate_final_field = false,
+               .adjust_initial_field = true},
+              {.score_history = &scores,
+               .completed_frame = &completed,
+               .strategies = &selected})) ||
+          !completed || Cells(selected) != Cells(grid) ||
+          budget.snapshot().peak_backing_bytes > capacity)
+        return false;
+    }
+    if (!Ok(gpu.TrimPreparationCache()))
+      return false;
+    job.Reset();
+    if (budget.snapshot().committed_bytes() != 0) {
+      std::cerr << "Resident metadata admission retained resources\n";
+      return false;
+    }
+  }
+  std::cout
+      << "3 complete resident-metadata lifetimes fit declared admission\n";
   return true;
 }
 
@@ -658,7 +954,11 @@ int main(int argc, char **argv) {
                            {129, 131}})
     if (!CheckShape(*gpu, shape, &cases))
       return EXIT_FAILURE;
-  if (!CheckFailure(*gpu) || !CheckDispatchConsumers(*gpu))
+  if (!CheckFailure(*gpu) || !CheckDispatchConsumers(*gpu) ||
+      !CheckDispatchConsumers(*gpu, true) ||
+      !CheckResidentMetadataFailure(*gpu) ||
+      !CheckResidentMetadataAllocationFailures(*gpu) ||
+      !CheckResidentMetadataAdmission(*gpu))
     return EXIT_FAILURE;
   std::cout << cases
             << " exact CPU-builder/GPU-metadata cases passed; guards, failure "

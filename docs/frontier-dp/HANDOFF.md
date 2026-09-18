@@ -74,17 +74,18 @@ must leave caller outputs unchanged.
 ## Qualified foundations
 
 The device metadata constructor is committed in `407cd05`; see METADATA.md.
-The parameter/indirect-dispatch consumer qualification is described in
-DISPATCH.md. Its real AQ kernels consume GPU family counts, but its test still
-retains CPU anchors and final-frame metadata as an oracle. Neither milestone
-removes the production search wait by itself.
+The indirect consumer qualification is committed in `7182d06`; see DISPATCH.md.
+The complete consumer boundary now builds all metadata within AQ, allocates
+completed output from geometry, propagates errors and publishes the selected
+host grid after completion; see RESIDENT-AQ-METADATA.md. Ordinary frontend calls
+still do not activate this boundary.
 
-The next integration must bind all builder outputs into prepared AQ, include
-prefix/parameter storage in admission, and make completed-frame allocation
-independent of the selected host grid. Retain the selector submission until
-consumer completion, import metadata errors after any reconstruction reset,
-and publish the authoritative host grid only after AQ finishes. The pending
-provider result must be explicit at the codec boundary.
+Next, compose scoring and selection as a prefix of the AQ command buffer. An
+explicit deferred provider result must retain search buffers through the AQ
+call, including failures. This avoids introducing a separately outstanding ACS
+submission. Update production workflow admission for both new scratch and the
+longer overlap of search buffers with completed output. Preserve the synchronous
+path for dense search, unsupported transform implementations and profiling.
 
 ## Acceptance gates
 

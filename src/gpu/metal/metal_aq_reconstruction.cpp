@@ -763,13 +763,14 @@ void MetalPreparedAqEvaluation::EncodeQuantFieldAdjustmentSubmission(
 
   const auto& self =
       *static_cast<const MetalPreparedAqEvaluation*>(context);
-  encoder->setComputePipelineState(
-      backend.aq_pipelines_.reset_initial_quant.get());
-  BindPlane(encoder, self.reconstruction_error_, 0);
-  encoder->setBytes(&self.initial_quant_gradient_params_,
-                    sizeof(self.initial_quant_gradient_params_), 1);
-  DispatchThreads1d(encoder, 1);
-
+  if (!self.resident_strategy_pending_) {
+    encoder->setComputePipelineState(
+        backend.aq_pipelines_.reset_initial_quant.get());
+    BindPlane(encoder, self.reconstruction_error_, 0);
+    encoder->setBytes(&self.initial_quant_gradient_params_,
+                      sizeof(self.initial_quant_gradient_params_), 1);
+    DispatchThreads1d(encoder, 1);
+  }
   for (size_t batch_index = 0; batch_index < self.batches_.size();
        ++batch_index) {
     const AqStrategyBatch& batch = self.batches_[batch_index];

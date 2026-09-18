@@ -1,0 +1,52 @@
+{
+  "revision": "7182d06611cd6cf4c4719448549058646f7cc44a",
+  "files": {
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/resident-aq-metadata-20260918/metadata-test": "c87a74e33a7d82b3d6532abea91b9a5ab84006e2f1fd8ca2c95727193ef8a3b3",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/resident-aq-metadata-20260918/gjxl.metallib": "3a1f0d488e799bc7d074800fcf5d8630c7422497c3ea48db8c8c8c89e733dc16"
+  },
+  "sources": {
+    "src/gpu/metal/kernels/aq_strategy_metadata.metal": "363107273290e3ae6ca3358a3c75c1a2196558e256d7bcb50434fde601f0aec6",
+    "src/gpu/metal/metal_aq_evaluation.cpp": "8dc4738a89c63067bbbf83161ef365a0df8544b55134206064c09982d77bb3da",
+    "src/gpu/metal/metal_aq_evaluation_internal.h": "fdbc9442e7e5544fd200dde9d165a35e0904378221f81149c00d3a6154919104",
+    "src/gpu/metal/metal_aq_host_storage_plan.cpp": "f9c79d5a16f45e2272c9b86b39d5750f19aa68fa27b866f1bc11e82fa19b52db",
+    "src/gpu/metal/metal_aq_host_storage_plan.h": "0c2cef169da66ff061f10f5c785fb8db30d2d5e669fb1dbbbb5cfdae9b348446",
+    "src/gpu/metal/metal_aq_reconstruction.cpp": "8e7eb7899505e931143fa8bd9c0753529e7f765e8235c43aea806ba3da64c114",
+    "src/gpu/metal/metal_aq_strategy_dispatch.cpp": "613eec60005cb581cd4917477931ae2490edcb05853628c69a67e5d5c7fcde3e",
+    "src/gpu/metal/metal_backend_internal.h": "bc7ce2a36c987cc275a0078ec0737ce8674eac8a9f995b0baa5907cf54c27f84",
+    "src/gpu/metal/metal_storage_plan.cpp": "b1b810b2abdeee5b37788bd6c6dac1ca907d62ca3e86d3dd1046819df5d1aa8f",
+    "src/gpu/metal/metal_storage_plan.h": "9effccad0e59811cf2c57d7f440373eb9153b914dc7d0ca3ed520b26918a1209",
+    "src/gpu/ops/aq_evaluation.h": "0a7eb4898bb6b8e321c4f6c11a4402b6bd7f74186af6def8d5d221900af5e315",
+    "tests/metal_aq_host_storage_plan_test.cpp": "af59c3c245e9a5625a82afd0b3bb9b56346c91a544f45627b0457648b81c5923",
+    "tests/metal_aq_strategy_metadata_test.cpp": "e75d556a1a48011094f2db2a0dd8d3e50f9feeaec6416b2eb871ac658de7bccc",
+    "tests/metal_storage_plan_test.cpp": "0c0a76c7baccc6eca3ae9a8cd22a52384bf980b505b3281178830b07debac83b",
+    "tools/frontier_dp/metadata_experiment.py": "af3411317ccfe953e47031e0ad408309f9ab3d6d057040cd5df38aebdb54bf17"
+  },
+  "commands": [
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/resident-aq-metadata-20260918/metadata-test",
+        "--metallib",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/resident-aq-metadata-20260918/gjxl.metallib"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/resident-aq-metadata-20260918/normal.log",
+      "started_unix": 1789710208.728908,
+      "finished_unix": 1789710209.809962
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/resident-aq-metadata-20260918/metadata-test",
+        "--metallib",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/resident-aq-metadata-20260918/gjxl.metallib"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/resident-aq-metadata-20260918/validation.log",
+      "started_unix": 1789710209.8101912,
+      "finished_unix": 1789710212.4631
+    }
+  ],
+  "completed": true,
+  "protocol": "Normal and Metal-validation CPU-builder and indirect AQ consumer parity; no timing",
+  "checks": {
+    "normal": "27 GPU-family/indirect AQ consumer cases matched CPU dispatch exactly\n27 full device-metadata AQ consumer cases matched CPU dispatch exactly\n12 malformed device maps rejected atomically through AQ\n42 managed allocation failures rejected atomically (37 after completion)\n3 complete resident-metadata lifetimes fit declared admission\n292 exact CPU-builder/GPU-metadata cases passed; guards, failure and reuse passed\n",
+    "validation": "2026-09-18 01:43:29.817 metadata-test[37768:322384470] Metal API Validation Enabled\n2026-09-18 01:43:29.818 metadata-test[37768:322384470] Metal GPU Validation Enabled\n27 GPU-family/indirect AQ consumer cases matched CPU dispatch exactly\n27 full device-metadata AQ consumer cases matched CPU dispatch exactly\n12 malformed device maps rejected atomically through AQ\n42 managed allocation failures rejected atomically (37 after completion)\n3 complete resident-metadata lifetimes fit declared admission\n292 exact CPU-builder/GPU-metadata cases passed; guards, failure and reuse passed\n"
+  }
+}

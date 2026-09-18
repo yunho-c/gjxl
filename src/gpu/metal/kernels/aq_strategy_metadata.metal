@@ -248,3 +248,10 @@ kernel void gjxl_aq_strategy_dispatch(
   r.groups[kLlf][0] = (3*n*(size/64)+255)/256;
   records[f] = r;
 }
+
+// Import selector/metadata failure after the enclosing AQ reset. Later policy
+// resets preserve this flag, including the zero-update final-frame path.
+kernel void gjxl_aq_metadata_error(device const uint* control [[buffer(0)]],
+                                 device atomic_uint* error [[buffer(1)]]) {
+  if (control[0]) atomic_fetch_or_explicit(error, 0x10000000u, memory_order_relaxed);
+}

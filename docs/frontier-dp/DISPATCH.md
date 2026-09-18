@@ -61,3 +61,6 @@ the future handoff. Production storage admission must include the prefix and
 parameter planes. Selection/submission lifetime, error import, geometry-only
 completed-output preparation and post-AQ host publication remain open, as listed
 in [HANDOFF.md](HANDOFF.md).
+
+The subsequent complete device-metadata consumer qualification is in
+[RESIDENT-AQ-METADATA.md](RESIDENT-AQ-METADATA.md).
