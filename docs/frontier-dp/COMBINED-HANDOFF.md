@@ -63,5 +63,36 @@ retained patch.
   exactly. The parent source archive, build and log are retained; the fixture
   was not changed for this work.
 
-Full-call timing against frozen CPU and synchronous-GPU controls is the next
-qualification step. The submission count alone is not a latency measurement.
+## Complete-call timing
+
+The [timing evidence](evidence/combined-acs-aq-timing-20260918.json) records a
+54-process comparison on the 20-core M4 Pro: two 24MP photographs and a 3MP
+downsample, efforts 5/8 at distance 1.2, eight CPU threads, three independent
+processes per arm/case, three warmups and seven timed encodes per process.
+Case and arm order rotate. The values below are medians of process medians in
+milliseconds, measured without GPU profiling. All codestreams are byte-identical.
+
+| Image | Effort | CPU selector | GPU with host handoff | Combined ACS/AQ | CPU / combined |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Alpine 3MP | 5 | 59.200 | 57.597 | 57.893 | 1.023x |
+| Alpine 3MP | 8 | 115.079 | 113.581 | 113.216 | 1.016x |
+| Alpine 24MP | 5 | 382.796 | 374.278 | 370.915 | 1.032x |
+| Alpine 24MP | 8 | 728.264 | 719.265 | 715.001 | 1.019x |
+| Forest 24MP | 5 | 422.264 | 411.654 | 405.890 | 1.040x |
+| Forest 24MP | 8 | 844.993 | 830.001 | 826.193 | 1.023x |
+
+The combined implementation delivers 1.6–4.0% higher throughput than the frozen
+CPU-selection control in this pilot. Compared with the preceding GPU selector
+and fused AQ initialization, eliminating the remaining handoff adds 0.46–1.42%
+on the 24MP cases. The 3MP changes (0.51% slower and 0.32% faster) are within the
+observed process spread. This small pilot supports a modest latency benefit;
+it does not establish a corpus-wide speedup or a compression improvement.
+
+Artifacts, individual samples, hashes and commands are retained in
+`build/frontier/results/combined-acs-aq-timing-20260918/`. The combined executable
+was compiled from the implementation committed as `195464c`; the run's source
+tree was clean. Its configure-time version banner still reports `407cd05`,
+because CMake had not been reconfigured after the later source edits. The
+retained executable hash, source revision and qualification artifacts identify
+the actual measured implementation. The fresh paper study uses a new production
+build with experiment controls disabled and a matching revision banner.

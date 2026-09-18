@@ -11,7 +11,7 @@ The initial original-bank Metal prototype is complete; see REPORT.md. It proves
 solver correctness and standalone timing, not production integration or rate
 improvement. This ledger does not redefine the objective around the prototype.
 
-Remaining work and evidence gates:
+Work and evidence gates:
 
 1. Diagnostic full-encode policy comparison: existing greedy, full frontier,
    and recursive rectangle DP with exact-cost greedy fallback. Freeze binaries,
@@ -37,15 +37,12 @@ Remaining work and evidence gates:
    of the committed implementation, with independent lifetime, bounded/resumable
    ledgers and no overlapping benchmark jobs. Report exact revision and coverage.
 
-Current source dependencies: ordinary FindAcStrategyGridGpuImpl now scores and
-selects on device but waits and reads the selected map.
-MetalPreparedAqEvaluation::Reconfigure still builds grouped anchors, batch
-offsets and CfL records on the CPU. Unprofiled resident Butteraugli AQ now adjusts
-the quant field and computes bounds inside the AQ submission; profiled and
-maximum-error paths retain the separate adjustment path.
-GPU reconstruction, inverse transforms, block reduction and Butteraugli sinks
-currently receive host batch counts, so resident metadata needs device parameter
-bindings and indirect dispatch or a justified bounded dispatch implementation.
+Current source behavior: ordinary unprofiled resident Butteraugli encoding
+scores and selects on device, builds grouped anchors, batch offsets, CfL records
+and dispatch parameters, then runs AQ in the same submission. Host strategy
+metadata is materialized after AQ completion. Initial quantization and final
+host frame assembly retain their existing boundaries. Profiled, dense-placement,
+maximum-error and unsupported configurations retain the synchronous path.
 
 The diagnostic policy pilot and comparative kernels are complete; see
 SELECTORS.md and the frozen rate-pilot/selector-comparison artifacts. Across six
@@ -61,18 +58,23 @@ encode parity and timing are in NATIVE-SELECTION.md. Fused AQ initialization is
 qualified separately in AQ-INITIALIZATION.md. The remaining metadata handoff and
 its consumers are detailed in HANDOFF.md.
 
-The standalone device metadata builder now matches the actual CPU builders in
-292 cases, including Metal validation; see METADATA.md. It is not yet consumed
-by ordinary AQ.
+The device metadata builder matches the actual CPU builders in 292 cases,
+including Metal validation; see METADATA.md. It is now consumed by ordinary AQ.
 
 Device parameter bindings and indirect consumer dispatches now have an internal
 qualification path, including resident Butteraugli and completed populations;
-see DISPATCH.md. Ordinary encodes do not activate it yet.
+see DISPATCH.md. Ordinary supported encodes now activate it.
 
 The complete device-map consumer is committed in `197a20b`. The ordinary
 frontend now composes scoring, selection and AQ without an intervening host
 wait; see COMBINED-HANDOFF.md for exact encode, failure and admission evidence.
 
-Progress: active. Full-call timing of the combined path and fresh frozen paper
-studies remain open. GPU profiling deliberately retains the qualified
-synchronous path.
+Implementation and bounded qualification are complete through `195464c`.
+COMBINED-HANDOFF.md records the 72 exact complete-encode comparisons, failure
+and admission checks, Metal validation and 54-process complete-call timing.
+The CPU-only pinned-score regression reproduces on the clean parent and remains
+documented. GPU profiling deliberately retains the qualified synchronous path.
+
+The remaining operational step is to freeze and start fresh fixed and calibrated
+paper studies. Their queue and ledgers live outside this source checkout so
+collection can continue independently without changing the frozen revision.
