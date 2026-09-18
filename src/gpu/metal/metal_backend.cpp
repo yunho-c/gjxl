@@ -624,7 +624,10 @@ Status CreateTransformPipeline(
 
     return Status::Unavailable(
       std::string("Metal GPU cannot launch the required threadgroup for ") +
-      std::string(implementation_name));
+      std::string(implementation_name) + " " + std::string(operation) + " " +
+      std::string(strategy_info->name) + " (required " +
+      std::to_string(threads_per_threadgroup) + ", supported " +
+      std::to_string(state->maxTotalThreadsPerThreadgroup()) + ")");
   }
 
   out->state = std::move(state);

@@ -210,6 +210,21 @@ an intermediate build appear complete.
   Native macOS C++20 reached testing after the Metal component setup fix.
   C++23 exposed a test's missing direct `<exception>` include; the include is
   now explicit and its focused Windows C++23 check passes.
+- Hosted Linux native C++20/C++23 checks pass. Metal runtime testing revealed
+  an integration regression: an omitted host pixel mask was passed with nonempty
+  geometry. Main's empty-view contract is restored. The shared AC-search test
+  now distinguishes CUDA arena capacity from Metal's separate buffers; worker
+  fault tests retain explicit four-participant coverage while limiting automatic
+  fault positions to the runner's available worker count. Scalar Metal pipeline
+  failures are being compared with pinned main on the same runner, not suppressed.
+- External distance bracketing produced 40 additional independently decoded
+  photographic comparisons; 36 meet a 0.2% byte-size gate. Among gated cases,
+  median decoded Butteraugli ratios (integrated/baseline) are 1.183 at effort 1,
+  1.274 at effort 4, 1.029 at effort 7, 0.996 at effort 8 and 1.005 at effort 10.
+  Efforts 1/4 have six gated pairs each; the others have eight. The effort-4
+  maximum is 1.548 and effort-7 maximum 1.129. Four unmatched cases remain
+  explicitly excluded. These compare changed default policies; low-effort
+  tradeoffs and the exact-mode threshold finding still require adjudication.
 
 ## Outstanding integration risks
 

@@ -29,9 +29,25 @@ jobs:
         run: cmake --build build/ci --parallel 4
       - name: Test
         run: ctest --test-dir build/ci --output-on-failure --parallel 2
+      - name: Diagnose Metal baseline on failure
+        if: failure() && runner.os == 'macOS' && matrix.standard == 20 && github.event_name == 'pull_request'
+        continue-on-error: true
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          xcrun swift -e 'import Metal; for d in MTLCopyAllDevices() { print(d.name, d.maxThreadsPerThreadgroup) }'
+          git fetch --depth=1 origin "$BASE_SHA"
+          git worktree add --detach build/main-reference "$BASE_SHA"
+          git -C build/main-reference submodule update --init --recursive
+          cmake -S build/main-reference -B build/main-reference-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=OFF -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF
+          cmake --build build/main-reference-build --parallel 4 --target gjxl_dct_test gjxl_ac_strategy_gpu_search_test gjxl_worker_launch_failure_test
+          ctest --test-dir build/main-reference-build --output-on-failure -R '^(metal_dct|metal_ac_strategy_search|worker_launch_failure_forward)$'
       - name: Retain test diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: native-${{ matrix.os }}-cxx${{ matrix.standard }}
-          path: build/ci/Testing/Temporary/
+          path: |
+            build/ci/Testing/Temporary/
+            build/main-reference-build/Testing/Temporary/

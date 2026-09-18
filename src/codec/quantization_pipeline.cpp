@@ -500,7 +500,8 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
     ? ConstPlaneF32View{}
     : ConstPlaneF32View{
         prepared.initial_quant.data(), block_extent, block_extent.width};
-  const ConstPlaneF32View pixel_mask = resident_only_initial
+  const ConstPlaneF32View pixel_mask =
+    (resident_only_initial || prepared.pixel_mask.empty())
     ? ConstPlaneF32View{}
     : ConstPlaneF32View{
         prepared.pixel_mask.data(), prepared.padded_extent,

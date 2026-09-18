@@ -381,7 +381,10 @@ bool CheckPreparedResidentReuse(gjxl::GpuBackend& gpu,
     return false;
   }
 #endif
-  if (stats.resource_capacity_bytes != expected_capacity ||
+  // CUDA packs scratch into one aligned arena; Metal retains independently
+  // allocated buffers and therefore has no resource-arena capacity.
+  if (stats.resource_capacity_bytes !=
+        (gpu.kind() == gjxl::BackendKind::kCuda ? expected_capacity : 0) ||
       stats.scratch.scratch_a_bytes != expected_scratch.scratch_a_bytes ||
       stats.scratch.scratch_b_bytes != expected_scratch.scratch_b_bytes ||
       stats.scratch.rate_scratch_bytes != expected_scratch.rate_scratch_bytes) {
