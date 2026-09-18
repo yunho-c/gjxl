@@ -5,6 +5,7 @@
 // unit without exposing a production test hook or widening the installed API.
 #include "codestream/encoder.cpp"
 
+#include <exception>
 #include <iostream>
 
 namespace {

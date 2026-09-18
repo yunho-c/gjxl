@@ -204,6 +204,12 @@ an intermediate build appear complete.
   exposed by main's additional refinement, not an accepted universal byte-match
   claim. Fixed-field coefficient contracts and this end-to-end numerical case
   must be distinguished during final qualification.
+- The refreshed complete Windows CUDA suite passes all 150 tests, including
+  public admission, DC policies, benchmark CLIs and the installed consumer
+  (918 seconds). Hosted Rust checks pass on Linux and macOS at `9cf3e65`.
+  Native macOS C++20 reached testing after the Metal component setup fix.
+  C++23 exposed a test's missing direct `<exception>` include; the include is
+  now explicit and its focused Windows C++23 check passes.
 
 ## Outstanding integration risks
 
