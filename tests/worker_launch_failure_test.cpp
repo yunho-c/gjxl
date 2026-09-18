@@ -110,9 +110,9 @@ void SingleFailures(bool metal, bool exact = false, std::optional<Site> selected
       fixture.options.cpu_thread_count = threads;
       for (Kind kind : {Kind::kSystemError, Kind::kBadAlloc}) {
         for (size_t before : {0, 1, 2}) {
-          // Automatic policy includes the caller and follows the machine's
-          // CPU count. A three-core runner has only two spawn opportunities.
-          if (threads == 0 && before >=
+          // Frontend/serializer dispatch caps even an explicit per-image
+          // limit at hardware concurrency; the caller consumes one slot.
+          if (before >=
               std::max(1u, std::thread::hardware_concurrency()) - 1) continue;
           WorkerLaunchFaultForTesting fault{site, before, kind};
           fault.context = &fixture;
@@ -273,7 +273,7 @@ void PreparedForwardFailures() {
     Ok(frontend_storage_internal::ComputePreparedForwardStoragePlan(fixture.image.extent(), threads, &plan));
     for (Kind kind : {Kind::kSystemError, Kind::kBadAlloc}) {
       for (size_t before : {0, 1, 2}) {
-        if (threads == 0 && before >=
+        if (before >=
             std::max(1u, std::thread::hardware_concurrency()) - 1) continue;
         WorkerLaunchFaultForTesting fault{Site::kForwardTransforms, before, kind};
         PreparedForwardDctCoefficients result;

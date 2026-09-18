@@ -217,6 +217,7 @@ int main(int argc, char **argv) {
            << "\",\"timing_semantics\":\"complete-encode-wall-time\","
            << "\"stage_profile_enabled\":false,\"backend\":\"metal\","
            << "\"gpu_aq_mode\":\"fully-resident\",\"density\":\"default\","
+           << "\"metal_aq_mode\":\"fully-resident\","
            << "\"compression\":\"automatic\",\"collect_final_score\":false,"
            << "\"input_layout\":\"planar-linear-srgb-f32\",\"resampling\":1,"
            << "\"dc_prediction\":\""

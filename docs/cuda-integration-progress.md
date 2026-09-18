@@ -235,6 +235,17 @@ an intermediate build appear complete.
   Memcheck reports zero errors with an explicit child completion marker. All
   nine focused pipeline/search/CPU-launch regressions pass after the Metal fixes.
   Hosted Rust checks pass on Windows, Linux and macOS at `53dfbeb`.
+- The hosted Mac is an Apple Paravirtual device, not a physical Apple GPU.
+  Pinned main reproduces the scalar DCT and worker-fault failures on that same
+  runner (job 105523511997). The scalar DCT32 shader now distributes its existing
+  per-element arithmetic over the pipeline's supported thread count, preserving
+  each dot product's order; this change is awaiting hosted shader/runtime tests.
+  Worker fault positions now respect the hardware cap for explicit limits too.
+  The quality benchmark retains main's `metal_aq_mode` JSON field alongside the
+  generic alias, and the effort-9 CLI assertion follows main's rate-optimized
+  policy. Timestamp-graph tests explicitly skip when the device rejects stage
+  counters; unsupported-profile output preservation remains tested. Such skips
+  do not qualify Metal timestamp behavior on physical hardware.
 
 ## Outstanding integration risks
 

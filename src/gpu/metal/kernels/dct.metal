@@ -2166,32 +2166,36 @@ kernel void gjxl_dct32_forward_scalar_2d_matmul(
   device const float* A [[buffer(0)]], // input (pixels)
   device       float* B [[buffer(1)]], // output (coefficients)
   uint              tid [[thread_index_in_threadgroup]],
+  uint3       group_size [[threads_per_threadgroup]],
   uint3  group_position [[threadgroup_position_in_grid]])
 {
-  int row = tid / 32;
-  int col = tid % 32;
-
   const ulong base = static_cast<ulong>(group_position.x) * 1024ul;
 
   threadgroup float T[32][32]; // intermediate product (C * A)
 
-  float t = 0;
-
-  for (int i=0; i<32; ++i) {
-    t += kOrthonormalDct32[32*row + i] * A[base + 32*i + col];
+  // Keep each element's accumulation order while allowing pipeline limits
+  // below 1024 threads (including the hosted Apple paravirtual device).
+  for (uint index = tid; index < 1024; index += group_size.x) {
+    const int row = index / 32;
+    const int col = index % 32;
+    float t = 0;
+    for (int i=0; i<32; ++i) {
+      t += kOrthonormalDct32[32*row + i] * A[base + 32*i + col];
+    }
+    T[row][col] = t;
   }
-
-  T[row][col] = t;
 
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  float b = 0;
-
-  for (int i=0; i<32; ++i) {
-    b += T[row][i] * kOrthonormalDct32[32*col + i];
+  for (uint index = tid; index < 1024; index += group_size.x) {
+    const int row = index / 32;
+    const int col = index % 32;
+    float b = 0;
+    for (int i=0; i<32; ++i) {
+      b += T[row][i] * kOrthonormalDct32[32*col + i];
+    }
+    B[base + 32*col + row] = b * kForwardDct32Scale;
   }
-
-  B[base + 32*col + row] = b * kForwardDct32Scale;
 }
 
 
@@ -2202,32 +2206,34 @@ kernel void gjxl_dct32_inverse_scalar_2d_matmul(
   device const float* A [[buffer(0)]], // input (coefficients)
   device       float* B [[buffer(1)]], // output (pixels)
   uint              tid [[thread_index_in_threadgroup]],
+  uint3       group_size [[threads_per_threadgroup]],
   uint3  group_position [[threadgroup_position_in_grid]])
 {
-  int row = tid / 32;
-  int col = tid % 32;
-
   const ulong base = static_cast<ulong>(group_position.x) * 1024ul;
 
   threadgroup float T[32][32]; // intermediate product (C^T * A^T)
 
-  float t = 0;
-
-  for (int i=0; i<32; ++i) {
-    t += kOrthonormalDct32[32*i + row] * A[base + 32*col + i];
+  for (uint index = tid; index < 1024; index += group_size.x) {
+    const int row = index / 32;
+    const int col = index % 32;
+    float t = 0;
+    for (int i=0; i<32; ++i) {
+      t += kOrthonormalDct32[32*i + row] * A[base + 32*col + i];
+    }
+    T[row][col] = t;
   }
-
-  T[row][col] = t;
 
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  float b = 0;
-
-  for (int i=0; i<32; ++i) {
-    b += T[row][i] * kOrthonormalDct32[32*i + col];
+  for (uint index = tid; index < 1024; index += group_size.x) {
+    const int row = index / 32;
+    const int col = index % 32;
+    float b = 0;
+    for (int i=0; i<32; ++i) {
+      b += T[row][i] * kOrthonormalDct32[32*i + col];
+    }
+    B[base + 32*row + col] = b * kInverseDct32Scale;
   }
-
-  B[base + 32*row + col] = b * kInverseDct32Scale;
 }
 
 
