@@ -44,6 +44,8 @@ struct AcStrategyCostOptions {
 
 struct AcStrategySearchOptions {
   float butteraugli_target = 1.0f;
+  /// Search DCT32-family placements at every base block instead of every two.
+  bool dense_dct32_search = false;
 };
 
 /// Selects a complete, non-overlapping strategy grid using libjxl's

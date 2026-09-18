@@ -54,7 +54,8 @@ Status ValidateSearchInputs(
     ? opsin.extent()
     : resident == nullptr ? Extent2D{} : resident->opsin.plane[0].extent;
   const Status status = ac_strategy_search_internal::ComputeStoragePlan(
-    opsin_extent, resident != nullptr, storage_plan, &gpu);
+    opsin_extent, resident != nullptr, storage_plan, &gpu,
+    options.dense_dct32_search);
   if (!status.ok()) return status;
   if (!quant_field.valid() || quant_field.extent != storage_plan->block_extent ||
       (!(resident != nullptr && pixel_mask.data == nullptr &&
@@ -351,15 +352,15 @@ static Status FindAcStrategyGridGpuImpl(
       }
     }
 
-    constexpr const auto& kStages =
-      ac_strategy_internal::kCandidateStages;
+    const auto stages =
+      ac_strategy_internal::CandidateStages(options.dense_dct32_search);
     auto& resources = state.resources;
     auto& cost_storage = state.cost_storage;
     AcStrategyGpuSearchStats result_stats;
-    for (size_t i = 0; i < kStages.size(); ++i) {
+    for (size_t i = 0; i < stages.size(); ++i) {
       const auto& stage_plan = storage_plan.stages[i];
       StrategyResources& resource = resources[i];
-      resource.staged = kStages[i];
+      resource.staged = stages[i];
       status = MakeCandidates(resource.staged,
         block_extent,
         tile_extent,
@@ -425,7 +426,8 @@ static Status FindAcStrategyGridGpuImpl(
       return status;
     }
 
-    std::array<AcStrategyCandidateBatch, kStages.size()> batches;
+    std::array<AcStrategyCandidateBatch,
+               ac_strategy_internal::kCandidateStages.size()> batches;
     for (size_t i = 0; i < resources.size(); ++i) {
       StrategyResources& resource = resources[i];
       batches[i] = {

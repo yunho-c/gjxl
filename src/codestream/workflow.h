@@ -65,8 +65,12 @@ struct VarDctEncodingOptions {
   float butteraugli_target = 1.0f;
   /// User-facing speed-versus-refinement intent in [1, 10]. Effort 7 preserves
   /// the established two-update adaptive-quantization policy and uses
-  /// deterministic DCT8-only coefficient-order sampling. Effort 8 adds full
+  /// deterministic DCT8-only coefficient-order sampling. Efforts 8-10 use full
   /// HybridUint/alphabet search with balanced complete-codestream fallback.
+  /// Ordinary resident Metal efforts 8-10 also use eight-step nonlinear final
+  /// chroma-from-luma; effort 8 runs three AQ updates and efforts 9-10 run four.
+  /// Ordinary effort 10 also searches DCT32-family placements at every base
+  /// block; efforts 5-9 use two-block spacing for these larger families.
   /// In the ordinary policy, efforts 1-4 use DCT8, disable Gaborish, and
   /// start with a uniform quantization field and run zero AQ updates.
   /// Efforts 5-6 enable mixed-transform AC search and run one AQ update.

@@ -137,7 +137,8 @@ bool CheckSearchParity(gjxl::GpuBackend& gpu,
   gjxl::Extent2D pixel_extent,
   float butteraugli_target,
   float phase,
-  bool check_full_tile_counts) {
+  bool check_full_tile_counts,
+  bool dense = false) {
   const SearchFixture fixture(pixel_extent, phase);
   gjxl::ColorCorrelationMap color_map;
   if (!gjxl::ComputeInitialColorCorrelationMap(fixture.Opsin(), &color_map)
@@ -150,7 +151,7 @@ bool CheckSearchParity(gjxl::GpuBackend& gpu,
     fixture.QuantField(),
     fixture.PixelMask(),
     color_map,
-    {.butteraugli_target = butteraugli_target},
+    {.butteraugli_target = butteraugli_target, .dense_dct32_search = dense},
     &cpu_grid);
   gjxl::AcStrategyGpuSearchStats stats;
   const gjxl::Status gpu_status = gjxl::FindAcStrategyGridGpu(gpu,
@@ -158,7 +159,7 @@ bool CheckSearchParity(gjxl::GpuBackend& gpu,
     fixture.QuantField(),
     fixture.PixelMask(),
     color_map,
-    {.butteraugli_target = butteraugli_target},
+    {.butteraugli_target = butteraugli_target, .dense_dct32_search = dense},
     &gpu_grid,
     &stats);
   if (!cpu_status.ok() || !gpu_status.ok()) {
@@ -178,10 +179,10 @@ bool CheckSearchParity(gjxl::GpuBackend& gpu,
         Count(gjxl::AcStrategyType::kDct16x8) != 56 ||
         Count(gjxl::AcStrategyType::kDct8x16) != 56 ||
         Count(gjxl::AcStrategyType::kDct16x16) != 49 ||
-        Count(gjxl::AcStrategyType::kDct32x16) != 12 ||
-        Count(gjxl::AcStrategyType::kDct16x32) != 12 ||
-        Count(gjxl::AcStrategyType::kDct32x32) != 9 ||
-        stats.total_candidate_count != 258) {
+        Count(gjxl::AcStrategyType::kDct32x16) != (dense ? 35u : 12u) ||
+        Count(gjxl::AcStrategyType::kDct16x32) != (dense ? 35u : 12u) ||
+        Count(gjxl::AcStrategyType::kDct32x32) != (dense ? 25u : 9u) ||
+        stats.total_candidate_count != (dense ? 320u : 258u)) {
       std::cerr << "Staged candidate counts are not dependency-minimal\n";
       return false;
     }
@@ -365,6 +366,23 @@ bool CheckPreparedResidentReuse(gjxl::GpuBackend& gpu) {
     std::cerr << "Malformed optional host mask was not rejected atomically\n";
     return false;
   }
+  // Changing placement policy must rebuild candidates, including when shrinking
+  // back to sparse after a dense search retained larger buffers.
+  for (bool dense : {true, true, false, true, false}) {
+    gjxl::AcStrategyGrid expected;
+    const gjxl::AcStrategySearchOptions options{
+      .butteraugli_target = 0.9f, .dense_dct32_search = dense};
+    if (!gjxl::FindAcStrategyGrid(
+          fixture.Opsin(), fixture.QuantField(), fixture.PixelMask(),
+          color_map, options, &expected).ok() ||
+        !gjxl::FindAcStrategyGridGpuResident(
+          gpu, {}, fixture.QuantField(), {}, color_map, resident,
+          options, &omitted, nullptr, &prepared).ok() ||
+        !GridsEqual(expected, omitted)) {
+      std::cerr << "Prepared AC policy transition changed placement\n";
+      return false;
+    }
+  }
   prepared.Reset();
   prepared.Reset();  // Empty/reset owners remain reusable; output is independent.
   if (!first.complete() || !GridsEqual(second, omitted) ||
@@ -400,6 +418,10 @@ int main() {
       !CheckSearchParity(*gpu, {80, 72}, 1.2f, 0.8f, false) ||
       !CheckSearchParity(*gpu, {80, 72}, 2.0f, 1.2f, false) ||
       !CheckSearchParity(*gpu, {128, 96}, 1.2f, 1.6f, false) ||
+      !CheckSearchParity(*gpu, {64, 64}, 1.2f, 0.0f, true, true) ||
+      !CheckSearchParity(*gpu, {80, 72}, 0.8f, 0.4f, false, true) ||
+      !CheckSearchParity(*gpu, {40, 24}, 1.2f, 0.8f, false, true) ||
+      !CheckSearchParity(*gpu, {128, 96}, 2.0f, 1.6f, false, true) ||
       !CheckValidationAndAtomicCommit(*gpu) ||
       !CheckPreparedResidentReuse(*gpu)) {
     return EXIT_FAILURE;
@@ -409,7 +431,8 @@ int main() {
   const gjxl::Status scalar_status =
     gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &scalar_gpu);
   if (!scalar_status.ok() ||
-      !CheckSearchParity(*scalar_gpu, {64, 64}, 1.2f, 0.6f, true)) {
+      !CheckSearchParity(*scalar_gpu, {64, 64}, 1.2f, 0.6f, true) ||
+      !CheckSearchParity(*scalar_gpu, {64, 64}, 1.2f, 0.6f, true, true)) {
     std::cerr << "Scalar staged search failed: " << scalar_status.message()
               << '\n';
     return EXIT_FAILURE;
@@ -422,7 +445,8 @@ int main() {
       OptionsFor(gjxl::MetalDctImplementation::kFactoredRadix2),
       &factored_gpu);
   if (!factored_status.ok() ||
-      !CheckSearchParity(*factored_gpu, {64, 64}, 1.2f, 0.9f, true)) {
+      !CheckSearchParity(*factored_gpu, {64, 64}, 1.2f, 0.9f, true) ||
+      !CheckSearchParity(*factored_gpu, {64, 64}, 1.2f, 0.9f, true, true)) {
     std::cerr << "Factored staged search failed: "
               << factored_status.message() << '\n';
     return EXIT_FAILURE;

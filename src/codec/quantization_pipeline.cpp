@@ -456,7 +456,9 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
         ? ConstPlaneF32View{}
         : ConstPlaneF32View{prepared.pixel_mask.data(), prepared.padded_extent,
                             prepared.padded_extent.width},
-      prepared.initial_color_correlation, {.butteraugli_target = control_target},
+      prepared.initial_color_correlation,
+      {.butteraugli_target = control_target,
+       .dense_dct32_search = options.dense_dct32_search},
       &prepared.strategies);
   }
   if (!status.ok()) {

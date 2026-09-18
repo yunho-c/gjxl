@@ -51,7 +51,8 @@ struct StoragePlan {
 /// unchanged.
 [[nodiscard]] Status ComputeStoragePlan(Extent2D coding, bool resident,
                                         StoragePlan *out,
-                                        GpuBackend *backend = nullptr);
+                                        GpuBackend *backend = nullptr,
+                                        bool dense_dct32_search = false);
 
 struct HostStoragePlan {
   // Candidates, quantization matrices, readback costs and dense cost tables.
@@ -68,12 +69,14 @@ struct HostStoragePlan {
 /// metadata/profiles, borrowed inputs and old output grids are separate. With
 /// reuse_prepared=false, state must start empty. With true, coding must bound
 /// BOTH dimensions of EVERY search since state was empty; a bound on pixel area
-/// alone is insufficient. Costs resize with geometric growth; candidates use
-/// explicit reserve and dense tables use assign. This does not transfer an old
-/// prepared owner's charges to a new reservation. No backing allocation on
+/// alone is insufficient. dense_dct32_search must be true if ANY search since
+/// state was empty used dense placement. Costs resize with geometric growth;
+/// candidates use explicit reserve and dense tables use assign. This does not
+/// transfer an old prepared owner's charges to a new reservation. No backing allocation on
 /// success; failure leaves output unchanged.
 [[nodiscard]] Status ComputeHostStoragePlan(Extent2D coding, bool resident,
                                             bool reuse_prepared,
-                                            HostStoragePlan *out);
+                                            HostStoragePlan *out,
+                                            bool dense_dct32_search = false);
 
 } // namespace gjxl::ac_strategy_search_internal

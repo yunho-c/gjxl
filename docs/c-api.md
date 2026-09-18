@@ -292,26 +292,37 @@ behavior:
 
 | Effort | AQ updates | Entropy behavior |
 | ---: | ---: | --- |
-| 1-3 | 0 | Balanced |
-| 4-6 | 1 | Balanced |
+| 1-4 | 0 | Balanced |
+| 5-6 | 1 | Balanced |
 | 7 | 2 | Balanced default |
-| 8 | 3 | Balanced |
-| 9 | 3 | High density |
-| 10 | 4 | High density |
+| 8 | 3 | Rate optimized, with balanced whole-file fallback |
+| 9-10 | 4 | Rate optimized, with balanced whole-file fallback |
+
+Ordinary fully resident Metal efforts 8-10 also share eight-step nonlinear
+final chroma-from-luma. CPU and explicit exact/throughput frontend modes retain
+their established final color-correlation policy. Effort 9 adds the fourth AQ
+update. Ordinary effort 10 additionally searches 16x32, 32x16 and 32x32
+transform placements at every 8x8 base block, instead of every two blocks.
+This increases candidate work and its host/device scratch reservation while
+preserving the 64x64 color-tile boundary. Explicit high-density and
+maximum-error modes retain their established placement policy. See the
+[candidate ladder and validation](e9-e10-rate.md); higher effort does not
+guarantee better measured rate-quality on every image.
 
 The numbers communicate the same user intent as `cjxl`, not identical
 algorithms or identical output. In particular, effort 10 does not select the
 exhaustive former serializer; that requires the independent compression mode.
 The CLI's `--high-density` compatibility override continues to request four AQ
-updates while resolving to the same high-density entropy behavior as efforts
-9-10.
+updates and the established high-density entropy behavior.
 
 ### Compression mode
 
 `GJXL_COMPRESSION_AUTOMATIC` resolves entropy search from effort. Balanced
 efforts commit one block-context map and coefficient-order representation and
-use effort-7-like direct ANS construction. Efforts 9-10 use the measured
-effort-9-like high-density policy.
+use effort-7-like direct ANS construction. Efforts 8-10 search HybridUint
+configurations and all valid ANS alphabet widths, then publish the smaller
+complete codestream from the expanded and balanced writers. Explicit
+high-density mode retains its separate entropy policy.
 
 `GJXL_COMPRESSION_MAXIMUM` preserves the former exhaustive serializer policy
 as an explicit opt-in. It changes only entropy/codestream search and does not

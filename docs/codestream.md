@@ -389,9 +389,17 @@ explicit unqualified override. Operational errors after GPU work starts are
 returned atomically instead of retrying on CPU. The default density policy
 performs two AQ updates; the explicit high-density policy performs four on CPU,
 exact-coefficient Metal, or fully-resident Metal.
-Entropy search is resolved independently: efforts 1-8 use the balanced
-single-representation serializer, efforts 9-10 and `kHighDensity` use the
-effort-9-like high-density serializer, and
+Entropy search is resolved independently: efforts 1-7 use the balanced
+single-representation serializer. Efforts 8-10 use full HybridUint/alphabet
+search with balanced complete-codestream fallback; ordinary fully resident
+Metal encoding also shares eight-step nonlinear final chroma-from-luma at
+these efforts. Effort 8 uses three AQ updates; efforts 9-10 use four.
+Ordinary effort 10 also searches DCT32-family placements at every base block,
+with matching CPU/GPU enumeration and memory admission. Explicit high-density
+and maximum-error recipes retain their existing transform search. See the
+[candidate ladder](e9-e10-rate.md) for scope and validation.
+Explicit `kHighDensity` uses the effort-9-like high-density
+serializer, and
 `VarDctCompressionMode::kMaximumCompression` explicitly restores the former
 exhaustive map/order/coder tournament. Direct serializer calls default to
 balanced behavior. See
@@ -434,8 +442,8 @@ of `--distance`, `--maximum-error`, `--target-bytes`, or `--target-bpp`, plus
 diagnostic evaluation; the default report says that the final score was not
 evaluated.
 `--high-density` selects four AQ updates for Butteraugli-target and target-size
-control and high-density entropy. Efforts 9-10 select the same entropy behavior
-without otherwise becoming aliases for the four-update compatibility option.
+control and the established high-density entropy. Ordinary efforts 9-10 use
+the rate-optimized writer and retain the shared effort-8 final-CfL improvement.
 `--maximum-compression` changes only entropy/codestream search; it does not
 silently change AQ, backend, rate control, or thread limits. High density is
 rejected with maximum-error, throughput, and maximum-throughput policies rather

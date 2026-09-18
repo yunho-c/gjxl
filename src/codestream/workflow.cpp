@@ -593,6 +593,8 @@ PrepareWorkflow(ConstImage3FView linear_rgb, VarDctEncodingOptions options,
       options, &preparation_options);
     preparation_options.fixed_dct8 =
       codestream_internal::UseFixedDct8Strategy(options);
+    preparation_options.dense_dct32_search =
+      codestream_internal::UseDenseDct32Search(options);
     if (options.rate_control_mode == VarDctRateControlMode::kMaximumError) {
       preparation_options.adaptive_quantization.control_mode =
         AdaptiveQuantizationControlMode::kMaximumError;
@@ -791,6 +793,8 @@ PrepareWorkflow(ConstImage3FView linear_rgb, VarDctEncodingOptions options,
   codestream_internal::ConfigureInitialQuantizationPolicy(options, &pipeline_options);
   pipeline_options.fixed_dct8 =
     codestream_internal::UseFixedDct8Strategy(options);
+  pipeline_options.dense_dct32_search =
+    codestream_internal::UseDenseDct32Search(options);
   pipeline_options.butteraugli_target = options.butteraugli_target;
   pipeline_options.adaptive_quantization.iterations =
     codestream_internal::AdaptiveQuantizationIterations(options);
@@ -1878,11 +1882,10 @@ VarDctEntropyBehavior ResolveEntropyBehavior(
       VarDctCompressionMode::kMaximumCompression) {
     return VarDctEntropyBehavior::kMaximumCompression;
   }
-  if (options.effort >= 9 ||
-      options.density_mode == VarDctDensityMode::kHighDensity) {
+  if (options.density_mode == VarDctDensityMode::kHighDensity) {
     return VarDctEntropyBehavior::kHighDensity;
   }
-  return options.effort == 8 ? VarDctEntropyBehavior::kRateOptimized
+  return options.effort >= 8 ? VarDctEntropyBehavior::kRateOptimized
                              : VarDctEntropyBehavior::kBalanced;
 }
 

@@ -1,0 +1,28 @@
+{
+  "scope": "Saved baseline measurements only; no candidate encodes or timings",
+  "source_revision": "8e6faf05be62233b56e168da429891c17de62099",
+  "source_run": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/fixed-gjxl-full-20260915",
+  "scores_sha256": "63df1ffb40bc6431311e08436b7dc9b02d97463b642fe1fe3880b47772f4e32f",
+  "metadata_sha256": "3ebb50aa636d4194f0fc331aa7eed0716b3aeb2f041896fc10993e5707c9c310",
+  "quality_range": [
+    75,
+    85
+  ],
+  "metric": "fast-ssim2",
+  "anchor": "GJXL effort 8",
+  "aggregation": "Arithmetic mean of per-image BD-rate; no extrapolation",
+  "summary": {
+    "9": {
+      "supported_images": 65,
+      "pchip": 1.4694068090228631,
+      "akima": 1.4783164449230781,
+      "improved_images": 1
+    },
+    "10": {
+      "supported_images": 65,
+      "pchip": 1.4567276362231527,
+      "akima": 1.4522959603338284,
+      "improved_images": 1
+    }
+  }
+}

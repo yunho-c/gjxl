@@ -28,12 +28,12 @@ namespace gjxl::codestream_internal {
     ResolveDcQuantization(options) == DcQuantizationMode::kPredictionAware;
 }
 
-/// Nonlinear final CfL is qualified for ordinary effort-8 resident Metal AQ.
+/// Ordinary efforts 8-10 share the eight-step nonlinear final CfL recipe.
 /// Zero denotes the established fast regression. This changes no host/device
 /// arena dimensions; it adds only bounded threadgroup-local shader scratch.
 [[nodiscard]] constexpr uint32_t FinalColorCorrelationIterations(
   const VarDctEncodingOptions& options, bool selected_metal) noexcept {
-  return selected_metal && options.effort == 8 &&
+  return selected_metal && options.effort >= 8 &&
       options.metal_aq_mode == GpuAdaptiveQuantizationMode::kFullyResident &&
       options.density_mode == VarDctDensityMode::kDefault &&
       options.rate_control_mode != VarDctRateControlMode::kMaximumError
@@ -53,8 +53,17 @@ namespace gjxl::codestream_internal {
       options.rate_control_mode != VarDctRateControlMode::kMaximumError) return 0;
   if (options.effort <= 6) return 1;
   if (options.effort == 7) return 2;
-  if (options.effort <= 9) return 3;
+  if (options.effort == 8) return 3;
   return 4;
+}
+
+/// Ordinary e10 searches every DCT32-family anchor. Explicit density/error
+/// recipes retain their existing placement policy, independently of writer mode.
+[[nodiscard]] constexpr bool UseDenseDct32Search(
+  const VarDctEncodingOptions& options) noexcept {
+  return options.effort == 10 &&
+    options.density_mode == VarDctDensityMode::kDefault &&
+    options.rate_control_mode != VarDctRateControlMode::kMaximumError;
 }
 
 /// Shared transform policy for execution and CPU/Metal storage admission.

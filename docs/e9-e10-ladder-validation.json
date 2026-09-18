@@ -1,0 +1,276 @@
+{
+  "base_revision": "d3ae3dd07db1f3d4e9b6f1f32a832da457edadef",
+  "scope": "First candidate ladder: preserve e1-e8; e9 uses four AQ updates; e10 also searches DCT32-family anchors at one-block spacing.",
+  "worktree": "/Users/yunhocho/GitHub/gjxl-e9-e10-rate",
+  "build": {
+    "configuration": "Release",
+    "benchmarks": false,
+    "libjxl_reference": false,
+    "directory": "build/e9-e10-rate",
+    "configure_command": "cmake -S . -B build/e9-e10-rate -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=OFF -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF",
+    "commands": [
+      "cmake --build build/e9-e10-rate -j 4 --target gjxl_ac_strategy_search_test gjxl_ac_strategy_storage_plan_test gjxl_ac_strategy_host_storage_plan_test gjxl_ac_strategy_gpu_search_test gjxl_quantization_pipeline_test gjxl_codestream_workflow_test gjxl_resident_workflow_storage_plan_test gjxl_compatibility_workflow_storage_plan_test gjxl_cpu_workflow_storage_plan_test gjxl_workflow_storage_plan_test",
+      "cmake --build build/e9-e10-rate -j 4 --target gjxl_resident_workflow_storage_plan_test gjxl_compatibility_workflow_storage_plan_test gjxl_codestream_workflow_test gjxl_c_api_test gjxl_codestream_encoder_test gjxl_metal_aq_reconstruction_test gjxl_quantization_gpu_pipeline_test gjxl_entropy_storage_plan_test gjxl_serializer_storage_plan_test"
+    ]
+  },
+  "tests": {
+    "passed": [
+      "entropy_storage_plan",
+      "serializer_storage_plan",
+      "codestream_encoder",
+      "codestream_workflow",
+      "c_api",
+      "ac_strategy_search",
+      "quantization_pipeline_uniform",
+      "quantization_pipeline_search_policy",
+      "ac_strategy_storage_plan",
+      "ac_strategy_host_storage_plan",
+      "metal_aq_reconstruction",
+      "metal_ac_strategy_search",
+      "metal_quantization_pipeline",
+      "resident_workflow_storage_plan",
+      "cpu_workflow_storage_plan",
+      "compatibility_workflow_storage_plan",
+      "workflow_storage_plan"
+    ],
+    "failed": [],
+    "ctest_command": "ctest --test-dir build/e9-e10-rate --output-on-failure -j 1 -R '^(entropy_storage_plan|serializer_storage_plan|codestream_encoder|codestream_workflow|c_api|ac_strategy_search|quantization_pipeline_uniform|quantization_pipeline_search_policy|ac_strategy_storage_plan|ac_strategy_host_storage_plan|metal_aq_reconstruction|metal_ac_strategy_search|metal_quantization_pipeline|resident_workflow_storage_plan|cpu_workflow_storage_plan|compatibility_workflow_storage_plan|workflow_storage_plan)$'",
+    "test_count": 17,
+    "notes": [
+      "The first test pass rejected a newly added throughput case routed to the compatibility planner. The case was moved to the resident planner suite, which owns normal throughput encoding; the final pass includes all 17 suites.",
+      "Full default quantization-pipeline score pins and the full repository suite were not run. Dedicated pipeline policy forwarding, uniform initialization and Metal pipeline suites passed."
+    ]
+  },
+  "e1_e8_compatibility": {
+    "fixture_source": "docs/e9-e10-ladder-fixtures.cpp",
+    "fixture_source_sha256": "e26aed3d3ed051035e8fed277c4f77d7faa157bc0e4ec11cd94142264b4f8b61",
+    "geometry": [
+      80,
+      72
+    ],
+    "distance": 1.2,
+    "baseline_binary_sha256": "1aa5430b800e014392be04236cce74efbd9372da440eb5893d9dca6134dd2921",
+    "candidate_binary_sha256": "4321f9caa317c98ad312b1c07d6e94c597c683af49a719560db7ff817cc02152",
+    "compile_command": "c++ -std=c++20 -O2 -Isrc docs/e9-e10-ladder-fixtures.cpp -o build/e9-e10-rate/ladder-validation/candidate-encode build/e9-e10-rate/libgjxl_codestream.a build/e9-e10-rate/libgjxl_metal.a build/e9-e10-rate/libgjxl_gpu_butteraugli.a build/e9-e10-rate/libgjxl_gpu_ops.a build/e9-e10-rate/libgjxl_codec.a build/e9-e10-rate/libgjxl_gpu.a -framework Metal -framework Foundation -framework CoreGraphics",
+    "run_command": "build/e9-e10-rate/ladder-validation/candidate-encode build/e9-e10-rate/ladder-validation/candidate",
+    "baseline_method": "Compiled the same fixture body against the existing d3ae3dd Release archives before rebuilding the modified libraries. The baseline binary and emitted codestreams are retained locally.",
+    "results": [
+      {
+        "fixture": "cpu-e1.jxl",
+        "sha256": "bdefc3d1d8a54f3ed9c6258a5685fec32826fc0ee72150389a80607d51c87ff4",
+        "baseline_identical": true
+      },
+      {
+        "fixture": "cpu-e2.jxl",
+        "sha256": "bdefc3d1d8a54f3ed9c6258a5685fec32826fc0ee72150389a80607d51c87ff4",
+        "baseline_identical": true
+      },
+      {
+        "fixture": "cpu-e3.jxl",
+        "sha256": "bdefc3d1d8a54f3ed9c6258a5685fec32826fc0ee72150389a80607d51c87ff4",
+        "baseline_identical": true
+      },
+      {
+        "fixture": "cpu-e4.jxl",
+        "sha256": "2353bfe63b556aecc7da41c63d914cd1a70d84742a3bbada4b4e926ca700bc5d",
+        "baseline_identical": true
+      },
+      {
+        "fixture": "cpu-e5.jxl",
+        "sha256": "895d3929a7261bf6d0ae24c8db439755d49ec4a66ea7affc2e0d7cc584cbd7a9",
+        "baseline_identical": true
+      },
+      {
+        "fixture": "cpu-e6.jxl",
+        "sha256": "895d3929a7261bf6d0ae24c8db439755d49ec4a66ea7affc2e0d7cc584cbd7a9",
+        "baseline_identical": true
+      },
+      {
+        "fixture": "cpu-e7.jxl",
+        "sha256": "d62204407a9c96f4ab25d2e8e2f6b91f645158fb6a31f2d78e66f820b174dac0",
+        "baseline_identical": true
+      },
+      {
+        "fixture": "cpu-e8.jxl",
+        "sha256": "d86379dc325f9ee87078969b9f05397c8f3818a358043577159afdf6c88d5ecc",
+        "baseline_identical": true
+      },
+      {
+        "fixture": "metal-e1.jxl",
+        "sha256": "bdefc3d1d8a54f3ed9c6258a5685fec32826fc0ee72150389a80607d51c87ff4",
+        "baseline_identical": true
+      },
+      {
+        "fixture": "metal-e2.jxl",
+        "sha256": "bdefc3d1d8a54f3ed9c6258a5685fec32826fc0ee72150389a80607d51c87ff4",
+        "baseline_identical": true
+      },
+      {
+        "fixture": "metal-e3.jxl",
+        "sha256": "bdefc3d1d8a54f3ed9c6258a5685fec32826fc0ee72150389a80607d51c87ff4",
+        "baseline_identical": true
+      },
+      {
+        "fixture": "metal-e4.jxl",
+        "sha256": "2353bfe63b556aecc7da41c63d914cd1a70d84742a3bbada4b4e926ca700bc5d",
+        "baseline_identical": true
+      },
+      {
+        "fixture": "metal-e5.jxl",
+        "sha256": "eb47e986bd0103e4959ae8513248d0a6a0dc8b561ea302de30b973bd2fafb3a9",
+        "baseline_identical": true
+      },
+      {
+        "fixture": "metal-e6.jxl",
+        "sha256": "eb47e986bd0103e4959ae8513248d0a6a0dc8b561ea302de30b973bd2fafb3a9",
+        "baseline_identical": true
+      },
+      {
+        "fixture": "metal-e7.jxl",
+        "sha256": "145211bbad41c942e97d980727d2ed4c73517b2bfedfe36fab54f29d52f67da1",
+        "baseline_identical": true
+      },
+      {
+        "fixture": "metal-e8.jxl",
+        "sha256": "8e27fff307a677c3ed8b8973659aba6ef3ea16665b578b8dd00c2d3f160f5cb1",
+        "baseline_identical": true
+      }
+    ]
+  },
+  "external_decoder": {
+    "path": "/opt/homebrew/bin/djxl",
+    "version": "djxl v0.12.0 0.12.0 [_NEON_BF16_,NEON] {AppleClang 17.0.0.17000604}\nCopyright (c) the JPEG XL Project",
+    "binary_sha256": "d851d989d6d4d0eba628a08d35689e92181718195e72e590f3826c63a7bc2ab4",
+    "results": [
+      {
+        "fixture": "cpu-e9",
+        "command": [
+          "/opt/homebrew/bin/djxl",
+          "build/e9-e10-rate/ladder-validation/candidate/cpu-e9.jxl",
+          "build/e9-e10-rate/ladder-validation/candidate/cpu-e9.pfm",
+          "--bits_per_sample=32",
+          "--color_space=RGB_D65_SRG_Rel_Lin"
+        ],
+        "decoded_dimensions": [
+          80,
+          72
+        ],
+        "all_pixels_finite": true,
+        "codestream_sha256": "d86379dc325f9ee87078969b9f05397c8f3818a358043577159afdf6c88d5ecc",
+        "decoded_pfm_sha256": "9485bd168b98958daa560937bf10e6c458bfb17d2862eb02d8e6515a357eed11"
+      },
+      {
+        "fixture": "cpu-e10",
+        "command": [
+          "/opt/homebrew/bin/djxl",
+          "build/e9-e10-rate/ladder-validation/candidate/cpu-e10.jxl",
+          "build/e9-e10-rate/ladder-validation/candidate/cpu-e10.pfm",
+          "--bits_per_sample=32",
+          "--color_space=RGB_D65_SRG_Rel_Lin"
+        ],
+        "decoded_dimensions": [
+          80,
+          72
+        ],
+        "all_pixels_finite": true,
+        "codestream_sha256": "d86379dc325f9ee87078969b9f05397c8f3818a358043577159afdf6c88d5ecc",
+        "decoded_pfm_sha256": "9485bd168b98958daa560937bf10e6c458bfb17d2862eb02d8e6515a357eed11"
+      },
+      {
+        "fixture": "metal-e9",
+        "command": [
+          "/opt/homebrew/bin/djxl",
+          "build/e9-e10-rate/ladder-validation/candidate/metal-e9.jxl",
+          "build/e9-e10-rate/ladder-validation/candidate/metal-e9.pfm",
+          "--bits_per_sample=32",
+          "--color_space=RGB_D65_SRG_Rel_Lin"
+        ],
+        "decoded_dimensions": [
+          80,
+          72
+        ],
+        "all_pixels_finite": true,
+        "codestream_sha256": "8e27fff307a677c3ed8b8973659aba6ef3ea16665b578b8dd00c2d3f160f5cb1",
+        "decoded_pfm_sha256": "bbb667e13de7b7435af6c4c00e340868df3622c68a1d4c8632b911180943604e"
+      },
+      {
+        "fixture": "metal-e10",
+        "command": [
+          "/opt/homebrew/bin/djxl",
+          "build/e9-e10-rate/ladder-validation/candidate/metal-e10.jxl",
+          "build/e9-e10-rate/ladder-validation/candidate/metal-e10.pfm",
+          "--bits_per_sample=32",
+          "--color_space=RGB_D65_SRG_Rel_Lin"
+        ],
+        "decoded_dimensions": [
+          80,
+          72
+        ],
+        "all_pixels_finite": true,
+        "codestream_sha256": "8e27fff307a677c3ed8b8973659aba6ef3ea16665b578b8dd00c2d3f160f5cb1",
+        "decoded_pfm_sha256": "bbb667e13de7b7435af6c4c00e340868df3622c68a1d4c8632b911180943604e"
+      }
+    ],
+    "scope": "Successful decode, exact dimensions and finite RGB float samples; no pixel equality between different efforts or rate-quality benefit claimed."
+  },
+  "source_sha256": {
+    "CMakeLists.txt": "ecacaa6002de39997f8e4d4d4df257f74bef886f4c577b26930ab349d20c6886",
+    "include/gjxl/gjxl.h": "bc71c7db28047792469dc19e8e825a3d675759aa0bb169d2fe1b429514822e93",
+    "src/codec/ac_strategy.cpp": "9929ac0355d95b7796a58b8ed4d6c6715365ecd310468a678b0b593eb5a948e7",
+    "src/codec/ac_strategy.h": "6a916f8fb699fa0f03c88b9f3de85ab42f37380584e57d659e36aaf1e30bd8e7",
+    "src/codec/ac_strategy_search_policy.h": "5a56665a2e5f1a669c289168b50bd27a5eef65285f03b44747541dd4200f0698",
+    "src/codec/quantization_pipeline.cpp": "7d5159a3cf5eefb954307f41409aa0f4208e7dfcab7ac9c17f81228dfb8c3859",
+    "src/codec/quantization_pipeline.h": "99e1b49724a909215d27aba82a5ceba144fe6131f7d7462f458ad3a8eeeae7bb",
+    "src/codestream/compatibility_workflow_storage_plan.cpp": "ed92265f5f05fe33518ce2a17fee79c4167192db0690840d41bf985cdff93d90",
+    "src/codestream/resident_workflow_storage_plan.cpp": "909c0c7a83cfdd75cd266869e7ed86152d8a3e33597af9671b8544bec807c116",
+    "src/codestream/workflow.cpp": "aacbc21f0cc93a3f16423d29bb428d1254c043afae2d977902206af4d16ad680",
+    "src/codestream/workflow.h": "2ac90673a3d32a759279d104e52f59d254a1535a3dea39e32be8088a301146e9",
+    "src/codestream/workflow_internal.h": "53fb1d3efa0b135a7054d4408292dfe41d0551abd97f235c9fefb96c4b2ab455",
+    "src/gpu/ops/ac_strategy_search.cpp": "817531214a407844cf276cb734f7a5668d1b7cbeeb4d5d704241a4a3f91b59d5",
+    "src/gpu/ops/ac_strategy_storage_plan.cpp": "2d6a1a4d9cc48654ab43fcc1f25d6f77cbf500cc31a46d6bb7196e9ffb5628af",
+    "src/gpu/ops/ac_strategy_storage_plan.h": "67f6d0f3c4804f6c65a4299a018443f4ce4b3a7f083cafd34689c22b4118c92b",
+    "tests/ac_strategy_gpu_search_test.cpp": "1a724859d654f1a186f0c67db84325c3cbef568ddefb1f6dca6d9c33b24cda53",
+    "tests/ac_strategy_host_storage_plan_test.cpp": "939a198393d6cbd410a48b01a0a597edc6e59505e3c4f521fa683a958e85815e",
+    "tests/ac_strategy_search_test.cpp": "2ee0e7c914f2b3837253f66cf1ea946fb1391243b91cfea2ce4554f1504f90f7",
+    "tests/ac_strategy_storage_plan_test.cpp": "278363ee2d805b799a3ee289a6fcd7064bcfe3faad1d9d43f7d50b45bd32a832",
+    "tests/codestream_workflow_test.cpp": "d410e6997b4d3269a04d72a02256d16d1be2f7389466010bc1a9b5571a4c2ceb",
+    "tests/compatibility_workflow_storage_plan_test.cpp": "da143a7ffcd8917b9943e867678c9abc8e6bffa524c9c34cce89c0dcd83e41d4",
+    "tests/quantization_pipeline_test.cpp": "1a128b2b2c25009e1cd54a20157fd16c26b105fdee80b00887fd728e22d81312",
+    "tests/resident_workflow_storage_plan_test.cpp": "79c09d91ebda1040c6b2164a5563fc71392910f41d00e8ce76afc38547fba03c"
+  },
+  "test_binary_sha256": {
+    "gjxl_ac_strategy_search_test": "e32db1aa6b27f192fdcd522d42916734d1965a19532b72c66793b6223802bb4f",
+    "gjxl_ac_strategy_storage_plan_test": "5a6adf3f0fa224d6dd7c7a780372d42fa4212c8b5bcff23bd55afd579a1619d8",
+    "gjxl_ac_strategy_host_storage_plan_test": "7e47c584f883e429e76baa4fe0a9081cf9c1b419a6d942efb3c38511849b2b52",
+    "gjxl_ac_strategy_gpu_search_test": "5ebe3022c7ccd16b509caacce3798e22381a51416eabf386eec7921345763e17",
+    "gjxl_quantization_pipeline_test": "e9909a52d0a4876507bc93a3fade4173a4dad69e43988fc52f53411c2dbc254c",
+    "gjxl_codestream_workflow_test": "bb9a28f67c001c0498224a9db57fb8146888e51bea0795630aadb07ec7ae3514",
+    "gjxl_resident_workflow_storage_plan_test": "3c77273e737c60a885f85eb061bff1907701bec00805d577bb1f38196226ae0c",
+    "gjxl_compatibility_workflow_storage_plan_test": "b7cca26985bd6045b4ca57dcba42d9beb8f975b3c497d4c2fb9d61c678527253",
+    "gjxl_cpu_workflow_storage_plan_test": "aa0246677921303848a438ced92465c6e0eb92993cae24845bfee0fd48335ed5",
+    "gjxl_workflow_storage_plan_test": "0509dbc204ea46c9765b08a0a940b23c0825ab0708a00bd562f2eab7fef8115f",
+    "gjxl_c_api_test": "4d104a416b99198f62b04da76b7b538c590acf5c4a935f2733070b3ad301b44b",
+    "gjxl_codestream_encoder_test": "307cf28dc2b5dbb7e473e405f86b9791eb3c76872a1221ae3812f32ea285b0ea",
+    "gjxl_metal_aq_reconstruction_test": "754d8b97e1ba3ed1b251404498ae2f230a54ebdc259d8460dad9e7c2e54aed3e",
+    "gjxl_quantization_gpu_pipeline_test": "79bc8cb9cf0a90b81c511ac81fb4e0038d6d744729ee5a122131046313173d27",
+    "gjxl_entropy_storage_plan_test": "37e5eed8d4b2d02f84ebb02b8a38dc3ec5a3cdcc7f8c668442636ade768b978c",
+    "gjxl_serializer_storage_plan_test": "9faf9070c92bd4fdcd2192bb96912601119c73d0bdf356f18e294046dc5e5c9c"
+  },
+  "local_artifact_sha256": {
+    "build/e9-e10-rate/ladder-validation/build.log": "bc92748c1cb976aaa8f6ae8f259c82acb56fb4cf5c14b80ee8477055503a9692",
+    "build/e9-e10-rate/ladder-validation/build-final.log": "34c877fb36d3aafb90efdbd596154d005dff4d783845406935efec6e407f703b",
+    "build/e9-e10-rate/ladder-validation/tests.log": "d35298fbb1e5cfd27012b56d953a8341f52c7cdd32351ff3ea3c1f44c83161e2",
+    "build/e9-e10-rate/ladder-validation/tests-final.log": "cb84c7587869e4034a660fd2156631e6267a92777fdb0814f4e0c89be5a93d30",
+    "build/e9-e10-rate/ladder-validation/baseline.log": "6ba373de7160bc13d4bd3d820196462d3bbbc6ccee2df55ff6d54570e3622580",
+    "build/e9-e10-rate/ladder-validation/candidate.log": "314c643d81c5c6784cf7be19a5d03735b727ff2b8762000a301b06288e238e47",
+    "build/e9-e10-rate/ladder-validation/decode-cpu-e9.log": "4e69b10cd2dd28a73a646ef256f87cb87d2ef1dc80961a3d2b35a75277f18cf6",
+    "build/e9-e10-rate/ladder-validation/decode-cpu-e10.log": "c3f83dcd5ed7532f739724b5f54429db7838adef927bb1f10f4a4c5c2655f63a",
+    "build/e9-e10-rate/ladder-validation/decode-metal-e9.log": "cd1ac4a7d28285bb9c07b717a49474bad46f39271dc60abe3a903d894826e18a",
+    "build/e9-e10-rate/ladder-validation/decode-metal-e10.log": "11a71747ede37920faeeb3617eb4ad3585f2c7f49e5319985d49d5a9511e260c"
+  },
+  "qualification_pending": [
+    "Matched-quality corpus BD-rate and secondary quality review",
+    "Controlled complete-call timing",
+    "No new speed benchmark or corpus sweep was run"
+  ]
+}

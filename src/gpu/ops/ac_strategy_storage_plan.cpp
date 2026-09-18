@@ -39,7 +39,7 @@ bool Add(size_t value, size_t *total) {
 } // namespace
 
 Status ComputeStoragePlan(Extent2D coding, bool resident, StoragePlan *out,
-                          GpuBackend *backend) {
+                          GpuBackend *backend, bool dense_dct32_search) {
   if (out == nullptr || coding.empty() ||
       coding.width % kJxlBlockDimension != 0 ||
       coding.height % kJxlBlockDimension != 0) {
@@ -64,8 +64,9 @@ Status ComputeStoragePlan(Extent2D coding, bool resident, StoragePlan *out,
         !Multiply(plan.pixel_count, sizeof(float), &plan.mask_bytes)))) {
     return Status::InvalidArgument("GPU AC-strategy input storage overflows");
   }
+  const auto stages = ac_strategy_internal::CandidateStages(dense_dct32_search);
   for (size_t i = 0; i < plan.stages.size(); ++i) {
-    const auto &stage = ac_strategy_internal::kCandidateStages[i];
+    const auto &stage = stages[i];
     const auto *info = GetAcStrategyInfo(stage.strategy);
     if (info == nullptr || stage.anchor_step == 0 ||
         info->covered_blocks.empty() ||
@@ -134,11 +135,13 @@ Status ComputeStoragePlan(Extent2D coding, bool resident, StoragePlan *out,
 }
 
 Status ComputeHostStoragePlan(Extent2D coding, bool resident,
-                              bool reuse_prepared, HostStoragePlan *out) {
+                              bool reuse_prepared, HostStoragePlan *out,
+                              bool dense_dct32_search) {
   if (out == nullptr)
     return Status::InvalidArgument("AC-search host plan output is null");
   StoragePlan device;
-  Status status = ComputeStoragePlan(coding, resident, &device);
+  Status status = ComputeStoragePlan(coding, resident, &device, nullptr,
+                                     dense_dct32_search);
   if (!status.ok())
     return status;
   HostStoragePlan plan;

@@ -223,11 +223,11 @@ Status ComputeMetalCompatibilityWorkflowStoragePlan(
       ac_strategy_search_internal::HostStoragePlan ac_host;
       AcSubmissionStoragePlan submission;
       if (!(status = ac_strategy_search_internal::ComputeStoragePlan(
-                coding, resident, &ac))
+                coding, resident, &ac, nullptr, UseDenseDct32Search(e)))
                .ok() ||
           !(status = ac_strategy_search_internal::ComputeHostStoragePlan(
                 coding, resident, resident && IsSearch(e.rate_control_mode),
-                &ac_host))
+                &ac_host, UseDenseDct32Search(e)))
                .ok() ||
           !(status = ComputeAcSubmissionStoragePlan(
                 {.batches = ac.stages.size(),

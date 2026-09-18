@@ -1,0 +1,47 @@
+{
+  "baseline_revision": "8e6faf05be62233b56e168da429891c17de62099",
+  "scope": "Focused correctness and storage qualification; no benchmark or new corpus sweep",
+  "build_type": "Release",
+  "benchmarks_enabled": false,
+  "tests_passed": [
+    "entropy_storage_plan",
+    "serializer_storage_plan",
+    "codestream_encoder",
+    "codestream_workflow",
+    "c_api",
+    "metal_aq_reconstruction",
+    "resident_workflow_storage_plan",
+    "cpu_workflow_storage_plan",
+    "workflow_storage_plan"
+  ],
+  "test_command": "ctest --test-dir build/e9-e10-rate --output-on-failure --parallel 1 -R \"^(entropy_storage_plan|serializer_storage_plan|codestream_encoder|codestream_workflow|c_api|metal_aq_reconstruction|resident_workflow_storage_plan|cpu_workflow_storage_plan|workflow_storage_plan)$\"",
+  "configure_command": "cmake -S . -B build/e9-e10-rate -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=OFF -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF",
+  "source_sha256": {
+    "src/codestream/workflow.cpp": "8f39bb506a4c2ae4dc14dcad714d78a583ae918e7d5cbae5fcb16605556ce12a",
+    "src/codestream/workflow_internal.h": "6bb4e9496cd6ee3fe29c817df2948cdebbc5db308757d045085e04b975940c09",
+    "src/codestream/workflow.h": "549664a7ceb028224374ee66651f05e15c41d7da488fb22d884f6fc0cbf80b49",
+    "include/gjxl/gjxl.h": "896b8fc66c0074de9482c1e93db77c4b6d44a93fc5340c36017ce6801e4adc71",
+    "tests/codestream_workflow_test.cpp": "6c172b89cb2a9a81bc5df0e986eda8fba1ee880efd0853be391ea26d9c295bb1"
+  },
+  "binary_sha256": {
+    "gjxl_entropy_storage_plan_test": "37e5eed8d4b2d02f84ebb02b8a38dc3ec5a3cdcc7f8c668442636ade768b978c",
+    "gjxl_serializer_storage_plan_test": "9faf9070c92bd4fdcd2192bb96912601119c73d0bdf356f18e294046dc5e5c9c",
+    "gjxl_codestream_encoder_test": "307cf28dc2b5dbb7e473e405f86b9791eb3c76872a1221ae3812f32ea285b0ea",
+    "gjxl_codestream_workflow_test": "0142b661bb7246b231bb9f6088fec880cf133e0e9577a1b38bff094dcdf48729",
+    "gjxl_c_api_test": "caae49aaa680540f35c49f2fd236be28213c23d574972645ffb657d3a08d4509",
+    "gjxl_metal_aq_reconstruction_test": "754d8b97e1ba3ed1b251404498ae2f230a54ebdc259d8460dad9e7c2e54aed3e",
+    "gjxl_resident_workflow_storage_plan_test": "81dadc8e131ade820069ad7613f8107e9d88d8d6ebca6dddf2896c389a50f868",
+    "gjxl_cpu_workflow_storage_plan_test": "0ec9e307a8452d991e428bc86733359ed736f39474125b53d3b809efb998c76a",
+    "gjxl_workflow_storage_plan_test": "90cfa38df22a50668ce142c1807aa0707c22c5da71b0b0890d510b0823012486"
+  },
+  "log_sha256": {
+    "build/e9-e10-rate/build-validation.log": "f4af6ea1df68787fbaad573a2ae3b7b29b5c528cd4e69d09db78eb1d32b9e403",
+    "build/e9-e10-rate/build-workflow-final.log": "1cab12ce18d48c36ceaf4103a013fb6cf93e5a5d6896fbd1371c6be4c5f5707b",
+    "build/e9-e10-rate/ctest-focused.log": "493ce6baf2919077fe890d83da3df60943867640e1f8bf4a93b6819256152983"
+  },
+  "pending": [
+    "New effort-9/10 corpus rate and secondary-quality qualification",
+    "Matched-quality speed qualification",
+    "Full-suite and decoder-conformance qualification"
+  ]
+}

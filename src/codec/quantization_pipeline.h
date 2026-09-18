@@ -20,6 +20,8 @@ struct CpuQuantizationPipelineOptions {
   bool fixed_dct8 = false;
   /// Initialize a uniform quantization field; AQ updates still run normally.
   bool uniform_initial_quantization = false;
+  /// Use the effort-10 placement search for the existing DCT32 families.
+  bool dense_dct32_search = false;
 };
 
 struct CpuQuantizationPipelineOutput {

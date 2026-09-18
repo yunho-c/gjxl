@@ -360,6 +360,15 @@ bool CheckRuntime(GpuBackend &gpu, bool large) {
       }
   }
   auto image = MakeImage({128, 96});
+  // Exercise dense candidate admission in the exact-coefficient path.
+  {
+    auto o = Options(0);
+    o.encoding.effort = 10;
+    o.encoding.rate_control_mode = VarDctRateControlMode::kButteraugliTarget;
+    o.collect_profile = true;
+    if (!Run(gpu, image.const_view(), o)) return false;
+    ++cases;
+  }
   for (size_t mode = 0; mode < 5; ++mode) {
     for (unsigned flags = 1; flags < 8; ++flags) {
       auto o = Options(mode);
