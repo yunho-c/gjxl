@@ -25,6 +25,9 @@
 #include "gpu/metal/metal_backend.h"
 #endif
 #include "gpu/ops/ac_strategy_search.h"
+#ifdef GJXL_TEST_CUDA
+#include "gpu/ops/ac_strategy_search_profile_internal.h"
+#endif
 
 #if !defined(GJXL_TEST_CUDA) && !defined(GJXL_METALLIB_PATH)
 #error "GJXL_METALLIB_PATH must point to the test metallib"
@@ -408,6 +411,26 @@ bool CheckPreparedResidentReuse(gjxl::GpuBackend& gpu,
     std::cerr << "Prepared resident AC search did not reuse allocations\n";
     return false;
   }
+#ifdef GJXL_TEST_CUDA
+  auto* profiler = dynamic_cast<gjxl::gpu_profile_internal::GpuSubmissionProfiler*>(&gpu);
+  if (profiler == nullptr) return false;
+  gjxl::gpu_profile_internal::GpuProfilingSession session(
+    gjxl::gpu_profile_internal::GpuProfilingMode::kStage,
+    profiler->QueryGpuProfilingCapabilities());
+  gjxl::AcStrategyGrid profiled;
+  const auto profile_status = gjxl::gpu_profile_internal::FindAcStrategyGridGpuResidentProfiled(
+    gpu, fixture.Opsin(), fixture.QuantField(), {}, color_map, resident,
+    {.butteraugli_target = 0.9f}, &profiled, &prepared, &session);
+  auto profile = std::move(session).Finish();
+  if (!profile_status.ok() || !GridsEqual(second, profiled) ||
+      profile.submissions.size() != 1 || profile.wall_stages.empty() ||
+      profile.submissions.front().stages.size() != 1 ||
+      profile.submissions.front().stages.front().gpu_nanoseconds == 0) {
+    std::cerr << "Profiled AC search changed results or omitted timings: "
+              << profile_status.message() << '\n';
+    return false;
+  }
+#endif
   std::cout << "Prepared AC search " << extent.width << 'x' << extent.height
             << " arena_bytes=" << stats.resource_capacity_bytes
             << " scratch_a_bytes=" << stats.scratch.scratch_a_bytes

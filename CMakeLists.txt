@@ -591,6 +591,7 @@ if(GJXL_ENABLE_CUDA)
     STATIC
 
     src/gpu/cuda/cuda_backend.cpp
+    src/gpu/cuda/cuda_profiling.cpp
     src/gpu/cuda/cuda_ac_strategy.cpp
     src/gpu/cuda/cuda_ac_strategy_kernels.cu
     src/gpu/cuda/cuda_ac_group_kernels.cu
@@ -2723,6 +2724,12 @@ if(GJXL_BUILD_TESTS)
       COMMAND gjxl_cuda_backend_test
     )
     set_tests_properties(cuda_backend PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_profiling_test tests/cuda_profiling_test.cpp)
+    target_link_libraries(gjxl_cuda_profiling_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_profiling_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_profiling COMMAND gjxl_cuda_profiling_test)
+    set_tests_properties(cuda_profiling PROPERTIES SKIP_RETURN_CODE 77)
 
     add_executable(
       gjxl_gpu_primitives_cuda_test

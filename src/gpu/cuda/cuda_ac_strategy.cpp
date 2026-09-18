@@ -517,6 +517,27 @@ cudaError_t CudaBackend::EncodeAcStrategySubmission(
 Status CudaBackend::EvaluateAcStrategyCandidateBatches(
   std::span<const AcStrategyCandidateBatch> batches,
   std::unique_ptr<GpuSubmission>* submission) {
+  return EvaluateAcStrategyCandidateBatchesImpl(
+    batches, submission, gpu_profile_internal::GpuProfilingMode::kDisabled);
+}
+
+Status CudaBackend::EvaluateAcStrategyCandidateBatchesProfiled(
+  std::span<const AcStrategyCandidateBatch> batches,
+  gpu_profile_internal::GpuProfilingMode mode,
+  std::unique_ptr<GpuSubmission>* submission) {
+  if (mode != gpu_profile_internal::GpuProfilingMode::kStage) {
+    if (submission != nullptr) submission->reset();
+    return mode == gpu_profile_internal::GpuProfilingMode::kDispatch
+      ? Status::Unavailable("CUDA dispatch profiling is not implemented")
+      : Status::InvalidArgument("Profiled CUDA AC search requires stage profiling");
+  }
+  return EvaluateAcStrategyCandidateBatchesImpl(batches, submission, mode);
+}
+
+Status CudaBackend::EvaluateAcStrategyCandidateBatchesImpl(
+  std::span<const AcStrategyCandidateBatch> batches,
+  std::unique_ptr<GpuSubmission>* submission,
+  gpu_profile_internal::GpuProfilingMode mode) {
   if (submission == nullptr) {
     return Status::InvalidArgument(
       "AC-strategy submission output pointer is null");
@@ -558,7 +579,8 @@ Status CudaBackend::EvaluateAcStrategyCandidateBatches(
 
   const AcStrategyEncodeContext context{validated_batches.first(validated_count)};
   return SubmitCompute(
-    &CudaBackend::EncodeAcStrategySubmission, &context, submission);
+    &CudaBackend::EncodeAcStrategySubmission, &context, submission,
+    mode, "ac_strategy.candidates");
 }
 
 }  // namespace gjxl::cuda_internal

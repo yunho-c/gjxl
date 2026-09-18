@@ -24,6 +24,7 @@
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/butteraugli.h"
 #include "gpu/ops/input_preparation.h"
+#include "gpu/ops/gpu_execution_profile_internal.h"
 #include "gpu/ops/resident_input.h"
 #include "gpu/ops/primitives.h"
 
@@ -131,14 +132,21 @@ class CudaBuffer final : public DeviceBuffer {
 class CudaSubmission final : public GpuSubmission {
  public:
   CudaSubmission(std::shared_ptr<CudaDeviceState> state, cudaEvent_t event,
-                 bool fail_completion);
+                 bool fail_completion, cudaEvent_t profile_begin = nullptr,
+                 gpu_profile_internal::GpuSubmissionProfile profile = {});
   ~CudaSubmission() override;
 
   Status Wait() override;
 
+  Status ResolveProfile(const CudaDeviceState* state,
+                        std::string_view submission_id,
+                        gpu_profile_internal::GpuExecutionProfile* profile);
+
  private:
   std::shared_ptr<CudaDeviceState> state_;
   cudaEvent_t event_ = nullptr;
+  cudaEvent_t profile_begin_ = nullptr;
+  gpu_profile_internal::GpuSubmissionProfile profile_;
   bool fail_completion_ = false;
   std::once_flag wait_once_;
   Status completion_status_;
@@ -153,6 +161,9 @@ class CudaPreparedLinearRgbOpsin;
 
 class CudaBackend final : public GpuBackend,
                           public GpuImagePrimitives,
+                          public gpu_profile_internal::GpuSubmissionProfiler,
+                          public gpu_profile_internal::GpuImagePrimitivesProfiler,
+                          public gpu_profile_internal::GpuAcStrategyEvaluationProfiler,
                           public GpuAcStrategyEvaluation,
                           public DeviceButteraugliOperation,
                           public GpuAqEvaluation,
@@ -189,6 +200,20 @@ class CudaBackend final : public GpuBackend,
 
   Status SubmitImagePrimitiveSequence(
       std::span<const ImagePrimitiveCommand> commands,
+      std::unique_ptr<GpuSubmission>* submission) override;
+  gpu_profile_internal::GpuProfilingCapabilities
+  QueryGpuProfilingCapabilities() const override;
+  Status ResolveGpuSubmissionProfile(
+      GpuSubmission& submission, std::string_view submission_id,
+      gpu_profile_internal::GpuProfilingMode mode,
+      gpu_profile_internal::GpuExecutionProfile* profile) override;
+  Status SubmitImagePrimitiveSequenceProfiled(
+      std::span<const ImagePrimitiveCommand> commands,
+      std::string_view stage_id, gpu_profile_internal::GpuProfilingMode mode,
+      std::unique_ptr<GpuSubmission>* submission) override;
+  Status EvaluateAcStrategyCandidateBatchesProfiled(
+      std::span<const AcStrategyCandidateBatch> batches,
+      gpu_profile_internal::GpuProfilingMode mode,
       std::unique_ptr<GpuSubmission>* submission) override;
   Status GetAcStrategyScratchRequirements(
       AcStrategyType strategy, size_t candidate_count,
@@ -274,7 +299,18 @@ class CudaBackend final : public GpuBackend,
       CudaBackend& backend, const void* context);
 
   Status SubmitCompute(EncodeCallback encode, const void* context,
-                       std::unique_ptr<GpuSubmission>* submission);
+                       std::unique_ptr<GpuSubmission>* submission,
+                       gpu_profile_internal::GpuProfilingMode mode =
+                         gpu_profile_internal::GpuProfilingMode::kDisabled,
+                       std::string_view stage_id = {});
+  Status SubmitImagePrimitiveSequenceImpl(
+      std::span<const ImagePrimitiveCommand> commands,
+      std::unique_ptr<GpuSubmission>* submission,
+      gpu_profile_internal::GpuProfilingMode mode, std::string_view stage_id);
+  Status EvaluateAcStrategyCandidateBatchesImpl(
+      std::span<const AcStrategyCandidateBatch> batches,
+      std::unique_ptr<GpuSubmission>* submission,
+      gpu_profile_internal::GpuProfilingMode mode);
   Status SubmitTransform(bool forward, const TransformBatch& batch,
                          std::unique_ptr<GpuSubmission>* submission);
   Status ValidateAcStrategyCandidateBatch(const AcStrategyCandidateBatch& batch,

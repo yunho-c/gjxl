@@ -225,6 +225,16 @@ an intermediate build appear complete.
   maximum is 1.548 and effort-7 maximum 1.129. Four unmatched cases remain
   explicitly excluded. These compare changed default policies; low-effort
   tradeoffs and the exact-mode threshold finding still require adjudication.
+- CUDA stage profiling now brackets image-primitive and AC-candidate submissions
+  with device events. Primitive tests pass for output preservation, repeated
+  snapshots, finite diagnostic reservations, lifetime and injected failures.
+  AQ/dispatch instrumentation and whole-workflow profile planning remain open;
+  the public profiling gate is deliberately still closed. See
+  [CUDA profiling integration](cuda-profiling.md) for timestamp semantics.
+  Profiled AC search matches its ordinary result, including an omitted host mask.
+  Memcheck reports zero errors with an explicit child completion marker. All
+  nine focused pipeline/search/CPU-launch regressions pass after the Metal fixes.
+  Hosted Rust checks pass on Windows, Linux and macOS at `53dfbeb`.
 
 ## Outstanding integration risks
 

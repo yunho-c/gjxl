@@ -382,6 +382,25 @@ cudaError_t CudaBackend::EncodePrimitiveSequence(
 Status CudaBackend::SubmitImagePrimitiveSequence(
   std::span<const ImagePrimitiveCommand> commands,
   std::unique_ptr<GpuSubmission>* submission) {
+  return SubmitImagePrimitiveSequenceImpl(
+    commands, submission, gpu_profile_internal::GpuProfilingMode::kDisabled, {});
+}
+
+Status CudaBackend::SubmitImagePrimitiveSequenceProfiled(
+  std::span<const ImagePrimitiveCommand> commands, std::string_view stage_id,
+  gpu_profile_internal::GpuProfilingMode mode,
+  std::unique_ptr<GpuSubmission>* submission) {
+  if (mode == gpu_profile_internal::GpuProfilingMode::kDisabled) {
+    if (submission != nullptr) submission->reset();
+    return Status::InvalidArgument("Profiled CUDA sequence requires profiling");
+  }
+  return SubmitImagePrimitiveSequenceImpl(commands, submission, mode, stage_id);
+}
+
+Status CudaBackend::SubmitImagePrimitiveSequenceImpl(
+  std::span<const ImagePrimitiveCommand> commands,
+  std::unique_ptr<GpuSubmission>* submission,
+  gpu_profile_internal::GpuProfilingMode mode, std::string_view stage_id) {
   if (submission == nullptr) {
     return Status::InvalidArgument(
       "Image primitive submission output pointer is null");
@@ -395,7 +414,7 @@ Status CudaBackend::SubmitImagePrimitiveSequence(
     if (!status.ok()) return status;
   }
   return SubmitCompute(
-    &CudaBackend::EncodePrimitiveSequence, &commands, submission);
+    &CudaBackend::EncodePrimitiveSequence, &commands, submission, mode, stage_id);
 }
 
 }  // namespace gjxl::cuda_internal

@@ -396,14 +396,20 @@ CudaBuffer::~CudaBuffer() {
 CudaSubmission::CudaSubmission(
   std::shared_ptr<CudaDeviceState> state,
   cudaEvent_t event,
-  bool fail_completion)
+  bool fail_completion,
+  cudaEvent_t profile_begin,
+  gpu_profile_internal::GpuSubmissionProfile profile)
   : state_(std::move(state)), event_(event),
+    profile_begin_(profile_begin), profile_(std::move(profile)),
     fail_completion_(fail_completion) {}
 
 CudaSubmission::~CudaSubmission() {
   ScopedCudaDevice device(state_->ordinal);
   if (device.status() == cudaSuccess && event_ != nullptr) {
     (void)cudaEventDestroy(event_);
+  }
+  if (device.status() == cudaSuccess && profile_begin_ != nullptr) {
+    (void)cudaEventDestroy(profile_begin_);
   }
 }
 
@@ -769,13 +775,24 @@ Status CudaBackend::CopyDeviceToHostBatch(
 Status CudaBackend::SubmitCompute(
   EncodeCallback encode,
   const void* context,
-  std::unique_ptr<GpuSubmission>* submission) {
+  std::unique_ptr<GpuSubmission>* submission,
+  gpu_profile_internal::GpuProfilingMode mode,
+  std::string_view stage_id) {
   if (submission == nullptr) {
     return Status::InvalidArgument("CUDA submission output pointer is null");
   }
   submission->reset();
   if (encode == nullptr) {
     return Status::Internal("CUDA submission callback is null");
+  }
+  using gpu_profile_internal::GpuProfilingMode;
+  const bool profiling = mode == GpuProfilingMode::kStage;
+  if (mode == GpuProfilingMode::kDispatch) {
+    return Status::Unavailable("CUDA dispatch profiling is not implemented");
+  }
+  if ((mode != GpuProfilingMode::kDisabled && !profiling) ||
+      (profiling && stage_id.empty())) {
+    return Status::InvalidArgument("CUDA profiling mode or stage ID is invalid");
   }
   if (test_fail_submission_ ||
       fail_next_submission_.exchange(false, std::memory_order_relaxed)) {
@@ -786,25 +803,54 @@ Status CudaBackend::SubmitCompute(
   if (device.status() != cudaSuccess) {
     return CudaRuntimeStatus(device.status(), "Select CUDA submission device");
   }
+  // Allocate diagnostic labels before enqueueing any device work. The ordinary
+  // path retains its timing-disabled event and allocates no profile backing.
+  gpu_profile_internal::GpuSubmissionProfile recorded;
+  try {
+    if (profiling) {
+      recorded.stages.reserve(1);
+      recorded.stages.push_back({
+        .stage_id = gpu_profile_internal::ProfileString(stage_id),
+      });
+    }
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory("Allocate CUDA stage profile");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument("CUDA stage ID is too large");
+  }
   cudaEvent_t event = nullptr;
-  cudaError_t error = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
+  cudaEvent_t begin = nullptr;
+  cudaError_t error = cudaEventCreateWithFlags(
+    &event, profiling ? cudaEventDefault : cudaEventDisableTiming);
   if (error != cudaSuccess) {
     return CudaRuntimeStatus(error, "Create CUDA completion event");
+  }
+  if (profiling) {
+    error = cudaEventCreate(&begin);
+    if (error != cudaSuccess) {
+      (void)cudaEventDestroy(event);
+      return CudaRuntimeStatus(error, "Create CUDA profile begin event");
+    }
   }
   std::unique_ptr<CudaSubmission> pending;
   try {
     pending.reset(new CudaSubmission(
       state_, event,
       test_fail_completion_ ||
-        fail_next_completion_.exchange(false, std::memory_order_relaxed)));
+        fail_next_completion_.exchange(false, std::memory_order_relaxed),
+      begin, std::move(recorded)));
   } catch (const std::bad_alloc&) {
     (void)cudaEventDestroy(event);
+    if (begin != nullptr) (void)cudaEventDestroy(begin);
     return Status::OutOfMemory("Allocate CUDA submission owner");
   }
 
   {
     std::lock_guard lock(state_->submission_mutex);
-    error = encode(*this, context);
+    if (profiling) error = cudaEventRecord(begin, state_->stream);
+    if (error == cudaSuccess) error = encode(*this, context);
     if (error == cudaSuccess) {
       error = cudaEventRecord(event, state_->stream);
     }
