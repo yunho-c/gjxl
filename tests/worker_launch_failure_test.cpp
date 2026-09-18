@@ -85,7 +85,7 @@ struct Fixture {
       for (size_t i = 0; i < image.plane(c).size(); ++i)
         image.plane(c)[i] = 0.05f + 0.8f * ((i * (c + 3)) % 127) / 127.0f;
     options.backend = metal ? VarDctBackendPreference::kMetal : VarDctBackendPreference::kCpu;
-    if (exact) options.metal_aq_mode = GpuAdaptiveQuantizationMode::kExactCoefficients;
+    if (exact) options.gpu_aq_mode = GpuAdaptiveQuantizationMode::kExactCoefficients;
     options.effort = 7; // Includes the coefficient-order path, unlike lower efforts.
     options.execution_domain = domain;
     options.cpu_thread_count = 1;

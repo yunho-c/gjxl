@@ -36,6 +36,14 @@ bool Add(size_t value, size_t *total) {
   *total += value;
   return true;
 }
+
+bool AddArena(size_t bytes, size_t* capacity) {
+  constexpr size_t alignment = 256;
+  if (bytes == 0) return true;
+  if (*capacity > std::numeric_limits<size_t>::max() - (alignment - 1)) return false;
+  *capacity = (*capacity + alignment - 1) & ~(alignment - 1);
+  return Add(bytes, capacity);
+}
 } // namespace
 
 Status ComputeStoragePlan(Extent2D coding, bool resident, StoragePlan *out,
@@ -130,6 +138,20 @@ Status ComputeStoragePlan(Extent2D coding, bool resident, StoragePlan *out,
     return Status::InvalidArgument(
         "GPU AC-strategy device storage sum overflows");
   }
+  if (!AddArena(plan.opsin_bytes, &plan.input_arena_bytes) ||
+      !AddArena(plan.mask_bytes, &plan.input_arena_bytes))
+    return Status::InvalidArgument("GPU AC input arena capacity overflows");
+  for (const auto& family : plan.stages) {
+    if (family.candidate_count == 0) continue;
+    if (!AddArena(family.candidate_bytes, &plan.resource_arena_bytes) ||
+        !AddArena(family.matrix_bytes, &plan.resource_arena_bytes) ||
+        !AddArena(family.cost_bytes, &plan.resource_arena_bytes))
+      return Status::InvalidArgument("GPU AC resource arena capacity overflows");
+  }
+  if (!AddArena(plan.maximum_scratch_a_bytes, &plan.resource_arena_bytes) ||
+      !AddArena(plan.maximum_scratch_b_bytes, &plan.resource_arena_bytes) ||
+      !AddArena(plan.maximum_rate_bytes, &plan.resource_arena_bytes))
+    return Status::InvalidArgument("GPU AC scratch arena capacity overflows");
   *out = plan;
   return Status::Ok();
 }

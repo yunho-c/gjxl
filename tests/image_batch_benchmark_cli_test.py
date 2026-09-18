@@ -4,6 +4,7 @@
 import argparse
 import csv
 import io
+import os
 from pathlib import Path
 import shutil
 import statistics
@@ -16,6 +17,7 @@ import unittest
 
 class ImageBatchBenchmarkTest(unittest.TestCase):
     binary: Path
+    default_backend: str
 
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -71,9 +73,10 @@ class ImageBatchBenchmarkTest(unittest.TestCase):
         for row in rows:
             self.assertEqual(
                 (row["codec"], row["backend"], row["requested_backend"]),
-                ("gjxl", "metal", "metal"),
+                ("gjxl", self.default_backend, self.default_backend),
             )
-            self.assertEqual(row["aq_mode"], "fully-resident")
+            self.assertEqual(row["aq_mode"],
+                             "fully-resident" if self.default_backend == "metal" else "n/a")
             self.assertEqual(row["effort"], "7")
             self.assertAlmostEqual(float(row["distance"]), 1.2, places=6)
             self.assertEqual(row["source"], str(source))
@@ -121,10 +124,15 @@ class ImageBatchBenchmarkTest(unittest.TestCase):
             self.assertGreater(float(summary["image_service_median_ms"]), 0)
 
     def test_directory_sort_dedup_dimensions_and_csv_escaping(self):
-        second = self.image('b,"line\n2.pfm')
+        second = self.image('b, line 2.pfm' if os.name == 'nt' else 'b,"line\n2.pfm')
         first = self.image("a.PFM", 16, 16)
         alias = self.root / "alias.pfm"
-        alias.symlink_to(second)
+        try:
+            alias.symlink_to(second)
+        except OSError:
+            # Symlinks need a Windows privilege. Repeated direct paths still
+            # exercise canonical deduplication and comma escaping.
+            alias = second
         nested = self.root / "nested"
         nested.mkdir()
         (nested / "invalid.pfm").write_text("must not be visited")
@@ -156,13 +164,15 @@ class ImageBatchBenchmarkTest(unittest.TestCase):
         )
 
     def test_synthetic_and_explicit_modes_remain_available(self):
-        for arguments, backend, mode in (
-            ([], "metal", "fully-resident"),
-            (["--metal-aq", "maximum-throughput"], "metal", "maximum-throughput"),
-            (["--backend", "cpu"], "cpu", "n/a"),
-        ):
+        cases = [([], self.default_backend,
+                  "fully-resident" if self.default_backend == "metal" else "n/a"),
+                 (["--backend", "cpu"], "cpu", "n/a")]
+        if self.default_backend == "metal":
+            cases.append((["--metal-aq", "maximum-throughput"],
+                          "metal", "maximum-throughput"))
+        for case_index, (arguments, backend, mode) in enumerate(cases):
             with self.subTest(arguments=arguments):
-                raw = self.root / f"{backend}-{mode.replace('/', '-')}.csv"
+                raw = self.root / f"{case_index}-{backend}-{mode.replace('/', '-')}.csv"
                 result = self.run_benchmark(
                     "--workload",
                     "thumbnail_64x64",
@@ -249,6 +259,8 @@ class ImageBatchBenchmarkTest(unittest.TestCase):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--benchmark", type=Path, required=True)
+    parser.add_argument("--default-backend", choices=("cpu", "metal"), required=True)
     args, remaining = parser.parse_known_args()
     ImageBatchBenchmarkTest.binary = args.benchmark.resolve()
+    ImageBatchBenchmarkTest.default_backend = args.default_backend
     unittest.main(argv=[sys.argv[0], *remaining])

@@ -147,7 +147,7 @@ bool PurePlans() {
       for (size_t h = 1; h <= 67; ++h) {
         const size_t b = w * h;
         for (auto behavior : {kFull, kEffort7Dct8Sampled}) {
-          for (size_t workers : {1ul, 2ul, 8ul}) {
+          for (size_t workers : {size_t{1}, size_t{2}, size_t{8}}) {
             CoefficientOrderStoragePlan plan;
             if (!FixtureOk(ComputeCoefficientOrderStoragePlan({w, h}, behavior,
                                                               workers, &plan)))
@@ -214,10 +214,10 @@ bool PurePlans() {
           "Coefficient counter-width boundary changed its storage bound"))
       return false;
     BlockContextMapStoragePlan map;
-    if (!FixtureOk(ComputeCoefficientOrderStoragePlan({1ul << 24, 1}, kFull, 8,
+    if (!FixtureOk(ComputeCoefficientOrderStoragePlan({size_t{1} << 24, 1}, kFull, 8,
                                                       &large)) ||
         !FixtureOk(
-            ComputeBlockContextMapStoragePlan({1ul << 24, 1}, true, &map)) ||
+            ComputeBlockContextMapStoragePlan({size_t{1} << 24, 1}, true, &map)) ||
         !FixtureCheck(ManagedHostAllocationFailurePendingForTest() &&
                           budget.snapshot().peak_backing_bytes == 0,
                       "Count-only planning allocated backing"))
@@ -269,7 +269,7 @@ bool CheckOrders(const FrameFixture &f, VarDctCoefficientOrderBehavior behavior,
   if (!FixtureOk(ComputeCoefficientOrderStoragePlan(f.blocks, behavior, workers,
                                                     &plan)))
     return false;
-  const size_t limit = std::max(1ul, plan.working.peak_bytes);
+  const size_t limit = std::max(size_t{1}, plan.working.peak_bytes);
   ResourceBudget budget(limit);
   ResourceReservation job;
   if (!FixtureOk(budget.Reserve(limit, &job)))
@@ -529,7 +529,7 @@ bool SampledAndClearedOrders() {
                            : orders.used_order_mask == 1,
               "Sampling/cleared-capacity fixture missed its intended path"))
         return false;
-      for (size_t workers : {1ul, 2ul, 8ul})
+      for (size_t workers : {size_t{1}, size_t{2}, size_t{8}})
         if (!CheckOrders(f, behavior, workers, orders))
           return false;
       if (pattern == 2) {
@@ -563,7 +563,7 @@ bool RealOperations() {
                   f.view(), behavior, &oracle)))
             return false;
         }
-        for (size_t workers : {1ul, 2ul, 8ul})
+        for (size_t workers : {size_t{1}, size_t{2}, size_t{8}})
           if (!CheckOrders(f, behavior, workers, oracle))
             return false;
       }

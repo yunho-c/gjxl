@@ -1452,7 +1452,7 @@ bool CheckWorkflowBackendSelection() {
           original.ConstView(),
           {.butteraugli_target = 1.0f,
            .backend = gjxl::VarDctBackendPreference::kMetal,
-           .metal_aq_mode =
+           .gpu_aq_mode =
              gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients},
           gpu.get(), false, &exact_bytes, &exact_summary).ok()) {
     std::cerr << "Public workflow backend selection failed\n";
@@ -1479,14 +1479,14 @@ bool CheckWorkflowBackendSelection() {
       unqualified_summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kCpu ||
       !unqualified_summary.final_butteraugli_score_evaluated ||
-      forced_summary.metal_aq_mode !=
+      forced_summary.gpu_aq_mode !=
           gjxl::GpuAdaptiveQuantizationMode::kFullyResident ||
-      automatic_summary.metal_aq_mode !=
+      automatic_summary.gpu_aq_mode !=
           gjxl::GpuAdaptiveQuantizationMode::kFullyResident ||
       exact_summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kMetal ||
       !exact_summary.final_butteraugli_score_evaluated ||
-      exact_summary.metal_aq_mode !=
+      exact_summary.gpu_aq_mode !=
           gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients) {
     std::cerr << "Public workflow default or fallback policy changed\n";
     return false;
@@ -1516,7 +1516,7 @@ bool CheckWorkflowBackendSelection() {
                   &cpu, &cpu_result);
           if (status.ok()) {
             options.backend = gjxl::VarDctBackendPreference::kMetal;
-            options.metal_aq_mode =
+            options.gpu_aq_mode =
                 gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
             status = gjxl::codestream_internal::
                 EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
@@ -1552,7 +1552,7 @@ bool CheckWorkflowBackendSelection() {
   maximum_cpu_options.backend = gjxl::VarDctBackendPreference::kCpu;
   auto maximum_metal_options = maximum_error_options;
   maximum_metal_options.backend = gjxl::VarDctBackendPreference::kMetal;
-  maximum_metal_options.metal_aq_mode =
+  maximum_metal_options.gpu_aq_mode =
     gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
   auto maximum_automatic_options = maximum_error_options;
   maximum_automatic_options.backend =
@@ -1597,7 +1597,7 @@ bool CheckWorkflowBackendSelection() {
   std::vector<uint8_t> maximum_resident_bytes;
   gjxl::VarDctEncodingSummary maximum_resident_summary;
   auto maximum_resident_options = maximum_metal_options;
-  maximum_resident_options.metal_aq_mode =
+  maximum_resident_options.gpu_aq_mode =
     gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
   if (!gjxl::codestream_internal::
         EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
@@ -1606,7 +1606,7 @@ bool CheckWorkflowBackendSelection() {
       maximum_resident_bytes.empty() ||
       maximum_resident_summary.execution_backend !=
         gjxl::VarDctExecutionBackend::kMetal ||
-      maximum_resident_summary.metal_aq_mode !=
+      maximum_resident_summary.gpu_aq_mode !=
         gjxl::GpuAdaptiveQuantizationMode::kFullyResident ||
       maximum_resident_summary.maximum_error_evaluation_count != 6 ||
       !std::isfinite(
@@ -1622,7 +1622,7 @@ bool CheckWorkflowBackendSelection() {
               original.ConstView(),
               {.butteraugli_target = 1.0f,
                .backend = gjxl::VarDctBackendPreference::kMetal,
-               .metal_aq_mode =
+               .gpu_aq_mode =
                    gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
                .collect_final_butteraugli_score = true},
               gpu.get(), false, &resident_bytes, &resident_summary)
@@ -1631,7 +1631,7 @@ bool CheckWorkflowBackendSelection() {
       !resident_summary.final_butteraugli_score_evaluated ||
       resident_summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kMetal ||
-      resident_summary.metal_aq_mode !=
+      resident_summary.gpu_aq_mode !=
           gjxl::GpuAdaptiveQuantizationMode::kFullyResident) {
     std::cerr << "Forced fully resident public workflow failed\n";
     return false;
@@ -1656,7 +1656,7 @@ bool CheckWorkflowBackendSelection() {
         resident_summary.score_history.begin()) ||
       resident_default_summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kMetal ||
-      resident_default_summary.metal_aq_mode !=
+      resident_default_summary.gpu_aq_mode !=
           gjxl::GpuAdaptiveQuantizationMode::kFullyResident) {
     std::cerr << "Default fully resident workflow changed encoded output\n";
     return false;
@@ -1703,14 +1703,14 @@ bool CheckWorkflowBackendSelection() {
               original.ConstView(),
               {.butteraugli_target = 1.0f,
                .backend = gjxl::VarDctBackendPreference::kMetal,
-               .metal_aq_mode =
+               .gpu_aq_mode =
                    gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput},
               gpu.get(), false, &maximum_bytes, &maximum_summary)
           .ok() ||
       maximum_bytes.empty() || !maximum_summary.score_history.empty() ||
       maximum_summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kMetal ||
-      maximum_summary.metal_aq_mode !=
+      maximum_summary.gpu_aq_mode !=
           gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput ||
       maximum_summary.strategy_counts[
           static_cast<size_t>(gjxl::AcStrategyType::kDct8)] !=
@@ -1729,7 +1729,7 @@ bool CheckWorkflowBackendSelection() {
       .target_size_selection =
           gjxl::TargetSizeSelectionPolicy::kClosestAbsolute,
       .backend = gjxl::VarDctBackendPreference::kMetal,
-      .metal_aq_mode =
+      .gpu_aq_mode =
           gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput,
   };
   if (!gjxl::codestream_internal::
@@ -1744,7 +1744,7 @@ bool CheckWorkflowBackendSelection() {
       !maximum_target_summary.score_history.empty() ||
       maximum_target_summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kMetal ||
-      maximum_target_summary.metal_aq_mode !=
+      maximum_target_summary.gpu_aq_mode !=
           gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput) {
     std::cerr << "Maximum-throughput target-size workflow failed\n";
     return false;
@@ -1766,7 +1766,7 @@ bool CheckWorkflowBackendSelection() {
           original.ConstView(),
           {.butteraugli_target = 1.0f,
            .backend = gjxl::VarDctBackendPreference::kMetal,
-           .metal_aq_mode =
+           .gpu_aq_mode =
                gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput},
           gpu.get(), false, &maximum_failed_bytes, &maximum_failed_summary);
   if (maximum_failure.ok() ||
@@ -1783,7 +1783,7 @@ bool CheckWorkflowBackendSelection() {
               original.ConstView(),
               {.butteraugli_target = 1.0f,
                .backend = gjxl::VarDctBackendPreference::kMetal,
-               .metal_aq_mode =
+               .gpu_aq_mode =
                    gjxl::GpuAdaptiveQuantizationMode::kThroughput},
               gpu.get(), false, &throughput_bytes, &throughput_summary)
           .ok() ||
@@ -1797,7 +1797,7 @@ bool CheckWorkflowBackendSelection() {
         resident_summary.score_history.begin()) ||
       throughput_summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kMetal ||
-      throughput_summary.metal_aq_mode !=
+      throughput_summary.gpu_aq_mode !=
           gjxl::GpuAdaptiveQuantizationMode::kThroughput) {
     std::cerr << "Forced throughput public workflow failed\n";
     return false;
@@ -1810,7 +1810,7 @@ bool CheckWorkflowBackendSelection() {
               original.ConstView(),
               {.butteraugli_target = 1.0f,
                .backend = gjxl::VarDctBackendPreference::kMetal,
-               .metal_aq_mode =
+               .gpu_aq_mode =
                    gjxl::GpuAdaptiveQuantizationMode::kThroughput,
                .collect_final_butteraugli_score = true},
               gpu.get(), false, &throughput_scored_bytes,
@@ -1820,7 +1820,7 @@ bool CheckWorkflowBackendSelection() {
       throughput_scored_summary.score_history !=
         resident_summary.score_history ||
       !throughput_scored_summary.final_butteraugli_score_evaluated ||
-      throughput_scored_summary.metal_aq_mode !=
+      throughput_scored_summary.gpu_aq_mode !=
         gjxl::GpuAdaptiveQuantizationMode::kThroughput) {
     std::cerr << "Throughput final-score collection changed encoded output\n";
     return false;
@@ -1851,7 +1851,7 @@ bool CheckWorkflowBackendSelection() {
           upper_automatic_summary.score_history ||
         upper_automatic_summary.execution_backend !=
             gjxl::VarDctExecutionBackend::kMetal ||
-        upper_automatic_summary.metal_aq_mode !=
+        upper_automatic_summary.gpu_aq_mode !=
             gjxl::GpuAdaptiveQuantizationMode::kFullyResident) {
       std::cerr << "Automatic Metal did not accept the upper quality bound\n";
       return false;
@@ -1941,7 +1941,7 @@ bool CheckWorkflowBackendSelection() {
       production_auto_summary.execution_backend !=
           expected_production_backend ||
       (expected_production_backend == gjxl::VarDctExecutionBackend::kMetal &&
-       production_auto_summary.metal_aq_mode !=
+       production_auto_summary.gpu_aq_mode !=
          gjxl::GpuAdaptiveQuantizationMode::kFullyResident)) {
     std::cerr << "Production automatic Metal selection failed\n";
     return false;

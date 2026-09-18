@@ -1656,7 +1656,7 @@ void RunPublicWorkflowOnlyWorkload(
              .compression_mode = compression_mode,
              .backend = backend,
              .cpu_thread_count = cpu_thread_count,
-             .metal_aq_mode = mode,
+             .gpu_aq_mode = mode,
              .collect_final_butteraugli_score =
                collect_final_butteraugli_score},
             backend == gjxl::VarDctBackendPreference::kMetal ? &gpu : nullptr,
@@ -1922,7 +1922,7 @@ void RunGpuProfileWorkflowWorkload(
     .effort = effort,
     .backend = gjxl::VarDctBackendPreference::kMetal,
     .cpu_thread_count = cpu_thread_count,
-    .metal_aq_mode = gpu_aq_mode,
+    .gpu_aq_mode = gpu_aq_mode,
     .collect_final_butteraugli_score = collect_final_butteraugli_score,
   };
   std::vector<uint8_t> expected;
@@ -2208,7 +2208,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
               original.ConstView(),
               {.butteraugli_target = butteraugli_target,
                .backend = gjxl::VarDctBackendPreference::kMetal,
-               .metal_aq_mode = gpu_aq_mode},
+               .gpu_aq_mode = gpu_aq_mode},
               &gpu, true, &gpu_validation_bytes,
               &gpu_validation_summary));
   const auto maximum_vector_error = [](const std::vector<float>& left,
@@ -2698,7 +2698,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
               original.ConstView(),
               {.butteraugli_target = butteraugli_target,
                .backend = gjxl::VarDctBackendPreference::kMetal,
-               .metal_aq_mode = gpu_aq_mode},
+               .gpu_aq_mode = gpu_aq_mode},
               &gpu, true, &workflow_bytes, &workflow_summary);
     case Phase::kGpuColdPublicWorkflow: {
       std::unique_ptr<gjxl::GpuBackend> cold_gpu;
@@ -2712,7 +2712,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
               original.ConstView(),
               {.butteraugli_target = butteraugli_target,
                .backend = gjxl::VarDctBackendPreference::kMetal,
-               .metal_aq_mode = gpu_aq_mode},
+               .gpu_aq_mode = gpu_aq_mode},
               cold_gpu.get(), true, &workflow_bytes, &workflow_summary);
     }
     case Phase::kCount:

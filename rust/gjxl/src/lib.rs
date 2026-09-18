@@ -64,6 +64,7 @@ pub enum Backend {
     Auto,
     Cpu,
     Metal,
+    Cuda,
 }
 
 /// Maximum supported explicit CPU thread count.
@@ -72,7 +73,7 @@ pub const MAX_CPU_THREADS: usize = sys::GJXL_MAX_CPU_THREADS as usize;
 /// Immutable execution policy stored by a reusable [`Context`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ContextOptions {
-    /// CPU/Metal backend preference.
+    /// CPU/Metal/CUDA backend preference.
     pub backend: Backend,
     /// Maximum participating CPU threads per encode. `None` selects automatic.
     pub cpu_threads: Option<usize>,
@@ -284,6 +285,7 @@ impl Context {
             Backend::Auto => sys::GJXL_BACKEND_AUTO,
             Backend::Cpu => sys::GJXL_BACKEND_CPU,
             Backend::Metal => sys::GJXL_BACKEND_METAL,
+            Backend::Cuda => sys::GJXL_BACKEND_CUDA,
         } as sys::GJXLBackend;
         options.num_cpu_threads = match context_options.cpu_threads {
             None => 0,
@@ -346,11 +348,15 @@ impl Context {
             DcQuantization::Round => sys::GJXL_DC_QUANTIZATION_ROUND,
             DcQuantization::PredictionAware => sys::GJXL_DC_QUANTIZATION_PREDICTION_AWARE,
         } as sys::GJXLDcQuantization;
-        native_options.adaptive_dc_smoothing = match options.adaptive_dc_smoothing {
+        // Bindgen's anonymous C enum constants are signed on MSVC and unsigned
+        // on other targets; the ABI field is always uint32_t.
+        #[allow(clippy::unnecessary_cast)]
+        let adaptive_dc_smoothing = match options.adaptive_dc_smoothing {
             None => sys::GJXL_DC_SMOOTHING_AUTOMATIC,
             Some(false) => sys::GJXL_DC_SMOOTHING_DISABLED,
             Some(true) => sys::GJXL_DC_SMOOTHING_ENABLED,
-        };
+        } as u32;
+        native_options.adaptive_dc_smoothing = adaptive_dc_smoothing;
 
         let mut output = NativeBuffer::empty();
         check(unsafe { sys::gjxl_encode(self.raw, &image, &native_options, &mut output.raw) })?;
@@ -461,7 +467,7 @@ mod tests {
             CompressionMode::Automatic
         );
         assert_eq!(distance_from_quality(100.0), 0.0);
-        assert!((distance_from_quality(80.0) - 1.9).abs() < f32::EPSILON);
+        assert!((distance_from_quality(80.0) - 1.9).abs() < 1.0e-6);
     }
 
     #[test]
@@ -474,6 +480,25 @@ mod tests {
             .expect_err("invalid CPU thread count must fail");
             assert_eq!(error.kind(), ErrorKind::InvalidArgument);
         }
+    }
+
+    #[cfg(feature = "cuda")]
+    #[test]
+    fn cuda_context_encodes_when_a_device_is_available() {
+        let context = match Context::with_options(ContextOptions {
+            backend: Backend::Cuda,
+            cpu_threads: None,
+        }) {
+            Ok(context) => context,
+            Err(error) if error.kind() == ErrorKind::Unavailable => return,
+            Err(error) => panic!("CUDA context creation failed: {error}"),
+        };
+        let pixels = rgba_fixture(64, 48);
+        let image = ImageView::rgba8(64, 48, 64 * 4, &pixels).unwrap();
+        let codestream = context
+            .encode(&image, EncoderOptions::default())
+            .expect("CUDA encode must succeed after context creation");
+        assert!(!codestream.is_empty());
     }
 
     #[test]

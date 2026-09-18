@@ -1208,7 +1208,7 @@ Metal encoding implementation. `GpuAdaptiveQuantizationMode` selects
 `kExactCoefficients`, `kFullyResident`, or `kThroughput` in bounded AQ, full AQ,
 and the complete iterative GPU quantization pipeline. The separate
 `kMaximumThroughput` value selects only the public frame-only workflow.
-`VarDctEncodingOptions::metal_aq_mode` and the CLI's `--metal-aq` option carry
+`VarDctEncodingOptions::gpu_aq_mode` and the CLI's `--gpu-aq` option carry
 the same choice through codestream generation. Fully resident participates in
 qualified automatic Butteraugli-target selection; throughput and
 maximum-throughput still require forced Metal. Resident output is atomic and

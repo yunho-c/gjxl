@@ -4,6 +4,7 @@
 // Adapted for GJXL from libjxl's enc_ans.cc and ans_common.cc.
 
 #include "codestream/ans_internal.h"
+#include "codestream/ans_reverse_bits_internal.h"
 
 #include <algorithm>
 #include <array>
@@ -249,6 +250,30 @@ Status StoreVarLenUint8(size_t value, Writer* writer) {
     highest_bit, value - (size_t{1} << highest_bit));
 }
 
+struct ScaledAnsRatio {
+  uint64_t quotient = 0;
+  uint64_t remainder = 0;
+};
+
+// Computes value * kAnsTableSize / denominator exactly without requiring a
+// non-standard 128-bit integer. At each doubling, remainder < denominator;
+// the subtraction form avoids overflowing 2 * remainder.
+ScaledAnsRatio ScaleByAnsTable(uint64_t value, uint64_t denominator) {
+  static_assert(kAnsTableSize != 0 &&
+    (kAnsTableSize & (kAnsTableSize - 1)) == 0);
+  ScaledAnsRatio result{0, value};
+  for (size_t scale = kAnsTableSize; scale > 1; scale >>= 1) {
+    result.quotient *= 2;
+    if (result.remainder >= denominator - result.remainder) {
+      result.remainder -= denominator - result.remainder;
+      ++result.quotient;
+    } else {
+      result.remainder *= 2;
+    }
+  }
+  return result;
+}
+
 Status NormalizeHistogram(
   const std::array<uint64_t, kMaximumAnsAlphabetSize>& raw,
   Storage<uint16_t>* frequencies) {
@@ -291,10 +316,9 @@ Status NormalizeHistogram(
     if (raw[symbol] == 0) {
       continue;
     }
-    const unsigned __int128 scaled =
-      static_cast<unsigned __int128>(raw[symbol]) * kAnsTableSize;
-    const uint64_t quotient = static_cast<uint64_t>(scaled / total);
-    const uint64_t remainder = static_cast<uint64_t>(scaled % total);
+    const ScaledAnsRatio scaled = ScaleByAnsTable(raw[symbol], total);
+    const uint64_t quotient = scaled.quotient;
+    const uint64_t remainder = scaled.remainder;
     const uint16_t frequency = static_cast<uint16_t>(
       std::max<uint64_t>(quotient, 1));
     (*frequencies)[symbol] = frequency;
@@ -1966,47 +1990,16 @@ Status WriteAnsStream(size_t token_count, Process&& process, BitWriter* writer) 
         !status.ok()) {
       return status;
     }
-    // Pack during reverse token processing. Every stored word contains 56
-    // bits; only the final pending word needs a separate logical width.
-    Storage<uint64_t> reverse_words;
-    reverse_words.reserve(chunk_count);
-    uint64_t pending = 0;
-    size_t pending_bits = 0;
+    codestream_internal::AnsReverseBits reverse_bits;
+    // ComputeAnsReverseChunkCount proves that token payload plus final state
+    // fits size_t, and bounds the exact same managed packed-word allocation.
+    reverse_bits.ReserveBits(token_count * codestream_internal::kAnsMaximumTokenBits);
     const auto append_chunk = [&](uint32_t bits, uint8_t bit_count) {
-      if (pending_bits + bit_count >= BitWriter::kMaxBitsPerWrite) {
-        const size_t take = BitWriter::kMaxBitsPerWrite - pending_bits;
-        const size_t remaining = bit_count - take;
-        reverse_words.push_back((pending << take) | (uint64_t{bits} >> remaining));
-        pending = bits & ((uint64_t{1} << remaining) - 1);
-        pending_bits = remaining;
-      } else {
-        pending = (pending << bit_count) | bits;
-        pending_bits += bit_count;
-      }
+      reverse_bits.PushValidated(bits, bit_count);
     };
     uint32_t state = 0;
-    if (Status status = process(append_chunk, &state);
-        !status.ok()) {
-      return status;
-    }
-    // The checked token bound above also bounds this exact size calculation.
-    const size_t total_bits = 32 + pending_bits +
-      BitWriter::kMaxBitsPerWrite * reverse_words.size();
-    BitWriter temporary;
-    const auto write_words = [&]() -> Status {
-      if (Status write = temporary.WriteBits(32, state); !write.ok()) return write;
-      if (Status write = temporary.WriteBits(pending_bits, pending); !write.ok())
-        return write;
-      for (auto word = reverse_words.rbegin(); word != reverse_words.rend(); ++word) {
-        if (Status write = temporary.WriteBits(BitWriter::kMaxBitsPerWrite, *word);
-            !write.ok()) return write;
-      }
-      return Status::Ok();
-    };
-    // reference_wrapper keeps the synchronous callback allocation-free.
-    Status status = temporary.WithMaxBits(total_bits, std::cref(write_words));
-    if (!status.ok()) return status;
-    return writer->Append(temporary);
+    if (Status status = process(append_chunk, &state); !status.ok()) return status;
+    return reverse_bits.Append(state, writer);
   } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
     return error.status();
   } catch (const std::bad_alloc&) {

@@ -151,13 +151,13 @@ bool MakeMixedStrategies(gjxl::AcStrategyGrid* strategies) {
       !CheckStatus(strategies->Set(
         4, 0, gjxl::AcStrategyType::kDct32x16), "DCT32x16 placement") ||
       !CheckStatus(strategies->Set(
-        6, 0, gjxl::AcStrategyType::kDct16x32), "DCT16x32 placement") ||
+        4, 4, gjxl::AcStrategyType::kDct16x32), "DCT16x32 placement") ||
       !CheckStatus(strategies->Set(
-        10, 0, gjxl::AcStrategyType::kDct16x16), "DCT16x16 placement") ||
+        8, 0, gjxl::AcStrategyType::kDct16x16), "DCT16x16 placement") ||
       !CheckStatus(strategies->Set(
-        6, 2, gjxl::AcStrategyType::kDct16x8), "DCT16x8 placement") ||
+        10, 0, gjxl::AcStrategyType::kDct16x8), "DCT16x8 placement") ||
       !CheckStatus(strategies->Set(
-        7, 2, gjxl::AcStrategyType::kDct8x16), "DCT8x16 placement")) {
+        10, 2, gjxl::AcStrategyType::kDct8x16), "DCT8x16 placement")) {
     return false;
   }
   strategies->fill_empty_dct8();
@@ -1666,6 +1666,9 @@ bool CheckResidentButteraugliPolicy(
   }
   std::vector<double> final_cfl_scores;
   gjxl::gpu_profile_internal::GpuExecutionProfile final_cfl_profile;
+  // One final-CfL dispatch plus the 20-dispatch evaluation quantizer that
+  // follows the invariant quantizer on first use.
+  constexpr size_t kFinalCflPreparationDispatches = 21;
   if (!CheckStatus(profiler->EvaluateResidentButteraugliPolicyProfiled(
           {
             .adjusted_initial_quant_field = {
@@ -1683,7 +1686,7 @@ bool CheckResidentButteraugliPolicy(
       !CheckResidentForwardDispatches(
           final_cfl_profile, kIterations + 1,
           ResidentForwardDispatchPattern::kFirstIterationOnly,
-          "resident final CfL profile", 1)) {
+          "resident final CfL profile", kFinalCflPreparationDispatches)) {
     return false;
   }
   size_t final_cfl_dispatches = 0;
@@ -2782,6 +2785,71 @@ bool CheckInvalidCoefficientDecisionMode(gjxl::GpuBackend& gpu) {
     prepared == nullptr;
 }
 
+bool CheckStrategyGridValidation(gjxl::GpuBackend& gpu) {
+  Fixture fixture;
+  if (!fixture.Initialize()) return false;
+  const gjxl::Extent2D blocks = fixture.strategies.extent();
+  const std::vector<uint8_t> sharpness(
+    blocks.width * blocks.height, 4);
+  gjxl::AcStrategyGrid crossing;
+  if (!CheckStatus(gjxl::AcStrategyGrid::Create(blocks, &crossing),
+                   "crossing Metal strategy-grid creation") ||
+      !CheckStatus(crossing.Set(
+        7, 0, gjxl::AcStrategyType::kDct16x16),
+        "crossing Metal strategy placement")) {
+    return false;
+  }
+  crossing.fill_empty_dct8();
+  const auto preparation = [&](const gjxl::AcStrategyGrid& strategies) {
+    return gjxl::AqEvaluationPreparation{
+      .original_linear_rgb = fixture.original.View(),
+      .coding_opsin = fixture.coding.View(),
+      .strategies = &strategies,
+      .epf_sharpness = {sharpness.data(), blocks, blocks.width},
+      .options = MakeOptions(),
+      .resident_quantization = true,
+      .coefficient_decision_mode =
+        gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant,
+    };
+  };
+
+  const gjxl::GpuBackendStats before_prepare = gpu.stats();
+  std::unique_ptr<gjxl::PreparedAqEvaluation> rejected;
+  const gjxl::Status rejected_prepare =
+    gjxl::PrepareAqEvaluation(gpu, preparation(crossing), &rejected);
+  const gjxl::GpuBackendStats after_prepare = gpu.stats();
+  if (!ExpectCode(rejected_prepare, gjxl::StatusCode::kInvalidArgument,
+                  "crossing Metal strategy preparation") ||
+      rejected != nullptr ||
+      after_prepare.successful_allocations !=
+        before_prepare.successful_allocations ||
+      after_prepare.committed_submissions !=
+        before_prepare.committed_submissions) {
+    return false;
+  }
+
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  if (!CheckStatus(gjxl::PrepareAqEvaluation(
+        gpu, preparation(fixture.strategies), &prepared),
+        "valid Metal resident strategy preparation")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats before_reconfigure = gpu.stats();
+  const gjxl::Status rejected_reconfigure = prepared->Reconfigure(
+    crossing, {sharpness.data(), blocks, blocks.width});
+  const gjxl::GpuBackendStats after_reconfigure = gpu.stats();
+  return ExpectCode(
+           rejected_reconfigure, gjxl::StatusCode::kInvalidArgument,
+           "crossing Metal strategy reconfiguration") &&
+    after_reconfigure.successful_allocations ==
+      before_reconfigure.successful_allocations &&
+    after_reconfigure.committed_submissions ==
+      before_reconfigure.committed_submissions &&
+    CheckStatus(prepared->Reconfigure(
+      fixture.strategies, {sharpness.data(), blocks, blocks.width}),
+      "reuse Metal resident state after rejected strategy reconfiguration");
+}
+
 bool CheckPublicPreparationRejectsNonFiniteImages(gjxl::GpuBackend& gpu) {
   Fixture fixture;
   if (!fixture.Initialize()) return false;
@@ -3195,6 +3263,7 @@ int main() {
                    "Metal AQ backend") ||
       !CheckProfilingSessionAggregation() || !CheckCapabilityBoundary() ||
       !CheckInvalidCoefficientDecisionMode(*gpu) ||
+      !CheckStrategyGridValidation(*gpu) ||
       !CheckPublicPreparationRejectsNonFiniteImages(*gpu) ||
       !CheckResidentInputPreparation(*gpu) || !CheckDeferredFrontend(*gpu) ||
       !CheckDeferredFrontend(*gpu, true) ||

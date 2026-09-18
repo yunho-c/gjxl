@@ -33,7 +33,7 @@ struct Options {
                                 4.0f};
   gjxl::VarDctBackendPreference backend =
     gjxl::VarDctBackendPreference::kCpu;
-  gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
+  gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode =
     gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
 };
 
@@ -45,7 +45,7 @@ struct ProbeRow {
   double bits_per_pixel = 0.0;
   double final_score = 0.0;
   std::string backend;
-  std::string metal_aq_mode;
+  std::string gpu_aq_mode;
   double elapsed_ms = 0.0;
   double total_ms = 0.0;
   bool size_monotonic = true;
@@ -106,11 +106,14 @@ struct ProbeRow {
   if (text == "metal") {
     return gjxl::VarDctBackendPreference::kMetal;
   }
+  if (text == "cuda") {
+    return gjxl::VarDctBackendPreference::kCuda;
+  }
   throw std::runtime_error("Unknown rate-control backend: " +
                            std::string(text));
 }
 
-[[nodiscard]] gjxl::GpuAdaptiveQuantizationMode ParseMetalAqMode(
+[[nodiscard]] gjxl::GpuAdaptiveQuantizationMode ParseGpuAqMode(
   std::string_view text) {
 
   if (text == "exact-coefficients") {
@@ -122,14 +125,14 @@ struct ProbeRow {
   if (text == "throughput") {
     return gjxl::GpuAdaptiveQuantizationMode::kThroughput;
   }
-  throw std::runtime_error("Unknown Metal AQ mode: " + std::string(text));
+  throw std::runtime_error("Unknown GPU AQ mode: " + std::string(text));
 }
 
 void PrintUsage(std::string_view executable) {
   std::cout
     << "Usage: " << executable
-    << " [--targets D1,D2,...] [--backend cpu|auto|metal] "
-       "[--metal-aq exact-coefficients|fully-resident|throughput] "
+    << " [--targets D1,D2,...] [--backend cpu|auto|metal|cuda] "
+       "[--gpu-aq exact-coefficients|fully-resident|throughput] "
        "INPUT.pfm [INPUT.pfm ...]\n";
 }
 
@@ -142,7 +145,7 @@ void PrintUsage(std::string_view executable) {
       std::exit(EXIT_SUCCESS);
     }
     if (argument == "--targets" || argument == "--backend" ||
-        argument == "--metal-aq") {
+        argument == "--gpu-aq" || argument == "--metal-aq") {
       if (index + 1 >= argc) {
         throw std::runtime_error(
           "Rate-control probe option is missing its value");
@@ -153,7 +156,7 @@ void PrintUsage(std::string_view executable) {
       } else if (argument == "--backend") {
         options.backend = ParseBackend(value);
       } else {
-        options.metal_aq_mode = ParseMetalAqMode(value);
+        options.gpu_aq_mode = ParseGpuAqMode(value);
       }
     } else if (!argument.empty() && argument.front() == '-') {
       throw std::runtime_error("Unknown rate-control probe option: " +
@@ -166,11 +169,13 @@ void PrintUsage(std::string_view executable) {
     throw std::runtime_error(
       "The rate-control probe requires at least one PFM input");
   }
-  if (options.metal_aq_mode ==
+  if (options.gpu_aq_mode ==
         gjxl::GpuAdaptiveQuantizationMode::kThroughput &&
       options.backend != gjxl::VarDctBackendPreference::kMetal) {
-    throw std::runtime_error(
-      "Throughput AQ requires the forced Metal backend");
+    if (options.backend != gjxl::VarDctBackendPreference::kCuda) {
+      throw std::runtime_error(
+        "Throughput AQ requires a forced GPU backend");
+    }
   }
   return options;
 }
@@ -183,11 +188,13 @@ void PrintUsage(std::string_view executable) {
       return "cpu";
     case gjxl::VarDctExecutionBackend::kMetal:
       return "metal";
+    case gjxl::VarDctExecutionBackend::kCuda:
+      return "cuda";
   }
   return "invalid";
 }
 
-[[nodiscard]] std::string MetalAqModeName(
+[[nodiscard]] std::string GpuAqModeName(
   gjxl::VarDctExecutionBackend backend,
   gjxl::GpuAdaptiveQuantizationMode mode) {
 
@@ -267,7 +274,7 @@ void PrintUsage(std::string_view executable) {
       {
         .butteraugli_target = target,
         .backend = options.backend,
-        .metal_aq_mode = options.metal_aq_mode,
+        .gpu_aq_mode = options.gpu_aq_mode,
         .collect_final_butteraugli_score = true,
       },
       &codestream,
@@ -306,8 +313,8 @@ void PrintUsage(std::string_view executable) {
     row.bits_per_pixel = summary.achieved_bits_per_pixel;
     row.final_score = summary.score_history.back();
     row.backend = BackendName(summary.execution_backend);
-    row.metal_aq_mode = MetalAqModeName(
-      summary.execution_backend, summary.metal_aq_mode);
+    row.gpu_aq_mode = GpuAqModeName(
+      summary.execution_backend, summary.gpu_aq_mode);
     row.elapsed_ms = std::chrono::duration<double, std::milli>(
       attempt_end - attempt_start).count();
     row.size_monotonic = rows.empty() || row.encoded_bytes <= previous_size;
@@ -335,7 +342,7 @@ void PrintRows(const std::vector<ProbeRow>& rows) {
               << std::setprecision(17) << row.bits_per_pixel << ','
               << row.final_score << ','
               << row.backend << ','
-              << row.metal_aq_mode << ','
+              << row.gpu_aq_mode << ','
               << std::fixed << std::setprecision(6)
               << row.elapsed_ms << ','
               << row.total_ms << ','

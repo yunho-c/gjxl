@@ -1,0 +1,37 @@
+name: Native Libraries
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} C++${{ matrix.standard }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, ubuntu-24.04, windows-2022]
+        standard: [20, 23]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/setup-native-toolchain
+      - name: Configure
+        run: cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=${{ matrix.standard }} -DGJXL_ENABLE_CUDA=OFF -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF
+      - name: Build
+        run: cmake --build build/ci --parallel 4
+      - name: Test
+        run: ctest --test-dir build/ci --output-on-failure --parallel 2
+      - name: Retain test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.os }}-cxx${{ matrix.standard }}
+          path: build/ci/Testing/Temporary/

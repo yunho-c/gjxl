@@ -59,11 +59,14 @@ struct AcStrategyScratchRequirements {
 /// single float plane. `matrices` contains dequant X/Y/B followed by inverse-
 /// dequant X/Y/B, with one complete strategy-sized matrix per entry.
 ///
-/// Use GetAcStrategyScratchRequirements to size the three scratch buffers.
-/// Conservative sizes remain valid: `candidate_count * 3 * coefficient_count`
-/// floats for each of A/B, and `candidate_count * 3 *
-/// kAcStrategyRateScratchBytesPerChannel` bytes for rate scratch. A zero-byte
-/// requirement means the corresponding pointer is unused and ignored.
+/// Use GetAcStrategyScratchRequirements to size the three scratch ranges.
+/// The default requires `candidate_count * 3 * coefficient_count` floats in
+/// each of `scratch_a` and `scratch_b`, and `candidate_count * 3 *
+/// kAcStrategyRateScratchBytesPerChannel` bytes in `rate_scratch`. Backends
+/// may require less; allocating these conservative sizes remains valid.
+/// A zero-byte scratch requirement means the corresponding buffer and offset
+/// are unused and ignored. CUDA keeps forward coefficients in shared memory
+/// and requires no `scratch_b` range.
 /// Inputs are expected to remain resident across batches; only candidate
 /// descriptors and scalar costs need to cross the CPU/GPU boundary.
 struct AcStrategyCandidateBatch {
@@ -81,11 +84,26 @@ struct AcStrategyCandidateBatch {
   ConstDeviceImage3View resident_opsin;
   ConstDevicePlaneView resident_pixel_mask;
   ConstDevicePlaneView resident_quant_field;
+  ConstDevicePlaneView resident_y_to_x;
+  ConstDevicePlaneView resident_y_to_b;
 
   DeviceBuffer* scratch_a = nullptr;
   DeviceBuffer* scratch_b = nullptr;
   DeviceBuffer* rate_scratch = nullptr;
   DeviceBuffer* costs = nullptr;
+
+  // Byte offsets make it possible to suballocate every legacy packed input,
+  // immutable stage table, and mutable output from a small number of owning
+  // buffers. Offsets must satisfy the natural alignment of the referenced
+  // element type and the complete range must remain inside its buffer.
+  size_t opsin_offset_bytes = 0;
+  size_t pixel_mask_offset_bytes = 0;
+  size_t matrices_offset_bytes = 0;
+  size_t candidates_offset_bytes = 0;
+  size_t scratch_a_offset_bytes = 0;
+  size_t scratch_b_offset_bytes = 0;
+  size_t rate_scratch_offset_bytes = 0;
+  size_t costs_offset_bytes = 0;
 
   Extent2D pixel_extent;
   size_t opsin_row_stride = 0;

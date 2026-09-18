@@ -3,10 +3,24 @@
 
 #pragma once
 
+#include <span>
+
 #include "codec/vardct_frame.h"
 #include "codec/coefficient_order_population_internal.h"
 
 namespace gjxl::vardct_frame_internal {
+
+// Optional, immutable producer cache with the completed frame's lifetime.
+// The producer guarantees exact zero counts from that frame's final AC and
+// strategies. Full counts are always present; pure DCT8 also has the pinned
+// group-first sampled counts. All absent-family/sample bins are zero. Consumers
+// check shape and bounds, not semantic equality (which requires a full scan).
+// Empty storage requests the CPU recount, including its wider counter fallback.
+struct CoefficientOrderPopulationView {
+  std::span<const uint32_t> counts;
+  uint16_t present_mask = 0;
+};
+
 
 /// Borrowed storage for the existing native group-major frame layout. Small
 /// value metadata is copied; all pointers, planes, and spans borrow storage.
@@ -72,12 +86,19 @@ class VarDctFrameView {
     return data_.group_used_coefficient_count.size();
   }
   [[nodiscard]] Status GetAcGroup(size_t index, VarDctAcGroupView* out) const;
+  [[nodiscard]] Status GetNativeAcGroup(
+      size_t index, VarDctNativeAcGroupView* out) const;
   [[nodiscard]] CoefficientOrderPopulationView coefficient_order_population() const noexcept {
     return data_.coefficient_order_population;
   }
 
  private:
+  friend VarDctFrameView BorrowFrame(const VarDctEncoderFrame&) noexcept;
   VarDctFrameViewData data_;
+  // Owned frames retain their validated native compact/sparse representation.
+  // Only BorrowFrame can attach this immutable owner; raw borrowed dense views
+  // continue to receive the full structural and coefficient validation.
+  const VarDctEncoderFrame* native_owner_ = nullptr;
 };
 
 /// Exclusive completed-output lease, independent of a producer's scratch.

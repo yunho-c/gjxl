@@ -10,6 +10,12 @@ function(gjxl_check_storage_toolchain include_dir)
   cmake_push_check_state(RESET)
   set(CMAKE_REQUIRED_INCLUDES "${include_dir}")
   set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+  # Match the actual selected configuration. MSVC's implicit try-compile
+  # configuration is Debug even in a single-config Release build, which would
+  # probe a different iterator-debug ABI from the implementation being built.
+  if(CMAKE_BUILD_TYPE)
+    set(CMAKE_TRY_COMPILE_CONFIGURATION "${CMAKE_BUILD_TYPE}")
+  endif()
   foreach(language IN ITEMS CXX OBJCXX)
     if(NOT CMAKE_${language}_COMPILER_LOADED)
       continue()

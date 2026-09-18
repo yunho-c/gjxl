@@ -158,7 +158,7 @@ bool CheckPlans() {
       invalid.encoding.backend = VarDctBackendPreference::kAutomatic;
       break;
     case 2:
-      invalid.encoding.metal_aq_mode =
+      invalid.encoding.gpu_aq_mode =
           GpuAdaptiveQuantizationMode::kExactCoefficients;
       break;
     case 3:
@@ -180,7 +180,7 @@ bool CheckPlans() {
       invalid.encoding.cpu_thread_count = 257;
       break;
     case 9:
-      invalid.encoding.metal_aq_mode =
+      invalid.encoding.gpu_aq_mode =
           GpuAdaptiveQuantizationMode::kMaximumThroughput;
       break;
     }
@@ -520,7 +520,7 @@ bool CheckRuntime(GpuBackend &gpu) {
     for (bool search : {false, true}) {
       ResidentWorkflowStorageOptions o;
       o.encoding.backend = VarDctBackendPreference::kMetal;
-      o.encoding.metal_aq_mode = mode;
+      o.encoding.gpu_aq_mode = mode;
       o.encoding.effort = 10;
       o.encoding.cpu_thread_count = 1;
       if (search) {
@@ -542,7 +542,7 @@ bool CheckRuntime(GpuBackend &gpu) {
     if (flags & 1)
       o.encoding.density_mode = VarDctDensityMode::kHighDensity;
     else
-      o.encoding.metal_aq_mode = GpuAdaptiveQuantizationMode::kThroughput;
+      o.encoding.gpu_aq_mode = GpuAdaptiveQuantizationMode::kThroughput;
     o.collect_timing = bool(flags & 2);
     o.collect_profile = !o.collect_timing;
     if (!RunCase(gpu, image.const_view(), o))

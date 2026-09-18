@@ -67,7 +67,7 @@ int main(int argc, char **argv) {
         .cpu_thread_count = threads,
         .backend = backend == "metal" ? gjxl::VarDctBackendPreference::kMetal
                                       : gjxl::VarDctBackendPreference::kCpu,
-        .metal_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+        .gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
         .collect_final_butteraugli_score = false,
     };
     options.dc_prediction = prediction == "weighted"
@@ -102,7 +102,7 @@ int main(int argc, char **argv) {
                   (backend == "metal" ? gjxl::VarDctExecutionBackend::kMetal
                                       : gjxl::VarDctExecutionBackend::kCpu) &&
               (backend == "cpu" ||
-               summary.metal_aq_mode ==
+               summary.gpu_aq_mode ==
                    gjxl::GpuAdaptiveQuantizationMode::kFullyResident) &&
               summary.dc_quantization == options.dc_quantization &&
               summary.adaptive_dc_smoothing == options.adaptive_dc_smoothing &&

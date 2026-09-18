@@ -29,7 +29,20 @@
 #include <filesystem>
 #include <fstream>
 #include <latch>
+#if defined(_WIN32)
+#define NOMINMAX
+#include <windows.h>
+#include <psapi.h>
+#elif defined(__APPLE__)
 #include <mach/mach.h>
+#else
+#include <sys/resource.h>
+#include <unistd.h>
+#endif
+#ifdef GJXL_CUDA_QUALIFICATION
+#include <cuda_runtime_api.h>
+#include "gpu/cuda/cuda_backend.h"
+#endif
 #include <thread>
 
 namespace {
@@ -89,11 +102,42 @@ uint64_t Ns(Clock::duration d) {
   return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(d).count());
 }
 uint64_t Footprint(bool peak = false) {
+#if defined(_WIN32)
+  PROCESS_MEMORY_COUNTERS counters{};
+  if (!GetProcessMemoryInfo(GetCurrentProcess(), &counters, sizeof(counters)))
+    throw std::runtime_error("GetProcessMemoryInfo failed");
+  return peak ? counters.PeakWorkingSetSize : counters.WorkingSetSize;
+#elif defined(__APPLE__)
   task_vm_info_data_t info{};
   mach_msg_type_number_t n = TASK_VM_INFO_COUNT;
   if (task_info(mach_task_self(), TASK_VM_INFO, reinterpret_cast<task_info_t>(&info), &n) != KERN_SUCCESS)
     throw std::runtime_error("task_info failed");
   return peak ? info.ledger_phys_footprint_peak : info.phys_footprint;
+#else
+  if (peak) {
+    rusage usage{};
+    if (getrusage(RUSAGE_SELF, &usage) != 0)
+      throw std::runtime_error("getrusage failed");
+    return static_cast<uint64_t>(usage.ru_maxrss) * 1024;
+  }
+  size_t size = 0, resident = 0;
+  std::ifstream statm("/proc/self/statm");
+  const long page_size = sysconf(_SC_PAGESIZE);
+  if (!(statm >> size >> resident) || page_size <= 0)
+    throw std::runtime_error("Unable to read resident memory");
+  return resident * static_cast<uint64_t>(page_size);
+#endif
+}
+// Device-wide allocation snapshots, not a per-process physical peak. Keep
+// these outside the timed encode boundary and report their scope explicitly.
+void PrintDeviceMemory() {
+#ifdef GJXL_CUDA_QUALIFICATION
+  size_t free = 0, total = 0;
+  if (cudaMemGetInfo(&free, &total) != cudaSuccess || free > total)
+    throw std::runtime_error("Unable to read CUDA device memory");
+  std::cout << ",\"device_used_bytes\":" << total - free
+            << ",\"device_total_bytes\":" << total;
+#endif
 }
 void Check(bool good, const char* message) { if (!good) throw std::runtime_error(message); }
 size_t Number(const std::string& text) {
@@ -130,7 +174,8 @@ struct Call {
 
 int main(int argc, char** argv) try {
   size_t count = 9, batch = 0, in_flight = 1, callers = 1, threads = 0, cpu_limit = 0;
-  std::string limit_mode = "default", retain;
+  std::string limit_mode = "default", retain, dc_policy = "default";
+  size_t effort = 7;
   std::vector<ImageStorage> original;
   std::vector<std::string> names;
   for (int i = 1; i < argc; ++i) {
@@ -145,6 +190,8 @@ int main(int argc, char** argv) try {
     else if (key == "--cpu-limit") cpu_limit = Number(value);
     else if (key == "--limit") limit_mode = value;
     else if (key == "--retain") retain = value;
+    else if (key == "--dc-policy") dc_policy = value;
+    else if (key == "--effort") effort = Number(value);
     else if (key == "--input") {
       original.push_back(LoadPfm(value)); names.push_back(value);
     } else if (key == "--synthetic") {
@@ -163,11 +210,32 @@ int main(int argc, char** argv) try {
   auto changed = original;
   for (auto& image : changed) for (auto& plane : image.plane) for (float& value : plane) value = 0.91f * value + 0.017f;
   gjxl::VarDctEncodingOptions options;
+#ifdef GJXL_CUDA_QUALIFICATION
+  options.backend = gjxl::VarDctBackendPreference::kCuda;
+#else
   options.backend = gjxl::VarDctBackendPreference::kMetal;
-  options.metal_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
-  options.effort = 7; options.butteraugli_target = 1.2f; options.cpu_thread_count = threads;
+#endif
+  options.gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
+  Check(effort >= 1 && effort <= 10, "Effort must be in [1, 10]");
+  options.effort = static_cast<int32_t>(effort);
+  options.butteraugli_target = 1.2f; options.cpu_thread_count = threads;
+  Check(dc_policy == "default" || dc_policy == "legacy", "Unknown DC policy");
+#ifndef GJXL_CUDA_QUALIFICATION
+  Check(dc_policy == "default", "Legacy DC comparison requires the CUDA driver");
+#endif
+#if defined(GJXL_FINAL_SCHEDULER) && defined(GJXL_CUDA_QUALIFICATION)
+  if (dc_policy == "legacy") {
+    options.dc_quantization = gjxl::DcQuantizationMode::kRound;
+    options.dc_prediction = gjxl::VarDctDcPrediction::kGradient;
+    options.adaptive_dc_smoothing = false;
+  }
+#endif
   const auto setup_begin = Clock::now();
+#ifdef GJXL_CUDA_QUALIFICATION
+  RequireStatus("Backend setup", gjxl::codestream_internal::EnsureProductionCudaBackendAvailable());
+#else
   RequireStatus("Backend setup", gjxl::codestream_internal::EnsureProductionMetalBackendAvailable());
+#endif
   const uint64_t setup_ns = Ns(Clock::now() - setup_begin);
   size_t limit = 0, planned_slots = batch ? in_flight : 1;
 #ifdef GJXL_FINAL_SCHEDULER
@@ -214,7 +282,9 @@ int main(int argc, char** argv) try {
               << ",\"height\":" << original[i].extent.height << ",\"original_fnv64\":\"" << HashImage(original[i])
               << "\",\"changed_fnv64\":\"" << HashImage(changed[i]) << "\"}";
   }
-  std::cout << "]}\n" << std::flush;
+  std::cout << "],\"effort\":" << effort << ",\"dc_policy\":" << std::quoted(dc_policy);
+  PrintDeviceMemory();
+  std::cout << "}\n" << std::flush;
   for (size_t iteration = 0; iteration < count; ++iteration) {
     std::vector<Call> calls(callers);
     for (size_t c = 0; c < callers; ++c) for (size_t j = 0; j < batch; ++j) {
@@ -311,7 +381,9 @@ int main(int argc, char** argv) try {
       }
       std::cout << "]}";
     }
-    std::cout << "]}\n" << std::flush;
+    std::cout << ']';
+    PrintDeviceMemory();
+    std::cout << "}\n" << std::flush;
   }
   const uint64_t idle_footprint = Footprint(); // Outputs released, backend and drivers still alive.
 #ifdef GJXL_FINAL_SCHEDULER
@@ -324,9 +396,15 @@ int main(int argc, char** argv) try {
         "Post-trim shared domain is not empty");
 #else
   drivers.clear();
+#ifdef GJXL_CUDA_QUALIFICATION
+  RequireStatus("Trim", gjxl::TrimCudaDeviceMemory());
+#else
   RequireStatus("Trim", gjxl::TrimVarDctPreparationCache());
 #endif
+#endif
   std::cout << "{\"type\":\"trim\",\"backend_alive_idle_footprint\":" << idle_footprint
-            << ",\"post_trim_footprint\":" << Footprint() << ",\"peak_footprint\":" << Footprint(true) << "}\n";
+            << ",\"post_trim_footprint\":" << Footprint() << ",\"peak_footprint\":" << Footprint(true);
+  PrintDeviceMemory();
+  std::cout << "}\n";
   return EXIT_SUCCESS;
 } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return EXIT_FAILURE; }

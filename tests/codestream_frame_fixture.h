@@ -72,8 +72,8 @@ struct FrameFixture {
     for (size_t gy = 0; gy < groups.height; ++gy) {
       for (size_t gx = 0; gx < groups.width; ++gx) {
         const size_t g = gy * groups.width + gx;
-        const Extent2D local{std::min(32ul, extent.width - gx * 32),
-                             std::min(32ul, extent.height - gy * 32)};
+        const Extent2D local{std::min(size_t{32}, extent.width - gx * 32),
+                             std::min(size_t{32}, extent.height - gy * 32)};
         size_t offset = 0;
         for (size_t y = 0; y < local.height; ++y) {
           for (size_t x = 0; x < local.width; ++x) {

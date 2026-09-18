@@ -1,0 +1,280 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Yunho Cho
+#include "codestream/cuda_workflow_storage_plan.h"
+
+#include "codec/coefficient_order_population_internal.h"
+#include "codec/frontend_storage_plan.h"
+#include "codestream/workflow_internal.h"
+#include "codestream/workflow_publication_storage_plan.h"
+#include "core/frame_geometry.h"
+#include "gpu/ops/ac_strategy_storage_plan.h"
+#include <cmath>
+
+namespace gjxl::codestream_internal {
+namespace {
+using enum resource_budget_internal::VectorCapacityPolicy;
+Status Overflow() {
+  return Status::OutOfMemory("CUDA workflow storage bound overflows");
+}
+
+Status ComputeCompatibility(Extent2D source, const CpuWorkflowStorageOptions &o,
+                            CudaWorkflowStoragePlan *out) {
+  // These routes retain the shared CPU frontend/AQ owners (including exact
+  // coefficients or final quality measurement). Compose their audited bound
+  // with the concrete CUDA owners. No memory guard is relaxed for these modes.
+  auto cpu_options = o;
+  cpu_options.encoding.backend = VarDctBackendPreference::kCpu;
+  CpuWorkflowStoragePlan cpu;
+  Status status = ComputeCpuWorkflowStoragePlan(source, cpu_options, &cpu);
+  if (!status.ok())
+    return status;
+  const auto &e = o.encoding;
+  const bool frame_only =
+      e.gpu_aq_mode == GpuAdaptiveQuantizationMode::kMaximumThroughput;
+  const bool exact =
+      e.gpu_aq_mode == GpuAdaptiveQuantizationMode::kExactCoefficients;
+  const bool maximum =
+      e.rate_control_mode == VarDctRateControlMode::kMaximumError;
+  CudaWorkflowStoragePlan p;
+  p.coding_extent = cpu.coding_extent;
+  p.maximum_attempts = cpu.maximum_attempts;
+  p.score_count = frame_only ? 0 : cpu.score_count;
+  p.frontend = cpu.frontend;
+  p.serializer = cpu.serializer;
+  p.output = cpu.output;
+  p.working = cpu.working;
+  AqEvaluationOptions evaluation;
+  evaluation.dc_quantization = ResolveDcQuantization(e);
+  evaluation.dc_prediction = e.dc_prediction;
+  evaluation.profile.extra_dc_precision =
+      evaluation.dc_quantization == DcQuantizationMode::kPredictionAware ? 1
+                                                                         : 0;
+  evaluation.profile.adaptive_dc_smoothing = ResolveAdaptiveDcSmoothing(e);
+  evaluation.metric = maximum ? AqEvaluationMetric::kMaximumError
+                              : AqEvaluationMetric::kButteraugli;
+  evaluation.maximum_error = e.maximum_error;
+  HostStorageBound cuda_host;
+  if (frame_only || exact) {
+    status = frame_only ? cuda_internal::ComputeCudaFrameOnlyStoragePlan(
+                              source, evaluation, true, &p.compatibility)
+                        : cuda_internal::ComputeCudaExactStoragePlan(
+                              source, evaluation, &p.compatibility);
+    if (!status.ok())
+      return status;
+    cuda_host = p.compatibility.host;
+    if (!cuda_host.Add(p.compatibility.butteraugli.host))
+      return Overflow();
+    for (size_t bytes :
+         {p.compatibility.persistent_bytes, p.compatibility.staging_bytes,
+          p.compatibility.butteraugli.capacity_bytes})
+      if (!p.device.Add({bytes, bytes}))
+        return Overflow();
+    if (frame_only) {
+      size_t input_bytes = 0;
+      status = cuda_internal::ComputeCudaInputStoragePlan(source, &input_bytes);
+      if (!status.ok())
+        return status;
+      if (!p.device.Add({input_bytes, input_bytes}))
+        return Overflow();
+    }
+  } else {
+    status = cuda_internal::ComputeCudaResidentStoragePlan(
+        {.source = source,
+         .evaluation = evaluation,
+         .resident_frontend = true,
+         .omit_initial_search_data = UseFixedDct8Strategy(e),
+         .borrowed_input = true},
+        &p.resident);
+    if (!status.ok())
+      return status;
+    cuda_host = p.resident.host;
+    if (!cuda_host.Add(p.resident.native_ac) ||
+        !cuda_host.Add(p.resident.butteraugli.host))
+      return Overflow();
+    size_t input_bytes = 0;
+    status = cuda_internal::ComputeCudaInputStoragePlan(source, &input_bytes);
+    if (!status.ok())
+      return status;
+    for (size_t bytes :
+         {input_bytes, p.resident.persistent_bytes, p.resident.staging_bytes,
+          p.resident.sparse_header_bytes,
+          p.resident.butteraugli.capacity_bytes})
+      if (!p.device.Add({bytes, bytes}))
+        return Overflow();
+  }
+  if (!frame_only && !UseFixedDct8Strategy(e)) {
+    ac_strategy_search_internal::StoragePlan ac;
+    ac_strategy_search_internal::HostStoragePlan ac_host;
+    status = ac_strategy_search_internal::ComputeStoragePlan(
+        p.coding_extent, !exact, &ac, nullptr, UseDenseDct32Search(e));
+    if (!status.ok())
+      return status;
+    status = ac_strategy_search_internal::ComputeHostStoragePlan(
+        p.coding_extent, !exact, p.maximum_attempts > 1, &ac_host,
+        UseDenseDct32Search(e));
+    if (!status.ok())
+      return status;
+    if (!cuda_host.Add(ac_host.working) ||
+        !p.device.Add({ac.input_arena_bytes, ac.input_arena_bytes}) ||
+        !p.device.Add({ac.resource_arena_bytes, ac.resource_arena_bytes}))
+      return Overflow();
+  }
+  // A direct exact reconstruction snapshots its incoming frame before
+  // publication. Resident native ownership can also coexist with a prior frame.
+  frontend_storage_internal::OwnedFrameStoragePlan frame;
+  status =
+      frontend_storage_internal::ComputeOwnedFrameStoragePlan(source, &frame);
+  if (!status.ok())
+    return status;
+  p.completed = frame.output;
+  if (!p.frontend.Add(cuda_host) || !p.working.Add(cuda_host) ||
+      !p.working.Add(p.device) || !p.working.Add(p.completed))
+    return Overflow();
+  p.cuda_idle_capacity = p.device.peak_bytes;
+  *out = p;
+  return Status::Ok();
+}
+} // namespace
+
+Status ComputeCudaWorkflowStoragePlan(Extent2D source,
+                                      const CpuWorkflowStorageOptions &o,
+                                      CudaWorkflowStoragePlan *out) {
+  const auto &e = o.encoding;
+  const bool search =
+      e.rate_control_mode == VarDctRateControlMode::kTargetBytes ||
+      e.rate_control_mode == VarDctRateControlMode::kTargetBitsPerPixel;
+  if (out == nullptr || e.backend != VarDctBackendPreference::kCuda ||
+      e.effort < 1 || e.effort > 10 ||
+      e.cpu_thread_count > kMaximumCpuThreadCount ||
+      (search &&
+       (e.target_size_maximum_attempts == 0 ||
+        e.target_size_maximum_attempts > kMaximumTargetSizeEncodeAttempts)) ||
+      (!search &&
+       e.rate_control_mode == VarDctRateControlMode::kButteraugliTarget &&
+       (!std::isfinite(e.butteraugli_target) || e.butteraugli_target <= 0)))
+    return Status::InvalidArgument("CUDA workflow storage options are invalid");
+  if (e.gpu_aq_mode == GpuAdaptiveQuantizationMode::kExactCoefficients ||
+      e.gpu_aq_mode == GpuAdaptiveQuantizationMode::kMaximumThroughput ||
+      e.rate_control_mode == VarDctRateControlMode::kMaximumError)
+    return ComputeCompatibility(source, o, out);
+  if (e.gpu_aq_mode != GpuAdaptiveQuantizationMode::kFullyResident &&
+      e.gpu_aq_mode != GpuAdaptiveQuantizationMode::kThroughput)
+    return Status::InvalidArgument("CUDA workflow AQ mode is invalid");
+  if (!search &&
+      e.rate_control_mode != VarDctRateControlMode::kButteraugliTarget)
+    return Status::InvalidArgument(
+        "CUDA workflow storage control mode is invalid");
+  FrameGeometry geometry;
+  Status status = FrameGeometry::Create(source, &geometry);
+  if (!status.ok())
+    return status;
+  CudaWorkflowStoragePlan p;
+  p.coding_extent = geometry.padded_frame();
+  p.maximum_attempts = search ? e.target_size_maximum_attempts : 1;
+  p.score_count = AdaptiveQuantizationIterations(e) +
+                  size_t(e.collect_final_butteraugli_score);
+  const bool fixed = UseFixedDct8Strategy(e);
+  AqEvaluationOptions evaluation;
+  evaluation.evaluation_free = p.score_count == 0;
+  evaluation.dc_quantization = ResolveDcQuantization(e);
+  evaluation.dc_prediction = e.dc_prediction;
+  evaluation.profile.extra_dc_precision =
+      evaluation.dc_quantization == DcQuantizationMode::kPredictionAware ? 1
+                                                                         : 0;
+  evaluation.profile.adaptive_dc_smoothing = ResolveAdaptiveDcSmoothing(e);
+  status = cuda_internal::ComputeCudaResidentStoragePlan(
+      {.source = source,
+       .evaluation = evaluation,
+       .resident_frontend = true,
+       .omit_initial_search_data = fixed,
+       .borrowed_input = true},
+      &p.resident);
+  if (!status.ok())
+    return status;
+  size_t input_bytes = 0;
+  status = cuda_internal::ComputeCudaInputStoragePlan(source, &input_bytes);
+  if (!status.ok())
+    return status;
+  for (size_t bytes :
+       {input_bytes, p.resident.persistent_bytes, p.resident.staging_bytes,
+        p.resident.sparse_header_bytes, p.resident.butteraugli.capacity_bytes})
+    if (!p.device.Add({bytes, bytes}))
+      return Overflow();
+  p.frontend = p.resident.host;
+  if (!p.frontend.Add(p.resident.butteraugli.host))
+    return Overflow();
+  ac_strategy_search_internal::StoragePlan ac;
+  ac_strategy_search_internal::HostStoragePlan ac_host;
+  if (!fixed) {
+    status = ac_strategy_search_internal::ComputeStoragePlan(
+        p.coding_extent, true, &ac, nullptr, UseDenseDct32Search(e));
+    if (!status.ok())
+      return status;
+    status = ac_strategy_search_internal::ComputeHostStoragePlan(
+        p.coding_extent, true, search, &ac_host, UseDenseDct32Search(e));
+    if (!status.ok())
+      return status;
+    if (!p.frontend.Add(ac_host.working) ||
+        !p.device.Add({ac.resource_arena_bytes, ac.resource_arena_bytes}))
+      return Overflow();
+  }
+  // All retries retain fixed geometry and arena sizes. Buffers acquired from
+  // the cache require exact capacities and remain inside this same reservation.
+  p.cuda_idle_capacity = p.device.peak_bytes;
+  const size_t blocks =
+      geometry.block_grid().blocks.width * geometry.block_grid().blocks.height;
+  frontend_storage_internal::ColorCorrelationStoragePlan cfl;
+  status = frontend_storage_internal::ComputeColorCorrelationStoragePlan(
+      p.coding_extent,
+      frontend_storage_internal::ColorCorrelationStorageMode::kCopy, &cfl);
+  if (!status.ok())
+    return status;
+  // Prepared sharpness, provisional/selected/replacement grids, compatibility
+  // initial/strategy/adjusted fields and retry CfL copies.
+  if (!p.frontend.AddVector<uint8_t>(blocks, kFreshExact, 4) ||
+      !p.frontend.AddVector<float>(blocks, kFreshExact, 3) ||
+      !p.frontend.Add(cfl.working, search ? 2 : 1))
+    return Overflow();
+  frontend_storage_internal::OwnedFrameStoragePlan frame;
+  status =
+      frontend_storage_internal::ComputeOwnedFrameStoragePlan(source, &frame);
+  if (!status.ok())
+    return status;
+  p.completed = frame.output;
+  const size_t dense_bytes = frame.ac_coefficients * sizeof(int32_t);
+  p.completed.retained_bytes -= dense_bytes;
+  p.completed.peak_bytes -= dense_bytes;
+  if (!p.completed.Add(p.resident.native_ac) ||
+      !p.completed.AddVector<size_t>(frame.ac_groups + 1, kFreshExact) ||
+      !p.completed.AddVector<vardct_frame_internal::CoefficientOrderPopulation>(
+          1, kFreshExact))
+    return Overflow();
+  status = ComputeSerializerStoragePlan(
+      source,
+      {.coding = {.entropy_behavior = ResolveEntropyBehavior(e),
+                  .coefficient_order_behavior =
+                      ResolveCoefficientOrderBehavior(e),
+                  .dc_prediction = e.dc_prediction,
+                  .dc_uint_search = UseDcUintSearch(e)},
+       .cpu_thread_count = e.cpu_thread_count,
+       .collect_profile = o.collect_profile},
+      &p.serializer);
+  if (!status.ok())
+    return status;
+  WorkflowPublicationStoragePlan publication;
+  status = ComputeWorkflowPublicationStoragePlan(
+      p.serializer.output, p.score_count, p.maximum_attempts, search,
+      o.collect_timing, &publication,
+      "CUDA workflow publication storage overflows");
+  if (!status.ok())
+    return status;
+  p.output = publication.output;
+  for (auto part : {p.frontend, p.device, p.completed, p.serializer.working,
+                    publication.scores, publication.timing,
+                    publication.search_control, publication.retained_best})
+    if (!p.working.Add(part))
+      return Overflow();
+  *out = p;
+  return Status::Ok();
+}
+} // namespace gjxl::codestream_internal

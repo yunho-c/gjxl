@@ -22,7 +22,7 @@ enum class GpuAdaptiveQuantizationMode {
   /// default.
   kExactCoefficients,
   /// Forward transforms, coefficient coding, and reconstruction remain on the
-  /// GPU. This is the default Metal encoding mode and may change encoder
+  /// GPU. This is the default GPU encoding mode and may change encoder
   /// decisions relative to the CPU reference.
   kFullyResident,
   /// Encoding-only workflows apply both default AQ updates, then quantize the
@@ -163,6 +163,14 @@ struct AdaptiveQuantizationMaterialization {
   bool final_perceptual_evaluation = true;
   std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame>*
     completed_frame = nullptr;
+  /// The encoding frontend retained its initial field on the prepared device
+  /// operation. Host initial-field inputs are intentionally empty.
+  bool resident_initial_quantization = false;
+  /// Backend-owned immutable frontend images. These are populated only by an
+  /// encoding workflow that prepared and validated RGB/XYB on the same GPU.
+  ConstDeviceImage3View resident_original_linear_rgb;
+  ConstDeviceImage3View resident_coding_opsin;
+  Extent2D resident_coding_extent;
 };
 
 /// Reusable frame-level GPU AQ state for repeated rate-control attempts.
@@ -176,14 +184,45 @@ struct PreparedAdaptiveQuantization {
   uint64_t quantization_pipeline_generation = 0;
   ConstDeviceImage3View resident_original_linear_rgb;
   ConstDeviceImage3View resident_coding_opsin;
+  ConstDeviceImage3View input_resident_original_linear_rgb;
+  ConstDeviceImage3View input_resident_coding_opsin;
   GpuBackend* backend = nullptr;
   ConstImage3FView original_linear_rgb;
   ConstImage3FView coding_opsin;
   AqEvaluationOptions evaluation_options;
   bool resident_quantization = false;
   bool omit_initial_search_data = false;
+  bool frame_only_resident_frontend = false;
   std::unique_ptr<PreparedAqEvaluation> evaluation;
 };
+
+/// Reuses a compatible maximum-throughput evaluator across rate-control
+/// attempts. A failed prepared operation is discarded before returning.
+[[nodiscard]] Status RunPreparedGpuFrameOnlyQuantizationResidentFrontend(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneU8View epf_sharpness,
+  InitialQuantizationOptions initial_options,
+  AdaptiveQuantizationOptions options,
+  PreparedAdaptiveQuantization* prepared,
+  InitialQuantFieldOutput initial_output,
+  GpuFrameOnlyQuantizationOutput output);
+
+/// Encoding-only variant that keeps the initial quantization and masking maps
+/// resident and materializes only the final encoder frame.
+[[nodiscard]] Status
+RunPreparedGpuFrameOnlyQuantizationResidentFrontendForEncoding(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  const AcStrategyGrid& strategies,
+  ConstPlaneU8View epf_sharpness,
+  InitialQuantizationOptions initial_options,
+  AdaptiveQuantizationOptions options,
+  PreparedAdaptiveQuantization* prepared,
+  GpuFrameOnlyQuantizationOutput output);
 
 [[nodiscard]] Status RunPreparedGpuAdaptiveQuantization(
   GpuBackend& gpu,

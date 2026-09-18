@@ -53,7 +53,7 @@ int main(int argc, char** argv) {
         .effort = static_cast<int32_t>(effort),
         .cpu_thread_count = threads,
         .backend = gjxl::VarDctBackendPreference::kMetal,
-        .metal_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+        .gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
         .collect_final_butteraugli_score = false,
     };
     std::vector<uint8_t> bytes;
@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
     };
     const auto validate = [&](size_t variant) {
       Require(summary.execution_backend == gjxl::VarDctExecutionBackend::kMetal &&
-                  summary.metal_aq_mode == gjxl::GpuAdaptiveQuantizationMode::kFullyResident &&
+                  summary.gpu_aq_mode == gjxl::GpuAdaptiveQuantizationMode::kFullyResident &&
                   summary.dc_prediction == options.dc_prediction &&
                   summary.extent == image.extent() && summary.encoded_bytes == bytes.size() &&
                   bytes.size() >= 2 && bytes[0] == 0xff && bytes[1] == 0x0a,
@@ -118,7 +118,7 @@ int main(int argc, char** argv) {
     }
     std::cout << std::setprecision(12)
               << "{\"schema_version\":1,\"revision\":\"" << GJXL_QUALITY_REVISION
-              << "\",\"backend\":\"metal\",\"metal_aq_mode\":\"fully-resident\","
+              << "\",\"backend\":\"metal\",\"gpu_aq_mode\":\"fully-resident\","
               << "\"timing_semantics\":\"complete-encode-wall-time\","
               << "\"pairing\":\"alternating-calls-in-one-process\","
               << "\"stage_profile_enabled\":false,\"collect_final_score\":false,"

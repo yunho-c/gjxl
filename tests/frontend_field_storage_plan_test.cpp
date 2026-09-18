@@ -291,9 +291,9 @@ bool PurePlans() {
                         {8200, 8},
                         {8, 8200},
                         {3840, 2160},
-                        {1ul << 24, 8}}) {
+                        {size_t{1} << 24, 8}}) {
       size_t last = 0;
-      for (size_t threads : {1ul, 2ul, 12ul, SIZE_MAX, 0ul}) {
+      for (size_t threads : {size_t{1}, size_t{2}, size_t{12}, SIZE_MAX, size_t{0}}) {
         InitialQuantStoragePlan plan;
         if (!Ok(ComputeInitialQuantStoragePlan(pixels, threads, &plan)))
           return false;
@@ -301,7 +301,7 @@ bool PurePlans() {
         const size_t p =
             n < 65536
                 ? 1
-                : std::min(rows, threads == 0 ? 12 : std::min(threads, 12ul));
+                : std::min(rows, threads == 0 ? 12 : std::min(threads, size_t{12}));
         const size_t row_bytes =
             4 * (n + n / 16 + p * pixels.width) +
             (p > 1 ? rows * sizeof(Status) + (p - size_t(threads != 0)) * sizeof(std::thread) : 0);
@@ -330,8 +330,8 @@ bool PurePlans() {
                     (op != 3 || work.peak_bytes == 2 * t) &&
                     (op != 4 || work.peak_bytes == 4 * t) &&
                     (op < 5 || work.peak_bytes ==
-                                   2 * t + 16 * std::min(pixels.width, 64ul) *
-                                               std::min(pixels.height, 64ul)),
+                                   2 * t + 16 * std::min(pixels.width, size_t{64}) *
+                                               std::min(pixels.height, size_t{64})),
                 "Field or CfL allocation recipe differs"))
           return false;
       }
@@ -406,7 +406,7 @@ bool RuntimeCases() {
                  "Prepared/direct final CfL differs"))
         return false;
       for (size_t op = 0; op < kOperations; ++op)
-        for (size_t threads : {1ul, 2ul, 12ul, 0ul}) {
+        for (size_t threads : {size_t{1}, size_t{2}, size_t{12}, size_t{0}}) {
           if (op != 0 && threads != 1)
             continue;
           HostStorageBound work, retained;

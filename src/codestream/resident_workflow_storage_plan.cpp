@@ -116,8 +116,8 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
       e.cpu_thread_count > kMaximumCpuThreadCount ||
       (e.backend != VarDctBackendPreference::kMetal &&
        e.backend != VarDctBackendPreference::kAutomatic) ||
-      (e.metal_aq_mode != GpuAdaptiveQuantizationMode::kFullyResident &&
-       e.metal_aq_mode != GpuAdaptiveQuantizationMode::kThroughput) ||
+      (e.gpu_aq_mode != GpuAdaptiveQuantizationMode::kFullyResident &&
+       e.gpu_aq_mode != GpuAdaptiveQuantizationMode::kThroughput) ||
       (e.density_mode != VarDctDensityMode::kDefault &&
        e.density_mode != VarDctDensityMode::kHighDensity) ||
       (e.compression_mode != VarDctCompressionMode::kAutomatic &&
@@ -125,9 +125,9 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
       (!search &&
        e.rate_control_mode != VarDctRateControlMode::kButteraugliTarget) ||
       ((search ||
-        e.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput) &&
+        e.gpu_aq_mode == GpuAdaptiveQuantizationMode::kThroughput) &&
        e.backend != VarDctBackendPreference::kMetal) ||
-      (e.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput &&
+      (e.gpu_aq_mode == GpuAdaptiveQuantizationMode::kThroughput &&
        e.density_mode == VarDctDensityMode::kHighDensity) ||
       (!search &&
        (!std::isfinite(e.butteraugli_target) || e.butteraugli_target <= 0)) ||

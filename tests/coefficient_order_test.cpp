@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "codec/vardct_frame_view_internal.h"
+#include "codec/vardct_frame_internal.h"
 #include "codestream/ac_group.h"
 #include "codestream/coefficient_order.h"
 #include "codestream/encoder.h"
@@ -123,6 +124,10 @@ int main() {
         const auto frame = MakeFrame(strategy, pattern);
         const auto view = gjxl::vardct_frame_internal::BorrowFrame(frame);
         const gjxl_test::OrderPopulationFixture population(view);
+        const auto cached_frame = gjxl_test::FrameWithPopulation(frame, pattern % 2 == 0);
+        const auto copied = cached_frame;
+        auto movable = copied;
+        const auto moved = std::move(movable);
         for (const auto behavior : {gjxl::VarDctCoefficientOrderBehavior::kFull,
                gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled}) {
           gjxl::SimpleCoefficientOrders orders;
@@ -133,6 +138,11 @@ int main() {
             population.WithPopulation(view, {population.counts, population.mask}), behavior, &cached));
           if (orders != cached) throw std::runtime_error("Cached coefficient orders differ");
           const auto reference = ReferenceOrders(frame, behavior);
+          for (const auto* owned : {&cached_frame, &copied, &moved}) {
+            gjxl::SimpleCoefficientOrders cached_orders;
+            Check(gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(gjxl::vardct_frame_internal::BorrowFrame(*owned), behavior, &cached_orders));
+            if (cached_orders != reference) throw std::runtime_error("Cached/copied/moved orders differ");
+          }
           if (orders != reference) throw std::runtime_error("Coefficient orders differ");
           std::vector<gjxl::EntropyToken> tokens, reference_tokens;
           Check(gjxl::TokenizeSimpleCoefficientOrders(orders, &tokens));
@@ -152,6 +162,7 @@ int main() {
           const auto frame = MakeFrame(strategy, pattern, block_side);
           const auto view = gjxl::vardct_frame_internal::BorrowFrame(frame);
           const gjxl_test::OrderPopulationFixture population(view);
+          const auto cached_frame = gjxl_test::FrameWithPopulation(frame);
           for (auto behavior : {gjxl::VarDctCoefficientOrderBehavior::kFull,
                  gjxl::VarDctCoefficientOrderBehavior::kEffort7Dct8Sampled}) {
             gjxl::SimpleCoefficientOrders actual;
@@ -162,6 +173,9 @@ int main() {
               population.WithPopulation(view, {population.counts, population.mask}), behavior, &cached));
             if (cached != actual) throw std::runtime_error("Boundary cached orders differ");
             const auto expected = ReferenceOrders(frame, behavior);
+            gjxl::SimpleCoefficientOrders cached_orders;
+            Check(gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(gjxl::vardct_frame_internal::BorrowFrame(cached_frame), behavior, &cached_orders));
+            if (cached_orders != expected) throw std::runtime_error("Cached boundary orders differ");
             if (actual != expected) {
               throw std::runtime_error("Boundary coefficient orders differ");
             }
@@ -177,10 +191,13 @@ int main() {
       }
     }
     const auto small = MakeFrame(0, 5, 4);
+    const auto cached_small = gjxl_test::FrameWithPopulation(small);
     gjxl::SimpleCoefficientOrders orders;
     Check(gjxl::ComputeSimpleCoefficientOrders(small, &orders));
     if (orders.used_order_mask != 0)
       throw std::runtime_error("Small frame selected a custom order");
+    Check(gjxl::ComputeSimpleCoefficientOrders(cached_small, &orders));
+    if (orders.used_order_mask != 0) throw std::runtime_error("Cached small-frame cutoff differs");
     const auto frame = MakeFrame(kStrategies.size(), 2);
     Check(gjxl::ComputeSimpleCoefficientOrders(frame, &orders));
     const auto sentinel = orders;
@@ -200,6 +217,24 @@ int main() {
             population.WithPopulation(view, data), gjxl::VarDctCoefficientOrderBehavior::kFull, &orders).ok() ||
           orders != sentinel) throw std::runtime_error("Malformed population was not atomic");
     }
+    auto cached_frame = gjxl_test::FrameWithPopulation(frame);
+    const auto* cached_sentinel = gjxl::vardct_frame_internal::GetCoefficientOrderPopulation(cached_frame);
+    for (size_t failure = 0; failure < 4; ++failure) {
+      auto population = gjxl_test::ReferencePopulation(frame);
+      if (failure == 0) population.present_mask ^= 1;
+      if (failure == 1) population.counts[0] = UINT32_MAX;
+      if (failure == 2) population.counts[gjxl::vardct_frame_internal::kOrderPopulationFullCount] = UINT32_MAX;
+      if (failure == 3) population.counts[gjxl::vardct_frame_internal::kOrderPopulationFullCount] = 1;
+      gjxl_test::PopulationAssembly assembly(frame);
+      const auto storage = assembly.coefficients;
+      if (gjxl::vardct_frame_internal::AssembleVarDctEncoderFrame(assembly.Input(&population), &cached_frame).ok() ||
+          assembly.coefficients.size() != storage.size() ||
+          !std::equal(storage.begin(), storage.end(), assembly.coefficients.begin()) ||
+          gjxl::vardct_frame_internal::GetCoefficientOrderPopulation(cached_frame) != cached_sentinel)
+        throw std::runtime_error("Invalid population assembly was not atomic");
+      Check(gjxl::ComputeSimpleCoefficientOrders(cached_frame, &orders));
+      if (orders != sentinel) throw std::runtime_error("Rejected population changed frame orders");
+    }
     if (gjxl::ComputeSimpleCoefficientOrders({}, &orders).ok() ||
         orders != sentinel ||
         gjxl::codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
@@ -208,7 +243,8 @@ int main() {
         gjxl::ComputeSimpleCoefficientOrders(frame, nullptr).ok())
       throw std::runtime_error("Invalid coefficient-order input was not atomic");
     std::cout << "Verified " << cases << " frame coefficient-order cases, "
-              << "small-frame cutoff, and invalid-input atomicity.\n";
+              << "cached/uncached policies, copied/moved cache ownership, "
+              << "small-frame cutoff, and invalid-input atomicity.\n" << std::flush;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
     return EXIT_FAILURE;

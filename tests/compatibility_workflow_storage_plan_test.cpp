@@ -41,7 +41,7 @@ bool Empty(const ResourceBudget &budget) {
 CpuWorkflowStorageOptions Options(size_t mode) {
   CpuWorkflowStorageOptions o;
   o.encoding.backend = VarDctBackendPreference::kMetal;
-  o.encoding.metal_aq_mode =
+  o.encoding.gpu_aq_mode =
       mode < 2    ? GpuAdaptiveQuantizationMode::kExactCoefficients
       : mode == 2 ? GpuAdaptiveQuantizationMode::kFullyResident
       : mode == 3 ? GpuAdaptiveQuantizationMode::kThroughput
@@ -123,7 +123,7 @@ bool CheckPlans() {
       o.encoding.cpu_thread_count = 257;
       break;
     case 3:
-      o.encoding.metal_aq_mode = GpuAdaptiveQuantizationMode::kFullyResident;
+      o.encoding.gpu_aq_mode = GpuAdaptiveQuantizationMode::kFullyResident;
       break;
     case 4:
       o = Options(4);
@@ -264,7 +264,7 @@ bool Run(GpuBackend &gpu, ConstImage3FView image,
           Encode(gpu, image, options, pass == 0 ? &oracle : &measured);
       if (!Ok(s)) {
         std::cerr << image.width() << 'x' << image.height()
-                  << " mode=" << static_cast<int>(o.encoding.metal_aq_mode)
+                  << " mode=" << static_cast<int>(o.encoding.gpu_aq_mode)
                   << " plan=" << working.peak_bytes << '\n';
         return false;
       }
@@ -325,7 +325,7 @@ bool Run(GpuBackend &gpu, ConstImage3FView image,
   }
   if (image.width() >= 3839)
     std::cout << "Large compatibility mode="
-              << static_cast<int>(o.encoding.metal_aq_mode)
+              << static_cast<int>(o.encoding.gpu_aq_mode)
               << " plan=" << working.peak_bytes
               << " peak=" << budget.snapshot().peak_backing_bytes
               << " bytes=" << measured.bytes.size() << '\n';

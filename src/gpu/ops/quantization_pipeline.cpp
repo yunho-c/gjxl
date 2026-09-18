@@ -175,6 +175,26 @@ bool SameImageIdentity(ConstImage3FView left, ConstImage3FView right) {
     SamePlaneIdentity(left.plane[2], right.plane[2]);
 }
 
+bool HasDeviceImage(
+  ConstDeviceImage3View image) {
+  return image.plane[0].buffer != nullptr || image.plane[1].buffer != nullptr ||
+         image.plane[2].buffer != nullptr;
+}
+
+bool SameDeviceImageIdentity(
+  ConstDeviceImage3View left, ConstDeviceImage3View right) {
+  for (size_t channel = 0; channel < 3; ++channel) {
+    const ConstDevicePlaneView a = left.plane[channel];
+    const ConstDevicePlaneView b = right.plane[channel];
+    if (a.buffer != b.buffer || a.offset_bytes != b.offset_bytes ||
+        a.element_type != b.element_type || a.extent != b.extent ||
+        a.row_stride != b.row_stride) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool HasValidatedHostImages(
   const quantization_pipeline_internal::PreparedQuantizationPipeline&
     prepared,
@@ -198,13 +218,16 @@ Status PrepareResidentFrontend(
   bool evaluation_free,
   bool omit_initial_search_data,
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization& state,
+  bool encoding_only,
   ResidentAcStrategySearchInputs* resident,
+  bool* resident_only_initial,
   gpu_profile_internal::GpuProfilingSession* profiling_session) {
 
-  if (resident == nullptr) {
+  if (resident == nullptr || resident_only_initial == nullptr) {
     return Status::InvalidArgument(
         "Resident AC-strategy input output is null");
   }
+  *resident_only_initial = false;
   const AqEvaluationOptions evaluation_options{
     .profile = options.adaptive_quantization.profile,
     .butteraugli = options.adaptive_quantization.butteraugli,
@@ -217,14 +240,45 @@ Status PrepareResidentFrontend(
     .dc_quantization = options.adaptive_quantization.dc_quantization,
     .dc_prediction = options.adaptive_quantization.dc_prediction,
   };
-  const bool compatible = state.evaluation != nullptr &&
+  const bool same_preparation =
+    state.evaluation != nullptr &&
     state.quantization_pipeline_generation == prepared.generation &&
     state.backend == &gpu &&
     SameImageIdentity(state.original_linear_rgb, original_linear_rgb) &&
     SameImageIdentity(state.coding_opsin, prepared.coding_opsin) &&
-    state.evaluation_options == evaluation_options &&
-    state.omit_initial_search_data == omit_initial_search_data &&
-    state.resident_quantization;
+    SameDeviceImageIdentity(state.input_resident_original_linear_rgb,
+      prepared.resident_original_linear_rgb) &&
+    SameDeviceImageIdentity(
+      state.input_resident_coding_opsin, prepared.resident_coding_opsin) &&
+    state.resident_quantization && !state.frame_only_resident_frontend &&
+    state.omit_initial_search_data == omit_initial_search_data;
+  bool compatible = same_preparation &&
+    state.evaluation_options == evaluation_options;
+  Status status = Status::Ok();
+  if (same_preparation && !compatible) {
+    AqEvaluationOptions normalized_previous = state.evaluation_options;
+    AqEvaluationOptions normalized_current = evaluation_options;
+    normalized_previous.profile.x_qm_scale = 0;
+    normalized_previous.profile.b_qm_scale = 0;
+    normalized_current.profile.x_qm_scale = 0;
+    normalized_current.profile.b_qm_scale = 0;
+    if (normalized_previous == normalized_current) {
+      auto* reconfiguration = dynamic_cast<
+        aq_evaluation_internal::PreparedAqScaleReconfiguration*>(
+          state.evaluation.get());
+      if (reconfiguration != nullptr) {
+        status = reconfiguration->ReconfigureScaleSelectors(
+          evaluation_options);
+        compatible = status.ok();
+        if (compatible) state.evaluation_options = evaluation_options;
+      }
+    }
+  }
+  if (!status.ok()) {
+    state.evaluation.reset();
+    state.resident_coding_opsin = {};
+    return status;
+  }
   if (!compatible) {
     const auto preparation_begin = profiling_session == nullptr
       ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
@@ -233,7 +287,7 @@ Status PrepareResidentFrontend(
     state.resident_original_linear_rgb = {};
     state.resident_coding_opsin = {};
     AcStrategyGrid provisional_strategies;
-    Status status = AcStrategyGrid::Create(
+    status = AcStrategyGrid::Create(
         prepared.block_extent, &provisional_strategies);
     if (!status.ok()) return status;
     provisional_strategies.fill_dct8();
@@ -302,11 +356,14 @@ Status PrepareResidentFrontend(
     // immutable coding view used by the downstream AQ provider so the same
     // allocation is recognized and reconfigured instead of replaced.
     state.coding_opsin = prepared.coding_opsin;
-    state.resident_original_linear_rgb =
+    state.input_resident_original_linear_rgb =
       prepared.resident_original_linear_rgb;
-    state.resident_coding_opsin = prepared.resident_coding_opsin;
+    state.input_resident_coding_opsin = prepared.resident_coding_opsin;
     state.evaluation_options = evaluation_options;
     state.resident_quantization = true;
+    state.frame_only_resident_frontend = false;
+    state.resident_original_linear_rgb = prepared.resident_original_linear_rgb;
+    state.resident_coding_opsin = prepared.resident_coding_opsin;
     state.omit_initial_search_data = omit_initial_search_data;
   }
 
@@ -325,6 +382,18 @@ Status PrepareResidentFrontend(
     .rescale = options.initial_quant_rescale,
     .uniform = options.uniform_initial_quantization,
   };
+  auto* encoding_initial = encoding_only &&
+      options.adaptive_quantization.control_mode ==
+        AdaptiveQuantizationControlMode::kButteraugli
+    ? dynamic_cast<
+        aq_evaluation_internal::PreparedAqEncodingInitialQuantization*>(
+          state.evaluation.get())
+    : nullptr;
+  if (encoding_initial == nullptr) {
+    status = prepared.PrepareHostInitialStorage(
+      !encoding_only || gpu.kind() == BackendKind::kCuda);
+    if (!status.ok()) return status;
+  }
   const InitialQuantFieldOutput initial_output{
     .quant_field = {prepared.initial_quant.data(), prepared.block_extent,
                     prepared.block_extent.width},
@@ -340,8 +409,17 @@ Status PrepareResidentFrontend(
   const auto initial_begin = profiling_session == nullptr
     ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
     : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
-  Status status;
-  if (profiling_session == nullptr) {
+  if (encoding_initial != nullptr) {
+    status = encoding_initial->ComputeInitialQuantizationForEncoding(
+      initial_options);
+    *resident_only_initial = status.ok();
+    if (status.ok() && profiling_session != nullptr) {
+      status = profiling_session->EndWallStage(
+        "frontend.initial_quantization",
+        gpu_profile_internal::GpuWallStageKind::kOperation,
+        initial_begin);
+    }
+  } else if (profiling_session == nullptr) {
     status = state.evaluation->ComputeInitialQuantization(
       initial_options, initial_output, nullptr, 0.0f,
       omit_initial_search_data ? nullptr : &prepared.initial_color_correlation);
@@ -388,21 +466,29 @@ Status PrepareResidentFrontend(
       .opsin = views.opsin,
       .quant_field = views.quant_field,
       .pixel_mask = views.pixel_mask,
+      .y_to_x = views.y_to_x,
+      .y_to_b = views.y_to_b,
   };
   return Status::Ok();
 }
 
 }  // namespace
 
-Status RunGpuFrameOnlyQuantizationPipeline(
+static Status RunGpuFrameOnlyQuantizationPipelineImpl(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,
   ConstImage3FView opsin,
   CpuQuantizationPipelineOptions options,
-  GpuFrameOnlyPipelineOutput output) {
-
-  if (!original_linear_rgb.valid() || !opsin.valid() ||
-      !BlockGrid::IsPaddedPixelExtent(opsin.extent()) ||
+  GpuFrameOnlyPipelineOutput output,
+  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization* prepared) {
+  const bool resident_input =
+    prepared != nullptr &&
+    HasDeviceImage(prepared->input_resident_coding_opsin);
+  const Extent2D pixel_extent =
+    resident_input ? prepared->input_resident_coding_opsin.plane[0].extent
+                   : opsin.extent();
+  if (!original_linear_rgb.valid() || (!resident_input && !opsin.valid()) ||
+      !BlockGrid::IsPaddedPixelExtent(pixel_extent) ||
       !std::isfinite(options.butteraugli_target) ||
       options.butteraugli_target <= 0.0f ||
       !std::isfinite(options.initial_quant_rescale) ||
@@ -413,14 +499,17 @@ Status RunGpuFrameOnlyQuantizationPipeline(
       "GPU frame-only pipeline inputs or options are invalid");
   }
   const Extent2D block_extent =
-    BlockGrid::FromPaddedPixelExtent(opsin.extent()).blocks;
-  if (!output.initial_quantization.quant_field.valid() ||
-      output.initial_quantization.quant_field.extent != block_extent ||
-      !output.initial_quantization.strategy_mask.valid() ||
-      output.initial_quantization.strategy_mask.extent != block_extent ||
-      !output.initial_quantization.pixel_mask.valid() ||
-      output.initial_quantization.pixel_mask.extent != opsin.extent() ||
-      !output.quant_field.valid() || output.quant_field.extent != block_extent) {
+    BlockGrid::FromPaddedPixelExtent(pixel_extent).blocks;
+  const bool encoding_only = prepared != nullptr;
+  if (!encoding_only &&
+      (!output.initial_quantization.quant_field.valid() ||
+        output.initial_quantization.quant_field.extent != block_extent ||
+        !output.initial_quantization.strategy_mask.valid() ||
+        output.initial_quantization.strategy_mask.extent != block_extent ||
+        !output.initial_quantization.pixel_mask.valid() ||
+        output.initial_quantization.pixel_mask.extent != pixel_extent ||
+        !output.quant_field.valid() ||
+        output.quant_field.extent != block_extent)) {
     return Status::InvalidArgument(
       "GPU frame-only pipeline output geometry is invalid");
   }
@@ -428,14 +517,17 @@ Status RunGpuFrameOnlyQuantizationPipeline(
   size_t block_count = 0;
   size_t pixel_count = 0;
   if (!block_extent.try_area(&block_count) ||
-      !opsin.extent().try_area(&pixel_count)) {
+      !pixel_extent.try_area(&pixel_count)) {
     return Status::InvalidArgument(
       "GPU frame-only pipeline dimensions are too large");
   }
   try {
-    ManagedVector<float> initial_quant(block_count);
-    ManagedVector<float> strategy_mask(block_count);
-    ManagedVector<float> pixel_mask(pixel_count);
+    ManagedVector<float> initial_quant(
+      encoding_only ? size_t{0} : block_count);
+    ManagedVector<float> strategy_mask(
+      encoding_only ? size_t{0} : block_count);
+    ManagedVector<float> pixel_mask(
+      encoding_only ? size_t{0} : pixel_count);
     const float initial_quant_target =
       (options.uniform_initial_quantization ||
        options.adaptive_quantization.profile.loop_filter.gaborish)
@@ -449,41 +541,67 @@ Status RunGpuFrameOnlyQuantizationPipeline(
     status = FillDefaultEpfSharpness(
       {sharpness.data(), block_extent, block_extent.width});
     if (!status.ok()) return status;
-    ManagedVector<float> final_quant(block_count);
+    ManagedVector<float> final_quant(
+      encoding_only ? size_t{0} : block_count);
     VarDctEncoderFrame frame;
     AdaptiveQuantizationOptions adaptive_options =
       options.adaptive_quantization;
     adaptive_options.butteraugli_target = options.butteraugli_target;
-    status = RunGpuFrameOnlyQuantizationResidentFrontend(
-      gpu, original_linear_rgb, opsin, strategies,
-      {sharpness.data(), block_extent, block_extent.width},
-      {
-        .butteraugli_target = initial_quant_target,
-        .rescale = options.initial_quant_rescale,
-        .uniform = options.uniform_initial_quantization,
-      },
-      adaptive_options,
-      {
-        .quant_field = {
-          initial_quant.data(), block_extent, block_extent.width},
-        .strategy_mask = {
-          strategy_mask.data(), block_extent, block_extent.width},
-        .pixel_mask = {
-          pixel_mask.data(), opsin.extent(), opsin.width()},
-      },
-      {
-        .quant_field = {
-          final_quant.data(), block_extent, block_extent.width},
-        .frame = &frame,
-      });
+    const InitialQuantizationOptions initial_options{
+      .butteraugli_target = initial_quant_target,
+      .rescale = options.initial_quant_rescale,
+      .uniform = options.uniform_initial_quantization,
+    };
+    const GpuFrameOnlyQuantizationOutput frame_output{
+      .quant_field = encoding_only
+        ? PlaneF32View{}
+        : PlaneF32View{
+            final_quant.data(), block_extent, block_extent.width},
+      .frame = &frame,
+    };
+    status =
+      encoding_only
+        ? adaptive_quantization_gpu_internal::
+            RunPreparedGpuFrameOnlyQuantizationResidentFrontendForEncoding(gpu,
+              original_linear_rgb,
+              opsin,
+              strategies,
+              {sharpness.data(), block_extent, block_extent.width},
+              initial_options,
+              adaptive_options,
+              prepared,
+              frame_output)
+        : adaptive_quantization_gpu_internal::
+            RunPreparedGpuFrameOnlyQuantizationResidentFrontend(gpu,
+              original_linear_rgb,
+              opsin,
+              strategies,
+              {sharpness.data(), block_extent, block_extent.width},
+              initial_options,
+              adaptive_options,
+              prepared,
+              {
+                .quant_field = {initial_quant.data(),
+                  block_extent,
+                  block_extent.width},
+                .strategy_mask = {strategy_mask.data(),
+                  block_extent,
+                  block_extent.width},
+                .pixel_mask = {pixel_mask.data(),
+                  pixel_extent,
+                  pixel_extent.width},
+              },
+              frame_output);
     if (!status.ok()) return status;
 
-    CopyContiguousPlane(
-      initial_quant, output.initial_quantization.quant_field);
-    CopyContiguousPlane(
-      strategy_mask, output.initial_quantization.strategy_mask);
-    CopyContiguousPlane(pixel_mask, output.initial_quantization.pixel_mask);
-    CopyContiguousPlane(final_quant, output.quant_field);
+    if (!encoding_only) {
+      CopyContiguousPlane(
+        initial_quant, output.initial_quantization.quant_field);
+      CopyContiguousPlane(
+        strategy_mask, output.initial_quantization.strategy_mask);
+      CopyContiguousPlane(pixel_mask, output.initial_quantization.pixel_mask);
+      CopyContiguousPlane(final_quant, output.quant_field);
+    }
     *output.frame = std::move(frame);
     return Status::Ok();
   } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
@@ -495,6 +613,55 @@ Status RunGpuFrameOnlyQuantizationPipeline(
     return Status::InvalidArgument(
       "GPU frame-only pipeline dimensions are too large");
   }
+}
+
+Status RunGpuFrameOnlyQuantizationPipeline(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  ConstImage3FView opsin,
+  CpuQuantizationPipelineOptions options,
+  GpuFrameOnlyPipelineOutput output) {
+
+  return RunGpuFrameOnlyQuantizationPipelineImpl(
+    gpu, original_linear_rgb, opsin, options, output, nullptr);
+}
+
+Status quantization_pipeline_internal::
+RunPreparedGpuFrameOnlyQuantizationPipeline(
+  GpuBackend& gpu,
+  ConstImage3FView original_linear_rgb,
+  PreparedQuantizationPipeline& prepared_pipeline,
+  CpuQuantizationPipelineOptions options,
+  GpuFrameOnlyPipelineOutput output,
+  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization* prepared) {
+
+  if (prepared == nullptr) {
+    return Status::InvalidArgument(
+      "Prepared GPU frame-only pipeline state is null");
+  }
+  if (prepared_pipeline.generation == 0) {
+    return Status::InvalidArgument(
+      "GPU frame-only pipeline preparation has no source generation");
+  }
+  if (prepared->quantization_pipeline_generation !=
+      prepared_pipeline.generation) {
+    prepared->resident_coding_opsin = {};
+    prepared->backend = nullptr;
+    prepared->original_linear_rgb = {};
+    prepared->coding_opsin = {};
+    prepared->evaluation_options = {};
+    prepared->resident_quantization = false;
+    prepared->frame_only_resident_frontend = false;
+    prepared->evaluation.reset();
+    prepared->quantization_pipeline_generation = prepared_pipeline.generation;
+  }
+  prepared->input_resident_original_linear_rgb =
+    prepared_pipeline.resident_original_linear_rgb;
+  prepared->input_resident_coding_opsin =
+    prepared_pipeline.resident_coding_opsin;
+  return RunGpuFrameOnlyQuantizationPipelineImpl(
+    gpu, original_linear_rgb, prepared_pipeline.coding_opsin, options, output,
+    prepared);
 }
 
 Status RunGpuQuantizationPipeline(
@@ -595,6 +762,7 @@ Status RunPreparedGpuQuantizationPipelineImpl(
     prepared_aq->coding_opsin = {};
     prepared_aq->evaluation_options = {};
     prepared_aq->resident_quantization = false;
+    prepared_aq->frame_only_resident_frontend = false;
     prepared_aq->evaluation.reset();
     prepared_aq->quantization_pipeline_generation = prepared.generation;
   }
@@ -629,6 +797,7 @@ Status RunPreparedGpuQuantizationPipelineImpl(
   adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
     aq_state = prepared_aq;
   ResidentAcStrategySearchInputs resident_inputs;
+  bool resident_only_initial = false;
   if (resident) {
     if (materialization.initial_quantization && prepared.pixel_mask.empty()) {
       try {
@@ -655,10 +824,14 @@ Status RunPreparedGpuQuantizationPipelineImpl(
           options.adaptive_quantization.control_mode ==
             AdaptiveQuantizationControlMode::kButteraugli,
         options.fixed_dct8 && !materialization.initial_quantization,
-        *aq_state,
-        &resident_inputs, profiling_session);
+        *aq_state, !materialization.initial_quantization,
+        &resident_inputs, &resident_only_initial, profiling_session);
     if (!status.ok()) return status;
   }
+  QuantizationPipelineMaterialization pipeline_materialization =
+    materialization;
+  pipeline_materialization.resident_initial_quantization =
+    resident_only_initial;
   GpuAcStrategySearchProvider strategy_search(
       gpu, resident ? &resident_inputs : nullptr,
       resident ? &aq_state->ac_strategy_search : nullptr,
@@ -668,15 +841,19 @@ Status RunPreparedGpuQuantizationPipelineImpl(
     {
       .quant_field = materialization.adaptive_quant_field,
       .block_distance_map = materialization.block_distance_map,
-      .reconstructed_linear_rgb =
-        materialization.reconstructed_linear_rgb,
+      .reconstructed_linear_rgb = materialization.reconstructed_linear_rgb,
       .final_perceptual_evaluation =
         materialization.final_perceptual_evaluation,
       .completed_frame = completed_frame,
-    }, profiling_session);
+      .resident_initial_quantization = resident_only_initial,
+      .resident_original_linear_rgb = prepared.resident_original_linear_rgb,
+      .resident_coding_opsin = prepared.resident_coding_opsin,
+      .resident_coding_extent = prepared.padded_extent,
+    },
+    profiling_session);
   const Status status = RunPreparedQuantizationPipelineWithProviders(
     original_linear_rgb, prepared, strategy_search, adaptive_quantization,
-    options, output, resident, materialization);
+    options, output, resident, pipeline_materialization);
   if (!status.ok()) {
     return status;
   }

@@ -157,7 +157,7 @@ int main(int argc, char **argv) {
         .effort = static_cast<int32_t>(options.effort),
         .cpu_thread_count = options.threads,
         .backend = gjxl::VarDctBackendPreference::kMetal,
-        .metal_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+        .gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
         .collect_final_butteraugli_score = false,
         .dc_prediction = options.dc_prediction,
         .dc_quantization = options.dc_quantization,
@@ -171,7 +171,7 @@ int main(int argc, char **argv) {
     };
     const auto validate = [&] {
       if (summary.execution_backend != gjxl::VarDctExecutionBackend::kMetal ||
-          summary.metal_aq_mode !=
+          summary.gpu_aq_mode !=
               gjxl::GpuAdaptiveQuantizationMode::kFullyResident ||
           summary.extent != image.extent() ||
           summary.dc_prediction != options.dc_prediction ||
@@ -216,7 +216,7 @@ int main(int argc, char **argv) {
            << GJXL_QUALITY_REVISION
            << "\",\"timing_semantics\":\"complete-encode-wall-time\","
            << "\"stage_profile_enabled\":false,\"backend\":\"metal\","
-           << "\"metal_aq_mode\":\"fully-resident\",\"density\":\"default\","
+           << "\"gpu_aq_mode\":\"fully-resident\",\"density\":\"default\","
            << "\"compression\":\"automatic\",\"collect_final_score\":false,"
            << "\"input_layout\":\"planar-linear-srgb-f32\",\"resampling\":1,"
            << "\"dc_prediction\":\""

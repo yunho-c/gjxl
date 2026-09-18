@@ -43,7 +43,7 @@ int main(int argc, char** argv) {
       Check(gjxl::codestream_internal::EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
         input.const_view(), {.butteraugli_target=std::stof(argv[5]),
           .effort=std::stoi(argv[6]), .backend=gjxl::VarDctBackendPreference::kMetal,
-          .metal_aq_mode=gjxl::GpuAdaptiveQuantizationMode::kFullyResident},
+          .gpu_aq_mode=gjxl::GpuAdaptiveQuantizationMode::kFullyResident},
         backend.get(), true, &bytes, &summary));
       std::ofstream file(argv[4], std::ios::binary);
       file.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());

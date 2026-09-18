@@ -801,8 +801,14 @@ Status WriteAcSections(
           profile == nullptr ? nullptr : &group_profiles[index];
         const ProfileClock::time_point tokens_begin =
           WorkBegin(group_profile != nullptr);
+        // Keep mutable writer metadata local to the worker. The model has
+        // already been validated and is immutable until every worker joins.
+        BitWriter local_output;
         Status token_status = WriteValidatedTokenStream(
-          ac.streams[index], ac_code, &candidate[1 + index]);
+          ac.streams[index], ac_code, &local_output);
+        if (token_status.ok()) {
+          candidate[1 + index] = std::move(local_output);
+        }
         WorkEnd(
           group_profile != nullptr, tokens_begin,
           group_profile == nullptr
