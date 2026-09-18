@@ -2849,6 +2849,8 @@ Status MetalPreparedAqEvaluation::PrepareInvariantColorCorrelationResident(
   Status status = UploadPlane(
       *backend_, quant_field, resident_policy_initial_field_);
   if (!status.ok()) {
+    // Reject competing operations before releasing the lock for cleanup.
+    state_ = State::kInvalid;
     lock.unlock();
     Invalidate();
     return status;

@@ -352,6 +352,20 @@ an intermediate build appear complete.
 
 ## Outstanding integration risks
 
+- Further isolated CUDA controls identify a Windows host-library difference:
+  MSVC's `std::cbrt(float(0.0037930732552754493))` returns bits `3e1fb276`,
+  while CUDA's fixed inverse-color constant is `3e1fb275`. Matching the host
+  value, CPU-order Gaussian filters, double inverse-DCT accumulation, paired
+  Gaborish sums and serial block reduction produces identical reconstructed RGB,
+  raw quantization and codestream bytes in 20 comparisons: four photographs,
+  zero through four AQ updates, prediction-aware DC with smoothing. Remaining
+  metric block error is at most 3.6e-7. Changing only the color constant does
+  not fix the original decision discrepancy. These are diagnostic linked-object
+  overrides, not production changes or a performance qualification. The next
+  implementation must isolate CPU-compatible arithmetic to exact mode, obtain
+  platform-dependent constants from the host, preserve ordinary resident
+  arithmetic and account for any added storage. No CPU fallback is introduced.
+
 - The later Metal resident-CfL failure exposes a separate functional defect:
   preparation validates but discards its supplied field/DC value, deriving the
   supposedly invariant map from the next evaluation instead. The candidate fix
