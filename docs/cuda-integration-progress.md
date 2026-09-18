@@ -332,9 +332,13 @@ an intermediate build appear complete.
   writer tests also pass with Windows C++23 and Linux C++20. JSON numbers are
   locale independent; failed writes preserve outputs and clean staging files.
   The extracted Metal benchmark passes an MSVC syntax check after correcting
-  two existing designated-initializer ordering errors. A full CUDA-build
-  regression run is in progress. CUDA's semantic stages still identify whole
-  submissions, while dispatch mode provides individual launch timings.
+  two existing designated-initializer ordering errors. The full Windows CUDA
+  build at `7154305` passes all 155 tests in 518 seconds, including the installed
+  consumer. CUDA's semantic stages still identify whole submissions, while
+  dispatch mode provides individual launch timings. The explicit GPU
+  qualification workflow now retains the previously validated profiling
+  lifetime/failure-recovery memcheck and its required completion marker,
+  alongside the DC memcheck/racecheck gates.
 - At `27c4344`, both hosted Metal modes pass 147/149 tests, including cache
   admission (64 seconds on C++20, within the revised outer deadline). The main
   control with the scalar-DCT portability patch and identical valid mixed

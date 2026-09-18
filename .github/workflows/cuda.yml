@@ -55,6 +55,11 @@ jobs:
           & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool racecheck --error-exitcode 86 "$env:GITHUB_WORKSPACE/build/cuda-ci/gjxl_cuda_dc_processing_test.exe" --quick --report "$env:GITHUB_WORKSPACE/build/cuda-ci/dc-racecheck-complete.txt"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ((Get-Content build/cuda-ci/dc-racecheck-complete.txt -Raw).Trim() -ne 'PASS cases=18') { throw 'Instrumented DC test did not complete' }
+      - name: Check profiling lifetimes and recovery
+        run: |
+          & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool memcheck --error-exitcode 86 "$env:GITHUB_WORKSPACE/build/cuda-ci/gjxl_cuda_profiling_test.exe" "$env:GITHUB_WORKSPACE/build/cuda-ci/profile-memcheck-complete.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-Content build/cuda-ci/profile-memcheck-complete.txt -Raw).Trim() -ne 'PASS CUDA stage/dispatch profiling checks') { throw 'Instrumented profiling test did not complete' }
       - name: Test CUDA Rust bindings
         working-directory: rust
         run: cargo test --workspace --features cuda
