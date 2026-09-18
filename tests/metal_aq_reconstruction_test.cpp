@@ -397,6 +397,17 @@ bool EqualFrames(const gjxl::VarDctEncoderFrame &expected,
   for (size_t channel = 0; channel < 3; ++channel) {
     if (!EqualPlane(expected_dc.plane[channel], actual_dc.plane[channel])) {
       std::cerr << "Frame-only DC differs in channel " << channel << '\n';
+      size_t reported = 0;
+      for (size_t y = 0; y < expected_dc.plane[channel].extent.height; ++y) {
+        for (size_t x = 0; x < expected_dc.plane[channel].extent.width; ++x) {
+          const auto expected_value = expected_dc.plane[channel].Row(y)[x];
+          const auto actual_value = actual_dc.plane[channel].Row(y)[x];
+          if (expected_value != actual_value && reported++ < 8)
+            std::cerr << "  block " << x << ',' << y << ": "
+                      << expected_value << " vs " << actual_value << '\n';
+        }
+      }
+      std::cerr << "  differing DC samples: " << reported << '\n';
       return false;
     }
   }

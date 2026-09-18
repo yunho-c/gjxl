@@ -3412,7 +3412,9 @@ if(GJXL_BUILD_TESTS)
     GJXL_METALLIB_PATH="${GJXL_METALLIB}")
   add_dependencies(gjxl_metal_cache_admission_test gjxl_metal_shaders)
   add_test(NAME metal_cache_admission COMMAND gjxl_metal_cache_admission_test)
-  set_tests_properties(metal_cache_admission PROPERTIES TIMEOUT 60)
+  # This test creates many complete backends/pipelines. Hosted virtual Metal
+  # devices can take over a minute; each admission wait still has a 5 s bound.
+  set_tests_properties(metal_cache_admission PROPERTIES TIMEOUT 180)
 
   add_executable(gjxl_workflow_storage_plan_test tests/workflow_storage_plan_test.cpp)
   target_link_libraries(gjxl_workflow_storage_plan_test PRIVATE gjxl_c gjxl_codestream gjxl_metal)

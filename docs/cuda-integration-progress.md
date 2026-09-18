@@ -284,8 +284,6 @@ an intermediate build appear complete.
   storage, DC-policy and profiling checks pass (110 seconds), followed by
   the strengthened workflow check for default-domain allocation escape.
 
-## Outstanding integration risks
-
 - Hosted CI at `3a8da47` passes Linux C++20/C++23 and all three Rust jobs.
   Metal's five remaining failures reproduce at that revision. Mixed-frame
   fixtures now keep every transform within its color tile; resident AQ tests
@@ -294,6 +292,37 @@ an intermediate build appear complete.
   MSVC syntax checks. The next hosted diagnostic runs pinned main with only
   the scalar-DCT launch-width portability patch, allowing numerical controls
   to reach execution on the paravirtual GPU. Numerical tolerances are unchanged.
+
+- CUDA dispatch profiling now records all 134 kernel launch sites, launch
+  geometry and invocation IDs; dispatch mode adds per-launch event intervals.
+  A source audit verifies unchanged kernel bodies, arguments and configuration.
+  Stage/dispatch primitive and resident-AQ checks pass, including 160 exact
+  byte/score pipeline pairs and 160 finite-domain workflow comparisons. All 678
+  diagnostic allocation boundaries in the effort-7 workflow preserve outputs.
+  Additional primitive sweeps fail between dependent launches and during
+  snapshot publication, then verify same-backend recovery. Memcheck reports
+  zero errors with a completion marker after those checks. The nine focused
+  admission, storage, DC-policy and profiling tests pass in 126 seconds.
+- Ordinary whole-call profiling-overhead controls use a separate build of
+  `6c90d83` with the same compiler and driver source. Sixty-four alternating
+  processes cover small images, odd 1080p/4K, a photo and concurrent batches;
+  every output signature matches. Median paired ratios range from 0.945 to
+  1.026. The initial 1080p effort-1 +2.6% result does not reproduce in a longer
+  24-process, 31-sample follow-up (median ratio 0.9875). These are noisy
+  single-device overhead checks, not claims of general speed improvement.
+- At `6c90d83`, hosted Metal C++23 passes the corrected resident AQ,
+  completed-frame and AQ-storage tests. Its remaining failures are two
+  numerical comparisons plus a cache-admission timeout. Main with the scalar
+  DCT portability patch reproduces the identical maximum-throughput pixel-mask
+  error (0.000419617). Its reconstruction test uses the old mixed fixture and
+  instead reaches a later initial-quantization pixel error (0.000164032), so it
+  does not yet adjudicate the integration's DC mismatch. The next control uses
+  the same valid reconstruction fixture. New diagnostics retain exact DC and
+  numerical checks; cache subcases report progress and retain their internal
+  5-second admission waits while allowing 180 seconds for repeated backend
+  creation (the prior successful hosted run took 43.4 seconds overall).
+
+## Outstanding integration risks
 
 - Broaden public policy/DC/low-effort coverage to all efforts, controls and
   representative images. Verify dense effort-10 behavior against independent

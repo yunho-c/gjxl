@@ -45,6 +45,10 @@ jobs:
           # numerical controls can run; this is main plus that explicit patch.
           git diff "$BASE_SHA" HEAD -- src/gpu/metal/metal_backend.cpp src/gpu/metal/kernels/dct.metal > build/main-reference-dct.patch
           git -C build/main-reference apply "$GITHUB_WORKSPACE/build/main-reference-dct.patch"
+          # Use the same valid mixed-transform fixture and failure diagnostics
+          # for the reconstruction control. Production code remains main plus
+          # the DCT portability patch above.
+          cp tests/metal_aq_reconstruction_test.cpp build/main-reference/tests/metal_aq_reconstruction_test.cpp
           cmake -S build/main-reference -B build/main-reference-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF
           cmake --build build/main-reference-build --parallel 4 --target gjxl_codestream_encoder_test gjxl_metal_aq_evaluation_test gjxl_metal_aq_reconstruction_test gjxl_quantization_gpu_pipeline_test gjxl_encoding_benchmark
           ctest --test-dir build/main-reference-build --output-on-failure -R '^(codestream_encoder|metal_aq_evaluation|metal_aq_reconstruction|metal_quantization_pipeline|encoding_benchmark_cli)$'

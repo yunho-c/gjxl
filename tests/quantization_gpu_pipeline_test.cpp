@@ -578,16 +578,25 @@ bool CheckMaximumThroughputFrontendParity() {
       MaximumError(expected_strategy, actual_strategy);
   const double pixel_error = MaximumError(expected_pixel, actual_pixel);
   const double final_error = MaximumError(expected_final, actual_final);
+  const bool frames_equal = FramesEqual(expected_frame, actual_frame);
+  const bool encoded = gjxl::EncodeVarDctCodestream(expected_frame, &expected_bytes).ok() &&
+    gjxl::EncodeVarDctCodestream(actual_frame, &actual_bytes).ok();
   if (quant_error > 2.0e-6 || strategy_error > 2.0e-6 ||
       pixel_error > 2.0e-5 || final_error > 2.0e-6 ||
-      !FramesEqual(expected_frame, actual_frame) ||
-      !gjxl::EncodeVarDctCodestream(expected_frame, &expected_bytes).ok() ||
-      !gjxl::EncodeVarDctCodestream(actual_frame, &actual_bytes).ok() ||
-      expected_bytes != actual_bytes) {
+      !frames_equal || !encoded || expected_bytes != actual_bytes) {
     std::cerr << "Resident maximum-throughput frontend differs: quant="
               << quant_error << " strategy=" << strategy_error
               << " pixel=" << pixel_error << " final=" << final_error
+              << " frame_equal=" << frames_equal << " encoded=" << encoded
+              << " bytes_equal=" << (expected_bytes == actual_bytes)
               << '\n';
+    for (size_t i = 0; i < expected_pixel.size(); ++i) {
+      if (std::abs(static_cast<double>(expected_pixel[i]) - actual_pixel[i]) == pixel_error) {
+        std::cerr << "  maximum pixel-mask delta at " << i << ": "
+                  << expected_pixel[i] << " vs " << actual_pixel[i] << '\n';
+        break;
+      }
+    }
     return false;
   }
   return true;
