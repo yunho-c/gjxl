@@ -182,8 +182,17 @@ struct PreparedAdaptiveQuantization {
   AqEvaluationOptions evaluation_options;
   bool resident_quantization = false;
   bool omit_initial_search_data = false;
+  bool resident_strategy_metadata = false;
   std::unique_ptr<PreparedAqEvaluation> evaluation;
 };
+
+[[nodiscard]] Status RunPreparedGpuAdaptiveQuantizationWithSearch(
+    GpuBackend &, ConstImage3FView original_linear_rgb, ConstImage3FView opsin,
+    ConstPlaneF32View initial_quant_field, ConstPlaneU8View epf_sharpness,
+    AdaptiveQuantizationOptions, GpuAdaptiveQuantizationMode,
+    PreparedAdaptiveQuantization *, const DeferredAcStrategySearch &,
+    AcStrategyGrid *, AdaptiveQuantizationOutput,
+    AdaptiveQuantizationMaterialization = {});
 
 [[nodiscard]] Status RunPreparedGpuAdaptiveQuantization(
   GpuBackend& gpu,

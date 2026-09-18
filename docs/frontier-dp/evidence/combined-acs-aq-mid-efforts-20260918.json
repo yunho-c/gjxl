@@ -1,0 +1,709 @@
+{
+  "revision": "197a20b7dc9f044cf6d2488906285816ed4b60d4",
+  "binaries": {
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/cpu-control": "562c488f534e4e36c9083cb2779fce81ae2f1fc573d9231b558ad6b199e50cd9",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/combined": "9ef4952be6fda601c2d7a3a0c637fff9e6d0f06b6b631015efb06d233635c83b"
+  },
+  "commands": [
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/cpu-control",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/01.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/01/e6/cpu/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/01/e6/cpu/raw.json",
+        "--effort",
+        "6",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/01/e6/cpu/encode.log",
+      "started_unix": 1789711570.291779,
+      "finished_unix": 1789711570.538826
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/combined",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/01.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/01/e6/combined/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/01/e6/combined/raw.json",
+        "--effort",
+        "6",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/01/e6/combined/encode.log",
+      "started_unix": 1789711570.539149,
+      "finished_unix": 1789711570.779117
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/cpu-control",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/01.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/01/e7/cpu/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/01/e7/cpu/raw.json",
+        "--effort",
+        "7",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/01/e7/cpu/encode.log",
+      "started_unix": 1789711570.7797482,
+      "finished_unix": 1789711570.892749
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/combined",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/01.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/01/e7/combined/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/01/e7/combined/raw.json",
+        "--effort",
+        "7",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/01/e7/combined/encode.log",
+      "started_unix": 1789711570.89301,
+      "finished_unix": 1789711571.0042298
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/cpu-control",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/12.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/12/e6/cpu/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/12/e6/cpu/raw.json",
+        "--effort",
+        "6",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/12/e6/cpu/encode.log",
+      "started_unix": 1789711571.007007,
+      "finished_unix": 1789711571.111722
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/combined",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/12.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/12/e6/combined/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/12/e6/combined/raw.json",
+        "--effort",
+        "6",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/12/e6/combined/encode.log",
+      "started_unix": 1789711571.111967,
+      "finished_unix": 1789711571.211518
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/cpu-control",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/12.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/12/e7/cpu/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/12/e7/cpu/raw.json",
+        "--effort",
+        "7",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/12/e7/cpu/encode.log",
+      "started_unix": 1789711571.212188,
+      "finished_unix": 1789711571.3087082
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/combined",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/12.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/12/e7/combined/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/12/e7/combined/raw.json",
+        "--effort",
+        "7",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/12/e7/combined/encode.log",
+      "started_unix": 1789711571.308985,
+      "finished_unix": 1789711571.4093409
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/cpu-control",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/24.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/24/e6/cpu/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/24/e6/cpu/raw.json",
+        "--effort",
+        "6",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/24/e6/cpu/encode.log",
+      "started_unix": 1789711571.411712,
+      "finished_unix": 1789711571.505568
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/combined",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/24.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/24/e6/combined/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/24/e6/combined/raw.json",
+        "--effort",
+        "6",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/24/e6/combined/encode.log",
+      "started_unix": 1789711571.5058172,
+      "finished_unix": 1789711571.604464
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/cpu-control",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/24.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/24/e7/cpu/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/24/e7/cpu/raw.json",
+        "--effort",
+        "7",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/24/e7/cpu/encode.log",
+      "started_unix": 1789711571.6050382,
+      "finished_unix": 1789711571.711957
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/combined",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/24.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/24/e7/combined/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/24/e7/combined/raw.json",
+        "--effort",
+        "7",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/kodak/24/e7/combined/encode.log",
+      "started_unix": 1789711571.7122262,
+      "finished_unix": 1789711571.8181398
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/cpu-control",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777/e6/cpu/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777/e6/cpu/raw.json",
+        "--effort",
+        "6",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777/e6/cpu/encode.log",
+      "started_unix": 1789711571.831682,
+      "finished_unix": 1789711572.033673
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/combined",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777/e6/combined/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777/e6/combined/raw.json",
+        "--effort",
+        "6",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777/e6/combined/encode.log",
+      "started_unix": 1789711572.033994,
+      "finished_unix": 1789711572.23917
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/cpu-control",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777/e7/cpu/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777/e7/cpu/raw.json",
+        "--effort",
+        "7",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777/e7/cpu/encode.log",
+      "started_unix": 1789711572.2397451,
+      "finished_unix": 1789711572.4845
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/combined",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777/e7/combined/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777/e7/combined/raw.json",
+        "--effort",
+        "7",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777/e7/combined/encode.log",
+      "started_unix": 1789711572.484807,
+      "finished_unix": 1789711572.717489
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/cpu-control",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/60430844748882ff66b9a5598ef06dd6.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/60430844748882ff66b9a5598ef06dd6/e6/cpu/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/60430844748882ff66b9a5598ef06dd6/e6/cpu/raw.json",
+        "--effort",
+        "6",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/60430844748882ff66b9a5598ef06dd6/e6/cpu/encode.log",
+      "started_unix": 1789711572.730602,
+      "finished_unix": 1789711572.923003
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/combined",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/60430844748882ff66b9a5598ef06dd6.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/60430844748882ff66b9a5598ef06dd6/e6/combined/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/60430844748882ff66b9a5598ef06dd6/e6/combined/raw.json",
+        "--effort",
+        "6",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/60430844748882ff66b9a5598ef06dd6/e6/combined/encode.log",
+      "started_unix": 1789711572.923269,
+      "finished_unix": 1789711573.1212108
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/cpu-control",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/60430844748882ff66b9a5598ef06dd6.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/60430844748882ff66b9a5598ef06dd6/e7/cpu/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/60430844748882ff66b9a5598ef06dd6/e7/cpu/raw.json",
+        "--effort",
+        "7",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/60430844748882ff66b9a5598ef06dd6/e7/cpu/encode.log",
+      "started_unix": 1789711573.1217542,
+      "finished_unix": 1789711573.359825
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/combined",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/60430844748882ff66b9a5598ef06dd6.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/60430844748882ff66b9a5598ef06dd6/e7/combined/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/60430844748882ff66b9a5598ef06dd6/e7/combined/raw.json",
+        "--effort",
+        "7",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/60430844748882ff66b9a5598ef06dd6/e7/combined/encode.log",
+      "started_unix": 1789711573.360092,
+      "finished_unix": 1789711573.5929291
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/cpu-control",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/ef576c4ed599d75d72145a8f34b58ccb.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/ef576c4ed599d75d72145a8f34b58ccb/e6/cpu/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/ef576c4ed599d75d72145a8f34b58ccb/e6/cpu/raw.json",
+        "--effort",
+        "6",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/ef576c4ed599d75d72145a8f34b58ccb/e6/cpu/encode.log",
+      "started_unix": 1789711573.6033869,
+      "finished_unix": 1789711573.785749
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/combined",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/ef576c4ed599d75d72145a8f34b58ccb.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/ef576c4ed599d75d72145a8f34b58ccb/e6/combined/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/ef576c4ed599d75d72145a8f34b58ccb/e6/combined/raw.json",
+        "--effort",
+        "6",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/ef576c4ed599d75d72145a8f34b58ccb/e6/combined/encode.log",
+      "started_unix": 1789711573.7861178,
+      "finished_unix": 1789711573.9710689
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/cpu-control",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/ef576c4ed599d75d72145a8f34b58ccb.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/ef576c4ed599d75d72145a8f34b58ccb/e7/cpu/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/ef576c4ed599d75d72145a8f34b58ccb/e7/cpu/raw.json",
+        "--effort",
+        "7",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/ef576c4ed599d75d72145a8f34b58ccb/e7/cpu/encode.log",
+      "started_unix": 1789711573.97188,
+      "finished_unix": 1789711574.179412
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/combined",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/ef576c4ed599d75d72145a8f34b58ccb.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/ef576c4ed599d75d72145a8f34b58ccb/e7/combined/output.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/ef576c4ed599d75d72145a8f34b58ccb/e7/combined/raw.json",
+        "--effort",
+        "7",
+        "--distance",
+        "1.2",
+        "--num-threads",
+        "8",
+        "--warmups",
+        "0",
+        "--samples",
+        "1"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-mid-efforts-20260918/clic2024_test/ef576c4ed599d75d72145a8f34b58ccb/e7/combined/encode.log",
+      "started_unix": 1789711574.179792,
+      "finished_unix": 1789711574.389833
+    }
+  ],
+  "checks": [
+    {
+      "image": "kodak/01",
+      "input_sha256": "85de56c3dbb999e135db21f4944a7d1e9ba0307d0499946721aa021fc0bfeb96",
+      "effort": 6,
+      "hashes": {
+        "cpu": "d2ddc6a5efef4ab4c7fbeed0be123b99fa3ca4b2806049a9831011776889ec10",
+        "combined": "d2ddc6a5efef4ab4c7fbeed0be123b99fa3ca4b2806049a9831011776889ec10"
+      },
+      "exact": true
+    },
+    {
+      "image": "kodak/01",
+      "input_sha256": "85de56c3dbb999e135db21f4944a7d1e9ba0307d0499946721aa021fc0bfeb96",
+      "effort": 7,
+      "hashes": {
+        "cpu": "cb68246b4705fee4801ff92be47db565e7d0ea5884378229a892ee573147588b",
+        "combined": "cb68246b4705fee4801ff92be47db565e7d0ea5884378229a892ee573147588b"
+      },
+      "exact": true
+    },
+    {
+      "image": "kodak/12",
+      "input_sha256": "690cfe2d630ba858269a36f28085d6810c9fa507f3325c88a74295fa1c65b793",
+      "effort": 6,
+      "hashes": {
+        "cpu": "537e6ac84943c8474548dd8efbf307cae65ab6ebdf861feedbcb81a7dd37ad3f",
+        "combined": "537e6ac84943c8474548dd8efbf307cae65ab6ebdf861feedbcb81a7dd37ad3f"
+      },
+      "exact": true
+    },
+    {
+      "image": "kodak/12",
+      "input_sha256": "690cfe2d630ba858269a36f28085d6810c9fa507f3325c88a74295fa1c65b793",
+      "effort": 7,
+      "hashes": {
+        "cpu": "7c4cb515b51d8046842f8bb583a581a3ade8e940a58b8fe8c1a91c41db8ed119",
+        "combined": "7c4cb515b51d8046842f8bb583a581a3ade8e940a58b8fe8c1a91c41db8ed119"
+      },
+      "exact": true
+    },
+    {
+      "image": "kodak/24",
+      "input_sha256": "ce0776b0b54649604611645a26cef19899e83856cfd72b3808c80a75adcb958a",
+      "effort": 6,
+      "hashes": {
+        "cpu": "ea4a142609506b6767d47e8769b3579d5f7e6d9f17496f0301d57517711608da",
+        "combined": "ea4a142609506b6767d47e8769b3579d5f7e6d9f17496f0301d57517711608da"
+      },
+      "exact": true
+    },
+    {
+      "image": "kodak/24",
+      "input_sha256": "ce0776b0b54649604611645a26cef19899e83856cfd72b3808c80a75adcb958a",
+      "effort": 7,
+      "hashes": {
+        "cpu": "9887a21f66dfcce2532c544e6e570ebd98b2dcf516423470fee5468ad0044acb",
+        "combined": "9887a21f66dfcce2532c544e6e570ebd98b2dcf516423470fee5468ad0044acb"
+      },
+      "exact": true
+    },
+    {
+      "image": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "input_sha256": "77aecbd6afc55bc5cb736f91aec30fdcb9a2a8f6a83acd2d740e8134ed5ac500",
+      "effort": 6,
+      "hashes": {
+        "cpu": "4dd00193bd3031bbfe94a991e561a4d0de5d84cb2682e2074a5cd70ca34e6668",
+        "combined": "4dd00193bd3031bbfe94a991e561a4d0de5d84cb2682e2074a5cd70ca34e6668"
+      },
+      "exact": true
+    },
+    {
+      "image": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "input_sha256": "77aecbd6afc55bc5cb736f91aec30fdcb9a2a8f6a83acd2d740e8134ed5ac500",
+      "effort": 7,
+      "hashes": {
+        "cpu": "ba7d9de2a72177d97d6d923917728c4417ac32ebd29e35878bb416eba768c003",
+        "combined": "ba7d9de2a72177d97d6d923917728c4417ac32ebd29e35878bb416eba768c003"
+      },
+      "exact": true
+    },
+    {
+      "image": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "input_sha256": "44624e7c9fe5e5318c7a0f5d76885c92b0a004b68a64f156194870733eca94b5",
+      "effort": 6,
+      "hashes": {
+        "cpu": "32aafbd0fa3274fc2eebc28e5c2a74e6552f115caa8de38e9df75b7720cf51c5",
+        "combined": "32aafbd0fa3274fc2eebc28e5c2a74e6552f115caa8de38e9df75b7720cf51c5"
+      },
+      "exact": true
+    },
+    {
+      "image": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "input_sha256": "44624e7c9fe5e5318c7a0f5d76885c92b0a004b68a64f156194870733eca94b5",
+      "effort": 7,
+      "hashes": {
+        "cpu": "77532ebab0ce775ba8144cd7bbf64c2644b2e1367ad470d3f66bbbda36f5bf0a",
+        "combined": "77532ebab0ce775ba8144cd7bbf64c2644b2e1367ad470d3f66bbbda36f5bf0a"
+      },
+      "exact": true
+    },
+    {
+      "image": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "input_sha256": "0e4766f8f838a821ead4898bbae1250e4520aad81adde4f4b4f232ef12541a6a",
+      "effort": 6,
+      "hashes": {
+        "cpu": "25d596fc49077e201d79445690e6003cb50eb12aa64a5c9348b803557021a4a4",
+        "combined": "25d596fc49077e201d79445690e6003cb50eb12aa64a5c9348b803557021a4a4"
+      },
+      "exact": true
+    },
+    {
+      "image": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "input_sha256": "0e4766f8f838a821ead4898bbae1250e4520aad81adde4f4b4f232ef12541a6a",
+      "effort": 7,
+      "hashes": {
+        "cpu": "6fa7b050f77c7be5604e532855bd489f32b55eabc9499b4f6db5b571e9920e03",
+        "combined": "6fa7b050f77c7be5604e532855bd489f32b55eabc9499b4f6db5b571e9920e03"
+      },
+      "exact": true
+    }
+  ],
+  "completed": true,
+  "protocol": "Six pilot images, efforts 6 and 7, distance 1.2, eight threads; byte identity against frozen CPU selector; no timing claim"
+}

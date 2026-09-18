@@ -15,11 +15,15 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--validate-only', action='store_true')
+    parser.add_argument('--pipeline', action='store_true', help='Qualify the combined production handoff')
     args = parser.parse_args()
+    if args.pipeline and not args.validate_only:
+        parser.error('--pipeline requires --validate-only')
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    binary, library = output / 'metadata-test', output / 'gjxl.metallib'
-    shutil.copy2(ROOT / 'build/frontier/gjxl_metal_aq_strategy_metadata_test', binary)
+    binary, library = output / ('pipeline-test' if args.pipeline else 'metadata-test'), output / 'gjxl.metallib'
+    test_name = 'gjxl_quantization_gpu_pipeline_test' if args.pipeline else 'gjxl_metal_aq_strategy_metadata_test'
+    shutil.copy2(ROOT / 'build/frontier' / test_name, binary)
     shutil.copy2(ROOT / 'build/frontier/metal/gjxl.metallib', library)
     tracked = subprocess.check_output(['git', 'diff', 'HEAD', '--name-only'], cwd=ROOT, text=True).splitlines()
     untracked = subprocess.check_output(['git', 'ls-files', '--others', '--exclude-standard'], cwd=ROOT, text=True).splitlines()
@@ -44,7 +48,8 @@ def main():
         manifest['commands'].append(run(base, output / f'{name}.log', selected_env))
         save()
     if args.validate_only:
-        manifest['protocol'] = 'Normal and Metal-validation CPU-builder and indirect AQ consumer parity; no timing'
+        manifest['protocol'] = ('Normal and Metal-validation combined ACS/AQ pipeline parity, reuse and failure atomicity; no timing'
+                                if args.pipeline else 'Normal and Metal-validation CPU-builder and indirect AQ consumer parity; no timing')
         manifest['checks'] = {name: (output / f'{name}.log').read_text()
                               for name in ('normal', 'validation')}
         manifest['completed'] = True

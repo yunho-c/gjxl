@@ -1,8 +1,8 @@
-# Remaining ACS-to-AQ handoff
+# ACS-to-AQ handoff design and qualification
 
-Source audit after native GPU selection and fused AQ initialization, based on
+Historical design audit after native GPU selection and fused AQ initialization, based on
 `7ab1db3` plus the retained AQ-initialization patch. This is an implementation
-plan, not a claim that the following handoff is already resident.
+plan. The implemented combined path and qualification are in COMBINED-HANDOFF.md.
 
 The selected map is still read after `FindAcStrategyGridGpuImpl` waits for its
 scoring/selection submission. `MetalPreparedAqEvaluation::Reconfigure` derives
@@ -73,19 +73,11 @@ must leave caller outputs unchanged.
 
 ## Qualified foundations
 
-The device metadata constructor is committed in `407cd05`; see METADATA.md.
-The indirect consumer qualification is committed in `7182d06`; see DISPATCH.md.
-The complete consumer boundary now builds all metadata within AQ, allocates
-completed output from geometry, propagates errors and publishes the selected
-host grid after completion; see RESIDENT-AQ-METADATA.md. Ordinary frontend calls
-still do not activate this boundary.
-
-Next, compose scoring and selection as a prefix of the AQ command buffer. An
-explicit deferred provider result must retain search buffers through the AQ
-call, including failures. This avoids introducing a separately outstanding ACS
-submission. Update production workflow admission for both new scratch and the
-longer overlap of search buffers with completed output. Preserve the synchronous
-path for dense search, unsupported transform implementations and profiling.
+The metadata builder (`407cd05`), indirect consumers (`7182d06`) and complete
+AQ device-map boundary (`197a20b`) are qualified in METADATA.md, DISPATCH.md and
+RESIDENT-AQ-METADATA.md. The ordinary frontend now composes the producer and AQ
+in one command buffer; see COMBINED-HANDOFF.md for ownership/admission, fallback
+scope, exact encode comparisons and the remaining full-call timing gate.
 
 ## Acceptance gates
 

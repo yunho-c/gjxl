@@ -255,18 +255,28 @@ PreparedAcStrategySearch::PreparedAcStrategySearch() = default;
 PreparedAcStrategySearch::~PreparedAcStrategySearch() = default;
 void PreparedAcStrategySearch::Reset() noexcept { impl_.reset(); }
 
+bool CanDeferAcStrategySearch(GpuBackend &gpu,
+                              AcStrategySearchOptions options) {
+  if (options.dense_dct32_search ||
+      dynamic_cast<GpuAcStrategySelection *>(&gpu) == nullptr)
+    return false;
+#ifdef GJXL_FRONTIER_EXPERIMENT
+  if (std::getenv("GJXL_FRONTIER_CAPTURE_DIR") ||
+      std::getenv("GJXL_AC_SEARCH_EXPERIMENT"))
+    return false;
+#endif
+  return true;
+}
+
 static Status FindAcStrategyGridGpuImpl(
-  GpuBackend& gpu,
-  ConstImage3FView opsin,
-  ConstPlaneF32View quant_field,
-  ConstPlaneF32View pixel_mask,
-  const ColorCorrelationMap& color_correlation,
-  const ResidentAcStrategySearchInputs* resident,
-  ac_strategy_search_internal::Prepared* prepared,
-  AcStrategySearchOptions options,
-  AcStrategyGrid* out,
-  AcStrategyGpuSearchStats* stats,
-  gpu_profile_internal::GpuProfilingSession* profiling_session) {
+    GpuBackend &gpu, ConstImage3FView opsin, ConstPlaneF32View quant_field,
+    ConstPlaneF32View pixel_mask, const ColorCorrelationMap &color_correlation,
+    const ResidentAcStrategySearchInputs *resident,
+    ac_strategy_search_internal::Prepared *prepared,
+    AcStrategySearchOptions options, AcStrategyGrid *out,
+    AcStrategyGpuSearchStats *stats,
+    gpu_profile_internal::GpuProfilingSession *profiling_session,
+    DeferredAcStrategySearch *deferred = nullptr) {
   const resource_budget_internal::ResourceClassScope resource_class(
     resource_budget_internal::ResourceClass::kAcSearch);
   ac_strategy_search_internal::StoragePlan storage_plan;
@@ -357,16 +367,14 @@ static Status FindAcStrategyGridGpuImpl(
       }
     }
 
-    auto* device_selector = resident != nullptr && !options.dense_dct32_search &&
-        profiling_session == nullptr
-      ? dynamic_cast<GpuAcStrategySelection*>(&gpu) : nullptr;
-#ifdef GJXL_FRONTIER_EXPERIMENT
-    // The experiment's CPU controls and alternate policies require the frozen
-    // candidate table. Normal builds do not consult these diagnostic variables.
-    if (std::getenv("GJXL_FRONTIER_CAPTURE_DIR") != nullptr ||
-        std::getenv("GJXL_AC_SEARCH_EXPERIMENT") != nullptr)
-      device_selector = nullptr;
-#endif
+    auto *device_selector = resident != nullptr &&
+                                    profiling_session == nullptr &&
+                                    CanDeferAcStrategySearch(gpu, options)
+                                ? dynamic_cast<GpuAcStrategySelection *>(&gpu)
+                                : nullptr;
+    if (deferred && (!device_selector || !prepared))
+      return Status::Unavailable(
+          "Deferred AC strategy selection is unavailable");
     const auto stages =
       ac_strategy_internal::CandidateStages(options.dense_dct32_search);
     auto& resources = state.resources;
@@ -472,6 +480,13 @@ static Status FindAcStrategyGridGpuImpl(
         .candidate_count = resource.candidates.size(),
         .butteraugli_target = options.butteraugli_target,
       };
+    }
+    if (deferred) {
+      *deferred = {batches, {block_extent, state.rate_scratch.get(), 0}};
+      result_stats.device_selection = true;
+      if (stats)
+        *stats = result_stats;
+      return Status::Ok();
     }
     std::unique_ptr<GpuSubmission> submission;
     if (device_selector != nullptr) {
@@ -642,6 +657,27 @@ static Status FindAcStrategyGridGpuImpl(
     return Status::InvalidArgument(
       "GPU AC-strategy search dimensions are too large");
   }
+}
+
+Status PreparedAcStrategySearch::PrepareDeferred(
+    GpuBackend &gpu, ConstImage3FView opsin, ConstPlaneF32View quant,
+    ConstPlaneF32View mask, const ColorCorrelationMap &cfl,
+    ResidentAcStrategySearchInputs resident, AcStrategySearchOptions options,
+    DeferredAcStrategySearch *out, AcStrategyGpuSearchStats *stats) {
+  if (!out)
+    return Status::InvalidArgument("Deferred search output is null");
+  if (!CanDeferAcStrategySearch(gpu, options))
+    return Status::Unavailable("Deferred search is unavailable");
+  try {
+    if (!impl_)
+      impl_ = std::make_unique<ac_strategy_search_internal::Prepared>();
+  } catch (const std::bad_alloc &) {
+    return Status::OutOfMemory("Deferred search allocation failed");
+  }
+  AcStrategyGrid unused;
+  return FindAcStrategyGridGpuImpl(gpu, opsin, quant, mask, cfl, &resident,
+                                   impl_.get(), options, &unused, stats,
+                                   nullptr, out);
 }
 
 Status FindAcStrategyGridGpu(

@@ -205,6 +205,7 @@ Status MetalPreparedAqEvaluation::ReconfigureResidentStrategies(
     strategy_dispatch_families_ = descriptor.planes[kMetadataFamilies];
     strategy_dispatch_ = resident_strategy_parameters_;
     resident_strategy_pending_ = true;
+    resident_search_batch_count_ = 0;
     final_transform_metadata_pending_ = true;
     anchor_count_ = block_count_;
     final_cfl_params_.transform_count = uint32_t(block_count_);
@@ -223,8 +224,74 @@ Status MetalPreparedAqEvaluation::ReconfigureResidentStrategies(
   }
 }
 
+Status MetalPreparedAqEvaluation::ReconfigureResidentStrategySearch(
+    std::span<const AcStrategyCandidateBatch> batches,
+    AcStrategyDeviceSelection selection, ConstPlaneU8View sharpness) {
+  if (!SupportsResidentStrategies())
+    return Status::Unavailable("Resident strategy search was not prepared");
+  if (batches.size() != resident_search_batches_.size() ||
+      selection.block_extent != block_extent_)
+    return Status::InvalidArgument(
+        "Resident strategy search geometry is invalid");
+  const auto aliases_aq = [&](const DeviceBuffer *buffer) {
+    if (!buffer)
+      return false;
+    if (buffer == persistent_.backing_buffer() ||
+        buffer == staging_.backing_buffer())
+      return true;
+    for (const auto &image : {original_, coding_})
+      for (const auto &plane : image)
+        if (buffer == plane.buffer)
+          return true;
+    return false;
+  };
+  if (aliases_aq(selection.output))
+    return Status::InvalidArgument(
+        "Resident selection output aliases AQ storage");
+  std::array<MetalBackend::ValidatedAcStrategyBatch, 7> validated;
+  size_t count = 0;
+  for (const auto &batch : batches) {
+    for (auto *buffer :
+         {batch.scratch_a, batch.scratch_b, batch.rate_scratch, batch.costs})
+      if (aliases_aq(buffer))
+        return Status::InvalidArgument(
+            "Resident search scratch aliases AQ storage");
+    MetalBackend::ValidatedAcStrategyBatch candidate;
+    Status status =
+        backend_->ValidateAcStrategyCandidateBatch(batch, &candidate);
+    if (!status.ok())
+      return status;
+    if (batch.candidate_count)
+      validated[count++] = candidate;
+  }
+  MetalBackend::AcStrategyEncodeContext::Selection selected;
+  Status status =
+      backend_->ValidateAcStrategySelection(batches, selection, &selected);
+  if (!status.ok())
+    return status;
+  const size_t bytes = block_count_ + tile_extent_.width * tile_extent_.height;
+  status = ReconfigureResidentStrategies({selection.output,
+                                          selection.offset_bytes,
+                                          DeviceElementType::kU8,
+                                          {bytes, 1},
+                                          bytes},
+                                         sharpness);
+  if (!status.ok())
+    return status;
+  resident_search_batches_ = validated;
+  resident_search_batch_count_ = count;
+  resident_search_selection_ = selected;
+  return Status::Ok();
+}
+
 void MetalPreparedAqEvaluation::EncodeResidentStrategyMetadata(
     MetalBackend &backend, MTL::ComputeCommandEncoder *encoder) {
+  if (resident_search_batch_count_) {
+    const MetalBackend::AcStrategyEncodeContext context{
+        {resident_search_batches_.data(), resident_search_batch_count_},
+        &resident_search_selection_};
+    MetalBackend::EncodeAcStrategySubmission(backend, encoder, &context);
+  }
   // Reset before importing the metadata error; all subsequent policy resets
   // preserve it while resident_strategy_pending_ is true.
   EncodeReconstructionReset(backend, encoder);
@@ -287,6 +354,7 @@ Status MetalPreparedAqEvaluation::FinishResidentStrategyMetadata(
   if (!status.ok())
     return status;
   resident_strategy_pending_ = false;
+  resident_search_batch_count_ = 0;
   resident_strategy_metadata_.selection = {};
   if (selected)
     *selected = std::move(grid);

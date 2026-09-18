@@ -83,7 +83,9 @@ struct GpuEncodingQuantizationPipelineOutput {
 /// diagnostic quant fields, block maps, or reconstructed RGB.
 /// Set retain_ac_search_storage=false only when no later search needs the
 /// cached capacity. The final search still reuses existing backing, then
-/// releases it after placement and before adaptive quantization.
+/// releases it after the consuming operation completes. Combined ACS/AQ keeps
+/// search buffers alive through AQ; synchronous selection releases them
+/// earlier.
 [[nodiscard]] Status RunPreparedGpuQuantizationPipelineForEncoding(
   GpuBackend& gpu,
   ConstImage3FView original_linear_rgb,

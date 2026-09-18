@@ -116,6 +116,12 @@ struct ButteraugliPolicySetup {
 
 /// Validates the same policy contract when the coding image is resident and
 /// only its padded geometry is available on the host.
+/// Validates geometry/options before device strategy selection has completed.
+[[nodiscard]] Status ValidateDeferredAdaptiveQuantizationPolicyInputs(
+    ConstImage3FView original_linear_rgb, Extent2D opsin_extent,
+    Extent2D block_extent, ConstPlaneF32View initial_quant_field,
+    ConstPlaneU8View epf_sharpness, AdaptiveQuantizationOptions options);
+
 [[nodiscard]] Status ValidateResidentAdaptiveQuantizationPolicyInputs(
   ConstImage3FView original_linear_rgb,
   Extent2D opsin_extent,

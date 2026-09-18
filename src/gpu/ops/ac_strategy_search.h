@@ -10,6 +10,7 @@
 #include "codec/ac_strategy.h"
 #include "gpu/backend.h"
 #include "gpu/image.h"
+#include "gpu/ops/ac_strategy_selection.h"
 
 namespace gjxl {
 
@@ -21,6 +22,7 @@ struct AcStrategyGpuSearchStats {
   std::array<size_t, kAcStrategyCount> candidate_counts{};
   size_t total_candidate_count = 0;
   bool device_selection = false;
+  bool combined_aq_submission = false;
 };
 
 struct ResidentAcStrategySearchInputs {
@@ -28,6 +30,16 @@ struct ResidentAcStrategySearchInputs {
   ConstDevicePlaneView quant_field;
   ConstDevicePlaneView pixel_mask;
 };
+
+struct DeferredAcStrategySearch {
+  std::array<AcStrategyCandidateBatch, 7> batches;
+  AcStrategyDeviceSelection selection;
+};
+
+/// False for dense search, missing selector capability or experiment controls
+/// that require the CPU candidate table. Performs no work or allocation.
+[[nodiscard]] bool CanDeferAcStrategySearch(GpuBackend &,
+                                            AcStrategySearchOptions);
 
 class PreparedAcStrategySearch;
 
@@ -52,6 +64,18 @@ public:
   /// finished. Borrowed inputs and returned grids are unaffected. The empty
   /// owner can be used again; do not call concurrently with a search.
   void Reset() noexcept;
+
+  /// Prepares scoring/selection descriptors without submitting or waiting.
+  /// This owner and all resident inputs must remain alive and unchanged until
+  /// the consuming AQ call returns, including its failure path. Reset/reuse is
+  /// allowed only afterward. Failure leaves the descriptor and stats unchanged.
+  [[nodiscard]] Status PrepareDeferred(GpuBackend &, ConstImage3FView,
+                                       ConstPlaneF32View, ConstPlaneF32View,
+                                       const ColorCorrelationMap &,
+                                       ResidentAcStrategySearchInputs,
+                                       AcStrategySearchOptions,
+                                       DeferredAcStrategySearch *,
+                                       AcStrategyGpuSearchStats * = nullptr);
 
   PreparedAcStrategySearch(const PreparedAcStrategySearch&) = delete;
   PreparedAcStrategySearch& operator=(const PreparedAcStrategySearch&) =

@@ -19,6 +19,7 @@
 #include "core/status.h"
 #include "gpu/backend.h"
 #include "gpu/image.h"
+#include "gpu/ops/ac_strategy_selection.h"
 
 namespace gjxl {
 
@@ -297,6 +298,23 @@ public:
     (void)selection;
     (void)epf_sharpness;
     return Status::Unavailable("Resident strategy metadata is unavailable");
+  }
+
+  [[nodiscard]] virtual bool SupportsResidentStrategySearch() const noexcept {
+    return false;
+  }
+
+  /// Adds scoring/selection before metadata construction in the next AQ
+  /// submission. All candidate buffers and resident inputs are borrowed through
+  /// that synchronous policy call. Binding itself performs no GPU work.
+  [[nodiscard]] virtual Status ReconfigureResidentStrategySearch(
+      std::span<const AcStrategyCandidateBatch> batches,
+      AcStrategyDeviceSelection selection, ConstPlaneU8View sharpness) {
+    (void)batches;
+    (void)selection;
+    (void)sharpness;
+    return Status::Unavailable(
+        "Resident strategy search composition is unavailable");
   }
 
   /// Materializes only the quantized encoder frame. Backends may use this

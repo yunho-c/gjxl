@@ -374,6 +374,12 @@ public:
   bool SupportsResidentStrategies() const noexcept override;
   Status ReconfigureResidentStrategies(ConstDevicePlaneView selection,
                                        ConstPlaneU8View epf_sharpness) override;
+  bool SupportsResidentStrategySearch() const noexcept override {
+    return SupportsResidentStrategies();
+  }
+  Status ReconfigureResidentStrategySearch(
+      std::span<const AcStrategyCandidateBatch>, AcStrategyDeviceSelection,
+      ConstPlaneU8View) override;
   Status EncodeFrame(AqEvaluationInput input,
                      VarDctEncoderFrame *frame) override;
   Status ComputeInitialQuantization(
@@ -514,6 +520,10 @@ private:
                                       MTL::ComputeCommandEncoder *);
   bool resident_strategy_metadata_enabled_ = false;
   bool resident_strategy_pending_ = false;
+  size_t resident_search_batch_count_ = 0;
+  std::array<MetalBackend::ValidatedAcStrategyBatch, 7>
+      resident_search_batches_;
+  MetalBackend::AcStrategyEncodeContext::Selection resident_search_selection_;
   AqStrategyMetadataDescriptor resident_strategy_metadata_;
   DevicePlaneView resident_strategy_parameters_;
 

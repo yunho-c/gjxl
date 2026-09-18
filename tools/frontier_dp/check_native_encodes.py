@@ -32,6 +32,10 @@ def main():
         'metal_aq_evaluation_internal.h', 'metal_aq_reconstruction.cpp',
         'metal_storage_plan.cpp', 'metal_storage_plan.h']]
     files += ['src/gpu/ops/adaptive_quantization.cpp', 'src/gpu/ops/aq_evaluation.h']
+    # Freeze every changed producer/consumer and admission file in addition to
+    # the baseline selector recipe; the patch identifies changes against HEAD.
+    files = sorted(set(files + subprocess.check_output(
+        ['git', 'diff', 'HEAD', '--name-only'], cwd=ROOT, text=True).splitlines()))
     for path in files:
         target = output / 'source' / path
         target.parent.mkdir(parents=True, exist_ok=True)

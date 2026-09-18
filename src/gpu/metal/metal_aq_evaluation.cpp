@@ -1938,6 +1938,7 @@ MetalPreparedAqEvaluation::ReconfigureImpl(const AcStrategyGrid &strategies,
       strategy_dispatch_ = {};
       strategy_dispatch_families_ = {};
       resident_strategy_pending_ = false;
+      resident_search_batch_count_ = 0;
       resident_strategy_metadata_.selection = {};
     }
     anchor_count_ = anchor_offset;
