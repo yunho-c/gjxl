@@ -2299,9 +2299,14 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
         append_reconstruction_stage(
           "aq.reconstruction.reset", ReconstructionProfileStage::kReset,
           iteration);
-        append_reconstruction_stage(
-          "aq.reconstruction.quantizer",
-          ReconstructionProfileStage::kQuantizer, iteration);
+        // First-use CfL selects its invariant quantizer and restores the
+        // evaluation quantizer inside the final_cfl stage. The standalone
+        // quantizer callback would otherwise record an empty stage here.
+        if (iteration != 0 || !profile_final_color_correlation) {
+          append_reconstruction_stage(
+            "aq.reconstruction.quantizer",
+            ReconstructionProfileStage::kQuantizer, iteration);
+        }
         if (iteration == 0 && profile_forward_coefficients) {
           for (size_t batch_index = 0; batch_index < batches_.size();
                ++batch_index) {
@@ -2433,11 +2438,13 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
             "aq.final_frame.reset", ReconstructionProfileStage::kReset,
             0, 0, "aq.final_frame");
         }
-        append_reconstruction_stage(
-          "aq.final_frame.quantizer",
-          ReconstructionProfileStage::kQuantizer,
-          static_cast<uint32_t>(resident_policy_iterations_), 0,
-          "aq.final_frame");
+        if (score_count != 0 || !profile_final_color_correlation) {
+          append_reconstruction_stage(
+            "aq.final_frame.quantizer",
+            ReconstructionProfileStage::kQuantizer,
+            static_cast<uint32_t>(resident_policy_iterations_), 0,
+            "aq.final_frame");
+        }
         if (score_count == 0 && profile_forward_coefficients) {
           for (size_t batch_index = 0; batch_index < batches_.size();
                ++batch_index) {

@@ -1693,9 +1693,6 @@ bool CheckResidentButteraugliPolicy(
   }
   std::vector<double> final_cfl_scores;
   gjxl::gpu_profile_internal::GpuExecutionProfile final_cfl_profile;
-  // One final-CfL dispatch plus the 20-dispatch evaluation quantizer that
-  // follows the invariant quantizer on first use.
-  constexpr size_t kFinalCflPreparationDispatches = 21;
   if (!CheckStatus(profiler->EvaluateResidentButteraugliPolicyProfiled(
           {
             .adjusted_initial_quant_field = {
@@ -1709,11 +1706,30 @@ bool CheckResidentButteraugliPolicy(
           {.score_history = &final_cfl_scores},
           gjxl::gpu_profile_internal::GpuProfilingMode::kStage,
           &final_cfl_profile),
-          "resident final CfL profile") ||
+          "resident final CfL profile")) {
+    return false;
+  }
+  // CfL adds one invariant-field quantizer and one CfL dispatch to the
+  // ordinary reconstruction work. Match the selected device path: two
+  // dispatches for small fields, or twenty for the parallel fallback.
+  size_t quantizer_dispatches = 0;
+  if (final_cfl_profile.submissions.size() == 1) {
+    for (const auto& stage : final_cfl_profile.submissions[0].stages) {
+      if (stage.stage_id == "aq.reconstruction.quantizer" &&
+          stage.iteration == 1) {
+        quantizer_dispatches = stage.dispatches.size();
+      }
+      if (stage.dispatches.empty()) {
+        std::cerr << "Resident final CfL profile contains an empty stage\n";
+        return false;
+      }
+    }
+  }
+  if ((quantizer_dispatches != 2 && quantizer_dispatches != 20) ||
       !CheckResidentForwardDispatches(
           final_cfl_profile, kIterations + 1,
           ResidentForwardDispatchPattern::kFirstIterationOnly,
-          "resident final CfL profile", kFinalCflPreparationDispatches)) {
+          "resident final CfL profile", quantizer_dispatches + 1)) {
     return false;
   }
   size_t final_cfl_dispatches = 0;
@@ -2120,12 +2136,20 @@ bool CheckEvaluationFreePolicy(gjxl::GpuBackend& gpu) {
               std::cerr << "Evaluation stage in zero-update profile: " << stage.stage_id << '\n';
               return false;
             }
+            if (stage.dispatches.empty()) {
+              std::cerr << "Empty stage in zero-update profile: "
+                        << stage.stage_id << '\n';
+              return false;
+            }
             reset |= stage.stage_id == "aq.final_frame.reset";
             quantizer |= stage.stage_id == "aq.final_frame.quantizer";
             final_cfl |= stage.stage_id == "aq.final_frame.final_cfl";
           }
         }
-        if (!reset || !quantizer || final_cfl != (pass == 0)) return false;
+        // First-use CfL includes both quantizer selections. Only reused
+        // execution has a separate final-frame quantizer stage.
+        if (!reset || quantizer != (pass != 0) || final_cfl != (pass == 0))
+          return false;
       }
     }
     if (mode != 0) {

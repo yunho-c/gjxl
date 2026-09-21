@@ -447,9 +447,34 @@ an intermediate build appear complete.
 - All ten hosted jobs pass at `0dfa1c8`: Windows/Linux/macOS native builds in
   C++20/C++23, three Rust jobs, and the CUDA 12.6 compile job. The new Metal
   qualification executable still needs its subsequent hosted compilation.
+- All ten hosted jobs also pass at `7e8c1d6`. Both Metal modes compile/link the
+  qualification executable and pass 150 tests; Windows/Linux native modes each
+  pass 111 tests. The retained decoder/policy evidence audit passes as well.
+- The first physical-Mac run of `7e8c1d6` on 2026-09-21 uses an Apple M4 Pro,
+  macOS 15.6 and the supported Apple Clang 17.0.0 headers. Build and two real
+  stage captures pass; dispatch timestamps are correctly reported unavailable.
+  The native suite passes 149/152 tests. `metal_aq_evaluation`,
+  `metal_aq_host_storage_plan` and `encoding_benchmark_cli` fail their profiling
+  assertions. The script stops before shader validation and pressure cases.
+  The supplied archive SHA-256 is
+  `cdcc3d2c95972cc4e487ff0a2ef0e4f2007910ed300cf569006bf7cff9af2ae5`;
+  the original records are retained in local integration evidence.
+- First-use invariant CfL selects both its retained-field quantizer and the
+  evaluation quantizer inside the CfL stage. Profiling still emitted an empty
+  standalone quantizer stage before that work. It now omits that no-op stage
+  for both scored and evaluation-free first use, preserving the GPU dispatch
+  sequence. The forward-reuse assertion also now accounts for either the
+  two-dispatch small quantizer or the twenty-dispatch fallback, instead of
+  assuming the latter. Nonempty-stage checks cover both first use and reuse;
+  existing output and storage-bound comparisons remain. The changed C++ tests
+  pass local MSVC syntax checks; physical validation of this fix is pending.
 
 ## Outstanding integration risks
 
+- Main advanced to `b1a7373` (PR #30) while physical qualification was pending.
+  Its resident AC-strategy/AQ handoff changes are not in this pinned integration
+  yet and require reconciliation before the final merge. The physical-Mac
+  results above describe `7e8c1d6`, not that newer main revision.
 - Extend production exact-mode qualification beyond the current device;
   the four-photo control is not a universal numerical or cross-toolchain
   guarantee. Linux userland/CUDA 12.6 is now exercised through WSL on the same
@@ -460,8 +485,9 @@ an intermediate build appear complete.
   intentional; tightening them requires new allocation evidence. The completed
   dense effort-10 oracle, all-effort public matrix, policy-quality controls and
   whole-call memory/performance runs are recorded above.
-- Run the physical Metal runtime/resource and timestamp check on appropriate
-  hardware. Hosted Apple Paravirtual does not supply this evidence.
+- Rerun the physical Metal check after correcting its first-run profiling
+  failures, then complete shader validation and pressure tests. Hosted Apple
+  Paravirtual does not supply this evidence.
 - CUDA and Metal share diagnostic APIs and JSON publication, but CUDA's stage
   records aggregate whole submissions. Individual dispatch timings are present;
   finer semantic stage aggregation remains a documented difference. Do not

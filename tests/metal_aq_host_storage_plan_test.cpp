@@ -627,6 +627,9 @@ bool CheckProfileInputs(GpuBackend &gpu) {
             shape.maximum_submission_id_length =
                 observed.submissions[0].submission_id.size();
             for (const auto &stage : observed.submissions[0].stages) {
+              if (!Check(!stage.dispatches.empty(),
+                         "Resident AQ profile contains an empty stage"))
+                return false;
               if ((stage.stage_id == "butteraugli.resident_reduction" &&
                    !Check(stage.dispatches.size() == family_count +
                               ButteraugliReductionDispatchCount(anchors),
