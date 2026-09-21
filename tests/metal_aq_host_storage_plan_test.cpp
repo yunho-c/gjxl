@@ -121,7 +121,7 @@ bool CheckPlans() {
         ((coding.width + 63) / 64) * ((coding.height + 63) / 64);
     const size_t groups =
         ((coding.width + 255) / 256) * ((coding.height + 255) / 256);
-    for (size_t flags = 0; flags < 2048; ++flags) {
+    for (size_t flags = 0; flags < 4096; ++flags) {
       AqHostStorageOptions o{
           .source_extent = source,
           .coding_extent = coding,
@@ -136,7 +136,8 @@ bool CheckPlans() {
           .exact_coefficients = bool(flags & 128),
           .reconstruct_exact_coefficients = bool(flags & 256),
           .reconstructed_rgb_readback = bool(flags & 512),
-          .resident_quant_field_readback = bool(flags & 1024)};
+          .resident_quant_field_readback = bool(flags & 1024),
+          .resident_strategy_metadata = bool(flags & 2048)};
       const bool invalid =
           (o.resident_ac_strategy_inputs && !o.resident_initial_quant) ||
           (o.defer_final_transform_metadata &&
@@ -145,6 +146,9 @@ bool CheckPlans() {
           (o.frame_only &&
            (o.reconfigure || o.exact_coefficients ||
             o.reconstructed_rgb_readback || o.resident_quant_field_readback)) ||
+          (o.resident_strategy_metadata &&
+           (!o.reconfigure || !o.resident_quantization || o.frame_only ||
+            o.metric != AqEvaluationMetric::kButteraugli)) ||
           (o.reconstruct_exact_coefficients && !o.exact_coefficients) ||
           (o.resident_quant_field_readback && !o.resident_quantization);
       AqHostStoragePlan plan;

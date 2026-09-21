@@ -1,0 +1,1015 @@
+{
+  "boundary": "Exploratory six-image pilot; five-point curves; no extrapolation; equal image-effort weights; lower BD-rate is better; no timing claim. Butteraugli uses negative log(distance), equivalent to decibel scaling.",
+  "summary": [
+    {
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "coverage": 10,
+      "expected": 12,
+      "pchip": {
+        "mean": -0.3041269403509791,
+        "min": -0.8022147543070429,
+        "max": 0.08291854162171423,
+        "median": -0.27770792247971254,
+        "wins": 9
+      },
+      "akima": {
+        "mean": -0.2776846252008457,
+        "min": -0.838820768698067,
+        "max": 0.04695315634592022,
+        "median": -0.20906329620738467,
+        "wins": 9
+      }
+    },
+    {
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "coverage": 12,
+      "expected": 12,
+      "pchip": {
+        "mean": -0.1105940038137725,
+        "min": -0.8937017087110051,
+        "max": 0.5731106530856066,
+        "median": -0.0764127801978709,
+        "wins": 7
+      },
+      "akima": {
+        "mean": -0.10707180733372824,
+        "min": -0.9092426969349044,
+        "max": 0.6035716209750991,
+        "median": -0.005555757877350909,
+        "wins": 6
+      }
+    },
+    {
+      "arm": "frontier",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "coverage": 12,
+      "expected": 12,
+      "pchip": {
+        "mean": -0.18492832153520816,
+        "min": -3.716513909742341,
+        "max": 2.7853596242124254,
+        "median": -0.19985489365775874,
+        "wins": 6
+      },
+      "akima": {
+        "mean": -0.17208435355842747,
+        "min": -3.547715738278348,
+        "max": 2.6329478035630998,
+        "median": -0.16197872147277312,
+        "wins": 6
+      }
+    },
+    {
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "coverage": 10,
+      "expected": 12,
+      "pchip": {
+        "mean": -0.23070090209948596,
+        "min": -0.8098064912985923,
+        "max": 0.25913825615806624,
+        "median": -0.18432019845013403,
+        "wins": 7
+      },
+      "akima": {
+        "mean": -0.2159307677170093,
+        "min": -0.8460229989103334,
+        "max": 0.2120021100822809,
+        "median": -0.14970829677389852,
+        "wins": 8
+      }
+    },
+    {
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "coverage": 12,
+      "expected": 12,
+      "pchip": {
+        "mean": -0.16950425702825028,
+        "min": -0.8936467393496098,
+        "max": 0.8555168410891196,
+        "median": -0.2594252390550689,
+        "wins": 9
+      },
+      "akima": {
+        "mean": -0.15275649585443196,
+        "min": -0.9092883961319088,
+        "max": 0.8857786316882792,
+        "median": -0.2092860240092978,
+        "wins": 9
+      }
+    },
+    {
+      "arm": "rectangle",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "coverage": 12,
+      "expected": 12,
+      "pchip": {
+        "mean": -0.11970910177850103,
+        "min": -3.721658365316264,
+        "max": 5.057603632143037,
+        "median": -0.6160945845808644,
+        "wins": 7
+      },
+      "akima": {
+        "mean": -0.17253903910768703,
+        "min": -3.552146434693638,
+        "max": 4.730669177438255,
+        "median": -0.69764067065533,
+        "wins": 7
+      }
+    }
+  ],
+  "curves": [
+    {
+      "image": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "effort": 5,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": -0.17277280614993515,
+      "akima": -0.17885021906612147
+    },
+    {
+      "image": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "effort": 5,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": 0.22380520437882445,
+      "akima": 0.19913953224182387
+    },
+    {
+      "image": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "effort": 5,
+      "arm": "frontier",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": 2.7853596242124254,
+      "akima": 2.6329478035630998
+    },
+    {
+      "image": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "effort": 5,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": -0.2429986824350297,
+      "akima": -0.23919356606796371
+    },
+    {
+      "image": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "effort": 5,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": -0.0021789107646575773,
+      "akima": -0.007309393245246139
+    },
+    {
+      "image": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "effort": 5,
+      "arm": "rectangle",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": 2.3833991706941045,
+      "akima": 2.256236719999412
+    },
+    {
+      "image": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "effort": 8,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": -0.26792224431529704,
+      "akima": -0.23289573870143113
+    },
+    {
+      "image": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "effort": 8,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": 0.07768435268988297,
+      "akima": 0.09009462994057
+    },
+    {
+      "image": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "effort": 8,
+      "arm": "frontier",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": 1.1910616594181982,
+      "akima": 1.2936577653851586
+    },
+    {
+      "image": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "effort": 8,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": -0.13317530656377358,
+      "akima": -0.10984351139759493
+    },
+    {
+      "image": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "effort": 8,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": 0.35329903471232865,
+      "akima": 0.35732654027039207
+    },
+    {
+      "image": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "effort": 8,
+      "arm": "rectangle",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": -0.44600474068647294,
+      "akima": -0.41118421648102027
+    },
+    {
+      "image": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "effort": 5,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip_error": "unbracketed",
+      "akima_error": "unbracketed"
+    },
+    {
+      "image": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "effort": 5,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": -0.07694649650744345,
+      "akima": 0.053346387609781123
+    },
+    {
+      "image": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "effort": 5,
+      "arm": "frontier",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": -2.1927817479592275,
+      "akima": -2.5043311802911443
+    },
+    {
+      "image": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "effort": 5,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip_error": "unbracketed",
+      "akima_error": "unbracketed"
+    },
+    {
+      "image": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "effort": 5,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": -0.5220350491892254,
+      "akima": -0.40287977795663815
+    },
+    {
+      "image": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "effort": 5,
+      "arm": "rectangle",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": -0.988646890875287,
+      "akima": -1.2806748155045944
+    },
+    {
+      "image": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "effort": 8,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip_error": "unbracketed",
+      "akima_error": "unbracketed"
+    },
+    {
+      "image": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "effort": 8,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": 0.42755228992862576,
+      "akima": 0.36253340927896144
+    },
+    {
+      "image": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "effort": 8,
+      "arm": "frontier",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": -1.6535338026337953,
+      "akima": -0.6173327207269756
+    },
+    {
+      "image": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "effort": 8,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip_error": "unbracketed",
+      "akima_error": "unbracketed"
+    },
+    {
+      "image": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "effort": 8,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": -0.3443552761441557,
+      "akima": -0.2852268309220823
+    },
+    {
+      "image": "clic2024_test/60430844748882ff66b9a5598ef06dd6",
+      "effort": 8,
+      "arm": "rectangle",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": -2.6709874805864215,
+      "akima": -1.838533416721705
+    },
+    {
+      "image": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "effort": 5,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": 0.08291854162171423,
+      "akima": 0.04695315634592022
+    },
+    {
+      "image": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "effort": 5,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": -0.10557691686564287,
+      "akima": -0.06445790336448294
+    },
+    {
+      "image": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "effort": 5,
+      "arm": "frontier",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": 2.3423182054733847,
+      "akima": 2.2040307447021656
+    },
+    {
+      "image": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "effort": 5,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": 0.004284137560646292,
+      "akima": -0.06146335966592678
+    },
+    {
+      "image": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "effort": 5,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": -0.17449520196598217,
+      "akima": -0.13334521709651329
+    },
+    {
+      "image": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "effort": 5,
+      "arm": "rectangle",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": 2.214192868364923,
+      "akima": 2.0640316309178437
+    },
+    {
+      "image": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "effort": 8,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": -0.2921217899348508,
+      "akima": -0.1594314155095499
+    },
+    {
+      "image": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "effort": 8,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": 0.21645634175307418,
+      "akima": 0.1512304001994658
+    },
+    {
+      "image": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "effort": 8,
+      "arm": "frontier",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": -0.7067929642190259,
+      "akima": -0.6872819274388364
+    },
+    {
+      "image": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "effort": 8,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": 0.003347450617506367,
+      "akima": 0.08674542296971272
+    },
+    {
+      "image": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "effort": 8,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": 0.2986068414367371,
+      "akima": 0.25698021725997944
+    },
+    {
+      "image": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "effort": 8,
+      "arm": "rectangle",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": -1.0261956475519687,
+      "akima": -0.9840971248296397
+    },
+    {
+      "image": "kodak/01",
+      "effort": 5,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": -0.05771232799866424,
+      "akima": -0.01306812239880199
+    },
+    {
+      "image": "kodak/01",
+      "effort": 5,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": -0.4986413408110124,
+      "akima": -0.4590210062231645
+    },
+    {
+      "image": "kodak/01",
+      "effort": 5,
+      "arm": "frontier",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": 0.3885000307313709,
+      "akima": 0.4329241662555687
+    },
+    {
+      "image": "kodak/01",
+      "effort": 5,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": -0.14499926690209108,
+      "akima": -0.09147689281034349
+    },
+    {
+      "image": "kodak/01",
+      "effort": 5,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": -0.4905531535086176,
+      "akima": -0.438729558611316
+    },
+    {
+      "image": "kodak/01",
+      "effort": 5,
+      "arm": "rectangle",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": 0.3087299353903915,
+      "akima": 0.3437199092771218
+    },
+    {
+      "image": "kodak/01",
+      "effort": 8,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": -0.2874936006441281,
+      "akima": -0.3105891710031471
+    },
+    {
+      "image": "kodak/01",
+      "effort": 8,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": -0.07587906388829836,
+      "akima": -0.11014236496184199
+    },
+    {
+      "image": "kodak/01",
+      "effort": 8,
+      "arm": "frontier",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": -3.716513909742341,
+      "akima": -3.547715738278348
+    },
+    {
+      "image": "kodak/01",
+      "effort": 8,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": -0.223641129998177,
+      "akima": -0.2510095161510658
+    },
+    {
+      "image": "kodak/01",
+      "effort": 8,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": -0.08172682759770197,
+      "akima": -0.12629323190867375
+    },
+    {
+      "image": "kodak/01",
+      "effort": 8,
+      "arm": "rectangle",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": -3.721658365316264,
+      "akima": -3.552146434693638
+    },
+    {
+      "image": "kodak/12",
+      "effort": 5,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": -0.73777141282414,
+      "akima": -0.6720173805624894
+    },
+    {
+      "image": "kodak/12",
+      "effort": 5,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": -0.5657929907857059,
+      "akima": -0.5438388773534025
+    },
+    {
+      "image": "kodak/12",
+      "effort": 5,
+      "arm": "frontier",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": 2.262532628339634,
+      "akima": 2.24200127227212
+    },
+    {
+      "image": "kodak/12",
+      "effort": 5,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": -0.7053388014208721,
+      "akima": -0.6694722830686565
+    },
+    {
+      "image": "kodak/12",
+      "effort": 5,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": -0.40373869078558855,
+      "akima": -0.3723700087532199
+    },
+    {
+      "image": "kodak/12",
+      "effort": 5,
+      "arm": "rectangle",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": 5.057603632143037,
+      "akima": 4.730669177438255
+    },
+    {
+      "image": "kodak/12",
+      "effort": 8,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": -0.18691973491020444,
+      "akima": -0.22412470232774673
+    },
+    {
+      "image": "kodak/12",
+      "effort": 8,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": 0.5731106530856066,
+      "akima": 0.6035716209750991
+    },
+    {
+      "image": "kodak/12",
+      "effort": 8,
+      "arm": "frontier",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": -1.6072021641979757,
+      "akima": -1.529045661191408
+    },
+    {
+      "image": "kodak/12",
+      "effort": 8,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": 0.25913825615806624,
+      "akima": 0.2120021100822809
+    },
+    {
+      "image": "kodak/12",
+      "effort": 8,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": 0.8555168410891196,
+      "akima": 0.8857786316882792
+    },
+    {
+      "image": "kodak/12",
+      "effort": 8,
+      "arm": "rectangle",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": -2.447861223652377,
+      "akima": -2.3045292240913167
+    },
+    {
+      "image": "kodak/24",
+      "effort": 5,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": -0.3192592740472427,
+      "akima": -0.1940018900870226
+    },
+    {
+      "image": "kodak/24",
+      "effort": 5,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": -0.8937017087110051,
+      "akima": -0.9092426969349044
+    },
+    {
+      "image": "kodak/24",
+      "effort": 5,
+      "arm": "frontier",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": 0.30708317690350845,
+      "akima": 0.2933752777814294
+    },
+    {
+      "image": "kodak/24",
+      "effort": 5,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": -0.31381918671254283,
+      "akima": -0.18957308215020208
+    },
+    {
+      "image": "kodak/24",
+      "effort": 5,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": -0.8936467393496098,
+      "akima": -0.9092883961319088
+    },
+    {
+      "image": "kodak/24",
+      "effort": 5,
+      "arm": "rectangle",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": 0.6871039492095794,
+      "akima": 0.5337375035755832
+    },
+    {
+      "image": "kodak/24",
+      "effort": 8,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": -0.8022147543070429,
+      "akima": -0.838820768698067
+    },
+    {
+      "image": "kodak/24",
+      "effort": 8,
+      "arm": "frontier",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": -0.6291983700321759,
+      "akima": -0.6580748194126438
+    },
+    {
+      "image": "kodak/24",
+      "effort": 8,
+      "arm": "frontier",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": -1.6191705947486539,
+      "akima": -2.2782420447339593
+    },
+    {
+      "image": "kodak/24",
+      "effort": 8,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        60,
+        80
+      ],
+      "pchip": -0.8098064912985923,
+      "akima": -0.8460229989103334
+    },
+    {
+      "image": "kodak/24",
+      "effort": 8,
+      "arm": "rectangle",
+      "metric": "ssimulacra2",
+      "interval": [
+        75,
+        85
+      ],
+      "pchip": -0.6287439522716501,
+      "akima": -0.657720924846236
+    },
+    {
+      "image": "kodak/24",
+      "effort": 8,
+      "arm": "rectangle",
+      "metric": "butteraugli",
+      "interval": [
+        -1.3862943611198906,
+        -0.4054651081081644
+      ],
+      "pchip": -0.7861844284752559,
+      "akima": -1.6276981781785462
+    }
+  ]
+}

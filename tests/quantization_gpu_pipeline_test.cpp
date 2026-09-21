@@ -17,8 +17,8 @@
 #include <string_view>
 #include <vector>
 
-#include "codec/color_transform.h"
 #include "codec/chroma_from_luma_internal.h"
+#include "codec/color_transform.h"
 #include "codec/epf.h"
 #include "codec/gaborish.h"
 #include "codec/quantization_pipeline.h"
@@ -33,12 +33,14 @@
 #include "gpu/ops/adaptive_quantization.h"
 #include "gpu/ops/gaborish.h"
 #include "gpu/ops/quantization_pipeline.h"
+#include "gpu/ops/quantization_pipeline_profile_internal.h"
 
 #ifndef GJXL_METALLIB_PATH
 #error "GJXL_METALLIB_PATH must point to the test metallib"
 #endif
 
 namespace {
+const char *kMetalLibraryPath = GJXL_METALLIB_PATH;
 
 constexpr gjxl::Extent2D kOriginalExtent{257, 17};
 constexpr gjxl::Extent2D kPaddedExtent{264, 24};
@@ -316,7 +318,7 @@ bool CheckGpuGaborish() {
   }
 
   std::unique_ptr<gjxl::GpuBackend> gpu;
-  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu).ok()) {
+  if (!gjxl::CreateMetalBackend(kMetalLibraryPath, &gpu).ok()) {
     return false;
   }
   ImageStorage output(kExtent);
@@ -407,7 +409,7 @@ bool CheckGpuPipelineParity() {
 
   std::unique_ptr<gjxl::GpuBackend> gpu;
   const gjxl::Status create_status =
-      gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu);
+      gjxl::CreateMetalBackend(kMetalLibraryPath, &gpu);
   if (!cpu_status.ok() || !create_status.ok()) {
     std::cerr << "Unable to initialize pipeline parity test: CPU="
               << cpu_status.message() << ", GPU=" << create_status.message()
@@ -534,7 +536,7 @@ bool CheckMaximumThroughputFrontendParity() {
       pipeline_options.butteraugli_target;
 
   std::unique_ptr<gjxl::GpuBackend> gpu;
-  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu).ok()) {
+  if (!gjxl::CreateMetalBackend(kMetalLibraryPath, &gpu).ok()) {
     return false;
   }
   std::vector<float> expected_final(block_count);
@@ -646,7 +648,7 @@ bool CheckDefaultUpdatePipelineParity() {
   }
 
   std::unique_ptr<gjxl::GpuBackend> gpu;
-  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu).ok()) {
+  if (!gjxl::CreateMetalBackend(kMetalLibraryPath, &gpu).ok()) {
     return false;
   }
   PipelineStorage accelerated(kExtent, kExtent);
@@ -708,7 +710,7 @@ bool CheckDefaultUpdatePipelineParity() {
       cpu.pixel_mask, resident.pixel_mask);
   if (!resident_status.ok() || resident_stats.total_candidate_count == 0 ||
       after_resident.committed_submissions !=
-          before_resident.committed_submissions + 5 ||
+          before_resident.committed_submissions + 4 ||
       resident_initial_error > 2.0e-6 ||
       resident_strategy_mask_error > 2.0e-6 ||
       resident_pixel_mask_error > 3.0e-5 || !resident.frame.valid() ||
@@ -1091,7 +1093,7 @@ bool CheckDefaultUpdatePipelineParity() {
   if (!throughput_status.ok() ||
       throughput_stats.total_candidate_count == 0 ||
       after_throughput.committed_submissions !=
-          before_throughput.committed_submissions + 5 ||
+          before_throughput.committed_submissions + 4 ||
       throughput_initial_error > 2.0e-6 ||
       throughput_strategy_mask_error > 2.0e-6 ||
       throughput_pixel_mask_error > 3.0e-5 || !throughput.frame.valid() ||
@@ -1190,7 +1192,7 @@ bool CheckPreparedGpuAttemptReuse() {
   }
 
   std::unique_ptr<gjxl::GpuBackend> gpu;
-  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu).ok()) {
+  if (!gjxl::CreateMetalBackend(kMetalLibraryPath, &gpu).ok()) {
     return false;
   }
   gjxl::CpuQuantizationPipelineOptions preparation_options;
@@ -1440,21 +1442,25 @@ bool CheckWorkflowBackendSelection() {
     return false;
   }
   std::unique_ptr<gjxl::GpuBackend> gpu;
-  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu).ok() ||
+  if (!gjxl::CreateMetalBackend(kMetalLibraryPath, &gpu).ok() ||
       !encode(gjxl::VarDctBackendPreference::kMetal, gpu.get(), false,
-              &forced_bytes, &forced_summary).ok() ||
+              &forced_bytes, &forced_summary)
+           .ok() ||
       !encode(gjxl::VarDctBackendPreference::kAutomatic, gpu.get(), true,
-              &automatic_bytes, &automatic_summary).ok() ||
+              &automatic_bytes, &automatic_summary)
+           .ok() ||
       !encode(gjxl::VarDctBackendPreference::kAutomatic, gpu.get(), false,
-              &unqualified_bytes, &unqualified_summary).ok() ||
+              &unqualified_bytes, &unqualified_summary)
+           .ok() ||
       !gjxl::codestream_internal::
-        EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
-          original.ConstView(),
-          {.butteraugli_target = 1.0f,
-           .backend = gjxl::VarDctBackendPreference::kMetal,
-           .metal_aq_mode =
-             gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients},
-          gpu.get(), false, &exact_bytes, &exact_summary).ok()) {
+           EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+               original.ConstView(),
+               {.butteraugli_target = 1.0f,
+                .backend = gjxl::VarDctBackendPreference::kMetal,
+                .metal_aq_mode =
+                    gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients},
+               gpu.get(), false, &exact_bytes, &exact_summary)
+               .ok()) {
     std::cerr << "Public workflow backend selection failed\n";
     return false;
   }
@@ -1988,13 +1994,247 @@ bool CheckWorkflowBackendSelection() {
   return true;
 }
 
+bool CheckCombinedResidentSearch() {
+  using namespace gjxl;
+  using namespace quantization_pipeline_internal;
+  ImageStorage original(kOriginalExtent), padded(kPaddedExtent),
+      opsin(kPaddedExtent);
+  FillImages(&original, &padded);
+  if (!LinearRgbToOpsin(padded.ConstView(), 255.0f, opsin.View()).ok())
+    return false;
+  const auto implementation = MetalDctImplementation::kSimdgroupMatmul;
+  MetalBackendOptions backend_options{.forward_dct8 = implementation,
+                                      .inverse_dct8 = implementation,
+                                      .forward_dct16x16 = implementation,
+                                      .inverse_dct16x16 = implementation,
+                                      .forward_dct32x32 = implementation,
+                                      .inverse_dct32x32 = implementation,
+                                      .forward_dct16x8 = implementation,
+                                      .inverse_dct16x8 = implementation,
+                                      .forward_dct8x16 = implementation,
+                                      .inverse_dct8x16 = implementation,
+                                      .forward_dct32x16 = implementation,
+                                      .inverse_dct32x16 = implementation,
+                                      .forward_dct16x32 = implementation,
+                                      .inverse_dct16x32 = implementation};
+  std::unique_ptr<GpuBackend> gpu;
+  if (!CreateMetalBackend(kMetalLibraryPath, backend_options, &gpu).ok())
+    return false;
+  // The existing profiled path retains CPU selection and provides an oracle
+  // using identical scoring/reconstruction kernels on the same backend.
+  size_t failure_case = 0;
+  for (size_t iterations :
+       {size_t{0}, size_t{1}, size_t{2}, size_t{3}, size_t{4}}) {
+    for (bool final_score : {false, true}) {
+      CpuQuantizationPipelineOptions options;
+      options.butteraugli_target = 1.2f;
+      options.adaptive_quantization.iterations = iterations;
+      PreparedQuantizationPipeline reference, combined;
+      adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization ref_aq,
+          combined_aq;
+      if (!PrepareQuantizationPipeline(original.ConstView(), opsin.ConstView(),
+                                       options, &reference, false, false)
+               .ok() ||
+          !PrepareQuantizationPipeline(original.ConstView(), opsin.ConstView(),
+                                       options, &combined, false, false)
+               .ok())
+        return false;
+      VarDctEncoderFrame expected, actual;
+      std::vector<double> expected_scores, actual_scores;
+      gpu_profile_internal::GpuExecutionProfile profile;
+      auto status = RunPreparedGpuQuantizationPipelineForEncodingProfiled(
+          *gpu, original.ConstView(), reference, options,
+          GpuAdaptiveQuantizationMode::kFullyResident,
+          {.frame = &expected,
+           .score_history = &expected_scores,
+           .collect_final_butteraugli_score = final_score},
+          &ref_aq, gpu_profile_internal::GpuProfilingMode::kStage, &profile);
+      if (!status.ok()) {
+        std::cerr << "Combined reference failed: " << status.message() << '\n';
+        return false;
+      }
+      const auto before = gpu->stats();
+      AcStrategyGpuSearchStats stats;
+      status = RunPreparedGpuQuantizationPipelineForEncoding(
+          *gpu, original.ConstView(), combined, options,
+          GpuAdaptiveQuantizationMode::kFullyResident,
+          {.frame = &actual,
+           .score_history = &actual_scores,
+           .collect_final_butteraugli_score = final_score},
+          &stats, &combined_aq, false);
+      const auto submissions =
+          gpu->stats().committed_submissions - before.committed_submissions;
+      std::vector<uint8_t> expected_bytes, actual_bytes;
+      if (!status.ok() || !stats.combined_aq_submission ||
+          !stats.device_selection ||
+          !GridsEqual(reference.strategies, combined.strategies) ||
+          expected_scores != actual_scores ||
+          !EncodeVarDctCodestream(expected, &expected_bytes).ok() ||
+          !EncodeVarDctCodestream(actual, &actual_bytes).ok() ||
+          expected_bytes != actual_bytes ||
+          submissions != (iterations == 0 && !final_score ? 2u : 3u)) {
+        std::cerr << "Combined search mismatch " << iterations << '/'
+                  << final_score << ": " << status.message()
+                  << " combined=" << stats.combined_aq_submission
+                  << " submissions=" << submissions << '\n';
+        return false;
+      }
+      // Last-use release must permit another search on the same preparation.
+      const auto reused_before = gpu->stats().committed_submissions;
+      status = RunPreparedGpuQuantizationPipelineForEncoding(
+          *gpu, original.ConstView(), combined, options,
+          GpuAdaptiveQuantizationMode::kFullyResident,
+          {.frame = &actual,
+           .score_history = &actual_scores,
+           .collect_final_butteraugli_score = final_score},
+          &stats, &combined_aq, false);
+      actual_bytes.clear();
+      if (!status.ok() || !stats.combined_aq_submission ||
+          gpu->stats().committed_submissions != reused_before + 2 ||
+          !EncodeVarDctCodestream(actual, &actual_bytes).ok() ||
+          expected_bytes != actual_bytes || expected_scores != actual_scores) {
+        std::cerr << "Combined search reuse failed: " << status.message()
+                  << '\n';
+        return false;
+      }
+      if (failure_case < 6) {
+        ResidentAcStrategyInputs resident;
+        DeferredAcStrategySearch pending;
+        const auto blocks = combined.block_extent;
+        const ConstPlaneF32View quant{combined.initial_quant.data(), blocks,
+                                      blocks.width};
+        if (!combined_aq.evaluation->GetResidentAcStrategyInputs(&resident)
+                 .ok())
+          return false;
+        const auto before_plan = gpu->stats();
+        status = combined_aq.ac_strategy_search.PrepareDeferred(
+            *gpu, combined.coding_opsin, quant, {},
+            combined.initial_color_correlation,
+            {resident.opsin, resident.quant_field, resident.pixel_mask},
+            {.butteraugli_target = 1.2f}, &pending);
+        if (!status.ok() || gpu->stats().committed_submissions !=
+                                before_plan.committed_submissions)
+          return false;
+        if (failure_case == 0) {
+          auto bad = pending;
+          bad.selection.output =
+              const_cast<DeviceBuffer *>(resident.opsin.plane[0].buffer);
+          if (combined_aq.evaluation
+                  ->ReconfigureResidentStrategySearch(
+                      bad.batches, bad.selection,
+                      {combined.epf_sharpness.data(), blocks, blocks.width})
+                  .code() != StatusCode::kInvalidArgument)
+            return false;
+          bad = pending;
+          bad.batches[0].scratch_a =
+              const_cast<DeviceBuffer *>(resident.opsin.plane[0].buffer);
+          if (combined_aq.evaluation
+                      ->ReconfigureResidentStrategySearch(
+                          bad.batches, bad.selection,
+                          {combined.epf_sharpness.data(), blocks, blocks.width})
+                      .code() != StatusCode::kInvalidArgument ||
+              gpu->stats().committed_submissions !=
+                  before_plan.committed_submissions)
+            return false;
+        }
+        AcStrategyGrid selected = combined.strategies;
+        auto aq_options = options.adaptive_quantization;
+        aq_options.butteraugli_target = 1.2f;
+        actual_scores = {-91.0};
+        if (failure_case == 0 &&
+            !metal_internal::FailNextMetalAqUploadForTesting(
+                 *combined_aq.evaluation)
+                 .ok())
+          return false;
+        if (failure_case == 1 &&
+            !ArmNextMetalSubmissionFailureForTest(*gpu, true, false).ok())
+          return false;
+        if (failure_case == 2 &&
+            !ArmNextMetalSubmissionFailureForTest(*gpu, false, true).ok())
+          return false;
+        if (failure_case == 3 &&
+            !metal_internal::FailNextMetalAqReadbackForTesting(
+                 *combined_aq.evaluation)
+                 .ok())
+          return false;
+        if (failure_case == 4 &&
+            !metal_internal::FailNextMetalAqNumericForTesting(
+                 *combined_aq.evaluation)
+                 .ok())
+          return false;
+        if (failure_case == 5 &&
+            !metal_internal::FailNextMetalAqResidentStagingForTesting(
+                 *combined_aq.evaluation)
+                 .ok())
+          return false;
+        const auto before_failure = gpu->stats().committed_submissions;
+        status = adaptive_quantization_gpu_internal::
+            RunPreparedGpuAdaptiveQuantizationWithSearch(
+                *gpu, original.ConstView(), combined.coding_opsin, quant,
+                {combined.epf_sharpness.data(), blocks, blocks.width},
+                aq_options, GpuAdaptiveQuantizationMode::kFullyResident,
+                &combined_aq, pending, &selected,
+                {.frame = &actual, .score_history = &actual_scores},
+                {.quant_field = false,
+                 .block_distance_map = false,
+                 .reconstructed_linear_rgb = false,
+                 .final_perceptual_evaluation = final_score});
+        combined_aq.ac_strategy_search
+            .Reset(); // Consumer must already be drained.
+        actual_bytes.clear();
+        const auto wanted = failure_case == 1   ? StatusCode::kSubmissionFailed
+                            : failure_case == 5 ? StatusCode::kOutOfMemory
+                                                : StatusCode::kDeviceError;
+        if (status.code() != wanted || combined_aq.evaluation ||
+            gpu->stats().committed_submissions !=
+                before_failure +
+                    size_t(failure_case >= 2 && failure_case <= 4) ||
+            !GridsEqual(selected, combined.strategies) ||
+            actual_scores != std::vector<double>{-91.0} ||
+            !EncodeVarDctCodestream(actual, &actual_bytes).ok() ||
+            actual_bytes != expected_bytes) {
+          std::cerr << "Combined prefix failure escaped: " << failure_case
+                    << ' ' << status.message() << '\n';
+          return false;
+        }
+        ++failure_case;
+        status = RunPreparedGpuQuantizationPipelineForEncoding(
+            *gpu, original.ConstView(), combined, options,
+            GpuAdaptiveQuantizationMode::kFullyResident,
+            {.frame = &actual,
+             .score_history = &actual_scores,
+             .collect_final_butteraugli_score = final_score},
+            &stats, &combined_aq, false);
+        actual_bytes.clear();
+        if (!status.ok() || !stats.combined_aq_submission ||
+            actual_scores != expected_scores ||
+            !EncodeVarDctCodestream(actual, &actual_bytes).ok() ||
+            actual_bytes != expected_bytes) {
+          std::cerr << "Combined search failed to recover: " << status.message()
+                    << '\n';
+          return false;
+        }
+      }
+    }
+  }
+  std::cout
+      << "26 combined ACS/AQ attempts match CPU-selection encodes; 6 failures "
+         "preserve outputs and recover; no separate ACS submission\n";
+  return true;
+}
+
 } // namespace
 
-int main() {
-  if (!CheckGpuGaborish() || !CheckGpuPipelineParity() ||
-      !CheckMaximumThroughputFrontendParity() ||
-      !CheckDefaultUpdatePipelineParity() ||
-      !CheckPreparedGpuAttemptReuse() ||
+int main(int argc, char **argv) {
+  if (argc == 3 && std::string_view(argv[1]) == "--metallib")
+    kMetalLibraryPath = argv[2];
+  else if (argc != 1) {
+    std::cerr << "Usage: pipeline-test [--metallib path]\n";
+    return EXIT_FAILURE;
+  }
+  if (!CheckCombinedResidentSearch() || !CheckGpuGaborish() ||
+      !CheckGpuPipelineParity() || !CheckMaximumThroughputFrontendParity() ||
+      !CheckDefaultUpdatePipelineParity() || !CheckPreparedGpuAttemptReuse() ||
       !CheckWorkflowBackendSelection()) {
     return EXIT_FAILURE;
   }

@@ -1278,14 +1278,24 @@ Status ValidateResidentAdaptiveQuantizationPolicyInputs(
   ConstPlaneF32View initial_quant_field,
   ConstPlaneU8View epf_sharpness,
   AdaptiveQuantizationOptions options) {
+  if (!strategies.complete())
+    return Status::InvalidArgument("Resident strategy grid is incomplete");
+  return ValidateDeferredAdaptiveQuantizationPolicyInputs(
+      original_linear_rgb, opsin_extent, strategies.extent(),
+      initial_quant_field, epf_sharpness, options);
+}
+
+Status ValidateDeferredAdaptiveQuantizationPolicyInputs(
+    ConstImage3FView original_linear_rgb, Extent2D opsin_extent,
+    Extent2D block_extent, ConstPlaneF32View initial_quant_field,
+    ConstPlaneU8View epf_sharpness, AdaptiveQuantizationOptions options) {
 
   if (!original_linear_rgb.valid() || opsin_extent.empty() ||
-      !strategies.complete() || !initial_quant_field.valid() ||
+      block_extent.empty() || !initial_quant_field.valid() ||
       !epf_sharpness.valid()) {
     return Status::InvalidArgument(
       "Resident adaptive-quantization inputs are invalid");
   }
-  const Extent2D block_extent = strategies.extent();
   Extent2D padded_pixel_extent;
   if (!BlockGrid{block_extent}.try_padded_pixel_extent(
         &padded_pixel_extent) ||

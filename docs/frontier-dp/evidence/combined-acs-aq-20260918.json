@@ -1,0 +1,63 @@
+{
+  "revision": "197a20b7dc9f044cf6d2488906285816ed4b60d4",
+  "files": {
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-20260918/pipeline-test": "3d386a98ffef0f0e6dcca9c57f5b2b5150326ec25591b85f43c9716d573b394f",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-20260918/gjxl.metallib": "3a1f0d488e799bc7d074800fcf5d8630c7422497c3ea48db8c8c8c89e733dc16"
+  },
+  "sources": {
+    "src/codec/adaptive_quantization.cpp": "9e7903a022a04f032ee39f8573f9140245e5c1f3467bdd55fc49cfcbe737dd86",
+    "src/codec/adaptive_quantization_internal.h": "28a151fd391ad40c028bc9c016770735d3e66e8688789244b3689384eb68b432",
+    "src/codec/quantization_pipeline.cpp": "af1a7a4271389385c2548ad396f5ff0b207f2879549affd026457b3556ab4a74",
+    "src/codec/quantization_pipeline_internal.h": "965b2d9211ab4bc037300f41a76ea79bc68b409f4f2e0a86efde32183a2e2aab",
+    "src/codestream/resident_workflow_storage_plan.cpp": "7c413b1c130c940ce0a6125f901d7f3b32128ae8547ea508e9ae8c12b4324647",
+    "src/gpu/metal/metal_aq_evaluation.cpp": "ab1318a1f4596ed0a16ad0077ce457fc30e08470497aa4b85b7b64df4f150cdc",
+    "src/gpu/metal/metal_aq_evaluation_internal.h": "b0171e8cf5b11c040c0ffb206fb3a16ccd82245db9bbc854837d06f2143b7815",
+    "src/gpu/metal/metal_aq_strategy_dispatch.cpp": "3e51327cf247f96c314159994173fd51a772f75393b4265ded9b67d908837b2d",
+    "src/gpu/ops/ac_strategy_search.cpp": "5550963332fa49e4727cfbdbfdf9b9795a3bbc7680f2ee589e87c274269329c8",
+    "src/gpu/ops/ac_strategy_search.h": "268597d21cb4e7d6ea831f7c37f9e1fffb7fd0b5ff33649435a914c8402af3e5",
+    "src/gpu/ops/adaptive_quantization.cpp": "d03802c58766f142b8c7f7cedbda024210fec7d029777472671c6cdc4468e29e",
+    "src/gpu/ops/adaptive_quantization.h": "378be0996cecf6ce3a5791ecfa653d21a4b31f710c3f9d5d9bbf32bb74194d89",
+    "src/gpu/ops/aq_evaluation.h": "6c317b79502f7a7d302aafd6088c537e5b89e1bb5810c80a419b57d8d7a1018e",
+    "src/gpu/ops/quantization_pipeline.cpp": "1eb6e311273427ebcb6812d71147aa6a5e00a20f79f51cf1b4d53fcbc5155120",
+    "src/gpu/ops/quantization_pipeline.h": "f6b78e89833a1948e99f8f813af263643d7e8d86cd8f3aa1dbdf47db3693631f",
+    "tests/quantization_gpu_pipeline_test.cpp": "175ddb16cfde28228764a83d64b83d871c364a5a21ac155f6d96ed09e74df0ac",
+    "tools/frontier_dp/check_native_encodes.py": "d9caea6af7438967703381d9abaf27cd89b51fb334760691ac65ac392f291853",
+    "tools/frontier_dp/metadata_experiment.py": "a8f36b5d7a8f6d2de001a85a5af596cf5b426b32f666f505e4a4d51a4f65fde1",
+    "tools/frontier_dp/time_resident_handoff.py": "2671d602261fa56f60d08b76a272295cb29b3936c2fb3150ee0c1639939ef732"
+  },
+  "commands": [
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-20260918/pipeline-test",
+        "--metallib",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-20260918/gjxl.metallib"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-20260918/normal.log",
+      "started_unix": 1789711295.018464,
+      "finished_unix": 1789711299.189038
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-20260918/pipeline-test",
+        "--metallib",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-20260918/gjxl.metallib"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-20260918/validation.log",
+      "started_unix": 1789711299.1893408,
+      "finished_unix": 1789711304.048352
+    }
+  ],
+  "completed": true,
+  "protocol": "Normal and Metal-validation combined ACS/AQ pipeline parity, reuse and failure atomicity; no timing",
+  "checks": {
+    "normal": "26 combined ACS/AQ attempts match CPU-selection encodes; 6 failures preserve outputs and recover; no separate ACS submission\nGPU Gaborish max error=2.98023e-07\nComplete GPU pipeline errors: quant=0 block=1.49012e-05 score=1.78814e-06 image=2.74181e-06; frame and codestream exact\nDefault-update GPU pipeline errors: quant=3.69549e-06 block=1.12653e-05 score=9.11951e-06 image=4.11272e-06; frame and codestream exact\nFully resident diagnostic errors: quant=1.58548e-05 block=9.77516e-05 score=9.09567e-05 image=5.30481e-06 frame=exact codestream=exact\nPrepared GPU attempts reuse exact and resident evaluator allocations and invalidate changed source generations\nAutomatic and forced Metal preserve public workflow bytes\nComplete GPU quantization pipeline matches CPU.\n",
+    "validation": "2026-09-18 02:01:39.197 pipeline-test[52711:322422683] Metal API Validation Enabled\n2026-09-18 02:01:39.197 pipeline-test[52711:322422683] Metal GPU Validation Enabled\n26 combined ACS/AQ attempts match CPU-selection encodes; 6 failures preserve outputs and recover; no separate ACS submission\nGPU Gaborish max error=2.98023e-07\nComplete GPU pipeline errors: quant=0 block=1.49012e-05 score=1.78814e-06 image=2.74181e-06; frame and codestream exact\nDefault-update GPU pipeline errors: quant=3.69549e-06 block=1.12653e-05 score=9.11951e-06 image=4.11272e-06; frame and codestream exact\nFully resident diagnostic errors: quant=1.58548e-05 block=9.77516e-05 score=9.09567e-05 image=5.30481e-06 frame=exact codestream=exact\nPrepared GPU attempts reuse exact and resident evaluator allocations and invalidate changed source generations\nAutomatic and forced Metal preserve public workflow bytes\nComplete GPU quantization pipeline matches CPU.\n"
+  },
+  "regressions": "Test project /Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier\n      Start  91: quantization_pipeline\n 1/13 Test  #91: quantization_pipeline .................***Failed    0.15 sec\nPinned pipeline score differs at 1: actual=0.24919039011001587 expected=0.24914586544036865 error=4.4524669647216797e-05\nhard edge actual scores: 0.38824319839477539 0.24919039011001587 0.80254608392715454\nactual quant: 0.370857477 0.346477211 0.309601277 0.35718742 0.35718742 0.370857477 0.346477211 0.309601277 0.35718742 0.35718742 0.363106668 0.33260259 0.292193532 0.351678133 0.365357071\nactual raw: 5 5 4 5 5 5 5 4 5 5 6 6 5 6 6\n\n      Start  93: quantization_pipeline_search_policy\n 2/13 Test  #93: quantization_pipeline_search_policy ...   Passed    0.00 sec\n      Start 113: metal_butteraugli\n 3/13 Test #113: metal_butteraugli .....................   Passed    0.62 sec\n      Start 114: metal_aq_evaluation\n 4/13 Test #114: metal_aq_evaluation ...................   Passed    2.09 sec\n      Start 115: adaptive_quantization_gpu_policy\n 5/13 Test #115: adaptive_quantization_gpu_policy ......   Passed    0.45 sec\n      Start 121: metal_aq_strategy_metadata\n 6/13 Test #121: metal_aq_strategy_metadata ............   Passed    1.10 sec\n      Start 123: metal_completed_frame\n 7/13 Test #123: metal_completed_frame .................   Passed    1.42 sec\n      Start 126: metal_storage_plan\n 8/13 Test #126: metal_storage_plan ....................   Passed    0.15 sec\n      Start 127: metal_aq_host_storage_plan\n 9/13 Test #127: metal_aq_host_storage_plan ............   Passed    4.57 sec\n      Start 130: metal_submission_storage_plan\n10/13 Test #130: metal_submission_storage_plan .........   Passed    0.12 sec\n      Start 132: resident_workflow_storage_plan\n11/13 Test #132: resident_workflow_storage_plan ........   Passed    5.09 sec\n      Start 135: metal_cache_admission\n12/13 Test #135: metal_cache_admission .................   Passed    0.38 sec\n      Start 137: workflow_admission\n13/13 Test #137: workflow_admission ....................   Passed   17.20 sec\n\n92% tests passed, 1 tests failed out of 13\n\nTotal Test time (real) =  33.36 sec\n\nThe following tests FAILED:\n\t 91 - quantization_pipeline (Failed)\nErrors while running CTest\n",
+  "preexisting_cpu_fixture_failure": {
+    "parent_revision": "197a20b7dc9f044cf6d2488906285816ed4b60d4",
+    "source_archive_sha256": "b19e68c2a17a34f393b0fc3dd4fa21cb4b0c7f9944e21ff751131ce54b2913f0",
+    "parent_log": "Pinned pipeline score differs at 1: actual=0.24919039011001587 expected=0.24914586544036865 error=4.4524669647216797e-05\nhard edge actual scores: 0.38824319839477539 0.24919039011001587 0.80254608392715454\nactual quant: 0.370857477 0.346477211 0.309601277 0.35718742 0.35718742 0.370857477 0.346477211 0.309601277 0.35718742 0.35718742 0.363106668 0.33260259 0.292193532 0.351678133 0.365357071\nactual raw: 5 5 4 5 5 5 5 4 5 5 6 6 5 6 6\n",
+    "note": "Clean parent Release build reproduces the identical pinned-score, quant-field and raw-quant values."
+  }
+}

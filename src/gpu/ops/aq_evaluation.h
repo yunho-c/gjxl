@@ -19,6 +19,7 @@
 #include "core/status.h"
 #include "gpu/backend.h"
 #include "gpu/image.h"
+#include "gpu/ops/ac_strategy_selection.h"
 
 namespace gjxl {
 
@@ -100,6 +101,9 @@ struct AqEvaluationPreparation {
   /// and final CfL preparation fail until a successful Reconfigure supplies
   /// final strategy.
   bool defer_final_transform_metadata = false;
+  /// Reserves storage for a deferred device-selected strategy map. The backend
+  /// may expose ReconfigureResidentStrategies only with this capability.
+  bool resident_strategy_metadata = false;
 };
 
 struct ResidentAcStrategyInputs {
@@ -162,6 +166,10 @@ struct AqResidentButteraugliPolicyInput {
   /// optimization; diagnostic block-map and reconstruction outputs are not
   /// available for the unevaluated final field.
   bool evaluate_final_field = true;
+  /// Treats the field above as unadjusted and performs strategy adjustment and
+  /// bound construction inside this unprofiled submission. Host lower/upper bounds are
+  /// ignored. Requires SupportsResidentPolicyInitialization().
+  bool adjust_initial_field = false;
 };
 
 struct AqResidentButteraugliPolicyOutput {
@@ -176,6 +184,10 @@ struct AqResidentButteraugliPolicyOutput {
   /// On success the lease is independent of this prepared operation/backend.
   std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame>*
     completed_frame = nullptr;
+  /// Optional authoritative selected grid, published with all other outputs.
+  /// Requires resident_strategy_metadata preparation. A deferred device
+  /// selection is never exposed before policy completion.
+  AcStrategyGrid *strategies = nullptr;
 };
 
 struct AqEvaluationMemoryStats {
@@ -243,6 +255,13 @@ public:
       "Prepared resident color correlation is unavailable");
   }
 
+  /// Whether the resident policy can also adjust its initial quant field and
+  /// construct the policy bounds in the same submission.
+  [[nodiscard]] virtual bool
+  SupportsResidentPolicyInitialization() const noexcept {
+    return false;
+  }
+
   /// Applies the prepared strategy grid's adjustment to one host field using
   /// device execution. The adjusted field is committed atomically after the
   /// submission and readback complete.
@@ -264,6 +283,39 @@ public:
   [[nodiscard]] virtual Status Reconfigure(
     const AcStrategyGrid& strategies,
     ConstPlaneU8View epf_sharpness) = 0;
+
+  /// Binds a native selector's row-major byte map followed by tile error bytes.
+  /// No submission, wait or selected-map readback occurs here. The producer
+  /// must precede the next unprofiled resident policy on this backend's queue.
+  /// Borrow the selection buffer through that call (including failure). Only
+  /// that policy may consume a pending selection; caller outputs remain atomic.
+  [[nodiscard]] virtual bool SupportsResidentStrategies() const noexcept {
+    return false;
+  }
+  [[nodiscard]] virtual Status
+  ReconfigureResidentStrategies(ConstDevicePlaneView selection,
+                                ConstPlaneU8View epf_sharpness) {
+    (void)selection;
+    (void)epf_sharpness;
+    return Status::Unavailable("Resident strategy metadata is unavailable");
+  }
+
+  [[nodiscard]] virtual bool SupportsResidentStrategySearch() const noexcept {
+    return false;
+  }
+
+  /// Adds scoring/selection before metadata construction in the next AQ
+  /// submission. All candidate buffers and resident inputs are borrowed through
+  /// that synchronous policy call. Binding itself performs no GPU work.
+  [[nodiscard]] virtual Status ReconfigureResidentStrategySearch(
+      std::span<const AcStrategyCandidateBatch> batches,
+      AcStrategyDeviceSelection selection, ConstPlaneU8View sharpness) {
+    (void)batches;
+    (void)selection;
+    (void)sharpness;
+    return Status::Unavailable(
+        "Resident strategy search composition is unavailable");
+  }
 
   /// Materializes only the quantized encoder frame. Backends may use this
   /// explicit fast path to omit inverse reconstruction and perceptual scoring.

@@ -1,0 +1,268 @@
+{
+  "revision": "195464c5679841da1b7feb9b0261e2dc281b8e62",
+  "files": {
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-timing-20260918/cpu": "d4972ad52c8b9cb4a7a0595784e8606703fa59336bf48ce945fa3a664d025ce9",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-timing-20260918/handoff": "bf13f759a195907dc9454b9112a7d6da84f1d7a5c3487c477fedcb12315f4504",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/combined-acs-aq-timing-20260918/combined": "9ef4952be6fda601c2d7a3a0c637fff9e6d0f06b6b631015efb06d233635c83b",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/kernel-probe-20260917/alpine-3mp.pfm": "dd952d7ac85bcbcc01f67e509453fdd873c4d86c53a8575fc44b658fa96e091c",
+    "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/alpine_lake/24mp.pfm": "1d15d26a54e295f964bedd297556d72a1dd8db67d98c0514f8e5ad10981d19d4",
+    "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/24mp.pfm": "413ddef64b8f4e83737614f9ac78c40fde34ff225bbbd26a47ad76bc588138e1"
+  },
+  "sources": {
+    "tools/frontier_dp/time_resident_handoff.py": "2671d602261fa56f60d08b76a272295cb29b3936c2fb3150ee0c1639939ef732"
+  },
+  "completed": true,
+  "cpu_control_binary": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/fused-aq-timing-20260918/control",
+  "gpu_control_binary": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/fused-aq-timing-20260918/candidate",
+  "protocol": "Complete-call wall time; efforts 5/8 at distance 1.2; 8 threads; 3 processes, 3 warmups, 7 samples per arm/case; rotated case/arm order; CPU control, GPU selector with host handoff and fused initialization, combined resident ACS/AQ; byte identity required; no profiling",
+  "artifact_root": "build/frontier/results/combined-acs-aq-timing-20260918",
+  "manifest_sha256": "2e9ce16741ca76c57e88b67784c77ee265dde4df1175c5e852cdc3e86008dfdb",
+  "command_count": 54,
+  "started_unix": 1789711721.7277372,
+  "finished_unix": 1789711981.9950452,
+  "summary": [
+    {
+      "image": "alpine_3mp",
+      "effort": 5,
+      "output_sha256": "84f3fb226d682c7fd9d59a858442520ae02480f69721ff316a8881c8b2b6a431",
+      "cpu": {
+        "ms": 59.199833,
+        "process_medians": [
+          59.199833,
+          59.760416,
+          59.119125
+        ]
+      },
+      "handoff": {
+        "ms": 57.597167,
+        "process_medians": [
+          57.597167,
+          58.625417,
+          57.198209
+        ]
+      },
+      "combined": {
+        "ms": 57.893375,
+        "process_medians": [
+          56.658583,
+          57.97275,
+          57.893375
+        ]
+      },
+      "combined_speedup": 1.0225666235558042,
+      "handoff_speedup": 0.994883559647369
+    },
+    {
+      "image": "alpine_3mp",
+      "effort": 8,
+      "output_sha256": "93f3bd526d0780cdfc5e29a03c106ab52aae5a39e84763a22a0d6f9fad5ef093",
+      "cpu": {
+        "ms": 115.0785,
+        "process_medians": [
+          113.542334,
+          116.589709,
+          115.0785
+        ]
+      },
+      "handoff": {
+        "ms": 113.58125,
+        "process_medians": [
+          112.976959,
+          114.2275,
+          113.58125
+        ]
+      },
+      "combined": {
+        "ms": 113.216416,
+        "process_medians": [
+          112.557875,
+          114.374834,
+          113.216416
+        ]
+      },
+      "combined_speedup": 1.0164471201773426,
+      "handoff_speedup": 1.0032224478824696
+    },
+    {
+      "image": "alpine_24mp",
+      "effort": 5,
+      "output_sha256": "2ea876f72712f9927f59e14125e8f7a9c8bc6272989c9b5bf222fd691d3a39d8",
+      "cpu": {
+        "ms": 382.795667,
+        "process_medians": [
+          380.118916,
+          382.795667,
+          387.424625
+        ]
+      },
+      "handoff": {
+        "ms": 374.277583,
+        "process_medians": [
+          370.094,
+          374.777583,
+          374.277583
+        ]
+      },
+      "combined": {
+        "ms": 370.915416,
+        "process_medians": [
+          370.915416,
+          369.507833,
+          377.077333
+        ]
+      },
+      "combined_speedup": 1.0320295422824917,
+      "handoff_speedup": 1.0090645113547936
+    },
+    {
+      "image": "alpine_24mp",
+      "effort": 8,
+      "output_sha256": "ba6ad8623c7323916bf6df179f3c3c01dbdc85d9ec76ea0650219589c3b98738",
+      "cpu": {
+        "ms": 728.263541,
+        "process_medians": [
+          728.263541,
+          730.77925,
+          725.654167
+        ]
+      },
+      "handoff": {
+        "ms": 719.264958,
+        "process_medians": [
+          719.592792,
+          719.264958,
+          715.136583
+        ]
+      },
+      "combined": {
+        "ms": 715.00075,
+        "process_medians": [
+          715.00075,
+          715.174708,
+          710.529584
+        ]
+      },
+      "combined_speedup": 1.0185493385846098,
+      "handoff_speedup": 1.005963921016866
+    },
+    {
+      "image": "forest_24mp",
+      "effort": 5,
+      "output_sha256": "aeca0c719e8adc54c6cb0fc4781415a67b11ff0781fae4d4bb368d2f964ff797",
+      "cpu": {
+        "ms": 422.264167,
+        "process_medians": [
+          426.292375,
+          422.264167,
+          418.5185
+        ]
+      },
+      "handoff": {
+        "ms": 411.653917,
+        "process_medians": [
+          409.588667,
+          411.653917,
+          416.020792
+        ]
+      },
+      "combined": {
+        "ms": 405.889958,
+        "process_medians": [
+          405.889958,
+          404.203667,
+          407.301625
+        ]
+      },
+      "combined_speedup": 1.040341498175227,
+      "handoff_speedup": 1.0142007923241108
+    },
+    {
+      "image": "forest_24mp",
+      "effort": 8,
+      "output_sha256": "a108aadff0e4d9c59d3ef774aa2d7e6850d7902cbc31866b9f6eb0ad8471fad8",
+      "cpu": {
+        "ms": 844.993,
+        "process_medians": [
+          845.603791,
+          844.993,
+          844.481167
+        ]
+      },
+      "handoff": {
+        "ms": 830.0005,
+        "process_medians": [
+          829.057042,
+          832.8275,
+          830.0005
+        ]
+      },
+      "combined": {
+        "ms": 826.192625,
+        "process_medians": [
+          826.979375,
+          826.192625,
+          826.078458
+        ]
+      },
+      "combined_speedup": 1.0227554379343438,
+      "handoff_speedup": 1.0046089433441747
+    }
+  ],
+  "raw_sample_hashes": {
+    "alpine_24mp-e5-combined-0/raw.json": "8e664f18c7c95ce7180887779d59b7ce6ca83be0c0dd42f420982ccd950cd4d1",
+    "alpine_24mp-e5-combined-1/raw.json": "82785cbe9b553fb752bfbaffb2224cafec7720644868a5a05d8e4de5f2b3c560",
+    "alpine_24mp-e5-combined-2/raw.json": "a573b1546d48547ec7d86a376d3d39d6e6e3f17bf005370950d9957dc14ce0fe",
+    "alpine_24mp-e5-cpu-0/raw.json": "f6592791b61a09d218f91fbb19eaf22d1a281a8251fe6338b78e3f944801f814",
+    "alpine_24mp-e5-cpu-1/raw.json": "4c676d5f4f0476bba57dfa8b2a49103e9371fea51776614aeb9ae1403a1a9ec9",
+    "alpine_24mp-e5-cpu-2/raw.json": "cbad6841d687c93a75f4f92e903b62292d9e063836cee3924283c4f96a8f2497",
+    "alpine_24mp-e5-handoff-0/raw.json": "6effa1fee27d0a84e26434dfb2e6d79a40e64dbfd9d60ffc60bbd6770751bf0c",
+    "alpine_24mp-e5-handoff-1/raw.json": "aa8f9a3b7bab513983d6d9c6e4c6d4fdbf0271b20594e1f88b4b4dc664a850db",
+    "alpine_24mp-e5-handoff-2/raw.json": "759d6ec2ae50668c66369fb477c09a016b78719116a67d587e69e4a5d8fdcaaa",
+    "alpine_24mp-e8-combined-0/raw.json": "b887d064dea9e7a1dace090e1bd1ad58d9a82d0c22cde3435b571f866b512f70",
+    "alpine_24mp-e8-combined-1/raw.json": "91b6c056aebf4e02936f26981bd345644b882dbcf24f06c68c44241474ae50e6",
+    "alpine_24mp-e8-combined-2/raw.json": "7fe842019324ac957318146d0af234eea8d8b5162f598684ecbb4ed0a700f826",
+    "alpine_24mp-e8-cpu-0/raw.json": "6bfd2463ea1c8e759637de90ce1f1522084c69fcf35fc777759bc0909dd48325",
+    "alpine_24mp-e8-cpu-1/raw.json": "ef18478160dd48ee0906d8625054d8d7a4d538f040830f08e310e8c543657fc6",
+    "alpine_24mp-e8-cpu-2/raw.json": "9ca3ef24430451f41f7387d304f439fcc207bc1738d192f8eda529e957c6c90c",
+    "alpine_24mp-e8-handoff-0/raw.json": "3e7df1058f0a235968b9f3969f085d33d0f367e66dd1042eb63548474c118a81",
+    "alpine_24mp-e8-handoff-1/raw.json": "01a2832b530ed5c93cae324427355436616ee433540c6298d41153eb21c61045",
+    "alpine_24mp-e8-handoff-2/raw.json": "eb97c800844e335ca67a7e78aef29994a471b4a2de48e1d8575889ea493a973c",
+    "alpine_3mp-e5-combined-0/raw.json": "f01b22e9d6e32cb43d656a6c36ba92c093d044c1a67bc8fbdbc94ddf5408384e",
+    "alpine_3mp-e5-combined-1/raw.json": "c41a2c4bd66866bf9e52924c343f17be19e6dfe6f7cb77ba4cfe38466d5e7b06",
+    "alpine_3mp-e5-combined-2/raw.json": "2ed45fdbbf62c3abeeb099c8e3fb3d7e617351ef60bc1af98f2ffe923dc1b9bf",
+    "alpine_3mp-e5-cpu-0/raw.json": "b5dc788b1a4a50c7bf1b02c650173447641af663c63bcaac64f07247d61a2bbe",
+    "alpine_3mp-e5-cpu-1/raw.json": "2a150f93e3423b257ecd2f80b6cd8be6879799a3bb0b34b72ae5490d7a76f8b4",
+    "alpine_3mp-e5-cpu-2/raw.json": "db0b5edee144ef3002e9a64dca927ffb8dc6e6f176eebe6e09c97c5c3aa9a19c",
+    "alpine_3mp-e5-handoff-0/raw.json": "436871fbd1dd8ea486c73631fb7a29504989fe691c7cd58263a6524ce2a8cd2e",
+    "alpine_3mp-e5-handoff-1/raw.json": "24848630da313abc6bb178bd216b02ad8dd97c4c4b9b8aaa6cfc90bd2cdb7c7e",
+    "alpine_3mp-e5-handoff-2/raw.json": "f14b6bff12b96b9b7d1177df72827c4fa8922392576a047caa0642f9e11e4716",
+    "alpine_3mp-e8-combined-0/raw.json": "b4f143a033a93e8bf7b9d40e46237c4cd7adcba52722f66d66597d9fd9bd4baf",
+    "alpine_3mp-e8-combined-1/raw.json": "1a3b22f1950b14440455139e22881c96c7758ba87fc54177c831ec998b5acc38",
+    "alpine_3mp-e8-combined-2/raw.json": "db3d15dd0f79c91d78f6d4bbcb1b5f2e380a6b848adb28c95a8d883e30b9f518",
+    "alpine_3mp-e8-cpu-0/raw.json": "7bc1ed5e1d0b20f40d68beae277bb56e076434e41dc82072fc784b7921382e8f",
+    "alpine_3mp-e8-cpu-1/raw.json": "cc6bbfd2b79587158310a10d42640d4c32123851720c7fb583d7e3a065953d60",
+    "alpine_3mp-e8-cpu-2/raw.json": "d8f72e6bdc1412ef3a3c599ad38a9f17f82a891bbb93b038dbe336ea423a1258",
+    "alpine_3mp-e8-handoff-0/raw.json": "0e8711dc184bd76c7c0613dfc30c0fb3d098053def9fbaca7b527aae500b37fa",
+    "alpine_3mp-e8-handoff-1/raw.json": "22e4bcee08e2029c9c7730a4eeea7b4e21fc2a50cee865604a1711cb624188f2",
+    "alpine_3mp-e8-handoff-2/raw.json": "729cdafab45859dd05d94a6ee02385c6bf2bde8e39f42c62b49bfdc6507731fa",
+    "forest_24mp-e5-combined-0/raw.json": "ed1ba332a26817b62458345eca7d9ee23b609604c4d8430bf0efae0ff04e70c5",
+    "forest_24mp-e5-combined-1/raw.json": "433e13294de24b0d35a1b93d80ce4e15e485112353be7348e88a26cfd4881ed1",
+    "forest_24mp-e5-combined-2/raw.json": "f4de264b24d27096c6ebb42b4a939c15dd8f20bfa08f066b8472fd561c055867",
+    "forest_24mp-e5-cpu-0/raw.json": "6299b1fcbc4ee87c67d660152758ea76946adad318fe522301e3da6a20fd0545",
+    "forest_24mp-e5-cpu-1/raw.json": "082647cd78e679a42c6f2f0791e4dd9e5b06e9cf6cf0271b6dc19964057f5f35",
+    "forest_24mp-e5-cpu-2/raw.json": "611d327f1f53b79231a0a79d9a29caf35587235607cf1f1d3612a5f01523655c",
+    "forest_24mp-e5-handoff-0/raw.json": "57fce894add7c042e244d70b15e7ec09b12b5b663224a6aab5de2422440386f3",
+    "forest_24mp-e5-handoff-1/raw.json": "c0c1d1a2dfc3c7182a65b440251d6cb1ee7740be92cae50ac5b9d53721863ba6",
+    "forest_24mp-e5-handoff-2/raw.json": "b0b79d5b01b669a63adf5597fe64dce82c832d46695bb85175a4ce15c7d40b7e",
+    "forest_24mp-e8-combined-0/raw.json": "7bd2a8d070c68d485c48b23d79c628722e076c2b8749b1d48c279bf90852fdcc",
+    "forest_24mp-e8-combined-1/raw.json": "cda76866cea26a6a53cd67cbf3339f42c2827538b04af9bda9f5bd92222f2dac",
+    "forest_24mp-e8-combined-2/raw.json": "2519eceb506392ec0b1772559dcc4c90a299e7576795ee09a77eebed29c0c9f4",
+    "forest_24mp-e8-cpu-0/raw.json": "b976cc24023a1060c023507ea549286f1c766e6f03db7f58c59480a0d0170662",
+    "forest_24mp-e8-cpu-1/raw.json": "94b8cff3f015ff858450e082f97f9dbacc1aa482c0a981301ed9ef49a9e83445",
+    "forest_24mp-e8-cpu-2/raw.json": "0fc7a3b2f97286a956fcfe5bd3ef57d90d4f3e892387b10244a844f490f2c73b",
+    "forest_24mp-e8-handoff-0/raw.json": "d891a3b7f5e58737777c96fb3fcd808b3872004af1a5980a5dcaff4b5697ed35",
+    "forest_24mp-e8-handoff-1/raw.json": "176c4817be71533f8fc08d2d4800b9702c9f5e1070cd94ed3b2d2080a181bd39",
+    "forest_24mp-e8-handoff-2/raw.json": "3cce48ccb9e25bdf63efdfe0680a9677053fb6968ed3937240ca122fe7ad3e28"
+  },
+  "version_banner_note": "Combined executable was compiled from source committed as 195464c, but its configure-time banner remained 407cd05. Actual binary identity is the retained SHA256."
+}

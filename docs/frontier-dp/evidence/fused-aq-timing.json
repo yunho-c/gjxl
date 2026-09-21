@@ -1,0 +1,188 @@
+[
+  {
+    "image": "alpine_3mp",
+    "effort": 5,
+    "output_sha256": "84f3fb226d682c7fd9d59a858442520ae02480f69721ff316a8881c8b2b6a431",
+    "cpu": {
+      "ms": 59.892,
+      "process_medians": [
+        61.531584,
+        59.284375,
+        59.892
+      ]
+    },
+    "gpu": {
+      "ms": 58.136625,
+      "process_medians": [
+        60.12775,
+        58.050084,
+        58.136625
+      ]
+    },
+    "fused": {
+      "ms": 58.146917,
+      "process_medians": [
+        60.202542,
+        58.146917,
+        57.898333
+      ]
+    },
+    "combined_speedup": 1.0300116169529676,
+    "initialization_speedup": 0.9998230000741054
+  },
+  {
+    "image": "alpine_3mp",
+    "effort": 8,
+    "output_sha256": "93f3bd526d0780cdfc5e29a03c106ab52aae5a39e84763a22a0d6f9fad5ef093",
+    "cpu": {
+      "ms": 115.327125,
+      "process_medians": [
+        118.305208,
+        114.508375,
+        115.327125
+      ]
+    },
+    "gpu": {
+      "ms": 114.441084,
+      "process_medians": [
+        117.713541,
+        114.441084,
+        113.731459
+      ]
+    },
+    "fused": {
+      "ms": 114.69475,
+      "process_medians": [
+        117.3675,
+        114.69475,
+        114.300208
+      ]
+    },
+    "combined_speedup": 1.0055135479174069,
+    "initialization_speedup": 0.9977883381758974
+  },
+  {
+    "image": "alpine_24mp",
+    "effort": 5,
+    "output_sha256": "2ea876f72712f9927f59e14125e8f7a9c8bc6272989c9b5bf222fd691d3a39d8",
+    "cpu": {
+      "ms": 385.569792,
+      "process_medians": [
+        389.431834,
+        385.569792,
+        384.35075
+      ]
+    },
+    "gpu": {
+      "ms": 374.815458,
+      "process_medians": [
+        378.410708,
+        371.709416,
+        374.815458
+      ]
+    },
+    "fused": {
+      "ms": 373.913458,
+      "process_medians": [
+        377.985833,
+        369.993292,
+        373.913458
+      ]
+    },
+    "combined_speedup": 1.0311738819521175,
+    "initialization_speedup": 1.002412322907083
+  },
+  {
+    "image": "alpine_24mp",
+    "effort": 8,
+    "output_sha256": "ba6ad8623c7323916bf6df179f3c3c01dbdc85d9ec76ea0650219589c3b98738",
+    "cpu": {
+      "ms": 731.470625,
+      "process_medians": [
+        751.521917,
+        724.231041,
+        731.470625
+      ]
+    },
+    "gpu": {
+      "ms": 723.605,
+      "process_medians": [
+        731.14525,
+        723.605,
+        715.679167
+      ]
+    },
+    "fused": {
+      "ms": 724.359166,
+      "process_medians": [
+        735.446208,
+        718.432917,
+        724.359166
+      ]
+    },
+    "combined_speedup": 1.009817586818526,
+    "initialization_speedup": 0.9989588507533292
+  },
+  {
+    "image": "forest_24mp",
+    "effort": 5,
+    "output_sha256": "aeca0c719e8adc54c6cb0fc4781415a67b11ff0781fae4d4bb368d2f964ff797",
+    "cpu": {
+      "ms": 419.773083,
+      "process_medians": [
+        414.192875,
+        419.773083,
+        422.73325
+      ]
+    },
+    "gpu": {
+      "ms": 411.44125,
+      "process_medians": [
+        405.379667,
+        411.44125,
+        412.322375
+      ]
+    },
+    "fused": {
+      "ms": 406.200084,
+      "process_medians": [
+        401.777542,
+        406.200084,
+        412.176417
+      ]
+    },
+    "combined_speedup": 1.033414564729632,
+    "initialization_speedup": 1.012902917075714
+  },
+  {
+    "image": "forest_24mp",
+    "effort": 8,
+    "output_sha256": "a108aadff0e4d9c59d3ef774aa2d7e6850d7902cbc31866b9f6eb0ad8471fad8",
+    "cpu": {
+      "ms": 845.430292,
+      "process_medians": [
+        837.128208,
+        848.914167,
+        845.430292
+      ]
+    },
+    "gpu": {
+      "ms": 829.5775,
+      "process_medians": [
+        829.5775,
+        830.898084,
+        827.577792
+      ]
+    },
+    "fused": {
+      "ms": 827.629208,
+      "process_medians": [
+        816.236458,
+        831.152791,
+        827.629208
+      ]
+    },
+    "combined_speedup": 1.0215085255908465,
+    "initialization_speedup": 1.0023540638502937
+  }
+]

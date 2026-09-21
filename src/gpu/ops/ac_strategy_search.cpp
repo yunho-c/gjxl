@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <new>
@@ -25,8 +26,12 @@
 #include "core/geometry.h"
 #include "gpu/buffer.h"
 #include "gpu/ops/ac_strategy.h"
+#include "gpu/ops/ac_strategy_selection.h"
 #include "gpu/ops/ac_strategy_search_profile_internal.h"
 #include "gpu/ops/ac_strategy_storage_plan.h"
+#ifdef GJXL_FRONTIER_EXPERIMENT
+#include "gpu/ops/ac_strategy_capture_internal.h"
+#endif
 
 namespace gjxl {
 using resource_budget_internal::ManagedVector;
@@ -250,18 +255,28 @@ PreparedAcStrategySearch::PreparedAcStrategySearch() = default;
 PreparedAcStrategySearch::~PreparedAcStrategySearch() = default;
 void PreparedAcStrategySearch::Reset() noexcept { impl_.reset(); }
 
+bool CanDeferAcStrategySearch(GpuBackend &gpu,
+                              AcStrategySearchOptions options) {
+  if (options.dense_dct32_search ||
+      dynamic_cast<GpuAcStrategySelection *>(&gpu) == nullptr)
+    return false;
+#ifdef GJXL_FRONTIER_EXPERIMENT
+  if (std::getenv("GJXL_FRONTIER_CAPTURE_DIR") ||
+      std::getenv("GJXL_AC_SEARCH_EXPERIMENT"))
+    return false;
+#endif
+  return true;
+}
+
 static Status FindAcStrategyGridGpuImpl(
-  GpuBackend& gpu,
-  ConstImage3FView opsin,
-  ConstPlaneF32View quant_field,
-  ConstPlaneF32View pixel_mask,
-  const ColorCorrelationMap& color_correlation,
-  const ResidentAcStrategySearchInputs* resident,
-  ac_strategy_search_internal::Prepared* prepared,
-  AcStrategySearchOptions options,
-  AcStrategyGrid* out,
-  AcStrategyGpuSearchStats* stats,
-  gpu_profile_internal::GpuProfilingSession* profiling_session) {
+    GpuBackend &gpu, ConstImage3FView opsin, ConstPlaneF32View quant_field,
+    ConstPlaneF32View pixel_mask, const ColorCorrelationMap &color_correlation,
+    const ResidentAcStrategySearchInputs *resident,
+    ac_strategy_search_internal::Prepared *prepared,
+    AcStrategySearchOptions options, AcStrategyGrid *out,
+    AcStrategyGpuSearchStats *stats,
+    gpu_profile_internal::GpuProfilingSession *profiling_session,
+    DeferredAcStrategySearch *deferred = nullptr) {
   const resource_budget_internal::ResourceClassScope resource_class(
     resource_budget_internal::ResourceClass::kAcSearch);
   ac_strategy_search_internal::StoragePlan storage_plan;
@@ -352,6 +367,14 @@ static Status FindAcStrategyGridGpuImpl(
       }
     }
 
+    auto *device_selector = resident != nullptr &&
+                                    profiling_session == nullptr &&
+                                    CanDeferAcStrategySearch(gpu, options)
+                                ? dynamic_cast<GpuAcStrategySelection *>(&gpu)
+                                : nullptr;
+    if (deferred && (!device_selector || !prepared))
+      return Status::Unavailable(
+          "Deferred AC strategy selection is unavailable");
     const auto stages =
       ac_strategy_internal::CandidateStages(options.dense_dct32_search);
     auto& resources = state.resources;
@@ -379,11 +402,14 @@ static Status FindAcStrategyGridGpuImpl(
       if (resource.matrices.size() != stage_plan.matrix_bytes / sizeof(float)) {
         return Status::Internal("GPU AC-strategy matrices disagree with storage plan");
       }
-      resource.costs.resize(resource.candidates.size());
+      if (device_selector == nullptr || i == 0)
+        resource.costs.resize(resource.candidates.size());
       const size_t strategy_index =
         static_cast<size_t>(resource.staged.strategy);
-      cost_storage[strategy_index].assign(
-        block_count, std::numeric_limits<float>::quiet_NaN());
+      if (device_selector == nullptr) {
+        cost_storage[strategy_index].assign(
+          block_count, std::numeric_limits<float>::quiet_NaN());
+      }
       result_stats.candidate_counts[strategy_index] =
         resource.candidates.size();
       result_stats.total_candidate_count += resource.candidates.size();
@@ -455,8 +481,18 @@ static Status FindAcStrategyGridGpuImpl(
         .butteraugli_target = options.butteraugli_target,
       };
     }
+    if (deferred) {
+      *deferred = {batches, {block_extent, state.rate_scratch.get(), 0}};
+      result_stats.device_selection = true;
+      if (stats)
+        *stats = result_stats;
+      return Status::Ok();
+    }
     std::unique_ptr<GpuSubmission> submission;
-    if (profiling_session == nullptr) {
+    if (device_selector != nullptr) {
+      status = device_selector->EvaluateAndSelectAcStrategyCandidateBatches(
+        batches, {block_extent, state.rate_scratch.get(), 0}, &submission);
+    } else if (profiling_session == nullptr) {
       status = EvaluateAcStrategyCandidateBatches(
         gpu, batches, &submission);
     } else {
@@ -511,6 +547,50 @@ static Status FindAcStrategyGridGpuImpl(
     const auto readback_begin = profiling_session == nullptr
       ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
       : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
+    if (device_selector != nullptr) {
+      // Scoring no longer needs rate scratch. Its selected byte map and error
+      // flags fit inside the existing DCT8 readback owner; no new backing is
+      // needed beyond the conservative search storage plan.
+      const size_t tile_count = tile_extent.width * tile_extent.height;
+      const size_t bytes = block_count + tile_count;
+      if (bytes > resources[0].costs.size() * sizeof(float))
+        return Status::Internal("Device AC selection exceeds its readback owner");
+      status = gpu.CopyDeviceToHost(*state.rate_scratch,
+        resources[0].costs.data(), bytes);
+      if (!status.ok()) return status;
+      const auto* cells = reinterpret_cast<const uint8_t*>(resources[0].costs.data());
+      for (size_t tile = 0; tile < tile_count; ++tile) {
+        if (cells[block_count + tile] != 0)
+          return Status::Internal("Device AC selection encountered an invalid candidate cost");
+      }
+      AcStrategyGrid result;
+      status = AcStrategyGrid::Create(block_extent, &result);
+      if (!status.ok()) return status;
+      for (size_t y = 0; y < block_extent.height; ++y) {
+        for (size_t x = 0; x < block_extent.width; ++x) {
+          const uint8_t cell = cells[y * block_extent.width + x];
+          if ((cell & 1u) != 0) {
+            status = result.Set(x, y, static_cast<AcStrategyType>(cell >> 1));
+            if (!status.ok()) return Status::Internal("Device AC selection produced an invalid cover");
+          }
+        }
+      }
+      if (!result.complete())
+        return Status::Internal("Device AC selection produced an incomplete cover");
+      for (size_t y = 0; y < block_extent.height; ++y) {
+        for (size_t x = 0; x < block_extent.width; ++x) {
+          AcStrategyCell cell;
+          status = result.Get(x, y, &cell);
+          if (!status.ok() || cells[y * block_extent.width + x] !=
+              ((static_cast<uint8_t>(cell.strategy) << 1) | cell.is_anchor))
+            return Status::Internal("Device AC selection produced inconsistent cells");
+        }
+      }
+      *out = std::move(result);
+      result_stats.device_selection = true;
+      if (stats != nullptr) *stats = result_stats;
+      return Status::Ok();
+    }
     for (StrategyResources& resource : resources) {
       if (!resource.candidates.empty()) {
         status = gpu.CopyDeviceToHost(*resource.device_costs,
@@ -560,6 +640,13 @@ static Status FindAcStrategyGridGpuImpl(
     if (stats != nullptr) {
       *stats = result_stats;
     }
+#ifdef GJXL_FRONTIER_EXPERIMENT
+    status = frontier_experiment::Capture(
+      opsin_extent, quant_field, color_correlation, options, table, *out);
+    if (!status.ok()) return status;
+    status = frontier_experiment::SelectDiagnostic(options, table, out);
+    if (!status.ok()) return status;
+#endif
     return Status::Ok();
   } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
     return failure.status();
@@ -570,6 +657,27 @@ static Status FindAcStrategyGridGpuImpl(
     return Status::InvalidArgument(
       "GPU AC-strategy search dimensions are too large");
   }
+}
+
+Status PreparedAcStrategySearch::PrepareDeferred(
+    GpuBackend &gpu, ConstImage3FView opsin, ConstPlaneF32View quant,
+    ConstPlaneF32View mask, const ColorCorrelationMap &cfl,
+    ResidentAcStrategySearchInputs resident, AcStrategySearchOptions options,
+    DeferredAcStrategySearch *out, AcStrategyGpuSearchStats *stats) {
+  if (!out)
+    return Status::InvalidArgument("Deferred search output is null");
+  if (!CanDeferAcStrategySearch(gpu, options))
+    return Status::Unavailable("Deferred search is unavailable");
+  try {
+    if (!impl_)
+      impl_ = std::make_unique<ac_strategy_search_internal::Prepared>();
+  } catch (const std::bad_alloc &) {
+    return Status::OutOfMemory("Deferred search allocation failed");
+  }
+  AcStrategyGrid unused;
+  return FindAcStrategyGridGpuImpl(gpu, opsin, quant, mask, cfl, &resident,
+                                   impl_.get(), options, &unused, stats,
+                                   nullptr, out);
 }
 
 Status FindAcStrategyGridGpu(

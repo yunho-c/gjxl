@@ -1,0 +1,41 @@
+{
+  "parent_revision": "7ab1db3",
+  "scope": "Fused AQ initialization checkpoint; test-only submission counts updated after first broader run; production binaries use precise bounds math.",
+  "normal_tests_passed": [
+    "gjxl_metal_aq_evaluation_test",
+    "gjxl_metal_aq_reconstruction_test",
+    "gjxl_metal_storage_plan_test",
+    "gjxl_metal_aq_host_storage_plan_test",
+    "gjxl_adaptive_quantization_gpu_policy_test",
+    "gjxl_quantization_gpu_pipeline_test",
+    "gjxl_resident_workflow_storage_plan_test",
+    "gjxl_compatibility_workflow_storage_plan_test",
+    "gjxl_workflow_storage_plan_test",
+    "gjxl_workflow_admission_test"
+  ],
+  "test_binary_sha256": {
+    "gjxl_metal_aq_evaluation_test": "86006fe20f1c808339855f88eb4d6f49305c730108ab0f223d16ce1447b8e6ec",
+    "gjxl_metal_aq_reconstruction_test": "a3534d1a92e045313222979d6b95483a0f21c94848215f96d490ade0cf802381",
+    "gjxl_metal_storage_plan_test": "10339013e2ba85f18e1ac2a9b4acc2c5f60526138030c43a9d762a3405fc48c0",
+    "gjxl_metal_aq_host_storage_plan_test": "dbe6c8557b9182e8cc54b81ceeb23abcc9ede841b927eae9c60f99f225d507c4",
+    "gjxl_adaptive_quantization_gpu_policy_test": "ea6445150be515eb1edc58a566136268661b1cb988f96e1e7f6ee34ad5cb141e",
+    "gjxl_quantization_gpu_pipeline_test": "5eeedb131b9d657876dc495adc631a67ddef2cd0375a44acad840b7d73e49ac9",
+    "gjxl_resident_workflow_storage_plan_test": "7d8b5d6c493fc9fce146082563a75e0baa7bfbfafc96dd6b107a7d623aab92ad",
+    "gjxl_compatibility_workflow_storage_plan_test": "4e054da465b8e5b2463e799a8f39ec86512b440efc4df3227b3ccd6278b5300a",
+    "gjxl_workflow_storage_plan_test": "dad09f4914bbd92c368c362372b205a6fba381368e0dfd2f007d15cf215806c7",
+    "gjxl_workflow_admission_test": "0174a57f3e21b8ec87f85f480c2022eed24e1f36ad3af355a50aa865a45e0c58"
+  },
+  "metal_validation": {
+    "executable": "gjxl_metal_aq_evaluation_test",
+    "environment": {
+      "MTL_DEBUG_LAYER": "1",
+      "MTL_SHADER_VALIDATION": "1"
+    },
+    "exit_code": 0
+  },
+  "direct_parity_cases": 256,
+  "initialization_failure_injections": 10,
+  "real_out_of_range_bounds_failure": true,
+  "complete_encode_parity_directory": "build/frontier/results/fused-aq-encode-parity-20260918-v2",
+  "byte_identical_encodes": 60
+}

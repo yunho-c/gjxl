@@ -1,0 +1,31 @@
+{
+  "revision": "7ab1db38f7dec064678c6c010121d05571866eb0",
+  "files": {
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/fused-aq-timing-20260918/control": "d4972ad52c8b9cb4a7a0595784e8606703fa59336bf48ce945fa3a664d025ce9",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/fused-aq-timing-20260918/candidate": "bf13f759a195907dc9454b9112a7d6da84f1d7a5c3487c477fedcb12315f4504",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/kernel-probe-20260917/alpine-3mp.pfm": "dd952d7ac85bcbcc01f67e509453fdd873c4d86c53a8575fc44b658fa96e091c",
+    "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/alpine_lake/24mp.pfm": "1d15d26a54e295f964bedd297556d72a1dd8db67d98c0514f8e5ad10981d19d4",
+    "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/24mp.pfm": "413ddef64b8f4e83737614f9ac78c40fde34ff225bbbd26a47ad76bc588138e1"
+  },
+  "sources": {
+    "src/gpu/metal/kernels/aq_reconstruction.metal": "77506cf78c5c7b8f12284173f7ffe7f10f4d92fa1427a2277e8fe864d1acd184",
+    "src/gpu/metal/metal_aq_evaluation.cpp": "894a5493e50810775d7758075dbbf37bea5af71165cae348e286009ef1b67c6b",
+    "src/gpu/metal/metal_aq_evaluation_internal.h": "1e57a5b1801000f4f227218c2c9362b7910f61bba83185a5f09cd556cc4e1fde",
+    "src/gpu/metal/metal_aq_evaluation_test.h": "127bf8f58b64e3a8b0a0133a927d407fc1817e7a4b1c28e8eed3207f32d68c81",
+    "src/gpu/metal/metal_aq_reconstruction.cpp": "dae6c16e7a73e7b2f1a6a95687e6d6c924ac96ff686701167fc0e2a0c6be4cb2",
+    "src/gpu/metal/metal_backend_internal.h": "43fd9658535dc5f53deb909457f46c8ff336e5c18e409570804bd08bd9946576",
+    "src/gpu/metal/metal_storage_plan.cpp": "85e16e3d306dbdd3245c2b28674f265d62f81e61dce69462b039040dd8376c50",
+    "src/gpu/metal/metal_storage_plan.h": "5eaf8c11cb4356af061306a82acb284aef92a7c99886b46d16540239d6f29c16",
+    "src/gpu/ops/adaptive_quantization.cpp": "5a5aa3dcf52b56881d4e7b07bf9b9a6d089df0edf6c977c5da4bb4603772bb20",
+    "src/gpu/ops/aq_evaluation.h": "cb21ccd9ce2658f07f5ff8aa9d4df010c267f4e8e48293c0096d440d11c6b424",
+    "tests/metal_aq_evaluation_test.cpp": "694eb025b7c6ccfc1ae61bab2beaf8739ad69ff55fc5b913997daf9fe672acd1",
+    "tests/metal_storage_plan_test.cpp": "26e922261cb1a9877a76d0ec4c8d8e9b87f3499a8c94adff3719081733ad6a33",
+    "tools/frontier_dp/check_native_encodes.py": "d752578319d6918d20f7a02e82bbce2ba972b118070c4b979000d12d8c093207",
+    "tools/frontier_dp/time_aq_initialization.py": "762cc6a90f32398309de344451c5342edcaacfe6518c49b72078617563ecf826"
+  },
+  "completed": true,
+  "control_binary": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/native-selection-timing-20260918/gjxl_quality_benchmark",
+  "protocol": "Complete-call wall time; efforts 5/8 at distance 1.2; 8 threads; 3 processes, 3 warmups, 7 samples per arm/case; rotated case/arm order; old CPU selector, old native GPU selector, new GPU selector plus fused AQ initialization; byte identity required; no profiling",
+  "artifact_directory": "build/frontier/results/fused-aq-timing-20260918",
+  "commands_count": 54
+}

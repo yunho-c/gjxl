@@ -29,6 +29,17 @@ protected:
   GaborishInverseProvider() = default;
 };
 
+struct DeferredStrategyQuantizationInput {
+  ConstImage3FView original_linear_rgb;
+  ConstImage3FView opsin;
+  ConstPlaneF32View initial_quant_field;
+  ConstPlaneF32View pixel_mask;
+  const ColorCorrelationMap *initial_color_correlation = nullptr;
+  ConstPlaneU8View epf_sharpness;
+  AcStrategySearchOptions search_options;
+  AdaptiveQuantizationOptions adaptive_options;
+};
+
 class AdaptiveQuantizationProvider {
 public:
   virtual ~AdaptiveQuantizationProvider() = default;
@@ -42,6 +53,20 @@ public:
     AdaptiveQuantizationOptions options,
     PreparedButteraugliReference* prepared_reference,
     AdaptiveQuantizationOutput output) = 0;
+
+  /// Optional composition that defers selection until the AQ submission.
+  /// Neither a provisional grid nor partial AQ output may be published.
+  [[nodiscard]] virtual bool
+  SupportsDeferredSearch(const AcStrategySearchProvider &,
+                         AcStrategySearchOptions) const noexcept {
+    return false;
+  }
+  [[nodiscard]] virtual Status
+  FindWithDeferredSearch(AcStrategySearchProvider &,
+                         DeferredStrategyQuantizationInput, AcStrategyGrid *,
+                         AdaptiveQuantizationOutput) {
+    return Status::Unavailable("Deferred strategy search is unavailable");
+  }
 
 protected:
   AdaptiveQuantizationProvider() = default;

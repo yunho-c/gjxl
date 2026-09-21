@@ -9,6 +9,8 @@ project(
   LANGUAGES C CXX
 )
 
+option(GJXL_BUILD_FRONTIER_EXPERIMENT "Build the isolated frontier-DP experiment and capture hook" OFF)
+
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
@@ -628,6 +630,11 @@ set(
   GJXL_AC_STRATEGY_METAL_IR
   "${GJXL_METAL_DIR}/ac_strategy.ir"
 )
+set(GJXL_AC_SELECTION_METAL_SOURCE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/ac_strategy_select.metal")
+set(GJXL_AC_SELECTION_METAL_IR "${GJXL_METAL_DIR}/ac_strategy_select.ir")
+set(GJXL_AQ_METADATA_METAL_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/aq_strategy_metadata.metal")
+set(GJXL_AQ_METADATA_METAL_IR "${GJXL_METAL_DIR}/aq_strategy_metadata.ir")
 
 set(
   GJXL_PRIMITIVES_METAL_IR
@@ -877,6 +884,7 @@ add_custom_command(
 
   DEPENDS
     "${GJXL_BUTTERAUGLI_METAL_SOURCE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/aq_strategy_dispatch.h"
 
   COMMENT
     "Compiling strict-math Metal Butteraugli shaders"
@@ -885,6 +893,22 @@ add_custom_command(
 )
 
 # .ir -> .metallib
+
+add_custom_command(OUTPUT "${GJXL_AQ_METADATA_METAL_IR}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${GJXL_METAL_DIR}"
+  COMMAND "${XCRUN_EXECUTABLE}" -sdk macosx metal -std=metal3.1
+    ${GJXL_METAL_PROFILING_FLAGS} -c "${GJXL_AQ_METADATA_METAL_SOURCE}" -o "${GJXL_AQ_METADATA_METAL_IR}"
+  DEPENDS "${GJXL_AQ_METADATA_METAL_SOURCE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/aq_strategy_dispatch.h"
+  COMMENT "Compiling Metal AQ strategy metadata" VERBATIM)
+
+add_custom_command(OUTPUT "${GJXL_AC_SELECTION_METAL_IR}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${GJXL_METAL_DIR}"
+  COMMAND "${XCRUN_EXECUTABLE}" -sdk macosx metal -std=metal3.1
+    -fno-fast-math -ffp-contract=off ${GJXL_METAL_PROFILING_FLAGS}
+    -c "${GJXL_AC_SELECTION_METAL_SOURCE}" -o "${GJXL_AC_SELECTION_METAL_IR}"
+  DEPENDS "${GJXL_AC_SELECTION_METAL_SOURCE}"
+  COMMENT "Compiling policy-preserving Metal AC selection" VERBATIM)
 
 add_custom_command(
   OUTPUT
@@ -898,6 +922,8 @@ add_custom_command(
     "${GJXL_METALLIB}"
     "${GJXL_DCT_METAL_IR}"
     "${GJXL_AC_STRATEGY_METAL_IR}"
+    "${GJXL_AC_SELECTION_METAL_IR}"
+    "${GJXL_AQ_METADATA_METAL_IR}"
     "${GJXL_PRIMITIVES_METAL_IR}"
     "${GJXL_AQ_REDUCTION_METAL_IR}"
     "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
@@ -907,6 +933,8 @@ add_custom_command(
   DEPENDS
     "${GJXL_DCT_METAL_IR}"
     "${GJXL_AC_STRATEGY_METAL_IR}"
+    "${GJXL_AC_SELECTION_METAL_IR}"
+    "${GJXL_AQ_METADATA_METAL_IR}"
     "${GJXL_PRIMITIVES_METAL_IR}"
     "${GJXL_AQ_REDUCTION_METAL_IR}"
     "${GJXL_AQ_RECONSTRUCTION_METAL_IR}"
@@ -1008,6 +1036,8 @@ add_library(
   src/gpu/metal/metal_aq_profile_storage_plan.cpp
   src/gpu/metal/metal_aq_postprocess.cpp
   src/gpu/metal/metal_aq_reconstruction.cpp
+  src/gpu/metal/metal_aq_strategy_dispatch.cpp
+  src/gpu/metal/metal_aq_strategy_metadata.cpp
   src/gpu/metal/metal_butteraugli.cpp
   src/gpu/metal/metal_primitives.cpp
   src/gpu/metal/metal_submission.cpp
@@ -2719,6 +2749,13 @@ if(GJXL_BUILD_TESTS)
     tests/quantization_gpu_pipeline_test.cpp
   )
 
+  add_executable(gjxl_metal_aq_strategy_metadata_test tests/metal_aq_strategy_metadata_test.cpp)
+  target_link_libraries(gjxl_metal_aq_strategy_metadata_test PRIVATE gjxl_metal gjxl_codec)
+  target_include_directories(gjxl_metal_aq_strategy_metadata_test PRIVATE third_party/metal-cpp)
+  target_compile_definitions(gjxl_metal_aq_strategy_metadata_test PRIVATE GJXL_METALLIB_PATH="${GJXL_METALLIB}")
+  add_dependencies(gjxl_metal_aq_strategy_metadata_test gjxl_metal_shaders)
+  add_test(NAME metal_aq_strategy_metadata COMMAND gjxl_metal_aq_strategy_metadata_test)
+
   target_link_libraries(
     gjxl_quantization_gpu_pipeline_test
     PRIVATE
@@ -3125,4 +3162,23 @@ if(GJXL_BUILD_BENCHMARKS)
     gjxl_metal_shaders
   )
 
+endif()
+
+if(GJXL_BUILD_FRONTIER_EXPERIMENT)
+  target_compile_definitions(gjxl_gpu_ops PRIVATE GJXL_FRONTIER_EXPERIMENT=1)
+  target_sources(gjxl_gpu_ops PRIVATE tools/frontier_dp/capture.cpp)
+  add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/frontier.metallib"
+    COMMAND xcrun -sdk macosx metal -std=metal3.1 -fno-fast-math
+      -c "${CMAKE_CURRENT_SOURCE_DIR}/tools/frontier_dp/frontier.metal"
+      -o "${CMAKE_CURRENT_BINARY_DIR}/frontier.air"
+    COMMAND xcrun -sdk macosx metallib "${CMAKE_CURRENT_BINARY_DIR}/frontier.air"
+      -o "${CMAKE_CURRENT_BINARY_DIR}/frontier.metallib"
+    DEPENDS tools/frontier_dp/frontier.metal VERBATIM)
+  add_custom_target(gjxl_frontier_shaders DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/frontier.metallib")
+  add_executable(gjxl_frontier_probe tools/frontier_dp/probe.cpp)
+  target_link_libraries(gjxl_frontier_probe PRIVATE gjxl_metal)
+  target_include_directories(gjxl_frontier_probe PRIVATE third_party/metal-cpp)
+  target_compile_definitions(gjxl_frontier_probe PRIVATE
+    FRONTIER_METALLIB_PATH="${CMAKE_CURRENT_BINARY_DIR}/frontier.metallib")
+  add_dependencies(gjxl_frontier_probe gjxl_frontier_shaders)
 endif()
