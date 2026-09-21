@@ -493,6 +493,15 @@ an intermediate build appear complete.
   supplied CfL, explicit snapshots and device-derived CfL on a reused
   evaluator. Physical validation now also covers AC search and strategy
   metadata under Metal API/shader validation.
+- The reconciled source builds with Windows CUDA 11.8/MSVC and Linux CUDA
+  12.6/GCC 13.3. The Windows run passes 155/156 tests; its only failure is the
+  installed C++ package missing main's new selector header. Adding that header
+  to the explicit install boundary passes the consumer rerun (104.63 s), so
+  all 156 configured tests have passing evidence. The consumer compiles every
+  installed header independently under both C++20 and C++23. Nine focused
+  Linux shared-code regressions also pass. Hosted macOS compilation exposed
+  the new selector's old buffer-validation signature; its reconciled path now
+  validates and binds per-buffer offsets and rejects resident-CfL aliases.
 
 ## Outstanding integration risks
 
