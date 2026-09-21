@@ -42,7 +42,8 @@ Butteraugli tiling or every optimization in the encoder.
 ## Build and battery-friendly trial
 
 Requires macOS/Metal, the repository's audited compiler, CMake, Python 3.11+,
-`djxl`, and `ssimulacra2`. The trial accepts only its generated 128x96 smooth
+`djxl`, and `ssimulacra2`. Full collection additionally uses NumPy for bounded,
+chunked decoded-pixel comparisons. The trial accepts only its generated 128x96 smooth
 and 257x193 textured/edge images, efforts 5 and 8, and distance 1. It uses two
 CPU threads, one process per configuration/case, and one measured sample.
 
@@ -95,6 +96,22 @@ three process rounds, three warmups, seven timing samples, and eight CPU
 threads; arm order rotates across cases/rounds. Pin the final patch or commit
 and build before starting a corpus study.
 
+Full runs retain content-addressed codestream objects, with hard links at every
+job's `output.jxl` path. Identical codestream/input pairs share decoded-pixel
+validation and quality scoring, outside all timing boundaries. Decoded PFM
+files are temporary; their hashes, finite-pixel checks, errors against the input,
+quality values, and frozen decoder/metric identities remain in validation
+records. A nonidentical pair is decoded again for its comparison and must
+reproduce the recorded pixel hashes. This avoids retaining hundreds of GiB of
+duplicate PFMs. The compact policy can also be tested with
+`--compact-artifacts` on a trial. Temporary files belong only to the current
+run; existing research artifacts are unaffected.
+
+`progress.json` records the active job and coverage. Collection checks input
+and tool identities between cases and stops before a job if free space falls
+below 8 GiB. A full run uses the same seven measured calls per job regardless
+of whether its output has already been validated.
+
 ```sh
 python3 tools/ablation/run.py --full --output ablation-runs/corpus-v1 \
   --input /corpus/image-a.pfm --input /corpus/image-b.pfm \
@@ -115,6 +132,31 @@ the image level and show variation across process rounds and size cohorts.
 Do not add conditional speedups together. Review nonidentical DCT cases for
 rate/quality changes before claiming equal-output or equal-quality speedups.
 No run is automatically certified as publication-quality performance evidence.
+
+## Saved-data analysis
+
+`tools/analyze_paper_ablation.py` checks complete coverage, raw timing/path
+contracts, process-repeat output stability, and optionally all retained artifact
+hashes. It produces `analysis/paired.csv`, `aggregate.csv`, `audit.json`, and
+`REPORT.md`. `tools/plot_paper_ablation.py` renders PDF, SVG, and PNG figures from
+that verified analysis. These commands do not collect performance samples.
+
+```sh
+python3 tools/analyze_paper_ablation.py --run /path/to/run \
+  --corpus /path/to/corpus.json --verify-artifacts
+python3 tools/plot_paper_ablation.py --analysis /path/to/run/analysis
+```
+
+Analysis requires NumPy; plotting also requires Matplotlib. The retained
+controller commands identify the actual interpreters used for a study.
+`tools/review_paper_ablation_timing.py --run /path/to/run --repeat /path/to/repeat`
+adds explicitly labeled post hoc sensitivity results for a balanced repeat of
+one image. Both runs must already have complete, artifact-verified analyses.
+It preserves the original aggregate and raw records.
+
+The completed 65-image collection, its timing disturbance and balanced repeat,
+and the resulting evidence are described in
+[paper-ablation-full.md](paper-ablation-full.md).
 
 ## Validation
 
