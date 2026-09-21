@@ -31,6 +31,7 @@ struct Options {
   gjxl::VarDctDcPrediction dc_prediction = gjxl::kDefaultDcPrediction;
   gjxl::DcQuantizationMode dc_quantization = gjxl::DcQuantizationMode::kAutomatic;
   std::optional<bool> adaptive_dc_smoothing;
+  bool adaptive_epf_sharpness = true;
   size_t effort = 7, threads = 8, warmups = 1, samples = 1;
 };
 
@@ -86,6 +87,10 @@ Options Parse(int argc, char **argv) {
         options.dc_quantization = gjxl::DcQuantizationMode::kPredictionAware;
       else
         throw std::runtime_error("Invalid DC quantization");
+    } else if (key == "--epf-sharpness-search") {
+      if (value != "on" && value != "off")
+        throw std::runtime_error("EPF sharpness search must be on or off");
+      options.adaptive_epf_sharpness = value == "on";
     } else if (key == "--effort")
       options.effort = Integer(value);
     else if (key == "--num-threads")
@@ -145,6 +150,7 @@ int main(int argc, char **argv) {
           << "gjxl_quality_benchmark --input IMAGE.pfm --output IMAGE.jxl "
              "--raw-samples REPORT.json [--distance D] [--effort 1..10] "
              "[--num-threads 1..256] [--warmups N] [--samples N] "
+             "[--epf-sharpness-search on|off] "
              "[--dc-prediction gradient|weighted] "
              "[--dc-quantization auto|round|prediction-aware] [--adaptive-dc-smoothing|--no-adaptive-dc-smoothing]\n";
       return 0;
@@ -155,6 +161,7 @@ int main(int argc, char **argv) {
     const gjxl::VarDctEncodingOptions settings{
         .butteraugli_target = options.distance,
         .effort = static_cast<int32_t>(options.effort),
+        .adaptive_epf_sharpness = options.adaptive_epf_sharpness,
         .cpu_thread_count = options.threads,
         .backend = gjxl::VarDctBackendPreference::kMetal,
         .metal_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
@@ -234,6 +241,8 @@ int main(int argc, char **argv) {
            << ",\"input_height\":" << image.extent().height
            << ",\"requested_distance\":" << options.distance
            << ",\"effort\":" << options.effort
+           << ",\"adaptive_epf_sharpness\":"
+           << (options.adaptive_epf_sharpness ? "true" : "false")
            << ",\"validation_encodes\":1,\"warmups\":" << options.warmups
            << ",\"sample_count\":" << times.size() << ",\"samples\":[";
     for (size_t i = 0; i < times.size(); ++i) {

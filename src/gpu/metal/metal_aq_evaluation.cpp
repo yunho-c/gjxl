@@ -208,6 +208,7 @@ static_assert(sizeof(AqReconstructionParams) == 148);
 static_assert(sizeof(AqResetParams) == 32);
 static_assert(sizeof(AqResidentPolicyInitializeParams) == 20);
 static_assert(sizeof(AqResidentPolicyUpdateParams) == 48);
+static_assert(sizeof(AqEpfSearchParams) == 56);
 static_assert(std::is_standard_layout_v<AqInitialCflParams>);
 static_assert(std::is_trivially_copyable_v<AqInitialCflParams>);
 static_assert(sizeof(AqInitialCflParams) == 24);
@@ -923,6 +924,8 @@ Status MetalPreparedAqEvaluation::Prepare(
     }
     strategies_host_ = *preparation.strategies;
     epf_sharpness_host_.resize(block_count_);
+    if (options_.search_epf_sharpness)
+      selected_epf_sharpness_host_.resize(block_count_);
     size_t tile_count = 0;
     if (!tile_extent_.try_area(&tile_count)) {
       return Status::InvalidArgument(
@@ -1085,6 +1088,8 @@ Status MetalPreparedAqEvaluation::Prepare(
           .extra_dc_precision = options_.profile.extra_dc_precision,
           .adaptive_dc_smoothing = options_.profile.adaptive_dc_smoothing,
           .resident_strategy_metadata = resident_strategy_metadata_enabled_,
+          .search_epf_sharpness = options_.search_epf_sharpness,
+          .resident_epf_search_reference = resident_ac_strategy_inputs_,
       },
       &storage_plan);
   if (!status.ok()) return status;
@@ -1298,6 +1303,35 @@ Status MetalPreparedAqEvaluation::Prepare(
                                 &resident_strategy_parameters_);
     if (!status.ok())
       return status;
+  }
+  if (options_.search_epf_sharpness) {
+    for (size_t i = 0; i < 3; ++i) {
+      status = staging_.BindPlane(storage_plan.epf_candidate_errors[i],
+                                  &epf_candidate_errors_[i]);
+      if (!status.ok()) return status;
+      if (resident_ac_strategy_inputs_) {
+        epf_search_reference_[i] = coding_[i];
+      } else {
+        status = persistent_.BindPlane(storage_plan.epf_search_reference[i],
+                                       &epf_search_reference_[i]);
+        if (!status.ok()) return status;
+        status = UploadPlane(*backend_,
+            preparation.epf_search_reference.original_opsin.plane[i],
+            epf_search_reference_[i]);
+        if (!status.ok()) return status;
+      }
+    }
+    if (resident_ac_strategy_inputs_) {
+      epf_search_mask_ = initial_quant_pixel_mask_;
+    } else {
+      status = persistent_.BindPlane(storage_plan.epf_search_mask, &epf_search_mask_);
+      if (!status.ok()) return status;
+      status = UploadPlane(*backend_, preparation.epf_search_reference.pixel_mask,
+                            epf_search_mask_);
+      if (!status.ok()) return status;
+    }
+    status = ConfigureEpfSharpnessSearch(0.0f);
+    if (!status.ok()) return status;
   }
   if (persistent_.layout_bytes() != storage_plan.persistent_bytes ||
       staging_.layout_bytes() != storage_plan.staging_bytes) {
@@ -1713,7 +1747,8 @@ MetalPreparedAqEvaluation::ReconfigureImpl(const AcStrategyGrid &strategies,
       AcStrategyCell cell;
       const Status status = strategies.Get(x, y, &cell);
       if (!status.ok() || !SupportedAqStrategy(cell.strategy) ||
-          epf_sharpness.Row(y)[x] >= 8) {
+          epf_sharpness.Row(y)[x] >= 8 ||
+          (options_.search_epf_sharpness && epf_sharpness.Row(y)[x] != 4)) {
         return Status::InvalidArgument(
           "Prepared AQ reconfiguration metadata is invalid");
       }
@@ -2230,6 +2265,12 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     Invalidate();
     return status;
   }
+  status = ConfigureEpfSharpnessSearch(
+      options_.search_epf_sharpness ? input.butteraugli_target : 0.0f);
+  if (!status.ok()) {
+    Invalidate();
+    return status;
+  }
   resident_quant_selection_params_.quant_dc = input.quant_dc;
   resident_quant_selection_params_.scaled_quant_dc =
     static_cast<uint32_t>(static_cast<int32_t>(
@@ -2276,7 +2317,8 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
        .gaborish = options_.profile.loop_filter.gaborish,
        .epf_iterations = epf_iterations,
        .deferred_dc = DeferredDc(),
-       .adaptive_dc_smoothing = options_.profile.adaptive_dc_smoothing}, &storage);
+       .adaptive_dc_smoothing = options_.profile.adaptive_dc_smoothing,
+       .search_epf_sharpness = options_.search_epf_sharpness}, &storage);
     if (!status.ok()) {
       Invalidate();
       return status;
@@ -2415,6 +2457,10 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
             "aq.policy_initialize",
             ResidentProfileStage::kPolicyInitialize, iteration);
         }
+        if (epf_search_target_ != 0.0f && iteration == resident_policy_iterations_) {
+          append_stage("ar.sharpness_search", ResidentProfileStage::kEpfSharpnessSearch,
+                        iteration);
+        }
         if (options_.profile.loop_filter.gaborish) {
           append_stage(
             "aq.gaborish", ResidentProfileStage::kGaborish, iteration);
@@ -2483,7 +2529,12 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
           "aq.policy_update", ResidentProfileStage::kPolicyUpdate,
           iteration);
       }
-      if (!resident_evaluate_final_field_) {
+      if (!resident_evaluate_final_field_ && epf_search_target_ != 0.0f) {
+        append_stage("ar.reconstruction", ResidentProfileStage::kEpfSearchFinalReconstruction,
+                      static_cast<uint32_t>(resident_policy_iterations_));
+        append_stage("ar.sharpness_search", ResidentProfileStage::kEpfSharpnessSearch,
+                      static_cast<uint32_t>(resident_policy_iterations_));
+      } else if (!resident_evaluate_final_field_) {
         if (score_count == 0) {
           append_reconstruction_stage(
             "aq.final_frame.reset", ReconstructionProfileStage::kReset,
@@ -2745,6 +2796,13 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
   if (frame_requested) {
     uint64_t mapping_nanoseconds = 0;
     uint64_t assembly_nanoseconds = 0;
+    status = ReadbackEpfSharpness();
+    if (!status.ok()) {
+      Invalidate();
+      return status;
+    }
+    candidate_readback_stats.epf_sharpness_bytes =
+        epf_search_target_ != 0.0f ? block_count_ : 0;
     if (candidate_completed_frame != nullptr) {
       const auto begin = profiling ? ProfileClock::now() : ProfileClock::time_point{};
       status = FinishCompletedFrame(*candidate_completed_frame);
@@ -3042,8 +3100,7 @@ Status MetalPreparedAqEvaluation::AssembleFrame(
           .quantizer = &last_quantizer_,
           .y_to_x = {last_y_to_x_.data(), tile_extent_, tile_extent_.width},
           .y_to_b = {last_y_to_b_.data(), tile_extent_, tile_extent_.width},
-          .epf_sharpness = {epf_sharpness_host_.data(), block_extent_,
-                            block_extent_.width},
+          .epf_sharpness = FinalEpfSharpness(),
           .profile = options_.profile,
           .quantized_dc = quantized_dc,
           .quantized_ac = quantized_ac,
@@ -3213,6 +3270,10 @@ Status MetalPreparedAqEvaluation::FinishCompletedFrame(
     MetalCompletedVarDctFrame& frame) const {
   const resource_budget_internal::ResourceClassScope resource_class(
     resource_budget_internal::ResourceClass::kCompletedFrame);
+  const auto sharpness = FinalEpfSharpness();
+  for (size_t y = 0; y < block_extent_.height; ++y)
+    std::copy_n(sharpness.Row(y), block_extent_.width,
+                frame.sharpness.data() + y * block_extent_.width);
   std::span<const int32_t> raw_quant;
   std::span<const int32_t> population;
   std::span<const int32_t> quantized_dc;
@@ -3663,6 +3724,13 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
   }
 
   if (frame_requested) {
+    status = ReadbackEpfSharpness();
+    if (!status.ok()) {
+      Invalidate();
+      return status;
+    }
+    candidate_readback_stats.epf_sharpness_bytes =
+        epf_search_target_ != 0.0f ? block_count_ : 0;
     if (exact_coefficients_) {
       status = AssembleFrameFromReadback(&final_frame);
     } else {
@@ -4018,6 +4086,34 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
     preparation.original_linear_rgb.extent(), coding_extent);
   if (!status.ok())
     return status;
+  if (preparation.options.search_epf_sharpness) {
+    if (preparation.frame_only || preparation.options.evaluation_free ||
+        preparation.omit_initial_search_data ||
+        preparation.options.metric != AqEvaluationMetric::kButteraugli) {
+      return Status::InvalidArgument("EPF search requires complete Butteraugli AQ");
+    }
+    if (!preparation.resident_ac_strategy_inputs) {
+      const auto& reference = preparation.epf_search_reference;
+      if (!reference.original_opsin.valid() ||
+          reference.original_opsin.extent() != coding_extent ||
+          !std::ranges::all_of(reference.original_opsin.plane,
+              [](auto plane) { return ValidHostPlaneLayout(plane); }) ||
+          !ValidHostPlaneLayout(reference.pixel_mask) ||
+          reference.pixel_mask.extent != coding_extent) {
+        return Status::InvalidArgument("EPF search reference geometry is invalid");
+      }
+      status = ValidateFiniteImage(reference.original_opsin,
+                                    "EPF search reference contains non-finite samples");
+      if (!status.ok()) return status;
+      for (size_t y = 0; y < coding_extent.height; ++y) {
+        for (size_t x = 0; x < coding_extent.width; ++x) {
+          const float mask = reference.pixel_mask.Row(y)[x];
+          if (!std::isfinite(mask) || mask < 0.0f)
+            return Status::InvalidArgument("EPF search pixel mask is invalid");
+        }
+      }
+    }
+  }
   if (resident_original_specified) {
     status = ValidateDeviceImage3View(
       preparation.resident_original_linear_rgb, backend_->id());
@@ -4135,7 +4231,9 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
         return Status::InvalidArgument(
             "Prepared AQ strategy grid contains an unsupported strategy");
       }
-      if (preparation.epf_sharpness.Row(y)[x] >= 8) {
+      if (preparation.epf_sharpness.Row(y)[x] >= 8 ||
+          (preparation.options.search_epf_sharpness &&
+           preparation.epf_sharpness.Row(y)[x] != 4)) {
         return Status::InvalidArgument(
             "Prepared AQ EPF sharpness is out of range");
       }
@@ -4157,6 +4255,12 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
 }
 
 Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
+  if (!std::isfinite(input.epf_sharpness_search_target) ||
+      input.epf_sharpness_search_target < 0.0f ||
+      (input.epf_sharpness_search_target != 0.0f &&
+       (!options_.search_epf_sharpness ||
+        input.exact_reconstructed_linear_rgb.valid())))
+    return Status::InvalidArgument("AQ EPF search input is invalid");
   if (final_transform_metadata_pending_ && !resident_strategy_pending_)
     return Status::FailedPrecondition(
       "AQ transform metadata requires successful reconfiguration");
@@ -4348,7 +4452,8 @@ Status MetalPreparedAqEvaluation::BeginOperation(bool profiling_reserved) {
 }
 
 Status MetalPreparedAqEvaluation::UploadInput(AqEvaluationInput input) {
-  Status status = Status::Ok();
+  Status status = ConfigureEpfSharpnessSearch(input.epf_sharpness_search_target);
+  if (!status.ok()) return status;
   uint64_t upload_bytes = 0;
   resident_quantization_active_ = input.quant_field.valid();
   if (resident_quantization_active_) {
@@ -4819,6 +4924,7 @@ void MetalPreparedAqEvaluation::EncodeEvaluationSubmission(
     const_cast<void*>(context));
   const bool prepared_color_correlation =
     self.resident_color_correlation_pending_;
+  self.EncodeEpfSearchReset(backend, encoder);
   EncodeReconstructionSubmission(backend, encoder, &self);
   if (prepared_color_correlation) {
     self.resident_color_correlation_pending_ = false;
@@ -4826,6 +4932,7 @@ void MetalPreparedAqEvaluation::EncodeEvaluationSubmission(
     self.resident_forward_coefficients_ready_ = true;
   }
   if (!self.exact_linear_reconstruction_) {
+    self.EncodeEpfSharpnessSearch(backend, encoder);
     self.EncodePostprocess(backend, encoder);
   }
   if (self.options_.metric == AqEvaluationMetric::kButteraugli) {
@@ -4875,6 +4982,7 @@ void MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission(
     const void* context) {
   auto& self = *static_cast<MetalPreparedAqEvaluation*>(
     const_cast<void*>(context));
+  self.EncodeEpfSearchReset(backend, encoder);
   if (self.resident_strategy_pending_)
     self.EncodeResidentStrategyMetadata(backend, encoder);
   if (self.DeviceStrategyDispatch())
@@ -4894,6 +5002,8 @@ void MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission(
       self.EncodeResidentPolicyInitialize(backend, encoder);
     }
 
+    if (iteration == self.resident_policy_iterations_)
+      self.EncodeEpfSharpnessSearch(backend, encoder);
     self.EncodePostprocess(backend, encoder, true);
     if (self.uses_butteraugli_sinks_) {
       const auto batches =
@@ -4936,7 +5046,13 @@ void MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission(
       backend, encoder, static_cast<uint32_t>(iteration));
   }
   if (!self.resident_evaluate_final_field_) {
-    self.EncodeResidentFrame(backend, encoder);
+    if (self.epf_search_target_ != 0.0f) {
+      self.EncodeResidentReconstruction(backend, encoder,
+          static_cast<uint32_t>(self.resident_policy_iterations_));
+      self.EncodeEpfSharpnessSearch(backend, encoder);
+    } else {
+      self.EncodeResidentFrame(backend, encoder);
+    }
   }
   self.reset_params_.preserve_error = 0u;
   self.reset_params_.preserve_forward_coefficients = 0u;
@@ -5066,6 +5182,9 @@ void MetalPreparedAqEvaluation::EncodeResidentProfileStage(
     stage.iteration == self.resident_policy_iterations_;
   switch (stage.stage) {
     case ResidentProfileStage::kReconstruction:
+      if (stage.iteration == 0 &&
+          stage.reconstruction_stage == ReconstructionProfileStage::kReset)
+        self.EncodeEpfSearchReset(backend, encoder);
       self.reset_params_.preserve_error = stage.iteration == 0 ? 0u : 1u;
       self.reset_params_.preserve_forward_coefficients =
         stage.iteration == 0 &&
@@ -5089,6 +5208,13 @@ void MetalPreparedAqEvaluation::EncodeResidentProfileStage(
         self.resident_color_correlation_readback_needed_ = true;
         self.resident_forward_coefficients_ready_ = true;
       }
+      break;
+    case ResidentProfileStage::kEpfSearchFinalReconstruction:
+      if (stage.iteration == 0) self.EncodeEpfSearchReset(backend, encoder);
+      self.EncodeResidentReconstruction(backend, encoder, stage.iteration);
+      break;
+    case ResidentProfileStage::kEpfSharpnessSearch:
+      self.EncodeEpfSharpnessSearch(backend, encoder);
       break;
     case ResidentProfileStage::kPolicyInitialize:
       self.EncodeResidentPolicyInitialize(backend, encoder);
@@ -5300,11 +5426,14 @@ Status CreateAqPipelines(
   }
   const std::array<
       std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,
-      3>
+      6>
       postprocess = {{
           {"gjxl_aq_gaborish_f32", &pipelines.gaborish},
           {"gjxl_aq_epf_f32", &pipelines.epf},
           {"gjxl_aq_opsin_to_linear_rgb_f32", &pipelines.opsin_to_linear},
+          {"gjxl_aq_epf_search_sigma", &pipelines.epf_search_sigma},
+          {"gjxl_aq_epf_search_error", &pipelines.epf_search_error},
+          {"gjxl_aq_epf_search_select", &pipelines.epf_search_select},
       }};
   for (const auto &[name, pipeline] : postprocess) {
     status = CreateAqPipeline(device, library, name, pipeline);
@@ -5322,6 +5451,11 @@ Status CreateAqPipelines(
       return Status::Unavailable(
         "Metal cannot launch an AQ postprocess threadgroup");
     }
+  }
+  if (pipelines.epf_search_sigma->maxTotalThreadsPerThreadgroup() < 256 ||
+      pipelines.epf_search_error->threadExecutionWidth() != 32) {
+    return Status::Unavailable(
+        "Metal cannot launch the EPF search threadgroups");
   }
   if (device->supportsFamily(MTL::GPUFamilyApple9)) {
     constexpr std::array<std::string_view, 3> direct_names = {

@@ -42,6 +42,7 @@ struct AqEvaluationOptions {
   bool evaluation_free = false;
   DcQuantizationMode dc_quantization = DcQuantizationMode::kRound;
   VarDctDcPrediction dc_prediction = VarDctDcPrediction::kGradient;
+  bool search_epf_sharpness = false;
 
   friend bool operator==(const AqEvaluationOptions&,
                          const AqEvaluationOptions&) = default;
@@ -104,6 +105,10 @@ struct AqEvaluationPreparation {
   /// Reserves storage for a deferred device-selected strategy map. The backend
   /// may expose ReconfigureResidentStrategies only with this capability.
   bool resident_strategy_metadata = false;
+  /// Complete nonresident preparations upload these immutable search inputs.
+  /// Resident AC preparations instead reuse their original coding XYB and
+  /// initial blurred pixel mask, without a host materialization.
+  EpfSharpnessSearchReference epf_search_reference;
 };
 
 struct ResidentAcStrategyInputs {
@@ -130,6 +135,9 @@ struct AqEvaluationInput {
   // may reject them.
   const VarDctEncoderFrame* exact_coefficients = nullptr;
   ConstImage3FView exact_reconstructed_linear_rgb;
+  /// Zero keeps the prepared neutral map. A positive target selects sharpness
+  /// after coefficient reconstruction and before the final metric evaluation.
+  float epf_sharpness_search_target = 0.0f;
 };
 
 struct AqEvaluationOutput {
@@ -160,8 +168,9 @@ struct AqResidentButteraugliPolicyInput {
   float upper_bound = 0.0f;
   size_t iterations = 0;
   /// When false, applies every requested policy update and then quantizes the
-  /// resulting field directly into `output.frame` without reconstructing and
-  /// scoring that final field. Score history then contains `iterations`
+  /// resulting field into `output.frame` without perceptually scoring that
+  /// final field. Enabled EPF sharpness search still reconstructs it to select
+  /// the final sharpness map. Score history then contains `iterations`
   /// entries instead of `iterations + 1`. This is an explicit encoding-only
   /// optimization; diagnostic block-map and reconstruction outputs are not
   /// available for the unevaluated final field.

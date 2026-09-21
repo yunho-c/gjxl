@@ -95,6 +95,9 @@ Status ComputeResidentAqProfileInputStoragePlan(
                      static_cast<size_t>(!o.evaluate_final_field) *
                          (1 + kSupportedAqStrategies.size() + size_t(o.deferred_dc)) +
                      1;
+  // Search itself is one aggregate stage. An unscored final field uses a
+  // complete reconstruction stage instead of the coefficient-only tail.
+  if (o.search_epf_sharpness) p.stage_capacity += 2;
   if (p.score_count == 0) {
     // First use also resets the error state, transforms the source, and
     // prepares final CfL before the final coefficient pass.

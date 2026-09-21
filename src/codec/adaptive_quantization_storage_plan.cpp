@@ -127,6 +127,14 @@ Status ComputeCpuAqStoragePlan(Extent2D source, const CpuAqStorageOptions &o,
                        color.working, reduction})
     if (!p.evaluation_working.Add(scratch))
       return Overflow();
+  if (o.search_epf_sharpness &&
+      (!p.evaluation_working.Add(image, 2) ||
+       !p.evaluation_working.AddVector<float>(block_count, kFreshExact, 5) ||
+       !p.evaluation_working.AddVector<uint8_t>(block_count, kFreshExact, 2)))
+    return Overflow();
+  // Search borrows the existing reconstruction, original XYB, and mask.
+  // Its base/filtered images, candidate errors, sigma, atomic error/sigma
+  // scratch, and two sharpness maps coexist; filter scratch is bounded above.
   // EPF sigma reduction and distance/error reduction use this scratch at
   // different stages; one reduction envelope above covers either consumer.
   if (o.control == AdaptiveQuantizationControlMode::kButteraugli) {

@@ -251,6 +251,7 @@ add_library(
   src/codec/dc_smoothing.cpp
   src/codec/dct.cpp
   src/codec/epf.cpp
+  src/codec/epf_search.cpp
   src/codec/gaborish.cpp
   src/codec/loop_filter.cpp
   src/codec/maximum_error.cpp
@@ -2170,6 +2171,10 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_epf_test
   )
 
+  add_executable(gjxl_epf_search_test tests/epf_search_test.cpp)
+  target_link_libraries(gjxl_epf_search_test PRIVATE gjxl_codec)
+  add_test(NAME epf_search COMMAND gjxl_epf_search_test)
+
   add_executable(
     gjxl_reconstruction_test
     tests/reconstruction_test.cpp
@@ -2573,6 +2578,13 @@ if(GJXL_BUILD_TESTS)
     NAME metal_aq_evaluation
     COMMAND gjxl_metal_aq_evaluation_test
   )
+
+  add_executable(gjxl_metal_epf_search_test tests/metal_epf_search_test.cpp)
+  target_link_libraries(gjxl_metal_epf_search_test PRIVATE gjxl_codec gjxl_codestream gjxl_metal)
+  target_compile_definitions(gjxl_metal_epf_search_test PRIVATE
+    GJXL_METALLIB_PATH="${GJXL_METALLIB}")
+  add_dependencies(gjxl_metal_epf_search_test gjxl_metal_shaders)
+  add_test(NAME metal_epf_search COMMAND gjxl_metal_epf_search_test)
 
   add_executable(
     gjxl_adaptive_quantization_gpu_policy_test

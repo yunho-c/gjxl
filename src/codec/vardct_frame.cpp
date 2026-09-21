@@ -73,6 +73,29 @@ ConstPlaneU8View VarDctEncoderFrame::epf_sharpness() const noexcept {
   return {epf_sharpness_.data(), extent, extent.width};
 }
 
+Status vardct_frame_internal::ReplaceEpfSharpness(
+    VarDctEncoderFrame& frame, ConstPlaneU8View sharpness) {
+  if (!frame.valid() || !sharpness.valid() ||
+      sharpness.extent != frame.geometry_.block_grid().blocks ||
+      sharpness.extent.height - 1 >
+          (std::numeric_limits<size_t>::max() - sharpness.extent.width) /
+              sharpness.stride) {
+    return Status::InvalidArgument("Replacement EPF sharpness geometry is invalid");
+  }
+  for (size_t y = 0; y < sharpness.extent.height; ++y) {
+    for (size_t x = 0; x < sharpness.extent.width; ++x) {
+      if (sharpness.Row(y)[x] >= 8) {
+        return Status::InvalidArgument("Replacement EPF sharpness is out of range");
+      }
+    }
+  }
+  for (size_t y = 0; y < sharpness.extent.height; ++y) {
+    std::copy_n(sharpness.Row(y), sharpness.extent.width,
+                frame.epf_sharpness_.data() + y * sharpness.extent.width);
+  }
+  return Status::Ok();
+}
+
 ConstImage3I32View VarDctEncoderFrame::quantized_dc() const noexcept {
   const Extent2D extent = geometry_.block_grid().blocks;
   return ConstImage3I32View{{

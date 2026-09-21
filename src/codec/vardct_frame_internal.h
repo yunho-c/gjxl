@@ -12,6 +12,11 @@
 
 namespace gjxl::vardct_frame_internal {
 
+/// Replaces only the reconstruction-control map in a completed CPU frame.
+/// Validates the entire input before mutation; does not reallocate or recode.
+[[nodiscard]] Status ReplaceEpfSharpness(VarDctEncoderFrame& frame,
+                                        ConstPlaneU8View sharpness);
+
 struct QuantizedAcTransformLayout {
   size_t block_x = 0;
   size_t block_y = 0;

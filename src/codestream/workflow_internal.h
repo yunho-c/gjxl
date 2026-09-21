@@ -17,6 +17,16 @@
 
 namespace gjxl::codestream_internal {
 
+/// Distance and EPF-iteration gates are evaluated per encoding attempt.
+/// Storage preparation uses this target-independent capability decision so
+/// a target-size retry may cross distance 0.5 without exceeding admission.
+[[nodiscard]] constexpr bool UseEpfSharpnessSearch(
+    const VarDctEncodingOptions& options) noexcept {
+  return options.adaptive_epf_sharpness && options.effort >= 6 &&
+         options.rate_control_mode != VarDctRateControlMode::kMaximumError &&
+         options.metal_aq_mode != GpuAdaptiveQuantizationMode::kMaximumThroughput;
+}
+
 /// Scope for modular DC mapping search. Keep explicit frontend and
 /// entropy modes, ordinary DC rounding, and other efforts on their own policy.
 [[nodiscard]] constexpr bool UseDcUintSearch(
@@ -87,6 +97,7 @@ inline void ConfigureInitialQuantizationPolicy(
   const VarDctEncodingOptions& options,
   CpuQuantizationPipelineOptions* pipeline) noexcept {
   pipeline->uniform_initial_quantization = UseUniformInitialQuantization(options);
+  pipeline->adaptive_quantization.search_epf_sharpness = UseEpfSharpnessSearch(options);
   pipeline->adaptive_quantization.profile.loop_filter.gaborish =
     !pipeline->uniform_initial_quantization;
 }

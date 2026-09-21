@@ -121,7 +121,7 @@ bool CheckPlans() {
         ((coding.width + 63) / 64) * ((coding.height + 63) / 64);
     const size_t groups =
         ((coding.width + 255) / 256) * ((coding.height + 255) / 256);
-    for (size_t flags = 0; flags < 4096; ++flags) {
+    for (size_t flags = 0; flags < 8192; ++flags) {
       AqHostStorageOptions o{
           .source_extent = source,
           .coding_extent = coding,
@@ -137,8 +137,11 @@ bool CheckPlans() {
           .reconstruct_exact_coefficients = bool(flags & 256),
           .reconstructed_rgb_readback = bool(flags & 512),
           .resident_quant_field_readback = bool(flags & 1024),
-          .resident_strategy_metadata = bool(flags & 2048)};
+          .resident_strategy_metadata = bool(flags & 2048),
+          .search_epf_sharpness = bool(flags & 4096)};
       const bool invalid =
+          (o.search_epf_sharpness &&
+           (o.frame_only || o.metric != AqEvaluationMetric::kButteraugli)) ||
           (o.resident_ac_strategy_inputs && !o.resident_initial_quant) ||
           (o.defer_final_transform_metadata &&
            (!o.resident_ac_strategy_inputs || !o.resident_quantization ||
@@ -166,6 +169,14 @@ bool CheckPlans() {
       if (invalid)
         continue;
       ++cases;
+      if (o.search_epf_sharpness) {
+        auto fixed = o;
+        fixed.search_epf_sharpness = false;
+        AqHostStoragePlan baseline;
+        if (!Ok(ComputeAqHostStoragePlan(fixed, &baseline)) ||
+            !Check(plan.prepared.retained_bytes - baseline.prepared.retained_bytes == blocks,
+                   "Selected EPF map was omitted or counted twice")) return false;
+      }
       if (!Check(
               plan.prepared.retained_bytes <= plan.prepared.peak_bytes &&
                   plan.preparation.peak_bytes >=

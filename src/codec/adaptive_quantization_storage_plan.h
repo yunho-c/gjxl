@@ -42,6 +42,7 @@ struct CpuAqStorageOptions {
   DcQuantizationMode dc_quantization = DcQuantizationMode::kRound;
   VarDctDcPrediction dc_prediction = VarDctDcPrediction::kGradient;
   bool adaptive_dc_smoothing = false;
+  bool search_epf_sharpness = false;
 };
 
 struct CpuAqStoragePlan {

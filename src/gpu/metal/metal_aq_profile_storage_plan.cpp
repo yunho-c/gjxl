@@ -46,6 +46,8 @@ constexpr size_t MaximumAqIdLength() {
                               "aq.final_frame.dc_quantization",
                               "aq.policy_initialize",
                               "aq.policy_update",
+                              "ar.reconstruction",
+                              "ar.sharpness_search",
                               "aq.gaborish",
                               "aq.epf.pass_0",
                               "aq.epf.pass_1",
@@ -208,6 +210,14 @@ ComputeResidentAqProfileStoragePlan(Extent2D source, Extent2D coding,
   // Completed output counts coefficient zeros once per family after the
   // final integer stores, including when there are no scored passes.
   if (frame == AqProfileFrameOutput::kCompleted) p.maximum_dispatches += families;
+  if (policy.search_epf_sharpness) {
+    // Neutral-map reset, shared Gaborish, up to three global candidates,
+    // selection, and a final sigma field from the selected map.
+    p.maximum_dispatches += 2 + size_t(policy.gaborish) +
+        3 * (families + policy.epf_iterations + 1) + families;
+    if (!policy.evaluate_final_field)
+      p.maximum_dispatches += 1 + 2 * families + dc_dispatches;
+  }
   p.maximum_id_length = MaximumAqIdLength();
   status = gpu_profile_internal::ComputeSubmissionProfileStoragePlan(
       {p.metadata.stage_capacity, p.maximum_dispatches, p.maximum_id_length,

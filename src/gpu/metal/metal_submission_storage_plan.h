@@ -75,6 +75,7 @@ struct ResidentAqProfileInputOptions {
   size_t epf_iterations = 0;
   bool deferred_dc = false;
   bool adaptive_dc_smoothing = false;
+  bool search_epf_sharpness = false;
 };
 
 struct ResidentAqProfileInputStoragePlan {

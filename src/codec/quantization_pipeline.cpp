@@ -474,6 +474,12 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
   AdaptiveQuantizationOptions adaptive_options =
     options.adaptive_quantization;
   adaptive_options.butteraugli_target = control_target;
+  adaptive_options.epf_search_reference = {
+      prepared.coding_opsin,
+      prepared.pixel_mask.empty()
+          ? ConstPlaneF32View{}
+          : ConstPlaneF32View{prepared.pixel_mask.data(), prepared.padded_extent,
+                              prepared.padded_extent.width}};
   // Providers commit atomically, so the selected caller-owned output can be
   // the staging destination without another prepared copy of every result.
   if (deferred_search) {

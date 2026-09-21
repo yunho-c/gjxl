@@ -72,7 +72,8 @@ Status ComputeCpuWorkflowStoragePlan(Extent2D source,
        .collect_profile = false,
        .dc_quantization = ResolveDcQuantization(e),
        .dc_prediction = e.dc_prediction,
-       .adaptive_dc_smoothing = ResolveAdaptiveDcSmoothing(e)},
+       .adaptive_dc_smoothing = ResolveAdaptiveDcSmoothing(e),
+       .search_epf_sharpness = UseEpfSharpnessSearch(e)},
       &p.aq);
   if (!status.ok())
     return status;

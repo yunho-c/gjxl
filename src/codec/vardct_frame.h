@@ -35,6 +35,7 @@ namespace vardct_frame_internal {
 class VarDctFrameView;
 [[nodiscard]] VarDctFrameView BorrowFrame(const VarDctEncoderFrame&) noexcept;
 struct QuantizedFrameAssemblyInput;
+[[nodiscard]] Status ReplaceEpfSharpness(VarDctEncoderFrame&, ConstPlaneU8View);
 [[nodiscard]] Status AssembleVarDctEncoderFrame(
   QuantizedFrameAssemblyInput,
   VarDctEncoderFrame*);
@@ -133,6 +134,8 @@ public:
     VarDctAcGroupView* out) const;
 
 private:
+  friend Status vardct_frame_internal::ReplaceEpfSharpness(
+      VarDctEncoderFrame&, ConstPlaneU8View);
   friend vardct_frame_internal::VarDctFrameView
     vardct_frame_internal::BorrowFrame(const VarDctEncoderFrame&) noexcept;
 

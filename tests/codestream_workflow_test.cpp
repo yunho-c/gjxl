@@ -440,8 +440,9 @@ bool CheckDeterministicWorkflow() {
     return false;
   }
 
-  // Keep the original DC policy as an explicit check. Context-map compression
-  // changes its bytes while preserving the decoded fixture exactly.
+  // Keep the original DC and fixed-sharpness policies as an explicit check.
+  // Context-map compression changes its bytes while preserving the decoded
+  // fixture exactly; adaptive EPF intentionally changes that reconstruction.
   std::vector<uint8_t> legacy_gradient;
   {
     gjxl::codestream_internal::ScopedDcTreePolicyForTesting legacy(
@@ -449,6 +450,7 @@ bool CheckDeterministicWorkflow() {
     status = gjxl::EncodeLinearRgbVarDctCodestream(
       image.View(),
       {.butteraugli_target = 1.0f,
+       .adaptive_epf_sharpness = false,
        .dc_prediction = gjxl::VarDctDcPrediction::kGradient,
        .dc_quantization = gjxl::DcQuantizationMode::kRound,
        .adaptive_dc_smoothing = false},

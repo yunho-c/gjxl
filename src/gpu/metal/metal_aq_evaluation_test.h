@@ -26,6 +26,18 @@ struct MetalAqStrategyMetadataSnapshot {
       destinations;
 };
 
+struct MetalEpfSearchSnapshotForTesting {
+  Extent2D blocks;
+  size_t candidate_count = 0;
+  std::array<std::vector<float>, 3> errors;
+  std::vector<uint8_t> sharpness;
+};
+
+/// Reads the last successful search immediately after evaluation, before any
+/// reuse or scratch reclamation. This diagnostic adds no production readback.
+[[nodiscard]] Status GetMetalEpfSearchSnapshotForTesting(
+    PreparedAqEvaluation& prepared, MetalEpfSearchSnapshotForTesting* output);
+
 /// Captures authoritative CPU-prepared metadata, including the production
 /// completed-frame destination builder, without evaluating any image content.
 [[nodiscard]] Status
@@ -44,11 +56,12 @@ struct MetalAqReadbackStatsForTesting {
   /// Completed shared-buffer bytes read directly during frame assembly.
   size_t mapped_frame_bytes = 0;
   size_t reconstructed_rgb_bytes = 0;
+  size_t epf_sharpness_bytes = 0;
 
   [[nodiscard]] size_t total_bytes() const noexcept {
     return control_bytes + score_history_bytes + maximum_error_bytes +
       quantizer_bytes + quant_field_bytes + block_distance_map_bytes +
-      frame_bytes + mapped_frame_bytes + reconstructed_rgb_bytes;
+      frame_bytes + mapped_frame_bytes + reconstructed_rgb_bytes + epf_sharpness_bytes;
   }
 };
 

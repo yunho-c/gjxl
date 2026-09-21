@@ -182,7 +182,8 @@ Status MetalPreparedAqEvaluation::ReconfigureResidentStrategies(
     return status;
   for (size_t y = 0; y < block_extent_.height; ++y)
     for (size_t x = 0; x < block_extent_.width; ++x)
-      if (sharpness.Row(y)[x] >= 8)
+      if (sharpness.Row(y)[x] >= 8 ||
+          (options_.search_epf_sharpness && sharpness.Row(y)[x] != 4))
         return Status::InvalidArgument(
             "Resident strategy sharpness is invalid");
   status = BeginOperation();

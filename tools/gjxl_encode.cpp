@@ -59,6 +59,7 @@ struct Options {
   gjxl::VarDctDcPrediction dc_prediction = gjxl::kDefaultDcPrediction;
   gjxl::DcQuantizationMode dc_quantization = gjxl::DcQuantizationMode::kAutomatic;
   std::optional<bool> adaptive_dc_smoothing;
+  std::optional<bool> adaptive_epf_sharpness;
   bool collect_final_butteraugli_score = false;
 };
 
@@ -314,6 +315,12 @@ struct Options {
     } else if (argument == "--adaptive-dc-smoothing" || argument == "--no-adaptive-dc-smoothing") {
       if (candidate.adaptive_dc_smoothing.has_value()) return false;
       candidate.adaptive_dc_smoothing = argument == "--adaptive-dc-smoothing";
+    } else if (argument == "--epf-sharpness-search") {
+      if (candidate.adaptive_epf_sharpness.has_value() || index + 1 >= argc)
+        return false;
+      const std::string_view value = argv[++index];
+      if (value != "on" && value != "off") return false;
+      candidate.adaptive_epf_sharpness = value == "on";
     } else if (argument == "--effort") {
       size_t effort = 0;
       if (effort_set || index + 1 >= argc ||
@@ -480,6 +487,7 @@ void PrintUsage(const char* executable) {
                "[--max-attempts N] "
                "[--size-selection under-budget|closest] "
                "[--effort 1..10] [--dc-prediction gradient|weighted] "
+               "[--epf-sharpness-search on|off] "
                "[--dc-quantization auto|round|prediction-aware] [--adaptive-dc-smoothing|--no-adaptive-dc-smoothing] "
                "[--high-density] "
                "[--maximum-compression] "
@@ -513,6 +521,7 @@ int main(int argc, char** argv) {
       linear_rgb.const_view(),
       {.butteraugli_target = options.butteraugli_target,
        .effort = options.effort,
+       .adaptive_epf_sharpness = options.adaptive_epf_sharpness.value_or(true),
        .density_mode = options.density_mode,
        .compression_mode = options.compression_mode,
        .rate_control_mode = options.rate_control_mode,

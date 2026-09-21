@@ -73,6 +73,11 @@ bool CheckAqSlices(const AqStoragePlanOptions &p, const AqStoragePlan &plan) {
     persistent.push_back(plane);
   for (const auto &plane : plan.reconstructed_linear)
     persistent.push_back(plane);
+  for (const auto &plane : plan.epf_search_reference)
+    persistent.push_back(plane);
+  persistent.push_back(plan.epf_search_mask);
+  for (const auto &plane : plan.epf_candidate_errors)
+    staging.push_back(plane);
   persistent.push_back(plan.strategies);
   persistent.push_back(plan.anchors);
   persistent.push_back(plan.epf_sharpness);
@@ -428,6 +433,45 @@ bool CheckFailureAndNoBacking() {
   return Check(budget.snapshot().committed_bytes() == 0,
                "Planning retained a reservation");
 }
+bool CheckEpfSearchPlan() {
+  for (bool resident : {false, true}) {
+    AqStoragePlanOptions options{
+        .source_extent = {17, 9}, .coding_extent = {24, 16},
+        .anchor_capacity_count = 6, .maximum_coefficient_count = 64,
+        .initial_quant_sort_count = 8, .filter_scratch_image_count = 2,
+        .needs_reconstructed = true,
+        .frame_only_resident_initial_quant = resident,
+        .resident_quantization = resident,
+        .search_epf_sharpness = true,
+        .resident_epf_search_reference = resident};
+    AqStoragePlan plan;
+    if (!Ok(ComputeAqStoragePlan(options, &plan)) ||
+        !CheckAqSlices(options, plan)) return false;
+    for (size_t c = 0; c < 3; ++c) {
+      if (!Check(plan.epf_candidate_errors[c].size_bytes == 6 * sizeof(float),
+                 "EPF candidate error storage differs") ||
+          !Check(plan.epf_search_reference[c].size_bytes ==
+                     (resident ? 0 : 24 * 16 * sizeof(float)),
+                 "EPF reference storage differs")) return false;
+    }
+    if (!Check(plan.epf_search_mask.size_bytes ==
+                   (resident ? 0 : 24 * 16 * sizeof(float)),
+               "EPF mask storage differs")) return false;
+    for (size_t failure = 0; failure < 4; ++failure) {
+      auto bad = options;
+      if (failure == 0) bad.frame_only = true;
+      if (failure == 1) bad.evaluation_free = true;
+      if (failure == 2) bad.omit_initial_search_data = true;
+      if (failure == 3) bad.metric = AqEvaluationMetric::kMaximumError;
+      const auto saved = plan;
+      if (!Check(ComputeAqStoragePlan(bad, &plan).code() ==
+                         StatusCode::kInvalidArgument && plan == saved,
+                 "Invalid EPF storage request changed output")) return false;
+    }
+  }
+  return true;
+}
+
 bool CheckResidentMetadataPlan() {
   for (const Extent2D coding : {Extent2D{8, 8}, {552, 552}, {6000, 4000}}) {
     const auto blocks = coding.ceil_div(8);
@@ -465,7 +509,7 @@ bool CheckResidentMetadataPlan() {
 } // namespace
 
 int main() {
-  return CheckResidentMetadataPlan() && CheckAqAndInputMatrix() &&
+  return CheckEpfSearchPlan() && CheckResidentMetadataPlan() && CheckAqAndInputMatrix() &&
                  CheckButteraugliMatrix() && CheckCompletedFrames() &&
                  CheckFailureAndNoBacking() &&
                  Check(DefaultResourceBudget().snapshot().peak_backing_bytes ==

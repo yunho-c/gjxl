@@ -10,6 +10,7 @@
 #include "codec/butteraugli.h"
 #include "codec/chroma_from_luma.h"
 #include "codec/reconstruction.h"
+#include "codec/epf_search.h"
 #include "codec/codestream.h"
 #include "core/ac_strategy.h"
 #include "core/image.h"
@@ -96,6 +97,12 @@ struct AdaptiveQuantizationOptions {
   ButteraugliOptions butteraugli;
   DcQuantizationMode dc_quantization = DcQuantizationMode::kRound;
   VarDctDcPrediction dc_prediction = VarDctDcPrediction::kGradient;
+  /// Select sharpness after final coefficient coding, retaining neutral
+  /// sharpness during AQ updates. Requires Butteraugli control. The borrowed
+  /// reference must outlive this synchronous call; resident GPU preparations
+  /// may supply their already-resident original XYB and mask instead.
+  bool search_epf_sharpness = false;
+  EpfSharpnessSearchReference epf_search_reference;
 };
 
 struct AdaptiveQuantizationOutput {

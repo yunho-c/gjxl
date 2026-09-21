@@ -180,6 +180,8 @@ struct PreparedAdaptiveQuantization {
   ConstImage3FView original_linear_rgb;
   ConstImage3FView coding_opsin;
   AqEvaluationOptions evaluation_options;
+  EpfSharpnessSearchReference epf_search_reference;
+  bool resident_epf_search_reference = false;
   bool resident_quantization = false;
   bool omit_initial_search_data = false;
   bool resident_strategy_metadata = false;

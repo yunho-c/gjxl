@@ -273,6 +273,21 @@ struct AqOpsinToLinearParams {
   float scale;
 };
 
+struct AqEpfSearchParams {
+  uint32_t width;
+  uint32_t height;
+  uint32_t reference_stride;
+  uint32_t image_stride;
+  uint32_t mask_stride;
+  uint32_t block_width;
+  uint32_t block_height;
+  uint32_t error_stride;
+  uint32_t sharpness_stride;
+  float no_smoothing_bias;
+  uint32_t candidate_count;
+  std::array<uint32_t, 3> candidates;
+};
+
 struct AqResidentInputParams {
   uint32_t source_width;
   uint32_t source_height;
@@ -412,6 +427,7 @@ public:
   Status FailNextResidentStaging();
   Status SetWaitObserver(bool *observed);
   Status GetReadbackStats(MetalAqReadbackStatsForTesting* stats) const;
+  Status GetEpfSearchSnapshot(MetalEpfSearchSnapshotForTesting* output) const;
   Status GetStrategyMetadataSnapshot(MetalAqStrategyMetadataSnapshot *output);
   // Internal dispatch-consumer qualification seam. Borrowed buffers must
   // outlive policy completion; ordinary callers do not enable it until handoff
@@ -452,6 +468,8 @@ private:
       ResidentAqProfileInputStoragePlan*);
   enum class ResidentProfileStage : uint8_t {
     kReconstruction,
+    kEpfSearchFinalReconstruction,
+    kEpfSharpnessSearch,
     kPolicyInitialize,
     kGaborish,
     kEpf,
@@ -698,6 +716,15 @@ private:
       MetalBackend &backend, MTL::ComputeCommandEncoder *encoder) const;
   [[nodiscard]] std::array<DevicePlaneView, 3>
   FinalFilteredImage() const noexcept;
+  Status ConfigureEpfSharpnessSearch(float target);
+  void EncodeEpfSearchReset(MetalBackend&, MTL::ComputeCommandEncoder*) const;
+  void EncodeEpfSharpnessSearch(MetalBackend&, MTL::ComputeCommandEncoder*) const;
+  void EncodeEpfSearchSigma(MetalBackend&, MTL::ComputeCommandEncoder*,
+                            uint32_t value) const;
+  void EncodeEpfSearchSelection(MetalBackend&, MTL::ComputeCommandEncoder*,
+                                bool reset) const;
+  Status ReadbackEpfSharpness();
+  [[nodiscard]] ConstPlaneU8View FinalEpfSharpness() const noexcept;
   Status FinishPostprocess(MetalAqPostprocessSnapshotForTesting *snapshot);
 
   MetalBackend *backend_ = nullptr;
@@ -711,6 +738,12 @@ private:
   DevicePlaneView strategies_;
   DevicePlaneView anchors_;
   DevicePlaneView epf_sharpness_;
+  std::array<DevicePlaneView, 3> epf_candidate_errors_;
+  std::array<DevicePlaneView, 3> epf_search_reference_;
+  DevicePlaneView epf_search_mask_;
+  AqEpfSearchParams epf_search_params_{};
+  float epf_search_target_ = 0.0f;
+  resource_budget_internal::ManagedVector<uint8_t> selected_epf_sharpness_host_;
   DevicePlaneView quant_tables_;
   DevicePlaneView raw_quant_;
   DevicePlaneView inverse_sigma_;

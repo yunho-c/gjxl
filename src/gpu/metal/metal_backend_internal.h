@@ -177,6 +177,9 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> adjustment_probe;
   NS::SharedPtr<MTL::ComputePipelineState> gaborish;
   NS::SharedPtr<MTL::ComputePipelineState> epf;
+  NS::SharedPtr<MTL::ComputePipelineState> epf_search_sigma;
+  NS::SharedPtr<MTL::ComputePipelineState> epf_search_error;
+  NS::SharedPtr<MTL::ComputePipelineState> epf_search_select;
   // The measured Apple-family-9 table is resolved once per prepared image.
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 3> epf_direct;
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 3> epf_tiled;

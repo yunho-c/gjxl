@@ -521,7 +521,15 @@ bool CheckProfiledPath() {
 
   for (const aqi::EvaluationProfile& evaluation : profile.evaluations) {
     uint64_t measured_stages = 0;
-    for (uint64_t stage : evaluation.stage_nanoseconds) {
+    for (size_t i = 0; i < evaluation.stage_nanoseconds.size(); ++i) {
+      const uint64_t stage = evaluation.stage_nanoseconds[i];
+      if (i == static_cast<size_t>(aqi::EvaluationStage::kEpfSharpnessSearch)) {
+        if (stage != 0) {
+          std::cerr << "Disabled EPF search reported work\n";
+          return false;
+        }
+        continue;
+      }
       if (stage == 0) {
         std::cerr << "Profiled AQ omitted an evaluation stage\n";
         return false;

@@ -2619,3 +2619,41 @@ kernel void gjxl_aq_count_coefficient_zeros(
     }
   }
 }
+
+// One thread per transform anchor. Covered blocks use that anchor's adjusted
+// raw quant, exactly as coefficient reconstruction does. Value 8 consumes the
+// selected mixed map; values 0..7 evaluate globally uniform candidates.
+kernel void gjxl_aq_epf_search_sigma(
+    device const uint2* anchors [[buffer(0)]],
+    device const int* raw_quant [[buffer(1)]],
+    device const uchar* sharpness [[buffer(2)]],
+    device const uint* resident_quantizer [[buffer(3)]],
+    device float* inverse_sigma [[buffer(4)]],
+    device atomic_uint* error [[buffer(5)]],
+    constant AqReconstructionParams& params [[buffer(6)]],
+    constant uint& candidate [[buffer(7)]],
+    uint index [[thread_position_in_grid]]) {
+  if (index >= params.anchor_count) return;
+  const uint2 anchor = anchors[params.anchor_offset + index];
+  const uint global_scale = params.use_resident_quantizer != 0u
+      ? resident_quantizer[0] : params.global_scale;
+  const int raw = raw_quant[anchor.y * params.raw_quant_stride + anchor.x];
+  const float sigma_quant = params.epf_quant_multiplier /
+      (float(global_scale) * (1.0f / 65536.0f) * float(raw) *
+       -1.1715728752538099024f);
+  for (uint y = 0; y < params.covered_height; ++y) {
+    for (uint x = 0; x < params.covered_width; ++x) {
+      const uint value = candidate < 8u ? candidate : uint(sharpness[
+          (anchor.y + y) * params.epf_sharpness_stride + anchor.x + x]);
+      if (value >= 8u || global_scale == 0u || raw <= 0) {
+        atomic_fetch_or_explicit(error, 1u << 29, memory_order_relaxed);
+        continue;
+      }
+      const float sigma = min(-1.0e-4f, sigma_quant * params.epf_sharpness_lut[value]);
+      const float inverse = 1.0f / sigma;
+      if (!isfinite(inverse) || inverse >= 0.0f)
+        atomic_fetch_or_explicit(error, 1u << 29, memory_order_relaxed);
+      inverse_sigma[(anchor.y + y) * params.inverse_sigma_stride + anchor.x + x] = inverse;
+    }
+  }
+}

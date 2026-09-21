@@ -30,10 +30,12 @@
 #include "codec/butteraugli.h"
 #include "codec/color_transform.h"
 #include "codec/epf.h"
+#include "codec/epf_search.h"
 #include "codec/gaborish.h"
 #include "codec/loop_filter.h"
 #include "codec/reconstruction.h"
 #include "codec/vardct_frame.h"
+#include "codec/vardct_frame_internal.h"
 #include "codestream/encoder.h"
 #include "core/ac_strategy.h"
 #include "core/frame_geometry.h"
@@ -83,6 +85,7 @@ struct Fixture {
   uint8_t extra_dc_precision = 0;
   bool adaptive_dc_smoothing = false;
   bool gaborish = true;
+  float epf_search_target = 0.0f;
 };
 
 struct PreparedFixture {
@@ -290,6 +293,7 @@ gjxl::Status PrepareFixture(
   }
 
   gjxl::Image3FBuffer preprocessed(geometry.padded_frame());
+  gjxl::Image3FBuffer epf_search_reference;
   if (fixture.pattern == Pattern::kLargeOpsin) {
     FillLargeOpsin(preprocessed.view());
   } else {
@@ -300,6 +304,10 @@ gjxl::Status PrepareFixture(
       linear.const_view(), kIntensityTarget, opsin.view());
     if (!status.ok()) {
       return status;
+    }
+    if (fixture.epf_search_target > 0.0f) {
+      epf_search_reference.resize(geometry.padded_frame());
+      gjxl::CopyImage(opsin.const_view(), epf_search_reference.view());
     }
     status = gjxl::ApplyGaborishInverse(
       opsin.const_view(), {1.0f, 1.0f, 1.0f}, preprocessed.view());
@@ -346,7 +354,8 @@ gjxl::Status PrepareFixture(
   const std::vector<int32_t> raw_quant(block_count, fixture.raw_quant);
   std::vector<uint8_t> sharpness(block_count);
   for (size_t index = 0; index < block_count; ++index) {
-    sharpness[index] = static_cast<uint8_t>((index * 5 + 4) % 8);
+    sharpness[index] = fixture.epf_search_target > 0.0f
+        ? 4 : static_cast<uint8_t>((index * 5 + 4) % 8);
   }
 
   gjxl::ColorCorrelationMap color_correlation;
@@ -430,6 +439,18 @@ gjxl::Status PrepareFixture(
     result.frame, reconstructed.view());
   if (!status.ok()) {
     return status;
+  }
+  if (fixture.epf_search_target > 0.0f) {
+    const auto padded = geometry.padded_frame();
+    const std::vector<float> mask(padded.width * padded.height, 1.0f);
+    status = gjxl::SearchEpfSharpnessFromReconstruction(
+        {epf_search_reference.const_view(), View(mask, padded)},
+        reconstructed.const_view(), result.frame, fixture.epf_search_target,
+        {sharpness.data(), blocks, blocks.width});
+    if (!status.ok()) return status;
+    status = gjxl::vardct_frame_internal::ReplaceEpfSharpness(
+        result.frame, View(sharpness, blocks));
+    if (!status.ok()) return status;
   }
   std::vector<float> inverse_sigma(block_count);
   status = gjxl::ComputeEpfInverseSigma(
@@ -758,6 +779,12 @@ std::vector<Fixture> SmokeFixtures() {
 
 std::vector<Fixture> FullFixtures() {
   std::vector<Fixture> fixtures = {
+    {.name = "epf-search-three-candidates", .extent = {61, 59},
+     .pattern = Pattern::kTexture, .mixed_strategies = true,
+     .epf_search_target = 1.0f},
+    {.name = "epf-search-two-candidates", .extent = {63, 57},
+     .pattern = Pattern::kHardEdge, .mixed_strategies = true,
+     .epf_search_target = 8.0f},
     {"one-pixel-flat", {1, 1}, Pattern::kFlat},
     {.name = "no-gaborish-odd", .extent = {13, 17},
      .pattern = Pattern::kGradient, .gaborish = false},

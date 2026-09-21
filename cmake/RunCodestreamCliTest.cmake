@@ -227,6 +227,7 @@ endif()
 execute_process(
   COMMAND
     "${GJXL_ENCODER}" --distance 1.0 --backend cpu --effort 7
+    --epf-sharpness-search on
     "${GJXL_SAMPLE}" "${effort_7}"
   RESULT_VARIABLE effort_7_result
   OUTPUT_QUIET
@@ -460,22 +461,22 @@ endif()
 if(NOT maximum_compression_hash STREQUAL maximum_compression_repeat_hash)
   message(FATAL_ERROR "Maximum-compression CLI output is not deterministic")
 endif()
-# Effort 7 defaults to prediction-aware quantization and adaptive DC smoothing.
-# Context-map search changes these codestreams without changing decoded pixels.
+# Effort 7 defaults to prediction-aware quantization, adaptive DC smoothing,
+# and adaptive EPF sharpness. The latter intentionally changes decoded pixels.
 set(expected_hash
-  c8a8c1215ac341df1a1a3337e428e9886bf8258fcde57aedd3958100d1cc3927)
+  25e8394f453ae711e09a0ef3fcc48b54d6167928efd7b56451b343476ac5cabf)
 if(NOT first_hash STREQUAL expected_hash)
   message(FATAL_ERROR
     "checked sample codestream hash changed: ${first_hash}")
 endif()
 set(expected_maximum_compression_hash
-  38cf7b01a4c31c2e44a7ebd76ca9c92711606572e11107d95979054d0a14c49b)
+  4b90182c2eb7d73c846d108dd34e3cf6ad7f922c0920e81c1316a064540f727a)
 if(NOT maximum_compression_hash STREQUAL expected_maximum_compression_hash)
   message(FATAL_ERROR
     "Maximum-compression sample hash changed: ${maximum_compression_hash}")
 endif()
-# Pin the former defaults independently, so selecting the legacy behavior stays
-# covered when the automatic policy changes.
+# Pin the former defaults, including fixed EPF sharpness, independently so
+# selecting the legacy behavior stays covered when the automatic policy changes.
 foreach(compression IN ITEMS ordinary maximum maximum-error)
   set(legacy "${GJXL_TEST_DIR}/legacy-${compression}.jxl")
   set(compression_flags)
@@ -494,6 +495,7 @@ foreach(compression IN ITEMS ordinary maximum maximum-error)
   execute_process(
     COMMAND "${GJXL_ENCODER}" ${rate_control_flags} --backend cpu
       --dc-quantization round --no-adaptive-dc-smoothing
+      --epf-sharpness-search off
       ${compression_flags} "${GJXL_SAMPLE}" "${legacy}"
     RESULT_VARIABLE legacy_result
     OUTPUT_QUIET

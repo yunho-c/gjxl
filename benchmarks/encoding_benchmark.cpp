@@ -119,7 +119,7 @@ constexpr std::array<std::string_view, kPhaseCount> kPhaseNames = {
 constexpr std::array<std::string_view, aqi::kEvaluationStageCount>
     kEvaluationStageNames = {
         "field_construction", "coefficient_coding", "reconstruction",
-        "loop_filters",       "color_conversion",   "butteraugli",
+        "epf_sharpness_search", "loop_filters",     "color_conversion", "butteraugli",
         "block_reduction",
 };
 
@@ -140,6 +140,7 @@ struct CommandLineOptions {
   gjxl::VarDctCompressionMode compression_mode =
       gjxl::VarDctCompressionMode::kAutomatic;
   bool collect_final_butteraugli_score = false;
+  bool adaptive_epf_sharpness = true;
   float butteraugli_target = kDefaultButteraugliTarget;
   int32_t effort = 7;
   size_t cpu_thread_count = 0;
@@ -572,6 +573,7 @@ ParseGpuProfilingMode(std::string_view text) {
                    "[--maximum-compression] "
                    "[--validation cpu-metal|metal-only] "
                    "[--collect-final-score] "
+                   "[--epf-sharpness-search on|off] "
                    "[--metallib PATH] [--raw-samples PATH] "
                    "[--gpu-profile stage|dispatch] "
                    "[--gpu-profile-output PATH] "
@@ -633,6 +635,11 @@ ParseGpuProfilingMode(std::string_view text) {
         throw std::runtime_error(
           "Unknown density mode: " + std::string(value));
       }
+    } else if (argument == "--epf-sharpness-search") {
+      if (value != "on" && value != "off") {
+        throw std::runtime_error("EPF sharpness search must be on or off");
+      }
+      options.adaptive_epf_sharpness = value == "on";
     } else if (argument == "--distance") {
       options.butteraugli_target = ParsePositiveFloat(value);
     } else if (argument == "--effort") {
@@ -662,6 +669,12 @@ ParseGpuProfilingMode(std::string_view text) {
       options.scope != BenchmarkScope::kMetalPublicWorkflow) {
     throw std::runtime_error(
       "Maximum-throughput mode requires a public-workflow scope");
+  }
+  if (!options.adaptive_epf_sharpness &&
+      options.scope != BenchmarkScope::kPublicWorkflow &&
+      options.scope != BenchmarkScope::kMetalPublicWorkflow) {
+    throw std::runtime_error(
+        "EPF sharpness ablation requires a public-workflow scope");
   }
   if (options.density_mode == gjxl::VarDctDensityMode::kHighDensity &&
       (options.scope != BenchmarkScope::kPublicWorkflow &&
@@ -1170,6 +1183,8 @@ void WriteRawWorkflowSamples(
            << "  \"distance\": " << std::setprecision(9)
            << options.butteraugli_target << ",\n"
            << "  \"effort\": " << options.effort << ",\n"
+           << "  \"adaptive_epf_sharpness\": "
+           << (options.adaptive_epf_sharpness ? "true" : "false") << ",\n"
            << "  \"cpu_threads\": " << options.cpu_thread_count << ",\n"
            << "  \"warmups\": " << options.warmups << ",\n"
            << "  \"sample_count\": " << options.samples << ",\n"
@@ -1352,6 +1367,8 @@ void WriteGpuProfileSamples(
            << "  \"scope\": \"metal-public-workflow\",\n"
            << "  \"mode\": \""
            << GpuProfilingModeName(options.gpu_profiling_mode) << "\",\n"
+           << "  \"adaptive_epf_sharpness\": "
+           << (options.adaptive_epf_sharpness ? "true" : "false") << ",\n"
            << "  \"gpu_aq\": \"" << GpuAqModeName(options.gpu_aq_mode)
            << "\",\n"
            << "  \"ac_residual_inverse\": \""
@@ -1627,6 +1644,7 @@ void RunPublicWorkflowOnlyWorkload(
     gjxl::VarDctDensityMode density_mode,
     gjxl::VarDctCompressionMode compression_mode,
     bool collect_final_butteraugli_score,
+    bool adaptive_epf_sharpness,
     std::string_view input_path, bool metal_only, ValidationMode validation,
     gjxl::GpuBackend& gpu,
     std::vector<RawWorkflowWorkload>* raw_results, double* global_sink) {
@@ -1652,6 +1670,7 @@ void RunPublicWorkflowOnlyWorkload(
             original.ConstView(),
             {.butteraugli_target = butteraugli_target,
              .effort = effort,
+             .adaptive_epf_sharpness = adaptive_epf_sharpness,
              .density_mode = density_mode,
              .compression_mode = compression_mode,
              .backend = backend,
@@ -1904,6 +1923,7 @@ void RunGpuProfileWorkflowWorkload(
     gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode,
     gjxl::gpu_profile_internal::GpuProfilingMode profiling_mode,
     bool collect_final_butteraugli_score,
+    bool adaptive_epf_sharpness,
     std::string_view input_path, gjxl::GpuBackend& gpu,
     std::vector<RawGpuProfileWorkload>* results, double* global_sink) {
   ImageStorage original = !input_path.empty()
@@ -1920,6 +1940,7 @@ void RunGpuProfileWorkflowWorkload(
   const gjxl::VarDctEncodingOptions encoding_options{
     .butteraugli_target = butteraugli_target,
     .effort = effort,
+    .adaptive_epf_sharpness = adaptive_epf_sharpness,
     .backend = gjxl::VarDctBackendPreference::kMetal,
     .cpu_thread_count = cpu_thread_count,
     .metal_aq_mode = gpu_aq_mode,
@@ -2992,7 +3013,8 @@ int main(int argc, char** argv) {
             options.cpu_thread_count,
             options.gpu_aq_mode,
             options.gpu_profiling_mode,
-            options.collect_final_butteraugli_score, options.input_path, *gpu,
+            options.collect_final_butteraugli_score,
+            options.adaptive_epf_sharpness, options.input_path, *gpu,
             &gpu_profile_results, &sink);
         } else {
           RunPublicWorkflowOnlyWorkload(
@@ -3003,6 +3025,7 @@ int main(int argc, char** argv) {
               options.density_mode,
               options.compression_mode,
               options.collect_final_butteraugli_score,
+              options.adaptive_epf_sharpness,
               options.input_path,
               options.scope == BenchmarkScope::kMetalPublicWorkflow,
               options.validation, *gpu, raw_results_pointer, &sink);
@@ -3030,7 +3053,8 @@ int main(int argc, char** argv) {
                 options.cpu_thread_count,
                 options.gpu_aq_mode,
                 options.gpu_profiling_mode,
-                options.collect_final_butteraugli_score, {}, *gpu,
+                options.collect_final_butteraugli_score,
+                options.adaptive_epf_sharpness, {}, *gpu,
                 &gpu_profile_results,
                 &sink);
             } else {
@@ -3041,7 +3065,8 @@ int main(int argc, char** argv) {
                   options.gpu_aq_mode,
                   options.density_mode,
                   options.compression_mode,
-                  options.collect_final_butteraugli_score, {},
+                  options.collect_final_butteraugli_score,
+                  options.adaptive_epf_sharpness, {},
                   options.scope == BenchmarkScope::kMetalPublicWorkflow,
                   options.validation, *gpu, raw_results_pointer, &sink);
             }

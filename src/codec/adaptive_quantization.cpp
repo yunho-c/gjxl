@@ -23,6 +23,7 @@
 #include "codec/frontend_dispatch_internal.h"
 #include "codec/maximum_error.h"
 #include "codec/quantization.h"
+#include "codec/vardct_frame_internal.h"
 #include "core/block_grid.h"
 #include "core/geometry.h"
 #include "core/image_buffer.h"
@@ -953,6 +954,27 @@ Status EvaluateQuantization(
     return status;
   }
 
+  if (options.search_epf_sharpness && options.butteraugli_target >= 0.5f &&
+      options.profile.loop_filter.epf_options.iterations != 0) {
+    status = MeasureEvaluationStage(
+        measured, aqi::EvaluationStage::kEpfSharpnessSearch, [&] {
+          ManagedVector<uint8_t> selected(block_count);
+          Status search = SearchEpfSharpnessFromReconstruction(
+              options.epf_search_reference, reconstructed_opsin.const_view(),
+              result.frame, options.butteraugli_target,
+              {selected.data(), block_extent, block_extent.width});
+          if (!search.ok()) return search;
+          search = vardct_frame_internal::ReplaceEpfSharpness(
+              result.frame, {selected.data(), block_extent, block_extent.width});
+          if (!search.ok()) return search;
+          return ComputeEpfInverseSigma(
+              strategies, result.frame.raw_quant_field(), result.frame.quantizer(),
+              result.frame.epf_sharpness(), options.profile.epf_sigma,
+              {inverse_sigma.data(), block_extent, block_extent.width});
+        });
+    if (!status.ok()) return status;
+  }
+
   Image3FBuffer cropped_reconstruction;
   Image3FBuffer filtered_opsin;
   status = MeasureEvaluationStage(
@@ -1077,7 +1099,7 @@ public:
   Status Evaluate(
     ConstPlaneF32View quant_field,
     float quant_dc,
-    bool,
+    bool is_final_evaluation,
     aqi::AdaptiveQuantizationEvaluation* evaluation,
     aqi::EvaluationProfile* profile) override {
 
@@ -1086,9 +1108,11 @@ public:
         "CPU adaptive-quantization evaluation output is null");
     }
     QuantizationEvaluation detailed;
+    auto evaluation_options = options_;
+    evaluation_options.search_epf_sharpness &= is_final_evaluation;
     Status status = EvaluateQuantization(
       original_linear_rgb_, opsin_, strategies_, quant_field,
-      epf_sharpness_, quant_dc, options_, prepared_reference_, &detailed,
+      epf_sharpness_, quant_dc, evaluation_options, prepared_reference_, &detailed,
       profile);
     if (!status.ok()) {
       return status;
@@ -1241,6 +1265,16 @@ Status ValidateAdaptiveQuantizationPolicyInputs(
   if (options.color_correlation_iterations == 0 ||
       options.color_correlation_iterations > 20)
     return Status::InvalidArgument("Final CfL iteration limit is invalid");
+  if (options.search_epf_sharpness) {
+    for (size_t y = 0; y < block_extent.height; ++y) {
+      for (size_t x = 0; x < block_extent.width; ++x) {
+        if (epf_sharpness.Row(y)[x] != 4) {
+          return Status::InvalidArgument(
+              "EPF sharpness search requires the neutral pre-AQ map");
+        }
+      }
+    }
+  }
   if (!options.profile.valid() ||
       !IsValidDcQuantization({options.dc_quantization, options.dc_prediction,
                               options.profile.extra_dc_precision})) {
@@ -1713,6 +1747,17 @@ Status FindBestQuantizationImpl(
   AdaptiveQuantizationOutput output,
   PreparedButteraugliReference* prepared_reference,
   aqi::AdaptiveQuantizationProfile* profile) {
+
+  if (options.search_epf_sharpness &&
+      (options.control_mode != AdaptiveQuantizationControlMode::kButteraugli ||
+       (options.butteraugli_target >= 0.5f &&
+        options.profile.loop_filter.epf_options.iterations != 0 &&
+        (!options.epf_search_reference.original_opsin.valid() ||
+         options.epf_search_reference.original_opsin.extent() != opsin.extent() ||
+         !options.epf_search_reference.pixel_mask.valid() ||
+         options.epf_search_reference.pixel_mask.extent != opsin.extent())))) {
+    return Status::InvalidArgument("CPU EPF sharpness search reference is invalid");
+  }
 
   Status status = aqi::ValidateAdaptiveQuantizationPolicyInputs(
     original_linear_rgb,
