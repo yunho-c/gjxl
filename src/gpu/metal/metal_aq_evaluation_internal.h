@@ -538,7 +538,8 @@ private:
   Status ValidatePreparation(
     const AqEvaluationPreparation& preparation,
     bool host_images_are_finite) const;
-  Status ValidateInput(AqEvaluationInput input) const;
+  Status ValidateInput(AqEvaluationInput input,
+                       bool derive_color_correlation = false) const;
   Status ValidateOutput(AqEvaluationOutput output) const;
   Status InitializeGpuExecutionProfile(
       gpu_profile_internal::GpuProfilingMode mode,
@@ -694,13 +695,22 @@ private:
   void EncodeBlockReduction(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
       ConstDevicePlaneView distance_map) const;
-  void EncodeResidentQuantizer(MetalBackend &backend,
-                               MTL::ComputeCommandEncoder *encoder) const;
+  void EncodeResidentQuantizer(MetalBackend& backend,
+                               MTL::ComputeCommandEncoder* encoder) const;
+  void EncodeResidentQuantizer(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      DevicePlaneView quant_field, DevicePlaneView raw_quant,
+      AqInitialQuantSelectionParams params) const;
   void EncodeResidentPolicyBounds(MetalBackend &backend,
                                   MTL::ComputeCommandEncoder *encoder) const;
   void EncodeForwardCoefficients(MetalBackend& backend,
                                  MTL::ComputeCommandEncoder* encoder) const;
   void EncodeFinalColorCorrelation(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const;
+  void EncodeFinalColorCorrelation(
+      MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+      DevicePlaneView raw_quant) const;
+  void EncodeInvariantColorCorrelation(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const;
   void EncodeMaximumErrorReduction(
       MetalBackend &backend, MTL::ComputeCommandEncoder *encoder) const;
@@ -801,6 +811,8 @@ private:
   float uniform_initial_quant_ = 0.0f;
   AqInitialQuantSelectionParams initial_quant_selection_params_{};
   AqInitialQuantSelectionParams resident_quant_selection_params_{};
+  float invariant_quant_dc_ = 0.0f;
+  bool invariant_color_correlation_from_policy_ = false;
   std::array<AqQuantFieldAdjustmentParams, 7>
     quant_field_adjustment_params_{};
   std::array<AqBlockReductionParams, 7> block_reduction_params_{};

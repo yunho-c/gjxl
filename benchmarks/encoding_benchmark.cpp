@@ -46,6 +46,7 @@
 #include "gpu/ops/quantization_pipeline.h"
 #include "io/pfm.h"
 #include "synthetic_images.h"
+#include "gpu_profile_json.h"
 
 #ifndef GJXL_FLOWER_PPM_PATH
 #error "GJXL_FLOWER_PPM_PATH must identify the pinned Flower PPM"
@@ -1011,16 +1012,9 @@ struct RawWorkflowWorkload {
   std::vector<RawWorkflowSample> samples;
 };
 
-struct RawGpuProfileSample {
-  size_t sample_index = 0;
-  gjxl::gpu_profile_internal::GpuExecutionProfile profile;
-};
-
-struct RawGpuProfileWorkload {
-  std::string workload;
-  gjxl::Extent2D source_extent;
-  std::vector<RawGpuProfileSample> samples;
-};
+using gjxl::benchmark::RawGpuProfileSample;
+using gjxl::benchmark::RawGpuProfileWorkload;
+using gjxl::benchmark::JsonEscape;
 
 using WorkflowProfileSamples =
     std::array<std::vector<double>, kWorkflowProfileNames.size()>;
@@ -1087,44 +1081,6 @@ void AppendWorkflowProfile(
   for (size_t index = 0; index < values.size(); ++index) {
     (*samples)[index].push_back(NanosecondsToMilliseconds(values[index]));
   }
-}
-
-[[nodiscard]] std::string JsonEscape(std::string_view value) {
-  std::ostringstream escaped;
-  for (const unsigned char character : value) {
-    switch (character) {
-      case '\"':
-        escaped << "\\\"";
-        break;
-      case '\\':
-        escaped << "\\\\";
-        break;
-      case '\b':
-        escaped << "\\b";
-        break;
-      case '\f':
-        escaped << "\\f";
-        break;
-      case '\n':
-        escaped << "\\n";
-        break;
-      case '\r':
-        escaped << "\\r";
-        break;
-      case '\t':
-        escaped << "\\t";
-        break;
-      default:
-        if (character < 0x20) {
-          escaped << "\\u" << std::hex << std::setw(4)
-                  << std::setfill('0') << static_cast<unsigned>(character)
-                  << std::dec << std::setfill(' ');
-        } else {
-          escaped << static_cast<char>(character);
-        }
-    }
-  }
-  return escaped.str();
 }
 
 void WriteRawWorkflowSamples(
@@ -1300,193 +1256,23 @@ void WriteRawWorkflowSamples(
   }
 }
 
-[[nodiscard]] std::string_view GpuProfilingModeName(
-    gjxl::gpu_profile_internal::GpuProfilingMode mode) {
-  switch (mode) {
-    case gjxl::gpu_profile_internal::GpuProfilingMode::kDisabled:
-      return "disabled";
-    case gjxl::gpu_profile_internal::GpuProfilingMode::kStage:
-      return "stage";
-    case gjxl::gpu_profile_internal::GpuProfilingMode::kDispatch:
-      return "dispatch";
-  }
-  return "invalid";
-}
-
-[[nodiscard]] std::string_view GpuWallStageKindName(
-    gjxl::gpu_profile_internal::GpuWallStageKind kind) {
-  switch (kind) {
-    case gjxl::gpu_profile_internal::GpuWallStageKind::kOperation:
-      return "operation";
-    case gjxl::gpu_profile_internal::GpuWallStageKind::kPreparation:
-      return "preparation";
-    case gjxl::gpu_profile_internal::GpuWallStageKind::kUpload:
-      return "upload";
-    case gjxl::gpu_profile_internal::GpuWallStageKind::kWait:
-      return "wait";
-    case gjxl::gpu_profile_internal::GpuWallStageKind::kReadback:
-      return "readback";
-    case gjxl::gpu_profile_internal::GpuWallStageKind::kHost:
-      return "host";
-  }
-  return "invalid";
-}
-
 void WriteGpuProfileSamples(
     const std::filesystem::path& destination,
     const CommandLineOptions& options,
     const std::vector<RawGpuProfileWorkload>& workloads) {
-  const std::filesystem::path temporary =
-    destination.string() + ".tmp-" + std::to_string(
-      static_cast<unsigned long long>(
-        std::chrono::steady_clock::now().time_since_epoch().count()));
-  try {
-    if (!destination.parent_path().empty()) {
-      std::filesystem::create_directories(destination.parent_path());
-    }
-    std::ofstream output;
-    output.exceptions(std::ios::badbit | std::ios::failbit);
-    output.open(temporary, std::ios::out | std::ios::trunc);
-    output << "{\n"
-           << "  \"schema_version\": 4,\n"
-           << "  \"execution_path\": \"production-aligned-resident-v1\",\n"
-           << "  \"scope\": \"metal-public-workflow\",\n"
-           << "  \"mode\": \""
-           << GpuProfilingModeName(options.gpu_profiling_mode) << "\",\n"
-           << "  \"gpu_aq\": \"" << GpuAqModeName(options.gpu_aq_mode)
-           << "\",\n"
-           << "  \"ac_residual_inverse\": \""
-           << JsonEscape(options.ac_residual_inverse) << "\",\n"
-           << "  \"collect_final_score\": "
-           << (options.collect_final_butteraugli_score ? "true" : "false")
-           << ",\n"
-           << "  \"distance\": " << std::setprecision(9)
-           << options.butteraugli_target << ",\n"
-           << "  \"warmups\": " << options.warmups << ",\n"
-           << "  \"sample_count\": " << options.samples << ",\n"
-           << "  \"workloads\": [\n";
-    for (size_t workload_index = 0; workload_index < workloads.size();
-         ++workload_index) {
-      const RawGpuProfileWorkload& workload = workloads[workload_index];
-      output << "    {\n"
-             << "      \"name\": \"" << JsonEscape(workload.workload)
-             << "\",\n"
-             << "      \"source_width\": " << workload.source_extent.width
-             << ",\n"
-             << "      \"source_height\": " << workload.source_extent.height
-             << ",\n"
-             << "      \"samples\": [\n";
-      for (size_t sample_index = 0; sample_index < workload.samples.size();
-           ++sample_index) {
-        const RawGpuProfileSample& sample = workload.samples[sample_index];
-        const auto& profile = sample.profile;
-        output << "        {\n"
-               << "          \"sample_index\": " << sample.sample_index
-               << ",\n"
-               << "          \"capabilities\": {"
-               << "\"timestamp_counter\": "
-               << (profile.capabilities.timestamp_counter ? "true" : "false")
-               << ", \"stage_boundary\": "
-               << (profile.capabilities.stage_boundary ? "true" : "false")
-               << ", \"dispatch_boundary\": "
-               << (profile.capabilities.dispatch_boundary ? "true" : "false")
-               << "},\n"
-               << "          \"wall_stages\": [";
-        for (size_t wall_index = 0;
-             wall_index < profile.wall_stages.size(); ++wall_index) {
-          const auto& wall = profile.wall_stages[wall_index];
-          if (wall_index != 0) output << ", ";
-          output << "{\"stage_id\": \"" << JsonEscape(wall.stage_id)
-                 << "\", \"kind\": \""
-                 << GpuWallStageKindName(wall.kind)
-                 << "\", \"invocation\": " << wall.invocation
-                 << ", \"wall_nanoseconds\": " << wall.wall_nanoseconds
-                 << '}';
-        }
-        output << "],\n"
-               << "          \"submissions\": [\n";
-        for (size_t submission_index = 0;
-             submission_index < profile.submissions.size();
-             ++submission_index) {
-          const auto& submission = profile.submissions[submission_index];
-          output << "            {\"submission_index\": "
-                 << submission_index
-                 << ", \"submission_id\": \""
-                 << JsonEscape(submission.submission_id)
-                 << "\", \"invocation\": " << submission.invocation
-                 << ", \"command_buffer_gpu_nanoseconds\": "
-                 << submission.command_buffer_gpu_nanoseconds
-                 << ", \"stages\": [\n";
-          for (size_t stage_index = 0;
-               stage_index < submission.stages.size(); ++stage_index) {
-            const auto& stage = submission.stages[stage_index];
-            output << "              {\"stage_id\": \""
-                   << JsonEscape(stage.stage_id)
-                   << "\", \"group_id\": \""
-                   << JsonEscape(stage.group_id)
-                   << "\", \"iteration\": " << stage.iteration
-                   << ", \"invocation\": " << stage.invocation
-                   << ", \"begin_timestamp\": " << stage.begin_timestamp
-                   << ", \"end_timestamp\": " << stage.end_timestamp
-                   << ", \"gpu_nanoseconds\": " << stage.gpu_nanoseconds
-                   << ", \"timestamp_valid\": " << (stage.timestamp_valid ? "true" : "false")
-                   << ", \"dispatches\": [";
-            for (size_t dispatch_index = 0;
-                 dispatch_index < stage.dispatches.size(); ++dispatch_index) {
-              const auto& dispatch = stage.dispatches[dispatch_index];
-              if (dispatch_index != 0) output << ", ";
-              output << "{\"kernel_id\": \""
-                     << JsonEscape(dispatch.kernel_id)
-                     << "\", \"kind\": \""
-                     << (dispatch.kind ==
-                           gjxl::gpu_profile_internal::GpuDispatchKind::kThreads
-                           ? "threads" : dispatch.kind ==
-                             gjxl::gpu_profile_internal::GpuDispatchKind::kIndirectThreadgroups
-                               ? "indirect_threadgroups" : "threadgroups")
-                     << "\", \"invocation\": " << dispatch.invocation
-                     << ", \"grid\": [" << dispatch.grid.width << ", "
-                     << dispatch.grid.height << ", " << dispatch.grid.depth
-                     << "], \"threads_per_threadgroup\": ["
-                     << dispatch.threads_per_threadgroup.width << ", "
-                     << dispatch.threads_per_threadgroup.height << ", "
-                     << dispatch.threads_per_threadgroup.depth
-                     << "], \"begin_timestamp\": "
-                     << dispatch.begin_timestamp
-                     << ", \"end_timestamp\": " << dispatch.end_timestamp
-                     << ", \"gpu_nanoseconds\": "
-                     << dispatch.gpu_nanoseconds
-                     << ", \"timestamp_valid\": " << (dispatch.timestamp_valid ? "true" : "false") << '}';
-            }
-            output << "]}";
-            if (stage_index + 1 != submission.stages.size()) output << ',';
-            output << '\n';
-          }
-          output << "            ]}";
-          if (submission_index + 1 != profile.submissions.size()) output << ',';
-          output << '\n';
-        }
-        output << "          ]\n        }";
-        if (sample_index + 1 != workload.samples.size()) output << ',';
-        output << '\n';
-      }
-      output << "      ]\n    }";
-      if (workload_index + 1 != workloads.size()) output << ',';
-      output << '\n';
-    }
-    output << "  ]\n}\n";
-    output.close();
-    std::error_code rename_error;
-    std::filesystem::rename(temporary, destination, rename_error);
-    if (rename_error) {
-      throw std::runtime_error(
-        "Could not atomically replace GPU-profile output: " +
-        rename_error.message());
-    }
-  } catch (...) {
-    std::error_code ignored;
-    std::filesystem::remove(temporary, ignored);
-    throw;
-  }
+  gjxl::benchmark::GpuProfileJsonOptions metadata;
+  metadata.scope = "metal-public-workflow";
+  metadata.execution_path = "production-aligned-resident-v1";
+  metadata.gpu_profiling_mode = options.gpu_profiling_mode;
+  metadata.gpu_aq = GpuAqModeName(options.gpu_aq_mode);
+  metadata.ac_residual_inverse = options.ac_residual_inverse;
+  metadata.collect_final_butteraugli_score = options.collect_final_butteraugli_score;
+  metadata.butteraugli_target = options.butteraugli_target;
+  metadata.warmups = options.warmups;
+  metadata.samples = options.samples;
+  metadata.effort = options.effort;
+  metadata.cpu_thread_count = options.cpu_thread_count;
+  gjxl::benchmark::WriteGpuProfileSamples(destination, metadata, workloads);
 }
 
 void PrintWorkflowProfile(
@@ -1657,11 +1443,11 @@ void RunPublicWorkflowOnlyWorkload(
             original.ConstView(),
             {.butteraugli_target = butteraugli_target,
              .effort = effort,
+             .cpu_thread_count = cpu_thread_count,
              .density_mode = density_mode,
              .compression_mode = compression_mode,
              .backend = backend,
-             .cpu_thread_count = cpu_thread_count,
-             .metal_aq_mode = mode,
+             .gpu_aq_mode = mode,
              .collect_final_butteraugli_score =
                collect_final_butteraugli_score},
             backend == gjxl::VarDctBackendPreference::kMetal ? &gpu : nullptr,
@@ -1925,9 +1711,9 @@ void RunGpuProfileWorkflowWorkload(
   const gjxl::VarDctEncodingOptions encoding_options{
     .butteraugli_target = butteraugli_target,
     .effort = effort,
-    .backend = gjxl::VarDctBackendPreference::kMetal,
     .cpu_thread_count = cpu_thread_count,
-    .metal_aq_mode = gpu_aq_mode,
+    .backend = gjxl::VarDctBackendPreference::kMetal,
+    .gpu_aq_mode = gpu_aq_mode,
     .collect_final_butteraugli_score = collect_final_butteraugli_score,
   };
   std::vector<uint8_t> expected;
@@ -2213,7 +1999,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
               original.ConstView(),
               {.butteraugli_target = butteraugli_target,
                .backend = gjxl::VarDctBackendPreference::kMetal,
-               .metal_aq_mode = gpu_aq_mode},
+               .gpu_aq_mode = gpu_aq_mode},
               &gpu, true, &gpu_validation_bytes,
               &gpu_validation_summary));
   const auto maximum_vector_error = [](const std::vector<float>& left,
@@ -2703,7 +2489,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
               original.ConstView(),
               {.butteraugli_target = butteraugli_target,
                .backend = gjxl::VarDctBackendPreference::kMetal,
-               .metal_aq_mode = gpu_aq_mode},
+               .gpu_aq_mode = gpu_aq_mode},
               &gpu, true, &workflow_bytes, &workflow_summary);
     case Phase::kGpuColdPublicWorkflow: {
       std::unique_ptr<gjxl::GpuBackend> cold_gpu;
@@ -2717,7 +2503,7 @@ void RunWorkload(const WorkloadSpec& spec, size_t warmups, size_t samples,
               original.ConstView(),
               {.butteraugli_target = butteraugli_target,
                .backend = gjxl::VarDctBackendPreference::kMetal,
-               .metal_aq_mode = gpu_aq_mode},
+               .gpu_aq_mode = gpu_aq_mode},
               cold_gpu.get(), true, &workflow_bytes, &workflow_summary);
     }
     case Phase::kCount:

@@ -1,0 +1,2444 @@
+# CUDA backend support analysis
+
+For the current main/CUDA integration results and remaining gates, see the
+[integration work record](cuda-integration-progress.md),
+[policy qualification](cuda-integration-policy-qualification.md), and
+[exact-arithmetic qualification](cuda-exact-arithmetic-integration.md).
+The dated analysis below retains the original backend implementation history.
+
+- Status: functionally complete for explicit CUDA selection; production
+  qualification remains in progress
+- Date: 2026-09-03
+- Supported target: explicit CUDA encoding on non-macOS hosts with a supported
+  NVIDIA device and CUDA toolkit
+
+Implementation progress as of this revision:
+
+- portable CPU-only, independently selectable Metal, and independently
+  selectable CUDA builds are in place;
+- each CUDA execution lane owns a non-blocking stream, device-scoped RAII
+  allocations, stream-ordered checked transfers, event-backed submissions,
+  deterministic failure injection, and backend/device ownership validation;
+- all nine VarDCT transform shapes and the shared affine, convolution,
+  symmetric-convolution, and maximum-reduction primitives pass real-device
+  conformance on compute capability 8.6;
+- all seven production AC-strategy candidate paths run on CUDA, support both
+  packed and checked resident inputs, retain CPU-owned traversal and merging,
+  and match CPU cost estimates within the existing Metal test tolerance;
+- forced `maximum-throughput` encoding now keeps initial quantization,
+  inverse Gaborish, initial CfL, DCT8 coefficient decisions, and quantized
+  frame state on CUDA. Its odd-size/padded conformance fixture matches CPU
+  initial-field tolerances and produces byte-identical codestreams;
+- the prepared CUDA maximum-throughput operation is deterministic across
+  reuse, performs no steady-state device allocations, and preserves
+  caller-visible outputs across injected submission failure;
+- prepared Butteraugli now runs the complete reference cache, psychoacoustic
+  decomposition, Malta/L2 difference, masking, multiscale composition, and
+  NaN-aware maximum reduction on CUDA. It uses one prepared allocation and
+  one submission per comparison, is deterministic across reuse, and matches
+  the CPU oracle on expanded, single-scale, multiscale, strided, identity,
+  and non-default-option fixtures (worst observed absolute error
+  `2.06e-5` on compute capability 8.6);
+- exact-coefficient adaptive quantization now keeps CPU coefficient decisions
+  authoritative and hands grouped, dequantized coefficients to CUDA at the
+  inverse-transform boundary. CUDA owns mixed-strategy reconstruction, pixel
+  scatter, Gaborish, all three EPF pass variants, opsin-to-linear conversion,
+  Butteraugli block reduction, and normalized maximum-error reduction;
+- the exact evaluator uses separate persistent and staging arenas, performs no
+  steady-state device allocations, preserves final CPU frame/codestream bytes,
+  supports odd padded source geometry and strategy reconfiguration, and
+  invalidates atomically after submission, completion, numeric, or readback
+  failure;
+- fully resident AQ supports all seven production strategies, strategy-aware
+  field adjustment, resident quantizer selection, cached forward transforms,
+  final CfL, adjusted coefficient decisions, DC and AC coding,
+  reconstruction, loop filtering, Butteraugli feedback, and resident
+  maximum-error control. Its dependent Butteraugli policy is fused into one
+  stream submission, so the two-evaluation field update stays on the device;
+- the public workflow supplies CUDA with resident source/preprocessing,
+  initial-quantization, initial-CfL, and AC-strategy-search results. It can
+  materialize only the final frame and optional diagnostics rather than
+  reading back and re-uploading the quant field between evaluations;
+- exact-coefficient, fully-resident, throughput, and maximum-throughput CUDA
+  modes work through C++, C, Rust, and the CLI. Distance, maximum-error, and
+  target-size rate control are covered at the public-workflow boundary;
+- forced CUDA was exercised on odd padded 1919x1079 input in all four modes and
+  on odd padded 3839x2159 input in fully-resident mode. Every output was
+  accepted by the pinned independent libjxl decoder and contained only finite
+  decoded RGB samples. At 1919x1079, exact CUDA and CPU emitted the same
+  codestream SHA-256, while requesting the optional final resident score did
+  not change resident codestream bytes;
+- native Rust builds now support macOS, Linux, and Windows, with an explicit
+  `cuda` feature. The Windows CUDA test creates a real CUDA context and encodes
+  through the public C API;
+- the pinned conformance decoder is portable to Windows, including executable
+  suffixes, a `clang-cl` workaround for the pinned revision, and local staging
+  of its runtime DLLs. All 22 codestream fixtures and all 52 CUDA-enabled CTest
+  tests pass in the measured Windows configuration; and
+- automatic selection deliberately remains Metal-only until CUDA passes the
+  cross-device qualification gates described below.
+
+## Executive finding
+
+A CUDA backend is technically feasible, and the existing GPU architecture was
+clearly designed with a second backend in mind. `BackendKind` already contains
+`kCuda`, while buffers, typed device images, submissions, transforms, image
+primitives, AC-strategy evaluation, prepared Butteraugli, and prepared adaptive
+quantization all have backend-neutral contracts.
+
+The work is nevertheless substantially larger than translating the Metal DCT
+kernels. The fully resident Metal path now implements almost the complete
+image-analysis half of the encoder: initial quantization, chroma-from-luma,
+AC-strategy candidate evaluation, quantizer construction, coefficient coding,
+reconstruction, loop filtering, opsin conversion, Butteraugli, metric
+reduction, and the dependent AQ update policy. The Metal host, header, and
+shader implementation is roughly 20,000 lines and exposes about one hundred
+distinct functional kernel paths once alternative DCT implementations are
+excluded.
+
+The expected difficulty therefore depends on the requested endpoint:
+
+| Endpoint | Difficulty | Cumulative one-engineer estimate |
+| --- | --- | ---: |
+| CUDA buffers, submissions, copies, and smoke tests | Moderate | 3-5 weeks |
+| DCT and reusable primitive conformance | Moderate | 5-8 weeks |
+| Forced `maximum-throughput` CUDA encoding | Moderately hard | 8-12 weeks |
+| Exact-coefficient CUDA workflow | Hard | 14-20 weeks |
+| Fully resident, production-qualified parity | Very hard | 26-40 weeks |
+
+These are engineering-week estimates for an experienced CUDA/C++ engineer
+with access to codec expertise. Full parity is likely a six-to-nine-month
+single-engineer project, or approximately three to five calendar months for
+two strong engineers where the work can be parallelized. Correctness,
+architecture, and qualification contain enough serial dependencies that team
+size will not divide calendar time linearly.
+
+## Existing foundation
+
+The shared GPU substrate is a strong starting point:
+
+- [`GpuBackend`](../src/gpu/backend.h) owns backend identity, allocation and
+  submission accounting, synchronous host transfers, and packed transform
+  operations.
+- [`DeviceBuffer`](../src/gpu/buffer.h) records both backend kind and backend
+  instance identity. It already reserves `BackendKind::kCuda`.
+- [`DevicePlaneView`](../src/gpu/image.h) and `DeviceImage3` provide typed,
+  strided, non-owning device views with checked byte-range and overlap logic.
+- [`GpuSubmission`](../src/gpu/submission.h) has explicit completion semantics.
+  Repeated and concurrent waits must return one cached status, and destruction
+  does not implicitly wait.
+- [`DeviceScratchArena`](../src/gpu/scratch.h) provides checked aligned
+  suballocation from one reusable device allocation.
+- [`GpuImagePrimitives`](../src/gpu/ops/primitives.h) defines a small optional
+  capability for affine operations, separable convolution, the codec's
+  symmetric 5x5 convolution, and maximum reduction.
+- [`GpuAcStrategyEvaluation`](../src/gpu/ops/ac_strategy.h) leaves candidate
+  traversal, non-overlap merging, and deterministic tie-breaking on the CPU
+  while evaluating expensive same-strategy batches on the device.
+- [`PreparedDeviceButteraugli`](../src/gpu/ops/butteraugli.h) fixes reference
+  preparation, comparison, readback, lifetime, and failure behavior without
+  exposing Metal types.
+- [`PreparedAqEvaluation`](../src/gpu/ops/aq_evaluation.h) defines resident
+  inputs, optional materialization, reconfiguration, memory accounting, and
+  failure-atomic output behavior.
+
+This separation means a CUDA backend does not require redesigning the encoder
+or public GPU operation contracts from scratch. The native CPU implementation
+also remains a readable executable specification and supplies numerical and
+decision-level oracles for CUDA tests.
+
+## Functional scope of a complete backend
+
+The current Metal implementation contains the following broad kernel families:
+
+| Family | Current Metal scope | CUDA requirement |
+| --- | --- | --- |
+| DCT | Nine shapes, forward and inverse, three implementations | One correct implementation per required shape and direction initially |
+| AC strategy | Gather, fused forward transforms, residual/inverse, and cost | Seven production strategy paths plus CPU-compatible cost output |
+| Initial AQ | Gradient, erosion, modulation, sorting, quantizer selection | Required for resident and maximum-throughput modes |
+| Reconstruction | Quant selection, coefficient coding, inverse transforms, scatter | Required for exact and resident perceptual modes |
+| Postprocessing | Gaborish, EPF, and opsin-to-linear conversion | Required for the perceptual tail |
+| Butteraugli | Prepared reference, psychoacoustic stages, Malta, masks, final map, reduction | Required for exact and resident Butteraugli control |
+| AQ policy | Block reduction, maximum-error reduction, dependent field updates | Required for complete resident rate control |
+
+There are four intentionally distinct behavior tracks, documented in
+[`metal-encoding-performance.md`](metal-encoding-performance.md):
+
+- `exact-coefficients` preserves CPU raw quantization, encoder-frame decisions,
+  and codestream bytes. The GPU begins at the reconstruction/perceptual tail.
+- `fully-resident` is the production Metal default. It is deterministic for a
+  fixed backend but is not required to be byte-identical to CPU.
+- `throughput` shares the resident implementation but may use a reduced
+  diagnostic or iteration policy in non-encoding APIs.
+- `maximum-throughput` uses DCT8 only, constructs a frame directly from the
+  adjusted initial field, and omits reconstruction and perceptual scoring.
+
+CUDA should preserve these explicit contracts rather than silently changing
+quality or compatibility behavior under one generic GPU label.
+
+## Metal design to retain
+
+### Prepared, resident operations
+
+The most important Metal design choice is to prepare immutable frame state once
+and keep large images and intermediates resident. Static images, strategies,
+transform metadata, quantization tables, Butteraugli reference data, and
+scratch are allocated or uploaded during preparation. Repeated evaluation then
+performs no device allocation.
+
+This maps well to CUDA device memory, stream-ordered execution, and eventually
+CUDA Graphs. The no-steady-state-allocation property should be a CUDA acceptance
+criterion, not merely an optimization goal.
+
+### Explicit ownership and lifetime rules
+
+Buffers are tied to one backend instance, device views are non-owning, and
+prepared operations retain any outstanding submission before reusing or
+destroying scratch. These rules prevent a large class of cross-device,
+use-after-free, and asynchronous lifetime failures.
+
+The CUDA implementation should preserve the same ownership checks even though
+raw CUDA pointers would otherwise make it easy to bypass them.
+
+### Failure-atomic output
+
+Metal validates complete descriptors before submission. Invalid requests
+submit no work. Upload, submission, execution, numeric, or readback failures do
+not partially commit caller-visible output. Operational failures invalidate the
+prepared state so it cannot silently reuse corrupted storage.
+
+The CUDA implementation should distinguish:
+
+- argument or compatibility rejection before launch;
+- immediate launch/submission failure;
+- asynchronous execution failure discovered at event synchronization;
+- device-side numeric error flags; and
+- host staging or readback failure.
+
+All paths must retain the existing output-atomicity contract.
+
+### Exact and resident acceptance tracks
+
+The exact-coefficient path is a useful compatibility boundary. It keeps
+threshold-sensitive coefficient decisions on the CPU and uses the GPU for the
+more numerically tolerant inverse-transform and perceptual tail. The resident
+path is allowed to make backend-specific floating-point decisions but is held
+to determinism, decodability, size, and decoded-quality gates.
+
+CUDA should adopt the same separation. Requiring CUDA and Metal resident paths
+to emit identical bytes would constrain both backends to their least natural
+arithmetic and execution order.
+
+### CPU-owned deterministic search policy
+
+AC-strategy traversal, non-overlap merging, and tie-breaking remain on the CPU.
+The device receives large candidate batches and returns scalar costs. This
+keeps policy readable and makes backend comparison straightforward while still
+moving the expensive work.
+
+Moving the merge or traversal to CUDA should require profiling evidence and a
+new deterministic contract; it should not be part of the initial port.
+
+### Up-front pipeline validation
+
+Metal loads the embedded library, creates required pipeline states, and checks
+launch limits when the backend is constructed. A forced backend therefore
+fails early rather than halfway through an encode.
+
+CUDA should similarly choose a device, validate its required features and
+memory limits, establish kernel variants, and construct any pools or reusable
+events before reporting the backend as available.
+
+### Differential tests and performance discipline
+
+The Metal work has strong stage-level CPU differential tests, poisoned-output
+checks, allocation and submission counters, concurrency tests, failure
+injection, GPU timestamps, and recorded end-to-end performance gates. It also
+measures the complete public encoder rather than treating a fast leaf kernel as
+an encoder speedup.
+
+Those practices should become shared GPU conformance and qualification suites
+that both backends run.
+
+## Metal design not to copy blindly
+
+### Platform and target coupling
+
+Before the CUDA work, the root [`CMakeLists.txt`](../CMakeLists.txt) rejected
+every non-Apple platform, unconditionally enabled Objective-C++, and publicly
+linked `gjxl_codestream` to `gjxl_metal`. This prevented even the CPU targets
+from serving as a portable foundation.
+
+The implemented build now provides independently controlled targets:
+
+- `GJXL_ENABLE_METAL`, available only on Apple platforms;
+- `GJXL_ENABLE_CUDA`, available when a supported CUDA toolchain is selected;
+- a portable CPU-only build with neither GPU backend; and
+- an internal backend resolver that depends only on the enabled concrete
+  factories.
+
+Metal frameworks, Objective-C++, `metal-cpp`, shader compilation, and metallib
+embedding must remain inside the conditional Metal branch. CUDA compilation,
+the CUDA runtime, architecture selection, and generated device objects must
+remain inside a separate `gjxl_cuda` target.
+
+### Original Metal-specific public vocabulary
+
+At the time of the initial analysis, [`VarDctEncodingOptions`](../src/codestream/workflow.h)
+exposed `kMetal`, a Metal-only execution summary, and a Metal-named AQ field.
+The C API and Rust wrapper likewise exposed only automatic, CPU, and Metal
+backend variants.
+
+The first implementation checkpoints completed the required vocabulary work:
+
+- `VarDctBackendPreference::kCuda`;
+- `VarDctExecutionBackend::kCuda`;
+- `GJXL_BACKEND_CUDA`, appended without renumbering existing C values;
+- a Rust `Backend::Cuda` variant;
+- `--backend cuda` in command-line tools; and
+- backend-neutral `gpu_aq_mode` terminology.
+
+Because the project is version `0.0.1`, the C++ field was renamed directly
+rather than retaining two independently writable aggregate members. The CLI
+accepts legacy `--metal-aq` as an alias for the canonical `--gpu-aq` spelling.
+
+### Brittle device qualification and process-global caching
+
+Automatic Metal selection currently recognizes one exact device-name string
+and stores one system-default backend behind a process-global `std::once_flag`.
+This is too narrow for NVIDIA's range of devices and prevents recovery from a
+transient initialization failure.
+
+The internal backend descriptor should report at least:
+
+- backend kind and stable device identity;
+- device ordinal;
+- available memory and relevant execution limits;
+- supported operation capabilities and AQ modes;
+- supported profiling capabilities; and
+- qualification state for automatic selection.
+
+The concrete `CreateCudaBackend` factory accepts an explicit CUDA device
+ordinal and validates it before constructing the backend; the higher-level
+production resolver currently selects ordinal zero. Automatic selection should
+remain conservative and be enabled per measured device class, geometry range,
+and AQ mode. A failed one-time initialization must not permanently poison every
+later encode unless the device itself is in an unrecoverable state.
+
+### Unified-memory assumptions
+
+[`MetalBackend`](../src/gpu/metal/metal_backend.cpp) allocates every buffer with
+`MTL::ResourceStorageModeShared`. Host copies are direct `memcpy` operations
+over `MTL::Buffer::contents()`, and final frame assembly borrows completed
+buffer ranges synchronously.
+
+That is appropriate for Apple Silicon but should not be reproduced with CUDA
+managed memory. On a discrete NVIDIA GPU it risks unpredictable page migration
+and disguises expensive transfers.
+
+CUDA should use:
+
+- explicit device allocations;
+- pinned host upload and readback staging;
+- asynchronous copies associated with the operation stream;
+- reusable allocation pools after correctness is stable; and
+- explicit transfer-byte and transfer-time accounting.
+
+The synchronous `GpuBackend` copy methods are sufficient for the first correct
+implementation. Prepared CUDA operations may then manage pinned staging and
+asynchronous copies internally without prematurely broadening the public base
+interface.
+
+### Final coefficient handoff
+
+Metal can synchronously consume completed shared storage while converting its
+strategy-batch-major coefficients into the CPU serializer's group-major
+layout. CUDA must transfer those coefficients across the device boundary.
+
+The preferred eventual design is:
+
+1. retain strategy-batch-major storage for CUDA coefficient kernels;
+2. pack the final result into the serializer's group-major representation on
+   the GPU;
+3. copy one contiguous result into pinned, candidate-owned host storage; and
+4. commit the completed `VarDctEncoderFrame` only after successful event
+   completion, readback, and validation.
+
+Writing directly to mapped host memory is unlikely to be a good default for
+the coefficient kernels. Explicit device packing followed by a large
+contiguous asynchronous copy should be the baseline to measure.
+
+### Monolithic prepared AQ state
+
+`MetalPreparedAqEvaluation` has accumulated geometry planning, validation,
+resource layout, host staging, Metal dispatch encoding, profiling, exact
+handoffs, several resident modes, frame assembly, diagnostics, failure
+injection, and a mutable operation state machine. Its many `frame_only_*`,
+`resident_*`, and exact-mode booleans encode combinations that are increasingly
+difficult to reason about.
+
+The CUDA implementation should not duplicate this class wholesale. First
+extract backend-independent immutable planning:
+
+- validated source, coding, block, tile, and filter geometry;
+- canonical strategy anchors and per-strategy batches;
+- coefficient offsets and final transform layouts;
+- quantization-table and constant preparation;
+- persistent, staging, and scratch capacity requirements;
+- selected execution features and valid feature combinations; and
+- requested output/readback materialization.
+
+A shared `PreparedAqPlan` can be consumed by separate Metal and CUDA executors.
+Native resource ownership, launch encoding, profiling, and synchronization
+should remain backend-specific.
+
+The preparation flags should also be grouped into a structured feature or mode
+description rather than extended with more interacting booleans.
+
+### Manually duplicated host/device ABI
+
+AQ and Butteraugli parameter structures are declared independently in C++ and
+Metal source. Host-side size assertions catch some mistakes, but they cannot
+prove that the shader declaration retained the same field offsets and
+semantics. Quantization formulas and constants also have separate CPU and Metal
+implementations.
+
+Adding a third handwritten CUDA copy would increase drift risk. Prefer one of:
+
+- generating host, MSL, and CUDA POD declarations from a small schema;
+- a carefully restricted shared header where language compatibility permits;
+  or
+- generated offset/size manifests plus exhaustive ABI tests.
+
+Decision-sensitive formulas should use shared generated test vectors even if
+the source syntax cannot be shared directly.
+
+### Apple-specific kernel structure
+
+The production Metal configuration selects SIMD-group matrix DCTs for the
+seven AQ strategies. CUDA warp geometry, register pressure, shared-memory bank
+behavior, and preferred block sizes differ. The CUDA port should preserve the
+math and coefficient layout, not Metal launch geometry or SIMD-group
+implementation details.
+
+The recommended DCT progression is:
+
+1. simple scalar or matrix FP32 kernels as the correctness oracle;
+2. separable shared-memory transforms;
+3. factored radix-2 variants where they win end to end; and
+4. warp-specialized variants selected by profiling.
+
+Tensor-core arithmetic should not be used in decision-sensitive paths until
+its output and quality behavior have an explicit acceptance contract.
+
+### Submission and transfer model
+
+The common submission abstraction maps naturally to a CUDA event, but the base
+backend has no explicit stream, event-dependency, or asynchronous-copy API. A
+single CUDA stream is sufficient for the first correct implementation and
+preserves ordering, but it may serialize otherwise independent prepared
+objects.
+
+Each implemented CUDA backend owns one non-blocking stream and serializes
+stream submission and host transfers with a mutex. Production worker threads
+are assigned to one of two persistent backend lanes, while explicitly created
+backends retain one private lane. Prepared AQ and Butteraugli objects own
+independent arenas, so work on different production lanes can overlap without
+sharing per-image device buffers. Two lanes bound simultaneous GPU execution
+without creating one stream per context. The cap follows local single-stream
+profiling in which maximum-throughput encoding stopped improving between two
+and four in-flight 1080p requests.
+
+The resident policy contains many launches with stable allocations and mostly
+stable geometry. Once the ordinary stream implementation is correct, it is a
+strong candidate for CUDA Graph capture. Graphs should optimize an established
+execution plan rather than become the initial correctness mechanism.
+
+### Metal-only tests and absent native CI
+
+Several important tests instantiate Metal directly even though most of their
+contracts are backend-neutral. They should be parameterized through a small
+backend test factory. Metal-specific pipeline selection, profiling, and shader
+capture tests should remain concrete.
+
+The repository currently has Rust workflows but no comprehensive native C++ or
+GPU CI. CUDA support should not be considered production-ready without
+automated CPU-only builds and real-NVIDIA functional testing.
+
+## CUDA architecture
+
+### Backend object
+
+`CudaBackend` implements the shared `GpuBackend` base and exposes the image
+primitive, AC-strategy, prepared Butteraugli, and prepared AQ capabilities. It
+owns:
+
+- explicit CUDA device identity and runtime-device restoration;
+- one private non-blocking stream and event-backed submissions;
+- validated device allocations and launch limits;
+- the correct FP32 DCT and functional-kernel dispatch paths; and
+- deterministic failure-injection state for tests.
+
+The functional backend has since gained shared private memory pools,
+two production execution lanes, and profiled kernel specializations; see the
+[optimization study](cuda-optimization-s1.md). Graph capture remains an
+unimplemented optimization, not a correctness requirement.
+
+`CudaBuffer` is an RAII `DeviceBuffer` containing an explicit device pointer
+and allocation metadata. Operations validate both backend instance and device
+ownership before using it.
+
+`CudaSubmission` records completion with a CUDA event and caches one
+translated status with `std::call_once`, preserving the concurrent `Wait()`
+contract. Immediate launch errors are reported before a successful
+submission is returned; asynchronous failures belong to the submission's
+completion status.
+
+### Device allocation policy
+
+On devices with stream-ordered allocation support, CUDA backends use
+`cudaMallocFromPoolAsync` and `cudaFreeAsync` on their existing streams.
+Backends with the same device ordinal and retention policy share one
+gjxl-private pool, including the two persistent production lanes. This does
+not share per-image buffers or weaken backend-ownership validation, and
+does not modify the application's default/current CUDA memory pool.
+
+The default release threshold is `min(totalGlobalMem / 2, 4 GiB)`. It retains
+unused memory for repeated encoding and is not a cap on live allocations.
+Separate custom thresholds create separate pools; their retention can add
+up. Zero requests release of unused storage at synchronization points.
+Callers creating explicit C++ backends can choose a policy:
+
+```cpp
+gjxl::CudaBackendOptions options;
+options.memory_pool_release_threshold_bytes = uint64_t{1} << 30;  // 1 GiB
+// Alternatively, options.use_stream_ordered_allocation = false selects
+// the legacy cudaMalloc/cudaFree policy instead of any memory pool.
+std::unique_ptr<gjxl::GpuBackend> backend;
+gjxl::Status status = gjxl::CreateCudaBackend(options, &backend);
+if (!status.ok()) return status;
+```
+
+The public `gpu/cuda/cuda_backend.h` declares these options and a cache
+release function. After quiescing encodes and releasing unneeded prepared
+objects/buffers, a C++ caller can release unused memory while retaining
+the backend lanes:
+
+```cpp
+gjxl::Status status = gjxl::TrimCudaDeviceMemory(0);
+if (!status.ok()) return status;
+```
+
+Trimming synchronizes CUDA work on the selected device in the current
+context, so it may wait for other users of that context. It leaves live
+allocations valid and trims only gjxl pools. Concurrent encoding can
+immediately grow the cache again. Pool ownership ends after the final
+backend/buffer/submission state releases it; the registry holds only weak
+references. Applications sharing a memory-constrained GPU can lower the
+threshold, explicitly trim, or select the legacy allocator. There is no
+automatic cross-pool out-of-memory recovery.
+
+The feature is guarded for CUDA 11.2+, with a runtime capability check;
+unsupported devices and older-toolkit builds use the legacy allocator.
+Other pool setup errors are returned to the caller. Qualification currently
+covers CUDA 11.8 on the RTX 3060 Laptop GPU, including forced legacy behavior,
+not an older toolkit or an unsupported physical device. Retained cache use
+and cold/warm timing are reported separately in the
+[S32 study](cuda-optimization-s1.md#stream-ordered-allocation-follow-up-s32).
+Release behavior follows NVIDIA's
+[stream-ordered allocator documentation](https://docs.nvidia.com/cuda/archive/11.8.0/cuda-c-programming-guide/index.html#stream-ordered-memory-allocator).
+
+### Prepared operations
+
+Prepared CUDA AQ and Butteraugli operations consume the shared descriptors and
+own persistent and staging device arenas. They submit through the backend
+stream and keep stable device pointers across evaluations; that preserves the
+option of later graph capture or pooling without making either part of the
+correctness mechanism.
+
+The operations expose the same ready, busy, and invalid state semantics as
+Metal. Destruction waits for outstanding work before releasing device or host
+staging memory.
+
+Fully-resident AQ allocates host RGB reconstruction staging only when a
+caller requests that diagnostic image. Encoding-only requests leave these
+three host planes unallocated, saving `3 * source_width * source_height *
+sizeof(float)` bytes of host storage (99.46 MB at 3839x2159). The GPU still
+reconstructs RGB for perceptual evaluation; device arenas and required frame
+readbacks are unchanged. The first diagnostic request allocates all three
+staging planes before submitting work, and later requests reuse them.
+Readback validation still precedes publication to the caller's image, so
+failure does not expose a partial reconstruction.
+
+Required fully-resident AC-coefficient host staging is allocated without
+initial value initialization. The synchronous readback overwrites its full
+extent before validation or frame assembly can access it. This avoids an
+extra full-image host clear, but does not reduce its capacity or readback
+volume. Final frame coefficients retain the same group/channel order and
+zero-filled unused edge tails.
+
+The fully-resident mixed-strategy forward DCT reads coding-image rectangles
+directly, and its inverse DCT writes reconstruction-image rectangles directly.
+Both use the existing factorized FP32 arithmetic and validated channel-major
+anchor batches. The separate gathered-pixel and inverse-pixel arrays are no
+longer allocated: this removes `2 * 3 * padded_width * padded_height *
+sizeof(float)` bytes of device staging (199.07 MB at padded 4K), plus the
+associated gather/scatter launches and device-memory round trips. Cached
+forward coefficients remain available for repeated AQ evaluations. Exact
+coefficient mode and the DCT8-only maximum-throughput path are unchanged.
+
+The resident coefficient kernel computes its small forward/inverse DC bases
+once per anchor block and reuses them across channels and samples. It retains
+the original FP32 formulas, constants, and accumulation order. Direct access
+to scale, bias, threshold, and sharpness values avoids dynamically indexed
+thread-local array copies; the generic CUDA 11.8 entry reports a 32-byte
+rather than 112-byte stack frame, with 256 bytes of shared basis storage per
+block. Its remaining stack belongs to the cosine large-argument path.
+This changes neither launch counts nor requested device allocation sizes or
+host/device transfers. A guarded original-kernel oracle covers all seven
+shapes, both quantization modes, changed-input reuse, and error paths.
+
+Resident AC quantization, X/B prediction, and color restoration now share
+one per-coefficient pass. Each thread keeps its reconstructed Y value and
+completes X/B restoration before storing those channels. An explicit final
+FMA preserves the unfused kernel's rounding boundary. The shared-basis,
+DC-extraction, and pre-LLF barriers remain; three other block barriers and
+intermediate reconstruction accesses are removed. A separate bounded entry
+keeps four 256-thread blocks feasible on the qualified SM86 device without
+changing the unbounded arithmetic/performance reference kernels.
+
+Encoding-only resident policy finalization has a specialized coefficient
+entry that omits unused float reconstruction stores and LLF restoration.
+It retains reconstructed Y for prediction and all dequantization/error
+checks. Scored iterations and diagnostic reconstruction use the full entry;
+the encoding-only branch rejects diagnostic outputs and passes a null float
+reconstruction pointer. The existing arena remains necessary for preceding
+scored iterations, so this does not reduce allocation capacity or transfers.
+
+Both full and encoding-only coefficient entries now specialize all seven
+production physical transform shapes. Checked dispatch supplies compile-time
+dimensions while preserving dynamic anchors, offsets, pitches, quantization
+values, arithmetic order, and error checks. Noncanonical internal batches
+retain the generic entry's behavior. Blocks use 64 threads for 8x8, 128 for
+8x16/16x8, and 256 for larger shapes. On the qualified CUDA 11.8/SM86 build,
+all fourteen specialized entries have zero stack/local allocation and use
+40-48 registers; full/materialization shared storage remains 256/128 bytes.
+Original, unfused, and generic controls remain available to differential
+tests. See the [S39 study](cuda-optimization-s1.md#shape-specialized-resident-coefficients-s39)
+for measured results and operating-state limitations; these resources do not
+by themselves establish an end-to-end speedup or cross-device qualification.
+
+Butteraugli frequency decomposition now fuses the vertical 15/7-tap blur
+with its in-place low/high split. The completed horizontal intermediate is
+the convolution input, so updating the original low-frequency plane has no
+cross-pixel read/write dependency. Each pixel retains the existing blur
+normalization, rounding, range decisions, and two output stores. The separate
+blurred-plane write/read and split launch disappear; working-plane capacity
+remains necessary for later masking/blur stages. A retained separate-pass
+entry and guarded differential test cover all four production channels.
+See the [S40 study](cuda-optimization-s1.md#fused-blur-and-frequency-split-s40).
+
+The shared CPU serializer's coefficient-order zero scan now uses branch-free
+64-bit updates and a stable count-buffer pointer. Frame validation bounds
+every counter by the representable block area; sampling, stable sorting,
+LLF prefixes, entropy policy, and bytes remain unchanged. The qualified
+MSVC build remains scalar. A backend-independent differential fixture and
+fully instrumented host ASan build cover the change. See the
+[S41 study](cuda-optimization-s1.md#branch-free-coefficient-order-zero-counting-s41)
+for isolated and complete-workflow results, including mixed cold timings.
+
+ANS token emission now inlines HybridUint conversion after validating each
+immutable configuration once per stream. Its private state recurrence uses
+a lightweight success return, constructing public status messages only on
+failure. All guards, arithmetic, model policy, and emitted bytes are retained.
+Backend-independent conversion/recurrence fixtures, host ASan, and the full
+decoded-image matrix cover the change. The
+[S42 study](cuda-optimization-s1.md#lightweight-ans-token-emission-s42)
+records the section-writing gain and the smaller, variable whole-workflow
+results. CUDA kernels and system settings are unchanged.
+
+Direct AC token accumulation likewise uses a small private error enum, with
+public status construction confined to failure paths. Its original
+validation, error codes, token order, fixed-HybridUint populations, and
+output atomicity are preserved. The expanded 4,096-case differential fixture
+checks all production transform shapes and mixed layouts, patterns, orders,
+context maps, scratch reuse, and both collection modes. See the
+[S43 study](cuda-optimization-s1.md#lightweight-direct-ac-token-accumulation-s43)
+for isolated and full-workflow qualification.
+
+AC nonzero counting now scans the contiguous coefficient plane and
+subtracts the small LLF rectangle, preserving the original exclusion rule.
+The qualified MSVC build uses baseline x64 vector operations. An independent
+coordinate-wise oracle checks counts and coefficient values, including
+LLF-only and single-last-coefficient patterns; both tokenizer paths still
+match exactly. The [S44 study](cuda-optimization-s1.md#contiguous-ac-nonzero-reduction-s44)
+records the larger-input target gains and the unresolved small-image
+whole-encode regression, including same-path and same-executable controls.
+No universal whole-workflow speedup is claimed. CUDA and system settings
+are unchanged.
+
+Butteraugli L2 differences are now evaluated inside final masking. The
+intervening mask preparation does not consume the L2 values or overwrite
+their inputs, so six temporary plane writes/reads and four launches are
+removed without reordering the arithmetic. Earlier psycho-image stages
+still need the aliased scratch allocation. The retained separate-pass
+kernels and a 360-case guarded fixture verify exact results, strides,
+non-finite handling, and reuse; seven scoped sanitizer checks and the full
+decoded-image matrix pass. See the
+[S45 study](cuda-optimization-s1.md#fused-l2-difference-and-final-masking-s45)
+for the approximately 35% target-kernel gain, smaller variable whole-encode
+results, native resource checks, and unchanged allocation/copy totals.
+
+The next checkpoint jointly fuses the three 33-tap vertical blurs with
+low/medium-frequency construction, preserving the Y/B dependency and
+original tap/division order. Packed horizontal intermediates reuse the
+already consumed Opsin RGB scratch. A measured 32x48 tile removes 18
+launches per encode and three blurred-plane writes/reads per psycho pass without
+changing arena sizes or transfers. All 67 CUDA / 49 CPU tests, 220 guarded
+cases plus a tall-grid fixture, seven scoped sanitizers, batch checks, and
+46 decoded-image pairs pass. The [S46 study](cuda-optimization-s1.md#fused-vertical-blur-and-lowmedium-construction-s46)
+records the 16.5% / 24.3% target-bundle gains at 4K / 1080p, adverse
+primary wall observations, same-executable control, and unchanged native
+oracles. No stable whole-encoder speedup is claimed.
+
+Prepared Butteraugli now reuses scratch after each phase's last read,
+reducing its allocation from 33 to 27 full working planes. Expanded and
+subsampled RGB temporarily use not-yet-produced low-frequency outputs;
+blurred RGB and XYB share pointwise storage; mask and pre-crop/half-scale
+output work reuse dead horizontal intermediates. The main result remains
+in the external distance map while half-scale construction runs.
+Captured requests shrink by 198,921,984 bytes at odd 4K and 49,694,592
+bytes at odd 1080p, with unchanged kernels, launches, and copies. All
+67 CUDA / 49 CPU tests, seven scoped sanitizers, 261 byte-exact prepared
+map pairs, 46 decoded-image pairs, and batch checks pass. See the
+[S47 study](cuda-optimization-s1.md#compact-prepared-butteraugli-scratch-s47)
+for the lifetime map, exact allocation accounting, and mixed timing
+results. This is a requested-memory improvement, not a stable encoder
+speedup or a promise of an equal reduction in pool-retained VRAM.
+
+The next checkpoint fuses the three mirrored five-tap vertical RGB blurs
+with pointwise Opsin conversion. Three packed horizontal RGB planes reuse
+the existing six-plane work set, then become horizontal XYB scratch.
+The measured 32x16 tile removes 18 launches per encode and three
+intermediate plane writes/reads per psycho pass, with unchanged allocations
+and transfers. The original kernels remain independent oracles. All
+69 CUDA / 49 CPU tests, 240 guarded cases plus a tall case, seven scoped
+sanitizers, 261 byte-exact prepared-map pairs, 46 decoded-image pairs,
+and batch checks pass. The
+[S48 study](cuda-optimization-s1.md#fused-mirrored-rgb-blur-and-opsin-conversion-s48)
+records the roughly 49% / 47% targeted GPU gain at 4K / 1080p and the
+mixed whole-encode results; no universal encoder speedup is claimed.
+
+The subsequent [S49 handoff investigation](cuda-optimization-s1.md#coefficient-handoff-measurement-and-packing-prototype-s49)
+measures the remaining coefficient readback and frame assembly. An isolated
+GPU-packing/ownership-transfer prototype improves the measured large-image
+handoff but retains host clearing, transfers padded edge tails, and regresses
+on the small-photo cohort. Its 46 image pairs are byte-identical, but an extra
+submission violates the existing AQ resource-count assertion. It was not adopted;
+production remained S48 at that checkpoint. No stable whole-encode gain was claimed.
+
+[S50](cuda-optimization-s1.md#owned-active-coefficient-readback-s50) implements
+the revised active-row layout: GPU packing stays inside the existing final
+submission and reuses reconstruction scratch; pitched copies write only active
+coefficients into overwrite-only final frame storage. Only unused host tails
+are cleared, and validated assembly transfers ownership with unchanged failure
+atomicity and deep-copy semantics. D2H bytes and submission counts stay fixed;
+offset metadata and up to seven packing launches are added. All 71 CUDA / 50 CPU
+tests, four host ASan targets, seven scoped CUDA sanitizers, 46 byte-identical
+decoded-image pairs, and batch checks pass. Same-executable inclusive host
+handoff improves by paired median 29.9% / 26.1% / 10.6% at 4K / 1080p / Flower,
+excluding added GPU packing cost. Warm whole-encode changes are -2.3% / -3.8% /
+-4.4%, but cold Flower regresses 3.2%; the study retains all outliers and does
+not claim a universal encoder gain. C++ consumers must rebuild for the private
+frame-storage representation change.
+
+[S51](cuda-optimization-s1.md#in-place-ans-clustering-and-hoisted-log-table-access-s51)
+reduces host ANS clustering work in the fully-resident workflow: private
+histogram costs are cached in place and exact log-table access is hoisted out
+of symbol loops. Counts, ordered floating-point sums, cluster decisions, and
+encoded bytes remain unchanged; all 162 GPU bodies and the CUDA library are
+identical. All 71 CUDA / 50 CPU tests, three host ASan targets, clustering
+differentials, 58 decoded-image pairs, and batch checks pass. Warm entropy
+optimization improves roughly 21% across the measured workloads, while
+whole-encode gains are smaller and inconsistent across controls. In particular,
+the same-executable 1080p cohort regresses overall despite faster entropy work.
+The study retains that result and all outliers; optimization remains ongoing.
+
+[S52](cuda-optimization-s1.md#borrowed-prepared-ans-populations-s52) reads
+validated prepared ANS populations through private metadata views. The caller's
+counts stay read-only; merged clusters remain owning and all validation is
+retained. At 6,930 contexts, source element storage drops from 14.41 MB to
+0.277 MB. Large-partition replay improves 24-32%; full-encode results are mixed,
+including retained warm release and cold 1080p regressions. A counterbalanced
+cold follow-up supports the entropy-stage benefit, not a universal speedup.
+All 71 CUDA / 50 CPU tests, three host ASan targets, 58 decoded-image pairs,
+17,961 partition comparisons, and batch checks pass. GPU code and ABI are
+unchanged; optimization remains ongoing.
+
+[S53](cuda-optimization-s1.md#bounded-narrow-coefficient-order-counting-s53)
+uses 32-bit private coefficient-order populations when the validated block
+area proves they cannot overflow, with the original 64-bit range retained
+for larger frames. A portable contiguous helper enables packed counting in
+the production MSVC object; no intrinsics, aliasing promises, public API/ABI,
+GPU code, or compiler flags change. Warm release coefficient-order work
+improves by paired median 54.3% / 48.1% / 39.9% at 4K / 1080p / Flower,
+and whole encode by 3.5% / 3.9% / 5.1%. Same-executable warm controls confirm
+the target benefit but give smaller whole-encode gains. Cold release 4K is
+flat and cold control Flower regresses 1.3%; all outliers remain documented.
+All 71 CUDA / 50 CPU tests, four host ASan targets, 58 decoded-image pairs,
+218 independent and 218 forced-width frame cases, counter-boundary checks,
+and batch checks pass. S52's earlier cross-executable order-stage anomaly
+is not explained by a source/object change and remains unresolved.
+Optimization remains ongoing.
+
+[S54](cuda-optimization-s1.md#multi-row-malta-halo-reuse-s54) reuses Malta
+halos across multiple output rows per thread while retaining 256-thread
+blocks. A size-based 8/24/64-row policy preserves the original tiny-image
+instructions and reduces interior halo load/scale work by 33.3% or 43.75%
+on the larger tiles. Scaling divisions, response trees, and accumulation
+order remain unchanged. Controlled GPU traces improve Malta by paired
+18.7% / 7.6% / 7.9% at 4K / 1080p / Flower. Warm release whole-encode
+changes are -3.1% / -2.0% / -0.2%, but cold 4K/1080p regress; controls,
+outliers, and slower batch observations remain documented. All 71 CUDA /
+50 CPU tests, four host ASan targets, seven scoped CUDA sanitizers,
+58 decoded-image pairs, 656 guarded and 16 tall Malta cases pass.
+Public API/ABI is unchanged; a CUDA-internal testing entry permits bounded
+sanitizer coverage of every tile/grid specialization. Optimization continues.
+
+[S55](cuda-optimization-s1.md#joint-channel-horizontal33-convolution-s55)
+combines three horizontal33 channel passes into one exact kernel, removing
+12 launches per profiled encode while retaining the same image intermediates,
+transfers, allocations, and arithmetic. Controlled horizontal GPU time
+improves by paired 8.8% / 15.2% / 24.3% at 4K / 1080p / Flower, but the
+4K total-GPU cohort regresses. Warm release whole-encode gains are only
+0.45% / 0.93% / 0.37%; cold 4K regresses in release and same-executable
+controls. All slower observations remain documented. All 71 CUDA / 50 CPU
+tests, four host ASan targets, seven scoped CUDA sanitizers, 320 guarded
+low/medium cases, the tall case, and 58 decoded-image pairs pass. The 170
+existing GPU bodies are unchanged and the new body matches the measured
+control, with no spills. No public API/ABI or quality-policy changes;
+optimization remains ongoing.
+
+[S56](cuda-optimization-s1.md#direct-dc-context-lookup-and-success-path-residual-emission-s56)
+uses an exact compile-time DC-context lookup and avoids constructing a
+successful status per DC residual. Predictor arithmetic, overflow errors,
+token order, API/ABI, and all GPU code remain unchanged. Final warm release
+DC tokenization improves 34.4% / 31.5% / 42.1% at 4K / 1080p / Flower,
+winning all 21 pairs; whole-encode gains are 4.0% / 0.4% / 4.0%.
+Cold Flower regresses in release and control cohorts, and all slower
+observations remain documented. All 71 CUDA / 50 CPU tests, five host ASan
+targets, 6,148 guarded context cases, and 58 decoded-image pairs pass.
+The CUDA archive is byte-identical; host diagnostic and release bodies
+are not instruction-identical, a stated limitation of those controls.
+Token-scanned ANS histogram preparation and remaining GPU work are still
+open leads; the fully-resident path is not demonstrated maxed out.
+
+[S57](cuda-optimization-s1.md#token-scanned-ans-validation-hoist-experiment-s57-rejected)
+adds exhaustive scanned-ANS configuration and failure-atomicity coverage.
+Its proposed validation-hoist optimization was **rejected**: captured DC
+partition replay improved, but release histogram work regressed about
+8.9% / 9.8% at 4K / 1080p, with six of seven pairs slower in each case.
+The compiler retained a private conversion call, and diagnostic/release
+bodies were not native-identical. Candidate correctness passed 71 CUDA /
+50 CPU tests, five host ASan targets, and 58 byte-identical decoded-image
+pairs. Production ANS code is restored to S56; no S57 speedup is claimed.
+The failed experiment and all slower cohorts remain documented. A smaller
+token-scan routine is an open experiment, not an accepted optimization.
+
+[S58](cuda-optimization-s1.md#small-token-scanned-ans-histogram-routine-s58)
+extracts a small private ANS token scan, enabling actual integer-conversion
+inlining. Its release scan body exactly matches the measured control, while
+the larger partition bodies do not. All captured partitions improve; warm
+4K release histogram work falls 14.0%, winning all seven pairs. Whole-encode
+changes are -1.2% / +0.1% / +2.0% at 4K / 1080p / Flower. Cold release
+regressions of +4.1% / +5.5% / +0.8% remain recorded despite a more favorable
+separate cold-phase cohort; this is not a universal wall-time speedup.
+All 71 CUDA / 50 CPU tests, five host ASan targets, 39,264 exact oracle
+comparisons, 40 new late-section failure cases, and 58 byte-identical
+decoded-image pairs pass. GPU code, API/ABI, and quality policy are unchanged.
+Complete-workflow variability and remaining GPU work are still open.
+
+[S59](cuda-optimization-s1.md#per-channel-malta-fusion-investigation-s59-not-retained)
+investigates combining three Malta responses per channel, but does not
+retain the new kernels. Staged 24-row fusion improves isolated 1080p/small
+cases substantially and 4K slightly. Whole encodes remain mixed: the initial
+4K cohort regresses 2.3%, a separate warm cohort improves 2.4%, and cold
+Flower regresses 3.6%. All 46 image cases produce identical bytes in three
+control modes; guarded/nondefault-stream checks and four scoped GPU
+sanitizers pass. A missing test-fixture initialization dependency caused two
+invalid timing attempts and was corrected without weakening equality or
+changing kernels. All 171 existing GPU bodies remain identical. Production
+stays at S58 at that checkpoint; the diagnostic gains are not advertised as
+a release speedup.
+
+[S60](cuda-optimization-s1.md#fused-reference-erosion-and-l2final-masking-s60)
+fuses reference-mask erosion with L2/final masking, removing four launches
+per profiled encode and one intermediate float-plane write/read per
+difference evaluation. Isolated combined work improves 14.9-19.7%, winning
+all 432 pairs. Explicit rounding intrinsics preserve the original sm86
+contraction tree after an initial one-ULP failure. The release kernel matches
+the measured body exactly; all 171 existing GPU bodies remain unchanged.
+Plane 26 is still used for psycho work, so the 27-plane allocation remains.
+Public API, frame ABI, and quality policy are unchanged.
+
+All 71 CUDA / 50 CPU tests, five host ASan targets, seven scoped GPU sanitizer
+checks, 432 new three-reuse erosion fixtures, and 58 byte-identical decoded
+image pairs pass. Whole-workflow evidence remains mixed: warm public changes
+are -2.9% / +1.5% / +5.5% at 4K / 1080p / Flower; true cold changes are
++2.7% / +1.6% / -1.9%. Two initially cold-labeled cohorts actually used
+warmups due to scalar PowerShell argument splatting; both remain recorded as
+warm repeats, and corrected cold runs are separate. S60 is retained for its
+consistent targeted GPU gain, not as a universal encoder speedup. Remaining
+workflow variability and cross-device qualification are still open.
+
+[S61](cuda-optimization-s1.md#cooperative-final-color-correlation-s61) uses
+one full warp per final color-correlation tile to load and scale coefficient
+chunks cooperatively, while preserving the original four FMA accumulation
+chains and reduction order. Two tile warps share each block; there is no
+size/content heuristic. All 16 floating partial sums per tile match the
+original oracle in 3,600 synthetic/real-capture comparisons. The release
+kernel matches the measured 40-register body with no stack, local, or shared
+storage; all 172 existing GPU bodies remain unchanged. Metadata/frame ABI,
+launch count, allocations, transfers, public API, and quality policy stay fixed.
+
+The targeted stage improves roughly 62-78% on non-tiny captured inputs across
+two screens. Simple tile packing can instead severely regress photographs;
+term splitting and indexing-only alternatives remain documented. All 72 CUDA /
+50 CPU tests, five host ASan targets, scoped GPU sanitizers, and 58 freshly
+decoded byte-identical image pairs pass. A wrapper omitted optional leak and
+stream-order flags on the initial basic memcheck; an explicit rerun passes
+with zero leaks/errors. Warm public whole encodes improve 2.1% / 1.4% / 2.8%
+at 4K / 1080p / Flower, while cold changes are -3.3% / +2.6% / +5.3%.
+Those regressions and slower total-GPU traces remain recorded: this is a
+targeted kernel improvement, not a universal encoder speedup or a maxed-out
+implementation.
+
+[S62](cuda-optimization-s1.md#vertical-low-medium-row-reuse-s62) reuses vertical
+convolution inputs across three adjacent low/medium output rows while keeping
+each output's original FMA and edge-weight order. The tile remains 32x48 with
+256 threads and 30,856 shared bytes; the new body uses 54 registers with zero
+stack/local storage. All 173 previous GPU bodies remain unchanged, and the
+new release body exactly matches both stage screens and the complete-workflow
+control. Launches, allocations, transfers, metadata/frame ABI, public API,
+and quality policy are unchanged; no size/content heuristic is added.
+
+Packed vertical-stage screens improve roughly 8-16%; eight complete-workflow
+trace pairs also improve the targeted GPU duration. A timing audit links 384
+event windows to 1,152 GPU kernels and locates large spikes inside kernel
+intervals, without claiming a causal clock/OS explanation. All 72 CUDA / 50
+CPU tests, five host ASan targets, scoped GPU sanitizers with explicit leak
+and stream-order checks, and 58 fresh byte-identical decoded-image pairs pass.
+The expanded low/medium test uses 380 fixtures and both prior resident and
+separate-pass oracles. Warm public whole changes are -1.6% / +1.0% / +5.0%
+at 4K / 1080p / Flower; cold changes are -2.2% / +1.2% / +1.9%. The ending
+performance snapshot reports thermal and power throttling. Regressions and
+measurement limitations remain documented; the backend is not maxed out.
+
+[S63](cuda-optimization-s1.md#horizontal-input-reuse-s63) reuses horizontal33
+inputs across two adjacent outputs, preserving each output's original FMA,
+edge-weight, and division order. The fixed 256x4 tile and 256-thread block
+retain 13,960 shared bytes; the new body uses 48 registers with no stack/local
+storage. An explicit logical-width dispatch keeps the original body at
+widths up to 32, where unconditional pairing regresses. All 174 old GPU
+bodies remain unchanged, and the new release body matches four stage-screen
+binaries and the complete-workflow control exactly. Launches, allocations,
+transfers, metadata/frame ABI, public API, and quality policy stay fixed.
+
+Six full-workflow trace pairs improve targeted horizontal GPU duration by
+roughly 40-55%. Competing tap-major, row-interleaved, volatile, and invalid-
+halo-write controls constrain the explanation; input-load forwarding alone
+does not explain all of the gain. All 72 CUDA / 50 CPU tests, five host ASan
+targets, seven scoped GPU sanitizer checks, and 58 freshly decoded
+byte-identical image pairs pass. The permanent low/medium suite now has
+460 fixtures and a paired-output tall-grid test. Warm public whole changes
+are +0.3% / -0.3% / -3.1% at 4K / 1080p / Flower; cold changes are
+-0.4% / +0.5% / -7.3%. Phase/control regressions and thermal/power throttling
+remain documented. This is a targeted GPU improvement, not a universal
+whole-encoder speedup or a maxed-out backend.
+
+[S64](cuda-optimization-s1.md#prefetched-initial-color-correlation-s64) preloads
+eight initial-CfL samples per original lane before accumulating them in the
+same order. Eight four-lane tiles share a 32-thread block; widths below 32
+keep the original body. The new body uses 48 registers and no shared,
+stack, or local storage. All 175 old GPU bodies remain unchanged, and the
+release body matches both final stage screens and the complete-workflow
+control. Launches, allocations, transfers, maps, frame ABI, public API,
+and quality policy are unchanged. Six workflow trace pairs improve targeted
+initial-CfL GPU time by 43-45%; vector loads and a new reduction tree are
+not necessary for the gain.
+
+All 73 CUDA / 50 CPU tests, five host ASan targets, seven scoped GPU sanitizer
+checks, and 58 fresh byte-identical decoded pairs pass. The new permanent
+test covers 310 fixtures with three-stage reuse; scoped sanitizer runs cover
+32 fixtures/96 comparisons each. A missing completion message under the
+first sanitizer invocation is resolved by explicitly flushing the test's
+output, with fresh instrumented checks; no firewall or permission block is
+confirmed. Earlier diagnostic failures and corrections are preserved.
+
+Warm public whole changes are -10.0% / -0.1% / +3.1% at 4K / 1080p / Flower;
+cold changes are -14.7% / +7.2% / -5.6%. Broad paired ranges and substantial
+changes in the unchanged host serialization phase prevent attributing those
+large 4K gains to CfL alone. Final endpoints report neither thermal nor power
+limiting; earlier stage/control endpoints report both. No system settings
+change. The local gain is supported, but the backend is not maxed out.
+
+[S65](cuda-optimization-s1.md#exact-zero-tile-malta-responses-s65) skips Malta
+response arithmetic only when a block-wide check finds that every scaled
+tile/halo value is exactly zero. Original scaling, tile geometry, output
+write/add, exceptional behavior, launches, allocations, and transfers remain.
+All twelve new bodies match guarded/replay/sanitizer/workflow controls; all
+176 previous bodies are unchanged. Wider tiles and double-shared raw-zero
+detection are rejected. Captured zero-rich stages improve substantially, but
+dense-stage and full-workflow regressions remain.
+
+All 73 CUDA / 50 CPU tests, five host ASan targets, seven release GPU sanitizer
+checks, and 58 freshly decoded byte-identical pairs pass. Permanent Malta
+coverage rises to 1,856 three-stage fixtures plus 32 tall-grid fixtures;
+release sanitizers cover 168 fixtures per tool. Five selected-mode trace
+pairs improve Malta GPU duration 8-21%; one 4K pair regresses 0.30%.
+Warm public whole changes are -1.49% / +0.40% / -1.36% at 4K / HD / Flower;
+cold changes are -1.09% / +0.14% / -0.57%. Earlier Flower controls regress,
+host phases scatter, and both release endpoint snapshots report thermal/power
+limiting. 4K batch two loses to serial in all three current-policy pairs.
+No system settings change. Harness failures and slow diagnostics are retained;
+no firewall or permission block is confirmed. This remains a local exact
+optimization, not a universal speedup or a maxed-out backend.
+
+[S66](cuda-optimization-s1.md#shared-malta-reciprocal-investigation-s66-not-retained)
+investigates sharing Malta's two reciprocal calculations, but retains neither
+candidate. The arithmetic probe passes 2,785,017,856 full-run bitwise
+comparisons; the Malta probe passes 2,880 three-stage fixtures and 36 captured
+stages pass all 1,152 timing windows. Native-identical duplicate kernels expose
+timing scatter. The correctly rounded reciprocal variant is neutral at 4K;
+the refined approximate variant has only a small local benefit and no general
+rounding proof. No complete-workflow speedup or new release qualification is
+claimed. That checkpoint kept S65 production unchanged, including all 39
+retained binaries/libraries.
+
+[S67](cuda-optimization-s1.md#reuse-dead-prepared-butteraugli-planes-s67)
+rejects both immutable reference-mask caches: extra reads outweigh the saved
+arithmetic even when preparation is excluded. A separate scratch-lifetime
+audit reduces the prepared Butteraugli arena from 27 to 25 full working
+planes. Future psycho outputs hold temporary horizontal blur values, and a
+dead distorted psycho plane holds the uncached half-scale reference mask.
+The odd 4K arena saves 66,307,328 bytes; odd 1080p saves 16,564,864 bytes.
+All 188 GPU bodies remain instruction-identical, with unchanged launch
+structure and transfer counts/bytes in 12 fresh complete-workflow traces.
+All 73 CUDA tests, 50 CPU tests, five host ASan targets, seven GPU sanitizer
+checks, 261 bit-identical prepared maps/scores, and 58 freshly decoded,
+byte-identical release pairs pass. The prepared suite adds thin/odd multiscale
+alias cases and independently checks the smaller physical allocation.
+This is a verified memory reduction, not a demonstrated general speedup:
+public warm whole-encode paired medians are +2.59% / +1.12% / +0.41% for
+4K / 1080p / Flower, while cold results are -1.93% / -4.05% / -0.52%.
+Thermal and power limits were active. An optional unelevated Nsight Compute
+check returned `ERR_NVGPUCTRPERM`; the user was notified, no counters were
+collected, and no security or clock settings were changed. Ordinary CUDA
+and Nsight Systems runs completed. No firewall block is established, and
+the backend is not considered maxed out.
+
+[S68](cuda-optimization-s1.md#fuse-mirrored-rgb-blur-and-opsin-s68)
+fuses mirrored RGB blur and Opsin using shared 32x8/32x16 tiles, with a
+joint-horizontal fallback at widths <= 24. Geometry screens expose severe
+thin-image regressions from unconditional fusion, so the retained policy
+also accounts for short heights and small tile grids. It eliminates eighteen
+launches per measured encode and the global horizontal-image roundtrip on
+wider inputs, without reducing S67's 25-plane arena or changing transfers.
+All 188 existing GPU bodies are unchanged; three additions match the tested
+prototypes instruction-for-instruction. The 73 CUDA tests, 50 CPU tests,
+five host ASan targets, eleven release GPU sanitizer checks, 261 full-map
+comparisons and 58 freshly decoded pairs pass; outputs remain bit-identical.
+All six parent/candidate comparisons in the twelve release traces improve
+the target stage across three workloads, with unchanged
+non-target launch structure, copies and allocations. Warm whole 4K paired
+medians improve 4.78% in the phase probe and 3.80% in the public benchmark.
+This is not a universal whole-encode speedup: public Flower regresses 4.92%
+warm and 6.74% cold, and public cold 1080p regresses 1.36%. Thermal/power
+limits and all adverse samples remain documented. No new permission or
+firewall block occurred; no system security or performance settings changed.
+The backend is not considered maxed out.
+
+[S69](cuda-optimization-s1.md#finer-zero-region-malta-investigation-s69-not-retained)
+rejects finer 4/8/16/32-row zero-region classification for Malta. All
+23,040 guarded comparisons, 3,528 captured-stage timing windows and four
+prototype GPU sanitizer campaigns pass, with native-identical controls.
+The sparse 4K stage improves, but the other stages pay classification costs
+without gaining additional zero regions. Every six-stage 4K candidate
+aggregate is neutral or slower (+0.10% to +0.80%); these are diagnostic
+stage aggregates, not whole-encode measurements. Production source/tests
+and all 39 S68 binaries/libraries remain unchanged. No new release
+qualification or speedup is claimed, and no permission/firewall block
+occurred. Dense Malta response work remains an open optimization target.
+
+[S70](cuda-optimization-s1.md#reuse-neighboring-malta-response-inputs-s70)
+reuses shared inputs across two adjacent Malta output rows. Full responses
+interleave directions; LF keeps row-major arithmetic. Tiny grids and images
+under four rows retain the previous schedule. Sum trees, scaling, zero-tile
+semantics, launches, transfers and the 25-plane arena are unchanged. All
+twelve new release kernels match the timed prototypes instruction-for-
+instruction, with all 191 previous bodies unchanged.
+
+Qualification passes 73 CUDA / 50 CPU tests, five host ASan checks,
+2,944 guarded Malta cases against two oracles, tall-grid boundaries, eleven
+release GPU sanitizer checks, 261 exact maps/scores and 58 freshly decoded
+quality pairs. Two release traces reduce 4K Malta time 18.84% / 23.11%.
+Warm whole-encode paired medians improve 2.85% in the phase probe and 2.01%
+in the public benchmark. This is not universal: phase cold 1080p regresses
+3.94%, public cold Flower 1.98%, and the same-binary controls show substantial
+noise. All adverse results and thermal/power limits remain documented.
+No new firewall/permission block occurred and no system settings changed.
+LF Malta and convolution work remain open targets; the backend is not
+considered maxed out.
+
+[S71](cuda-optimization-s1.md#conditional-second-malta-division-s71-not-retained)
+rejects conditional second-division layouts for Malta. Factoring the
+correction expression fails a finite bitwise guard. Two other layouts and
+an unchanged control each pass 15,360 two-oracle comparisons; all 3,456
+selected captured-stage timing windows remain exact. Native instructions
+confirm that the outer guard really skips the unused division, but its
+4K stage-time aggregate is 0.44% slower; four separate correction branches
+are 3.71% slower. These are local stage aggregates, not encoder timings.
+The S70 runtime, tests and 39 release binaries/libraries remain unchanged.
+No new permission/firewall block occurs or system settings change. Input/
+output and tile-staging costs remain to be separated from arithmetic;
+the backend is not considered maxed out.
+
+[S72](cuda-optimization-s1.md#align-malta-accumulator-rows-s72-not-retained)
+separates Malta component and row-layout costs. Materializing scaled values
+regresses the 4K six-stage replay aggregate 46.71%. Accumulator-only row
+alignment improves isolated 4K LF stages 14.84-16.60%, but complete-workflow
+evidence is mixed: public warm 4K improves 1.22%, phase warm 4K regresses
+1.13%, and same-binary duplicate controls do not establish a net gain.
+The candidate passes 73 CUDA / 50 CPU tests, five host ASan targets,
+15 release GPU sanitizer checks, 261 exact maps/scores per policy and
+58 exact decoded-quality cases. Twelve traces preserve launch/transfer
+structure and confirm the expected small allocation increase. Nevertheless,
+the alignment change is not retained; production/tests and all 39 saved
+S70 build artifacts are restored, with the candidate and all adverse
+results preserved. No permission/firewall block or system-setting change
+occurs. Integrated layout and convolution costs remain open targets;
+the backend is not considered maxed out.
+
+[S73](cuda-optimization-s1.md#phase-convolution-channel-halos-s73-not-retained)
+tests two-phase channel staging for vertical low/medium convolution. A taller
+tile improves isolated 4K vertical work about 7-8% and captured two-pass work
+about 5%; reducing shared storage without changing residency is largely flat.
+All eight modes pass guarded/tall tests and four scoped GPU sanitizers. The
+selected integrated modes pass 31 prepared cases each and 24 exact retained
+bitstream comparisons. Nevertheless, 192 complete-workflow timing windows
+and eight 4K traces show mixed net results, with small-image regressions.
+Neither fixed dispatch is retained; production and all 39 S70 artifacts are
+unchanged. A stale diagnostic test object is rebuilt from current source;
+the failed evidence remains. No firewall/permission block or system-setting
+change occurs. A size-dependent policy remains untested, and the backend is
+not considered maxed out.
+
+[S74](cuda-optimization-s1.md#provisional-resident-metadata-cost-s74-investigation)
+identifies discarded provisional strategy metadata as a host-side target.
+An encoder-only guarded counterfactual preserves all 203 GPU bodies and
+18 retained bitstreams/reports. Clean warm measurements save about 8.96 ms
+in 4K quantization and 3.29 ms at 1080p; total-time results are noisier and
+cold 4K is inconclusive. A timing cohort overlapping a native audit is
+preserved but excluded. Two sanitizer wrappers lose application console
+output despite exact bitstreams and clean tool summaries; qualification
+remains unresolved. No production change is retained. An API-preserving
+lazy metadata implementation and its lifecycle/error tests remain open.
+No firewall cause is established or security setting changed.
+
+[S75](cuda-optimization-s1.md#defer-provisional-dct8-metadata-s75) retains
+owned, validated pending DCT8 metadata for the fully resident frontend.
+Reconfiguration replaces it without constructing the discarded plan; direct
+use realizes it under the existing lock. At 4K this removes five uploads
+(5.32 MB), preserving all 373 launches and every other copy. Warm public total
+time improves 1.77% at 4K and 3.46% at 1080p; cold and small-image results
+remain mixed, with small-image public regressions preserved. Qualification
+passes 73 CUDA-enabled/50 CPU-only tests, three full AQ sanitizer checks,
+58 exact fresh decoded-quality cases and all 203 unchanged native GPU bodies.
+Explicit flushing in diagnostic copies resolves S74's missing sanitizer
+output, with six full encode checks passing. No security settings change.
+Remaining host and GPU bottlenecks are still open; this is not a maxed-out
+claim.
+
+[S76](cuda-optimization-s1.md#interleaved-small-image-metadata-controls-s76-investigation)
+tests S75's small-image concern with per-encode, within-process eager/lazy/
+duplicate-eager interleaving. All 3,618 preflight, measured and warmup/reference
+encodes preserve bytes and summaries; all 203 GPU bodies and 39 retained
+runtime artifacts remain unchanged. Flower's automatic-thread paired total
+improves 2.18% with a persistent backend and 1.69% with fresh backends inside
+the warm process, with essentially unchanged serialization. The earlier
+public regressions remain recorded; these diagnostic results do not settle
+cold-process behavior. No size gate, thread-policy change or production
+implementation is added. Every bounded child completes without an observed
+permission/firewall block. Remaining host and GPU costs are still open.
+
+[S77](cuda-optimization-s1.md#serializer-worker-lifecycle-s77-not-retained)
+measures serializer worker lifetimes and finds about 0.81/1.12/1.62 ms per
+Flower/1080p/4K encode with no worker active inside the profiled calls. Two
+caller-participation counterfactuals preserve all 3,306 encoded results and
+203 GPU bodies. Flower benefits, but larger-image totals remain mixed or
+adverse against duplicate controls, so neither policy is retained. All 39
+runtime artifacts remain unchanged. Exact GPU coefficient-order population
+accumulation remains an unimplemented host-scan lead; the backend is not
+considered maxed out. No permission/firewall block or system-setting change
+occurs.
+
+[S78](cuda-optimization-s1.md#gpu-coefficient-order-population-replay-s78-investigation)
+isolates about 7.23 ms of 4K CPU strategy-presence/zero-count work and qualifies
+three diagnostic GPU counting recipes on 108 exported frames. All exact bin,
+guard/source checks and 12 full-corpus GPU sanitizer jobs pass. A same-binary
+four-mode comparison measures unified clear/count/readback at about 0.50 ms
+for 4K, with a paired 4.49% improvement over the atomic control, but roughly
+no improvement at 1080p. These are resident replay results, not public encode
+speedups. All 39 production runtime artifacts remain unchanged; frame-owned
+population caching and resident integration are still unimplemented. Two
+preserved setup failures concern a tiny-frame export cutoff and an escaped
+build path, not an observed permission/firewall block. Optimization continues.
+
+[S79](cuda-optimization-s1.md#resident-coefficient-order-populations-s79)
+retains exact GPU coefficient-order zero populations on materialized resident
+frames, with immutable owned caching and unchanged CPU sorting/sampling
+semantics. Generic and separate frame-only paths retain CPU fallback. All
+73 CUDA / 50 CPU tests, eight host ASan targets, eleven GPU sanitizer jobs,
+58 fresh exact decode/quality cases and 2,466 interleaved control encodes pass.
+The expanded permanent GPU population test passes after the full-suite run.
+Persistent same-process paired total improves about 1.74%/2.68%/1.41% at
+4K/1080p/Flower; cold public 1080p is 0.89% slower in its small cohort. A 4K
+trace adds one roughly 0.51 ms kernel and 24 KiB clear/readback, preserving all
+prior launches and allocation/synchronization counts. These are qualified
+warm gains, not universal or batch-throughput claims. No security-setting
+change or observed permission/firewall block occurs; optimization remains open.
+
+[S80](cuda-optimization-s1.md#lossless-sparse-ac-transfer-investigation-s80)
+investigates lossless sparse AC transfer without changing S79 production.
+The 4K handoff carries 99.5 MB despite only 1.12% nonzero coefficients.
+Guarded GPU compression/CPU reconstruction passes exact signed-int32 replay,
+but fresh ordinary host-buffer costs erase smaller-image gains. Unconditional
+sparse transfer is not justified. A zero-backed Windows output counterfactual
+also times a full dense read, so deferred page costs are not hidden. This is
+not a production allocator change or a new public/batch speedup claim. The
+zero-backed experiment is not a general fix either: 4K is nearly flat against
+its own dense baseline, while several corpus cases lose. Seven GPU sanitizer
+and five host-ASan jobs pass; ownership/reuse and reconstruction remain the
+next gates before any sparse-transfer integration. S79 remains retained.
+
+[S81](cuda-optimization-s1.md#lossless-narrow-ac-transfer-investigation-s81)
+qualifies lossless byte/int16 AC transport with exact int32 fallback. Linear
+streaming expansion improves the fresh 4K replay stage by 10.73%, but fresh
+1080p is near flat and Flower loses 20.18%; this is not a general readback fix
+or a whole-encode gain. All 66,432 guarded and 7,200 timed comparisons pass,
+alongside two host-ASan and four GPU sanitizer jobs. Production and the 40-file
+S79 runtime remain unchanged. Flags synchronization, host-storage ownership
+and full-workflow integration remain open; no observed privilege/firewall
+block or security/device-setting change occurs.
+
+[S82](cuda-optimization-s1.md#integrated-narrow-ac-transport-and-metadata-batching-s82)
+integrates metadata batching and lossless narrow transport in a diagnostic
+resident implementation. Six 4K traces confirm two fewer synchronizations and
+74.65 MB less D2H traffic, with unchanged device allocations. All 5,762 counted
+exact encodes, three functional jobs, five scoped host-ASan jobs and six GPU
+sanitizer jobs pass; 58 fresh encodes match already decoded/scored references,
+without fresh decoder runs. Persistent-backend 1080p gains about 2%, but 4K
+and fresh-backend results depend on controls or remain mixed. Neither narrow
+transport nor metadata-only batching is retained; the 40-file S79 runtime is
+unchanged. Overlapping ordinary dense-output first-touch with resident GPU
+work is the next untested lead. Preserved setup/visibility/timeout failures
+are not counted as passes or attributed to a firewall/admin block. No security
+or device setting changes occur; fully resident optimization remains open.
+
+[S83](cuda-optimization-s1.md#overlapped-dense-host-first-touch-s83) overlaps
+ordinary final-host-buffer initialization with resident GPU work, without
+changing kernels, transfers, synchronizations or frame ownership. It qualifies
+12,272 exact encodes across separate position-balanced and preceding-mode-
+balanced campaigns, seven functional jobs, seven scoped host-ASan jobs and
+three GPU memchecks. Eight traces directly show CPU initialization overlapping
+GPU kernels. The stronger schedule measures full-initialization 1080p gains
+of 2.96%/3.71% against duplicate dense control for persistent/fresh backend,
+but fresh 4K remains mixed despite a faster post-submission stage. Production
+is unchanged: avoiding redundant tail clearing, combining overlap with narrow
+transport, and production/batch qualification remain next gates. No permission
+or firewall block is observed; the quiet initial 4K memcheck is verified active
+work, not restarted. The backend is not considered maxed out.
+
+[S84](cuda-optimization-s1.md#combined-first-touch-and-narrow-ac-transport-s84)
+combines narrow AC transport with overlapped initialization of ordinary host
+buffers. It qualifies 9,401 exact encodes, 26 functional/sanitizer jobs and
+twelve traces with unchanged retained GPU bodies. In balanced whole-encode
+comparisons, the combined mode gains 6.37%/4.85% at persistent/fresh 1080p and
+3.22%/2.68% at 4K versus the primary dense control; both combined duplicates
+beat both dense controls in every 1080p/4K replication. The tiny sample still
+regresses, duplicate controls reveal timing noise, and early compact staging
+adds 49.77 MB of host memory at 4K. Production remains unchanged pending a
+size/geometry and compact-fill study, complete production qualification and
+concurrent batch-throughput gates. All runs complete without a detected
+permission block; the 5.5-minute 4K memcheck is verified active computation.
+
+[S85](cuda-optimization-s1.md#size-geometry-and-overlap-headroom-s85) adds a
+coarse 50-input size/geometry sweep using the unchanged S84 binary: 36,890
+exact encodes, 50 fresh independent decodes, 50 scoped encoder-ASan and four
+GPU memcheck replays, plus release/ASan fixture parity. Small cases often
+have too little post-submission wait to hide full host initialization, while
+thin heavily padded images can benefit from changed host first-touch/clearing
+costs. Duplicate variation and replication counterexamples prevent a clean
+production size cutoff. Focused timing-position/store-policy tests and
+production/batch qualification remain necessary; production stays unchanged.
+One host fixture compiler-command failure is corrected and preserved, with
+no detected firewall or permission block and no encoder retry.
+
+[S86](cuda-optimization-s1.md#initialization-position-and-expansion-stores-s86)
+isolates full initialization before/after wait and ordinary/streaming host
+expansion: 14,462 exact encodes, 38 qualification jobs and unchanged native
+GPU kernels. Pre-wait filling wins all matched large-image position contrasts
+in both replications' total and outer-wall medians. Streaming expansion retains
+the large-image readback advantage after initialization; ordinary stores are
+not a universal replacement. Post-wait initialization can still help thin
+images, separating some tail/setup savings from overlap. A packing-fusion
+follow-up must avoid overwriting quantized source still being read by other
+CTAs/batches. Holdout policy selection and production/batch gates remain open;
+S79 production stays unchanged. The 5.5-minute 4K memcheck is verified active
+work and finishes with zero reported errors/leaks; no permission block is seen.
+
+[S87](cuda-optimization-s1.md#fused-compact-ac-packing-s87) safely reuses dead
+threshold storage for two diagnostic fused dense/compact packers, preserving
+the original quantized source and dense fallback without another device
+allocation. Native audits retain 208 GPU bodies plus two new packers;
+14,462 exact encodes and 42 accepted qualification jobs pass. Synthetic
+GPU-event packing intervals improve 14-36%, but incremental whole-encode
+fusion gains do not hold consistently across both duplicate controls and
+replications. The combined compact-readback candidate still beats both
+dense controls in every large-image replication with vector fusion; that
+gain includes the earlier readback/initialization changes. Scratch placement
+alone is not a general speedup, and no unconditional fused policy is promoted.
+Original host-compile and missing-final-marker failures are preserved; only
+the affected adapters are corrected/rebuilt, with final sanitizer markers
+captured. No CUDA/encoder timing retry occurs or permission block is observed. Small-
+transform packing granularity and production/batch qualification remain open;
+the 40-file S79 runtime stays unchanged.
+
+[S88](cuda-optimization-s1.md#grouped-compact-packing-s88) qualifies three
+grouped vector packers with partial-block and exact-overflow coverage,
+14,462 exact encodes and 43 qualification jobs. Two-pass synthetic DCT8
+packing gains reach about 26% versus S87 vector4, but neither grouped
+encoder family beats both vector controls across both repetitions in total
+and outer wall for any input/lifetime group. Retained 4K traces explain a
+key limitation: their transform mix is DCT32x32/DCT32x16, not DCT8. Packing
+is only about 0.6% of recorded kernel time there, while the leading paired
+Malta variants total about 14.5%. These are older, hash-checked traces, not
+new S88 profiling. Keep grouped packing diagnostic and prioritize fresh
+attribution of larger perceptual/convolution costs, accounting for prior
+rejected Malta experiments. All executed builds/tests/timings pass without
+retry; the active 5m14s 4K memcheck reports zero errors/leaks. No permission
+block is observed, and production/runtime remain unchanged.
+
+[S89](cuda-optimization-s1.md#malta-scalingresponse-split-s89) rejects a
+separate Malta scaling pass with the current paired response schedule.
+Both split duplicates lose to all three fused controls on all 36 saved
+stages in both repetitions. Six-stage median sums regress about 46% at
+4K and 43–44% at HD, despite response-only savings when scaling is excluded.
+The 77 correctness and 72 timing jobs preserve exact outputs, intermediate
+planes and guards; 75 retained and 24 renamed control GPU bodies are
+native-identical across all qualification/timing builds. A missing unflushed
+memcheck summary initially stops the runner; the original record remains,
+and terminal exit, all six flushed mode completions and zero errors/leaks
+independently establish completion without rerunning. No permission block
+is observed. Production and the 40-file S79 runtime remain unchanged;
+larger convolution/final perceptual mechanisms remain open, not maxed out.
+
+[S90](cuda-optimization-s1.md#shared-convolution-normalization-s90) tests
+guarded reciprocal sharing across convolution channels/rows, including one
+CTA-wide interior reciprocal. Both variants pass 402,653,184 primitive
+quotient checks and 47,472 two-oracle fixture-stage comparisons, but lose
+to both retained controls on every HD/4K capture in both timing boundaries
+and repetitions. Lower register use does not overcome unchanged shared
+storage/traffic and additional guard/refinement/fallback code. All 155
+correctness/timing GPU jobs complete, including a 7m08s active racecheck
+with zero hazards. No permission block or test/timing restart occurs.
+Production and the S79 runtime remain unchanged. Other convolution
+arithmetic/data-movement hypotheses remain open; rounding-changing variants
+would need independent error and decoded-quality gates.
+
+[S91](cuda-optimization-s1.md#pre-normalized-convolution-weights-s91) rejects
+pre-normalized interior weights with and without a tile-wide exceptional-range
+guard. Both lose to both retained controls on 34 of 36 saved stage/boundary
+combinations in both repetitions; the other two are mixed, with no repeatable
+win. The existing primitive numerical screen also fails on all 18 saved stages,
+despite passing ordinary/tall fixtures and all four sanitizers. Explicitly
+unqualified observers preserve violations, exact guards and per-mode bitwise
+repeatability; their completion is not a quality pass. Double-reference detail
+separates difference from retained from mathematical error. All failed build,
+oversized test-allocation and strict-screen records remain. No permission block
+is observed. Production, permanent tolerances and the S79 runtime are unchanged;
+broader convolution/final-pass work and resident qualification remain open.
+
+[S92](cuda-optimization-s1.md#geometry-aware-phased-convolution-s92) tests a
+fixed geometry/occupancy-aware dispatch for S73's exact phased convolution.
+Selected wide boundary cases improve, but a packed single-column case loses
+in both repetitions while its padded counterpart wins. The rule also misses
+some wide-shape wins. All direct/sanitizer/prepared checks pass; 24 ordinary
+and 3,612 interleaved fully-resident encodes preserve retained bytes and
+summaries exactly. Whole-workflow results are mixed against native-identical
+controls, and fresh 4K's favorable public total does not repeat at the outer
+backend-lifetime boundary. No policy is promoted or tuned on the same data.
+All 322 GPU jobs finish, with no observed permission block. Production and
+all 40 retained runtime files remain unchanged. Layout-aware dispatch and
+broader convolution/final-mask investigations remain open.
+
+[S93](cuda-optimization-s1.md#erosion-tiling-and-the-streaming-limit-s93)
+refreshes the fully-resident traces and rejects direct/shared erosion tiling
+as general replacements: both lose at 4K despite exact guards and clean
+sanitizers. A separately qualified, explicitly nonperceptual read/write proxy
+moves the same 20 live input planes and is essentially no faster at 4K
+(about 253 logical GB/s for either kernel). This strongly favors reducing
+intermediate memory traffic over further arithmetic-only tuning for that
+large pass; it is not a DRAM-counter measurement or proof of optimality.
+The next lead is distorted-mask vertical-blur/final-pass fusion, with explicit
+scratch-alias and half-scale ordering hazards to resolve. All 306 GPU jobs
+complete without an observed permission block. Production and all 40 retained
+runtime files remain unchanged; the encoder is not declared maxed out.
+
+[S94](cuda-optimization-s1.md#mask-blurfinal-fusion-and-flat-output-locality-s94)
+qualifies distorted-mask vertical-blur/erosion/L2/final fusion as an isolated
+primitive. The 32x64 tiled version loses at 4K; 32x8 helps HD but is not a
+general 4K win. Preserving flat row-major final output mapping instead gives
+about 11% lower time at 4K and 12% at HD for this two-kernel boundary, with
+both candidate copies beating both unfused controls in both repetitions on
+all 18 finite-random geometry/layout combinations. Across both experiments,
+42,672 guarded comparisons and all 304 GPU jobs pass, including host and
+CUDA sanitizer gates. No permission block is observed. This is not an
+encoder-wide speedup: plane-23 staging, uncached half-scale ordering, real
+working strides, prepared reuse, failure/quality gates and complete encode
+timing remain to be qualified. Production and all 40 retained runtime files
+remain unchanged; the flat fused primitive is the next integration candidate.
+
+[S95](cuda-optimization-s1.md#resident-mask-fusion-integration-and-qualification-s95)
+integrates S94's flat fusion in an isolated resident diagnostic encoder,
+using dead plane 23 for expanded/half-scale final staging and preserving
+live horizontal input in plane 24. Exact prepared-state tests, host ASAN,
+four CUDA sanitizer tools, 124 CPU-differential prepared cases, and 24
+scored/unscored encodes pass; 3,612 paired timing encodes preserve bytes and
+summaries. Integrated traces remove four launches with unchanged allocation
+and transfer histograms and reduce the target vertical-blur/final boundary
+about 8.7-9.4% at 4K. Whole-encoder timings remain mixed against both
+identical controls and both candidate copies, so this is not an end-to-end
+speedup claim or a production promotion. Next measure steady public prepared
+Compare on real inputs before enlarged workflow and decoder qualification.
+The failed invalid-option fixture and recovered trace checks are retained;
+each capture has one known post-kernel invalid-context status also present
+in S93. No admin/firewall/permission block is observed. Production remains
+S79 with all 40 retained runtime files unchanged.
+
+[S96](cuda-optimization-s1.md#prepared-mask-fusion-on-retained-decoded-pairs-s96)
+measures synchronous public prepared comparisons on seven frozen
+source/decoded pairs in packed and padded layouts. Successful jobs execute
+15,456 comparisons and pass 4,704 exact full-output checks; release and
+host-ASAN native bodies match S95. Both candidate copies beat
+both controls in both repetitions for all twelve non-4K input/layout
+combinations, including roughly 1-3% prepared-comparison gains at HD.
+The two 4K layouts remain mixed with substantial control scatter. These
+are prepared-operation results, not complete-encoder gains. Next isolate
+the internal already-active-submission comparison boundary before deciding
+promotion. One host compile error and one missing-ASAN-DLL startup failure
+are corrected and preserved; no admin/firewall/permission prompt is observed.
+Production and all 40 retained runtime files remain unchanged.
+
+[S97](cuda-optimization-s1.md#integrated-mask-fusion-on-the-resident-stream-s97)
+times the full internal comparison on the resident stream with ordinary
+launches and graph replay. All 117 GPU jobs pass, including release/host-ASAN
+preflights and five graph sanitizer checks. Multi-scale capture changes
+58 -> 56 kernels per comparison. Fusion wins all twelve non-4K input/layout
+combinations against both controls and copies in graph replay, but 4K remains
+mixed in both launch styles. Its event-time scatter is much larger than the
+roughly 0.05 ms surrounding host overhead, so synchronous public-call overhead
+alone is not the cause. Next gather time-aligned device telemetry and examine
+graph setup amortization; neither this diagnostic nor a later idle snapshot
+establishes an encoder-wide gain or a causal clock/power explanation.
+Production and the 40 retained runtime files remain unchanged; no permission
+prompt or restricted-counter retry occurs.
+
+[S98](cuda-optimization-s1.md#resident-comparison-telemetry-and-validation-cadence-s98)
+adds synchronized read-only NVML telemetry and tests validation cadence and
+graph burst length without changing any of the 209 linked CUDA bodies.
+All 28 qualification and twelve packed-4K timing jobs pass. Full-map checking
+between windows leaves mixed fusion results and large event-time scatter;
+score-only runs show sustained low SM clocks and repeatable paired
+fusion regressions of 0.411-2.081% (burst four) and 0.741-1.151% (burst
+sixteen), with background monitoring both off and on. The timed driver
+reports power/thermal software limiting flags; the post-run snapshot reports
+a 40 W enforced power limit, AC online and Windows Balanced. This identifies
+a relevant device-state constraint, not GPU-core overheating or an
+encoder-wide result. No power, clock, priority, profile or security setting
+is changed. Next test the real resident encoder lifetime under the same
+telemetry discipline; production and all 40 retained runtime files remain
+unchanged. The timing campaign takes 18m09s with continuous progress and no
+observed admin/firewall/permission prompt.
+
+[S99](cuda-optimization-s1.md#complete-resident-encodes-with-synchronized-telemetry-s99)
+moves synchronized telemetry to complete resident encodes with a persistent
+backend. All 32 qualification/timing jobs pass: 2,208 encodes retain exact
+S70 bytes and unchanged strategy summaries, and both host binaries retain
+all 209 CUDA bodies. Four-K visits both low and higher clocks; the tight
+score-only comparison loop does not reproduce its complete device cadence.
+All six input/monitor configurations remain mixed at public total and outer
+encode boundaries, so fusion is still unpromoted. The public quantization
+phase accounts for roughly 75% of 4K time, including its host/transfer work.
+Next measure graph setup and reuse inside the actual resident-owner
+lifetime; prebuilt replay timings alone do not prove amortization. The
+timing batch finishes in 3m54s with no observed permission prompt. Production,
+the 40 retained runtime files and system settings remain unchanged.
+
+[S100](cuda-optimization-s1.md#resident-comparison-graph-setup-at-encoder-lifetime-s100)
+implements an isolated prepared-owner comparison-graph cache with capture,
+instantiation, upload and destruction inside complete encode timing. Actual
+resident reuse is one build and two launches per encode. Full release/ASAN,
+descriptor/stream/failure checks and all four CUDA sanitizers pass; all ten
+diagnostic binaries retain the same 209 CUDA bodies. Across 52 successful
+encoder jobs, 2,820 encodes preserve exact S70 bytes and strategy summaries.
+Both 4K and 1080p remain mixed, while the 510x532 photograph improves public
+total by 0.314-3.771% and quantization by 3.269-4.828%; one unmonitored outer
+comparison still regresses slightly. Recorded setup/cleanup groups total
+roughly 0.37-0.49 ms, excluding other wrapper work and driver graph-memory
+accounting. Next test geometry/content-matched photographs before defining
+any dispatch threshold, and qualify graph resources/concurrency. Production
+and all forty retained runtime files remain unchanged. Timing takes 4m04s;
+the longer racecheck advances normally, with no observed permission prompt.
+
+[S101](cuda-optimization-s1.md#resident-graph-crossover-across-photograph-content-and-size-s101)
+tests four retained photographs at matched 500-, 1000- and 2000-square
+geometries using unchanged S100 binaries. All 108 GPU jobs pass, with
+6,636 total encodes and twelve independent production-reference decodes
+and quality measurements. Only four of 24 content/monitor configurations
+pass the whole-call graph timing gate; every 2000-square configuration is
+mixed, so no universal size cutoff is justified. Source and measured tails
+show graph destruction happens after the public profile stops but inside
+the outer encode interval, costing median 0.086-0.170 ms on the smallest
+fixtures. Next investigate safe last-use graph retirement under the full
+return-boundary gate, not a profile-only improvement. Production and all
+forty runtime files remain unchanged; timing completes in 8m35s with no
+observed permission prompt. Generated fixtures/decoded PFMs use a dedicated
+U: directory to avoid C:'s low free space, with all data hash-anchored.
+
+[S102](cuda-optimization-s1.md#resident-graph-retirement-before-completion-s102)
+tests explicit graph retirement after resident-policy submission, with
+scratch and input/output ownership retained through completion. All 134
+GPU jobs pass, including blocked-stream lifetime tests, failure/recovery,
+release/ASAN and all four CUDA sanitizers. The 116 complete-encode harness
+jobs contain 12,332 encodes: outputs match retained byte oracles, and
+candidates match fresh direct summaries. Early retirement reduces the
+measured late cleanup tail, but versus late
+retirement only one of 28 whole-call configurations is faster, one slower
+and 26 mixed; none passes both monitoring settings. All 2000-square and
+synthetic-resolution configurations remain mixed versus direct launches.
+Keep production and all forty runtime files unchanged. Successful destroy
+API calls do not prove physical driver freeing or complete graph-memory
+accounting; further graph work needs a larger cost/reuse opportunity and
+aggregate-workload/resource qualification, not another destructor-tail
+microbenchmark. Main timing takes 19m12s with advancing logs and no
+observed admin/firewall/permission prompt. New binaries and native dumps
+are hash-anchored in a dedicated U: directory; no system settings change.
+
+[S103](cuda-optimization-s1.md#complete-retained-encode-attribution-s103)
+profiles the complete unchanged retained encode in six content/size cases,
+with reversed-order plain controls. All 24 main jobs pass exact-output
+checks; main timing takes 2m36s. Including both release/ASAN host-harness
+preflights and the accepted tiny trace, 57 accepted jobs contain 354 encodes.
+One original trace lacks its final application marker and remains unaccepted;
+dedicated application logging qualifies the replacement harness. All four
+new host executables match the retained 205 native CUDA bodies, and all
+forty production runtime files remain unchanged.
+
+The 80 exact-quantizer kernels take only 2.66 ms GPU time per 4K encode,
+1.59% of kernel time. Larger inactive intervals precede strategy-metadata
+uploads: up to 19.08 ms at 4K, mostly before the memcpy API. Copy sizes and
+source order identify that boundary, but do not separate host strategy merge,
+metadata construction and scheduling. Instrument those host stages next;
+do not treat all gaps as removable launch overhead or promote a tiny-kernel
+change from launch counts alone. Profiling materially affects timings and
+telemetry shows changing state. This is attribution, not a new speedup or
+proof that optimization is exhausted. No system/security settings change or
+permission prompt is observed. Large new evidence is on U:, with mutable
+profiler temporary files excluded from freezing and nothing deleted.
+
+[S104–S105](cuda-candidate-qualification.md) closes S84/S95 default-production
+qualification with a four-way comparison, concurrent batches and memory checks.
+S84 retains large single-image gains but has mixed batch/size evidence and about
+47.4 MiB extra host working set per 4K image. Mask fusion gives no consistent
+complete-call gain alone or added to S84. Both tested default changes are
+rejected; production remains S79. Four-image 4K encounters schedule-dependent
+OOM including baseline controls, motivating capacity-aware admission.
+
+Portable Nsight Compute 2025.2 succeeds where installed 2022.3 reports a driver
+resource error. The survey collects 249 main first-invocation profiles covering
+all observed specializations in three retained traces, plus repeated leading
+kernels. Final masking reaches about 96% DRAM utilization; Malta instead shows
+high SM load/store demand with much lower FMA utilization. Direct CPU scopes
+identify about 12 ms in 4K strategy merging and 3.1 ms in metadata construction.
+Fresh retained outer medians are 322–325 ms at 4K, 81–84 ms at 1080p and 22–23 ms
+on Flower. These are new observations of unchanged production, not a speedup.
+The report and accompanying counter CSV give priorities, ceilings, provenance
+and limits; no driver or system setting is changed.
+
+[S106](cuda-representation-fusion-scheduling-s106.md) explores the requested
+compact-consumption, composition/reduction and tile-scheduling directions.
+
+Typed int8/int16/int32 inputs preserve tested token templates, direct tokens,
+contexts and populations; frame ownership was not yet integrated in S106.
+Fusing composition with the first maximum pass passes all four CUDA sanitizers
+and reduces the isolated 4K stage by about 29%; it is not a measured encoder
+gain. Bounded CPU tile scheduling cuts roughly 4.6–6.5 ms from 4K merging,
+but complete-call comparisons remain mixed there; only static 1080p passes
+both repetitions. All 1,406 encoder calls match frozen bytes/fresh summaries
+as applicable. Keep production unchanged and qualify actual compact ownership,
+integrated fusion and concurrent scheduling before promotion.
+
+[S107](cuda-compact-frame-s107.md) carries signed int8/int16 owners from CUDA
+readback through frame assembly, native coefficient orders/tokenization and
+reconstruction, without a dense compatibility cache. It is available behind
+`GJXL_CUDA_COMPACT_AC=ON` (default OFF). In six paired process repetitions,
+4K/1080p complete-call median changes are -5.70%/-6.87%, with exact frozen
+bytes and summaries; Keong 500 is mixed. The 4K AC owner drops from 101.25 to
+25.31 MiB. S108 below extends concurrent batch and fallback/quality qualification.
+The report records host/CUDA tests, instrumentation
+canaries, failed probes, memory definitions and measurement limits.
+
+[S108](cuda-compact-qualification-s108.md) adds 3,120 exact encode checks across
+quality settings, rate control, high-range overflow fixtures and concurrent
+batches, plus 42 checked encodes under five integrated memchecks. Three
+synthetic inputs select the actual int32 fallback. A permanent host test
+passes 156 injected allocation failures in both release and ASAN. Two-image
+4K paired median changes are -3.30% with independent backends and -1.99% with
+the public driver; peak working set falls about 153 MiB. Small batches and
+driver 1080p timings remain mixed, so compact CUDA storage remains opt-in.
+S108 proposed direct narrow group packing as the next compact-path candidate,
+investigated in S109 below. Composition/reduction integration is measured in
+S110; tile scheduling remains a separate experiment.
+
+[S109](cuda-direct-packing-s109.md) implements and validates direct byte/word
+group packing, reducing logical packing traffic from 15N to 7N bytes and the
+isolated tested 4K stage by roughly 0.5–1.0 ms. The kernel and focused tests
+are retained, but encoder routing stays unchanged: both separate-process and
+duplicate-label within-process comparisons leave incremental complete-call
+gains mixed. There are 2,645 exact encode checks plus 45 under integrated
+memcheck, and all four kernel sanitizers pass. The report preserves the tested
+integration and explains why the scoped saving is not promoted as an encoder
+speedup.
+
+[S110](cuda-compose-integration-s110.md) carries composition/maximum fusion
+through prepared Butteraugli, exact encoder oracles and concurrent batches.
+The new primitive passes 480 bitwise kernel cases and all four sanitizers;
+the integrated candidate passes 2,942 exact encode checks plus 36 under
+memcheck. It eliminates one map read and one launch per comparison without
+changing scratch capacity. Full-call measurements remain mixed across
+repetitions, including duplicate-label controls, so the encoder keeps its
+separate-pass route. The qualified primitive and permanent test are retained
+without a new runtime selector or compatibility adapter.
+
+[S111](cuda-compose-aq-s111.md) eliminates the resident policy's composed
+pixel map by fusing composition, transform L16 reduction and anchor maxima.
+DCT8 uses four warps per CTA, one warp per anchor, with the original rounded
+sum preserved. This route is retained as a validated GPU-stage optimization:
+actual in-encode stage paired medians save 3.43–3.78 ms per odd-4K encode.
+Whole-encode results remain mixed, including slower cohorts, so this is not
+a claim of a general throughput improvement. The study passes 5,521 exact
+encode checks across dense/compact storage, rate/quality settings and batches;
+all kernel sanitizers, eight integrated memchecks and 78/78 CTest tests pass.
+Reconstruction scratch reuse adds no allocation, readback or synchronization. Compact
+storage remains opt-in; CPU tile scheduling is unchanged. The report includes
+the earlier test-upload ordering defect, failed probes, exact math/lifetime
+contracts, duplicate controls and the qualification limits.
+
+[S112](cuda-tile-scheduling-s112.md) qualifies bounded dynamic CPU scheduling
+of the prepared candidate-cost merge without changing per-tile math. The
+clean odd-4K merge saves 4.35–4.67 ms, but its enclosing quantization phase
+is slower by 0.43–14.13 ms across all eight automatic-thread paired medians;
+complete-call and batch throughput remain mixed. The candidate is **not
+promoted**: serial CPU routing, S111 GPU fusion and opt-in compact storage
+are unchanged, with no new runtime selector or compatibility layer. There
+are 6,684 checked encodes, 14 matching expected rejections, scoped ASAN
+coverage including parallel HD/4K batches, and 79/79 candidate CTest passes.
+The tested source/build integration is archived, not retained in the runtime.
+The next targets are quantization time outside the merge and serial grid
+export; the cause of the outside-merge slowdown is not yet established.
+
+[S113](cuda-quantization-attribution-s113.md) locates that offset in subsequent
+AQ policy execution. The trace attributes the policy-time variation to GPU
+kernel execution, not launch gaps or host wake-up delays; all 32 captured
+encodes retain the same 229-kernel/two-memset policy signature. Duplicate
+candidate traces still vary substantially, so this does not prove a
+deterministic scheduler penalty. Read-only telemetry reports power/thermal
+clock-limit flags, but SM-clock values change only about every 500 ms and do
+not explain individual policy times. No power settings or runtime routing
+are changed. The study passes 861 encode checks, including 40 scoped ASAN
+checks, and preserves rejected captures and excluded control timings. Malta
+and tiled convolution remain higher-value device-work targets than the
+roughly half-millisecond 4K serial grid export.
+
+[S114](cuda-horizontal-pair-s114.md) retains paired adjacent outputs for the
+7/13/15-tap horizontal Butteraugli filters. The final kernels are instruction-
+identical to the measured prototype, saving 3.01–3.51 ms in instrumented
+odd-4K horizontal-filter intervals. Whole-encode results remain mixed, so
+this is a GPU-stage improvement, not a general throughput claim. Malta's
+64x32 tile helps 4K but regresses on some HD stages and is not promoted.
+Launch geometry, allocation, vertical/33-tap routes, S111 fusion, serial CPU
+scheduling and opt-in compact storage are unchanged. There is no runtime
+selector or compatibility layer. Qualification passes 2,070 exact encode
+checks, 14 expected rejections, all scoped CUDA sanitizers and 78/78 CTest
+tests; the expanded 880-case frequency test retains independent horizontal
+references. Failed setup attempts and all slower observations are preserved.
+
+[S115](cuda-malta-layout-s115.md) explains Malta layout tradeoffs with exact
+replay tests and replicated counters. Wider row tiles reduce 4K L2 traffic
+about 5% without comparable DRAM savings. Column pairing increases full-response
+shared-load work and register pressure; adjacent-input scaling nearly doubles
+shared-store work and raises global-load sector requests by 68–93%. Both new
+variants have response/size-dependent gains and regressions and are not retained
+as universal replacements. Production remains unchanged. Release and host-ASAN
+each pass 10,752 fixtures; all four CUDA sanitizers are clean. The next scaling
+experiment should preserve contiguous lane accesses while reducing loop work.
+
+[S116](cuda-malta-batching-s116.md) tests that lane-contiguous layout with two-
+and four-iteration scaling loops. The memory-transaction increase disappears,
+but two iterations execute 1.4–3% more warp instructions and four reduce LF
+occupancy. Neither is retained: two iterations show no useful replicated gain,
+and four regress all tested LF stages. Native auditing catches and removes an
+extra first-item guard before timing. Both builds pass release/host-ASAN
+fixtures and all four CUDA sanitizers; production and its S114 qualification
+remain unchanged. Separate full batches from tail handling before further
+scaling-loop/preload experiments.
+
+[S117](cuda-malta-preload-s117.md) separates full-batch tails and explicit
+input preloading. Two-value preloading improves historical and current-call
+replays, but is not promoted: 4K integrated evidence is noisy and does not
+qualify a stable replacement. Current captures preserve all 24 calls and
+their row strides, exposing older replay coverage gaps. Kernel traces confirm
+that the resident pipeline's much larger Malta total appears in kernel durations,
+not merely event intervals enclosing launch gaps. The next priority is the
+early/later execution-context slowdown, before further preload tuning.
+Production is unchanged; 972 exact encode checks, differential fixtures,
+scoped sanitizers and retained-runtime hashes pass. No compatibility layer
+or new dispatch heuristic is added.
+
+[S118](cuda-malta-allocation-s118.md) tests whether allocation explains the
+Malta execution-context slowdown. Disabling pooling costs 83–97 ms per 4K
+encode and does not remove the early/late kernel-duration difference, so
+production pooling stays unchanged. Twelve counter captures execute identical
+warp-instruction/FFMA counts with nearly unchanged traffic. Their SM cycle
+rates differ, but counter collection itself largely removes the late-call
+slowdown. The next test needs lightweight in-stream cycle-rate observation,
+not a claim that profiling has already proved throttling. All 580 exact encode
+checks pass; GPU bodies and retained runtime hashes are unchanged.
+
+[S119](cuda-malta-cycle-rate-s119.md) observes cycle rate beside ordinary
+resident Malta launches without counter profiling. Timer-edge alignment makes
+5/20-microsecond replay probes agree near 1.60 cycles/ns. Aligned 4K probes
+observe 0.71–0.77 near the early full-response call and 0.29–0.31 near the late
+one, accompanying roughly 1.04–1.14 versus 2.55–2.78 ms bracket gaps. Normalizing
+those gaps by endpoint rates gives approximately 0.80 million cycles, but
+neither that estimate nor the one-SM probes identify the system-level cause.
+Probe overhead and duplicate-control drift are measured explicitly. All 1,160
+exact encodes, 1,920 replay bursts, scoped sanitizers and retained-runtime hashes
+pass. Production is unchanged; read-only telemetry is the next bounded test.
+
+[S120](cuda-malta-telemetry-s120.md) adds bounded host/device clock mapping and
+read-only management telemetry with on/off controls. Reported SM clocks and
+limit counters update about every 500 ms; even accurately timed queries do
+not resolve individual Malta calls. The 40 W limit and `0x24` flags are also
+reported during faster replay, while newer thermal/brake counters are
+unsupported. Production is unchanged. All 555 exact encodes, 480 replay bursts,
+scoped checks and retained-runtime identities pass. The next test is sustained
+device-only replay to distinguish workload-history effects from short-burst
+kernel throughput, not further polling of the same cached fields.
+
+[S121](cuda-malta-sustained-s121.md) reproduces a several-fold slowdown in
+device-only replay of unchanged, idempotent Malta work. Read-only endpoint
+checks reveal varying enforced limits, including 30/40 W and roughly 67–72 W,
+so opposite-order runs cannot be pooled as one fixed operating state. With
+40 W at both endpoints, 128-launch unprobed bursts rise from about 0.71 to
+3.13 ms per launch between first and last quarters; local late rates approach
+0.30 cycles/ns. All 900 replay bursts and retained-runtime identities pass.
+Production is unchanged. Candidate screening now needs sustained workload and
+operating-state controls before final resident-encoder qualification.
+
+[S122](cuda-malta-loader-recurrence-s122.md) tests coordinate and input-offset
+recurrences in the paired Malta tile loader. Both preserve exact output and
+native resource use, but execute 2.86%/3.27% more warp instructions. Short
+replay is slower, and sustained replay provides no repeatable win; all 448
+unprofiled power-limit endpoints report 40 W. The 14,976 differential fixtures,
+four CUDA sanitizers, 224 unprofiled replay bursts and retained-runtime hashes
+pass. Neither candidate is promoted. The disassembly instead motivates a
+narrower test of unsigned widening for already validated input coordinates.
+
+[S123](cuda-malta-unsigned-address-s123.md) verifies that unsigned widening
+inside the same coordinate bounds check removes 1.01% of executed Malta warp
+instructions without changing numerical work or resources. Four uninstrumented
+4K encoder windows favor the both-coordinate candidate, but duplicate variation
+is large and one instrumented confirmation window reverses the Malta result.
+All 1,488 encoded outputs, 14,976 fixtures, four CUDA sanitizers and retained
+runtime identities pass. The candidate proceeds to production-build and other
+tile-size qualification; no stable speedup or production change is claimed yet.
+
+[S124](cuda-malta-unsigned-production-s124.md) promotes the exact unsigned
+coordinate widening to the existing 8/24/64-row paired Malta loaders after a
+clean production build. All twelve changed native bodies match their qualified
+prototypes; the other 66 Butteraugli bodies and 133 linked GPU dependencies
+are unchanged. Two static instructions are removed per changed specialization
+with no resource increase, new dispatch policy or compatibility layer. All
+2,070 exact encodes, 25,088 prototype fixtures, eight CUDA sanitizer jobs and
+78 CTest tests pass, including tall-grid boundaries. Uninstrumented 4K encode
+medians improve by 5.36/6.84 ms, but HD medians regress by 0.81/1.49 ms and
+event-instrumented results are mixed. Retention is for verified address-work
+reduction, not a demonstrated universal elapsed-time improvement. All 1,680
+observed power-limit endpoints are 40 W; clocks within an encode remain an
+uncontrolled source of variation.
+
+[S125](cuda-epf-color-fusion-s125.md) qualifies an isolated final-EPF/color
+fusion candidate. Keeping filtered values in registers removes their three
+plane writes/reads: measured 4K boundary DRAM traffic falls about 49.8%, with
+unchanged FFMA work. All 48 case/burst-length matched medians favor fusion;
+4K final pass 2 improves about 49% in short bursts and 37–40% in sustained
+bursts. The study passes 69,120 guarded pipeline executions and all four CUDA
+sanitizers, with native-identical controls. Its inputs are synthetic and its
+output strides differ from the resident path, so this is not yet a production
+or whole-encode result. Next integrate and qualify real resident layouts and
+hot inputs, preserving maximum-error evaluation's filtered-XYB consumer.
+Current runtime remains S124, without a new compatibility layer or policy.
+
+[S126](cuda-epf-color-integration-s126.md) integrates that candidate into an
+isolated fully resident owner while preserving maximum-error evaluation's
+filtered-XYB data. Actual coding-stride/packed-RGB layouts and six hot captures
+pass bitwise checks, as do 2,076 frozen-oracle encodes, 256 parameter-matrix
+AQ pairs and nine CUDA sanitizer jobs. All 211 original GPU bodies remain
+unchanged. Every candidate-versus-control in-encode stage median is favorable,
+with primary savings of about 0.40 ms at HD and 1.61 ms at 4K. Uninstrumented
+whole-encode timing is mixed, including one slower 4K window; this is a local
+stage improvement, not a general throughput claim. Clean production-build
+qualification and a permanent regression test are next. Runtime stays S124.
+
+[S127](cuda-epf-color-production-s127.md) promotes final-EPF/color fusion to
+the production fully resident perceptual path, sharing one EPF implementation
+and retaining maximum-error evaluation's required XYB output. Both fused GPU
+bodies match the qualified S125/S126 candidates exactly. A fresh Release build
+passes all 79 CTest tests; qualification adds 1,230 frozen-oracle encodes,
+256 bitwise old/new profile-matrix comparisons, 48,384 guarded pipeline
+executions and eight clean CUDA sanitizer jobs. One launch and 24 logical
+bytes per pixel are eliminated at each eligible EPF/color boundary, without
+changing public APIs, compact defaults or allocation policy. The earlier
+roughly 1.61 ms / 29% 4K stage saving remains the performance evidence;
+whole-encode timing is still mixed, and no new timing campaign or universal
+throughput improvement is claimed. The retained runtime is now S127.
+
+[S128](cuda-gaborish-epf-fusion-s128.md) investigates the opposite filter
+boundary: Gaborish plus first EPF. An isolated raw-shared pass-1 candidate
+saves about 14.5–15.3% for XYB and 17.9–18.7% for RGB in short 4K synthetic
+bursts, while pass 0 regresses. Counters show roughly 48% less DRAM traffic
+for pass 1, at the cost of higher shared-memory use and lower occupancy.
+The candidate passes 145,152 guarded pipeline executions and four CUDA
+sanitizers. A late power-limit transition is retained and explicitly excluded
+from initial-regime timing qualification; nine user-requested repeats have
+all 3,888 limit endpoints at 40 W and reproduce the large pass-1 result.
+Actual resident inputs/alignment and whole-encode qualification are next.
+No production code, allocation policy or public API changes; runtime remains
+S127.
+
+[S129](cuda-gaborish-epf-integration-s129.md) qualifies that candidate inside
+the resident owner without changing allocations. Actual aligned captures,
+2,086 frozen-oracle encodes, 384 AQ profile pairs and six CUDA memcheck jobs
+pass. However, the two 4K in-encoder stage changes are only +0.36% and −1.44%,
+with larger duplicate-control variation: the synthetic win does not justify
+promotion. Captured-data counters still show roughly 48% less DRAM traffic
+but about half the achieved occupancy. Short timeline traces show kernel
+execution, not large launch gaps, dominating the interval. Keep runtime at
+S127; next test shared-storage reuse to reduce the fused tile's resource
+cost, then requalify it in the actual encoder context.
+
+[S130](cuda-gaborish-epf-reuse-s130.md) tests two shared-storage reuse
+schedules. Both raise achieved pass-1 occupancy from about 49% to 82%,
+but channel-wise reuse adds 71% warp instructions versus old fusion and
+regresses the encoder stage. All-channel reuse keeps work nearly unchanged
+and improves the actual two-boundary stage by 10.6–18.7%, with all 24
+individual label-pair medians favorable. The 181,440 guarded executions,
+1,080 captured replays, 2,424 frozen-oracle encodes and 768 AQ profile pairs
+pass; all 4,848 measured power-limit endpoints are 40 W. Whole-encode changes
+still reverse sign between repeats. Select all-channel pass-1-to-XYB reuse
+for production integration and qualification, without claiming a dependable
+end-to-end speedup or enabling unmeasured fusion routes. Runtime remains
+S127 in this isolated study.
+
+[S131](cuda-gaborish-epf-production-s131.md) integrates all-channel reuse
+for first-pass XYB output. The clean production kernel reproduces S130's
+2,744 instructions with only unused-parameter relocations; all 213 previous
+kernel bodies remain unchanged. The measured two-boundary stage improves
+11.0–17.7%, with all 24 individual label-pair medians favorable. Both 4K
+uninstrumented repeats favor fusion, but total-time variation precludes
+attributing their entire 3–4% difference to this kernel. All 80 CTests,
+2,262 frozen-oracle encodes, 256 AQ profile comparisons and thirteen CUDA
+sanitizer jobs pass. Production enables the qualified XYB route while
+preserving maximum-error ownership, other filter routes, allocations and
+compact defaults. Next isolate filter-scratch lifetime planning: the default
+fused perceptual path leaves one allocated scratch image unused.
+
+[S132](cuda-filter-storage-s132.md) removes that unused image and reuses
+the inverse-DCT storage for later filter passes. All profiles need at most
+one dedicated scratch image; a lone perceptual EPF without Gaborish needs
+none. The default padded 4K persistent arena falls from 403.6 to 304.0 MB,
+with all 214 GPU kernels unchanged. All 80 CTests, 1,746 frozen-oracle encodes,
+256 profile comparisons and eight CUDA sanitizer jobs pass. Complete-encode
+repeats do not establish a dependable speed change, so this is retained as
+a live-storage reduction, not a claimed throughput percentage. The next
+step is to reprofile the complete resident critical path after these changes.
+
+[S133](cuda-resident-reprofile-s133.md) refreshes that profile without changing
+runtime code. Across 576 frozen-oracle encodes and 24 complete traces, padded
+4K still spends roughly 6.4–7.0 ms in host resident preparation, 4.6–4.9 ms
+constructing strategy candidates, and 9–17 ms merging their costs while the
+GPU is idle. Template-aware attribution also separates strategy residual
+DCT work from AQ reconstruction. Compact cuts 4K D2H volume by 74.65 MB, but
+separate-process timings do not establish a new causal speedup or justify a
+default change. All 214 GPU bodies remain unchanged. The next bounded
+experiment removes unused host initial-field/mask storage from encoding-only
+resident preparation, preserving real host-output requests and verifying
+whole-call performance; the rejected S112 scheduler remains unpromoted.
+
+[S134](cuda-pipeline-storage-s134.md) removes those unused host arrays and
+materializes them transactionally only when required. Fresh encoding-only
+resident preparation saves 34,214,400 bytes (32.63 MiB) at padded 4K and
+5.9–6.6 ms in controlled input-preparation comparisons. All sixteen whole-call
+paired medians favor the candidate, but duplicate controls leave the exact
+throughput gain uncertain. All 81 CTests, 2,606 frozen-oracle encodes, 108
+lazy/eager host-materialization pairs and six qualified CUDA sanitizer jobs
+pass. No CUDA source changes; 213 historical kernel bodies are bit-identical
+and one source-unchanged code-generation variant has identical resources and
+reproduces in fresh compiles. Next investigate candidate construction and
+cost scattering/representation without restoring the rejected S112 scheduler.
+
+[S135](cuda-packed-strategy-costs-s135.md) tests direct consumption of packed
+candidate costs, removing seven dense host arrays and their scatter. Search
+time improves in all sixteen primary comparisons, including 1.4–1.5 ms less
+4K scattering, but whole-call medians split evenly between improvement and
+regression. The candidate is archived and S134 runtime restored; no standalone
+speed promotion is made. Differential grid tests and 1,616 frozen-oracle
+encodes pass, with all 214 S134 GPU bodies unchanged. Next investigate the
+larger regular candidate representation: 522,120 descriptors totaling
+12.53 MB are still constructed and uploaded at 4K.
+
+[S136](cuda-generated-candidates-s136.md) generates those descriptors inside
+the existing quant-norm pass. Traces verify seven fewer H2D copies and
+12,530,880 fewer payload bytes at 4K, with unchanged launch counts. Preparation
+improves by 6.7–7.8 ms, but whole-call primary comparisons favor the candidate
+in only eleven of sixteen runs and three of four 4K runs are unfavorable.
+The candidate is archived and runtime restored; no standalone promotion is
+made. All 82 candidate CTests, 2,712 frozen-oracle encodes and ten CUDA
+sanitizer jobs pass. The added kernel costs only about 0.04 ms in 4K traces;
+variation in other GPU work remains unattributed. Next investigate active
+residual-transform/perceptual-analysis work with whole-call controls, rather
+than inferring throughput gains from removed host intervals alone.
+
+[S137](cuda-fused-ac-evaluation-s137.md) qualifies a shared-memory AC-evaluation
+prototype that schedules complete three-channel candidates together and fuses
+forward transforms with residual/inverse/rate/loss work. Traces verify seven
+fewer launches, and all 214 original kernel bodies remain unchanged. Exact
+grid/exhaustive/contract tests, four CUDA sanitizers and 1,436 frozen-oracle
+encodes pass. Scalarized reductions eliminate the initial prototype's local
+arrays. Whole-call primary comparisons favor it in 15/16 runs, with 16–25 ms
+lower 4K times, but the short compact-4K GPU trace is unfavorable. Production
+remains unchanged: next integrate the fused path and remove the still-allocated
+304,496,640-byte 4K forward scratch, then qualify the new layout and timings.
+
+[S138](cuda-fused-ac-integration-s138.md) retains that integration in the normal
+CUDA path. The 4K AC-search arena falls from 323,845,888 to 19,349,248 bytes,
+with exact layout and allocation-free shrink/restore reuse checks. All 82
+CTests, 2,732 frozen-oracle encodes and fourteen qualified CUDA sanitizer jobs
+pass. The seven fused bodies match S137 V2 exactly. Whole-call primary results
+favor the candidate in 14/16 runs, including all four 4K comparisons at about
+16–26 ms lower latency; two small-image results remain unfavorable. Traces
+verify seven fewer launches and unchanged memcpy payloads. Next investigate
+the remaining quant-norm/final-cost boundaries and complete-candidate tile
+packing, without treating noisy whole-call percentages as universal speedups.
+
+[S139](cuda-fused-final-cost-s139.md) tests final-cost composition inside that
+same block, consuming shared channel rates/losses while retaining S138's tile
+schedule and allocation layout. Exact differential grids and frozen encodes
+pass, but whole-call primary comparisons favor fusion in only 8/16 runs, with
+three of four 4K comparisons unfavorable. The standalone final-cost work was
+only about 0.16 ms at 4K in prior traces. The prototype is not promoted; S138
+remains the runtime baseline for isolated candidate-packing/scheduling work.
+
+[S140](cuda-ac-scheduling-s140.md) tests channel-major 192-thread scheduling
+and candidate-major 96-thread packing. Both remain unpromoted: all four 4K
+whole-call primary comparisons are unfavorable for each variant. All 2,488
+frozen-oracle encodes and four CUDA sanitizer jobs pass. The 96-thread variant
+lowers summed evaluator time in all eight traces without establishing a
+whole-encode gain. A read-only driver query identifies 1,024 reserved shared
+bytes per block, explaining the retained 32×32 evaluator's two-block-per-SM
+shared-memory capacity bound. Next test removing its duplicate shared Y copy
+while retaining the 192-thread schedule; capacity alone does not prove speedup.
+
+[S141](cuda-shared-y-reuse-s141.md) removes that copy in two isolated prototypes:
+phased X/B-then-Y residual work and deferred residual stores. Both pass 2,488
+frozen-oracle encodes and four CUDA sanitizers, but remain unpromoted, with
+three of four 4K whole-call primary comparisons unfavorable for each. Shared
+storage falls from 33,536 to 25,344 bytes for 32×32, raising its modeled ceiling
+from twelve to eighteen warps per SM without local-memory traffic. Deferred
+16×16 and 32×32 kernels are faster in all eight short traces, while other shapes
+lose resource capacity. Next test those shapes selectively with repeated GPU
+stage timing and clock/throttle telemetry; retain S138 until whole-encode
+benefit is independently qualified.
+
+[S142](cuda-selective-y-reuse-s142.md) tests deferred reuse only for 32×32, then
+for 32×32 plus 16×16, using the exact frozen S141 evaluator bodies. All 4,941
+frozen-oracle encodes and four CUDA sanitizers pass. Repeated GPU-stage timing
+favors 32×32 in 16/16 primary and 64/64 cross-label comparisons for both variants;
+the added 16×16 stage is favorable in 14/16 primary comparisons. Whole-call
+results remain mixed (8/16 and 10/16 favorable), including a compact-4K reversal.
+Read-only telemetry exposes 210–1,537 MHz encode-endpoint clocks despite a
+constant reported 40 W limit; it does not establish clocks during kernels.
+Next integrate the two-shape prototype for fresh production-path qualification,
+retaining the one-shape diagnostic control. S138 remains the retained runtime.
+
+[S143](cuda-shared-y-integration-s143.md) integrates selective shared-Y reuse
+for 16×16 and 32×32 into normal source, without a runtime selector. Native
+bodies exactly match the qualified deferred prototypes; the other five fused
+shapes remain instruction-identical to S138. Static shared allocation drops by
+4 KiB and 8 KiB per block respectively, with no spills. Fresh qualification
+passes all 82 CTests, 6,230 frozen-oracle encodes, sixteen CUDA sanitizer jobs
+and fourteen matched expected rejections. Repeated 32×32 stage comparisons
+remain favorable in 16/16 primary and 64/64 cross-label pairs; 16×16 in 14/16
+and 52/64. Whole-call results are mixed (9/16 favorable), so no universal
+encoder-wide gain is claimed. S143 becomes the retained source implementation;
+historical binaries remain untouched. Fresh traces point next to Malta and
+convolution data reuse/scheduling, alongside GPU-active operating-state checks.
+
+[S144](cuda-rolling-low-medium-s144.md) explores rolling shared-row windows
+for low/medium vertical convolution. Warp-distributed weights make a 24 KiB
+ring fit four blocks per SM instead of three. All guarded, replay, host-ASAN,
+and four CUDA sanitizer checks pass. Repeated isolated full-4K comparisons
+favor rolling 48/96 rows by 3.5-5.7% / 6.3-8.0%, but smaller geometries regress;
+each rolling family is favorable in only 17/36 primary comparisons overall.
+Counters show higher observed occupancy despite increased instruction work,
+and lower memory traffic for 96 rows. A bimodal half-resolution baseline is
+preserved; timeline repeats locate the slowdown inside reported kernel
+intervals without establishing its physical cause. S143 remains the retained
+runtime. Next qualify sustained full-pair/current resident use and small-image
+exclusions before selecting a production tile policy.
+
+[S145](cuda-rolling-sustained-s145.md) tests fresh current-path captures with
+short and sustained horizontal-plus-vertical work. Ten capture encodes match
+frozen codestream oracles; wide/compact/ASAN captures reduce to 24 identical-
+payload groups. Forty-eight replay preflights and 48 timing processes pass.
+Under 128-pair bursts, rolling 48/96 are favorable in only 5/24 and 8/24
+primary comparisons; full-4K rolling 48 regresses about 3.6%, while rolling 96
+is near even. Separate aligned probes observe large within-burst decreases
+in local cycle/timer ratio, despite 40 W limit endpoints, with measurable
+probe-on/off differences. No production policy is selected. S143 remains
+retained; next reduce the rolling design's extra weight/instruction work,
+then repeat sustained and current resident qualification.
+
+[S146](cuda-retired-ring-weights-s146.md) stores weights in unused rolling
+tile rows, retaining 24 KiB shared memory and four blocks per SM without
+spills. Both new kernels pass bitwise guard/reuse and all four CUDA sanitizer
+checks. Their executed warp instructions fall 5.68%/4.18% versus old 48/96
+rings, though shared-load wavefronts increase. Forty-eight current-input
+preflights and 48 timing processes pass. Sustained full 4K improves about
+1.2-1.4% for new 48 and 1.9-2.8% for new 96; full 2000x2000 also improves
+on both repeats. Small inputs still regress and HD duplicate controls are
+noisy, so no production rule is retained. S143 remains the runtime baseline.
+Next test parameter-carried weights to reduce remaining coefficient traffic,
+then qualify any selected large-plane policy in the integrated encoder.
+
+[S147](cuda-parameter-weights-s147.md) passes 33 weights by value, keeping
+the original ordered device normalization. Both kernels use 46 registers,
+24 KiB shared memory, and four blocks per SM without spills. Per-case and
+captured-graph ownership pass release/ASAN and all four CUDA sanitizer tools.
+Compared with S146, executed warp instructions fall 1.24-1.49% and shared-load
+wavefronts about 14%. All 48 preflights and 48 timing processes pass; the
+96-row sustained full-4K gain repeats at 4.7-4.9%, with favorable large-image
+and HD results. Smaller inputs still regress, so no blanket or integrated
+policy is retained. S143 remains the runtime baseline. Next carry the CPU
+weights through the prepared plan, then qualify geometry selection and
+whole-encoder correctness/performance in both coefficient-storage modes.
+
+[S148](cuda-parameter-weights-integration-s148.md) integrates explicit owned
+tap values into the prepared plan and retains the qualified initial policy:
+plain tiles below 2M pixels or for narrow/short planes, rolling 48 below 4M,
+and rolling 96 above. All 84 CTests, 7,552 frozen-oracle encodes, and sixteen
+CUDA sanitizer jobs pass. The 221 prior GPU bodies are unchanged; the two
+new bodies match S147 exactly. In complete-encode event measurements, selected
+full-resolution vertical stages improve 7.37-10.21%, with all large-case
+cross-label comparisons favorable. Ordinary and separate-executable timing
+remain noisy, so no universal whole-encoder gain is claimed. The 2000-square
+case favors rolling 48 over 96; refining the 4M switch is the next scheduling
+experiment. S148 is now the retained runtime baseline.
+
+[S149](cuda-rolling-tile-crossover-s149.md) screens twelve cases across five
+areas and multiple photographic contents using the frozen S148 binaries.
+All 24 cross-label comparisons at 4M favor rolling 48, but larger-size
+preferences and unchanged-stage controls disagree. Some large control shifts
+are already present before the current encode's first changed kernel.
+The 3,375 oracle-checked encodes and four device memory/init checks pass;
+a missing study-local temporary directory caused one preserved sanitizer
+launch failure, resolved without admin or firewall changes. No new area
+boundary is retained. Next test four adjacent outputs per lane and 32-row
+chunks, with warp-local normalization, to reduce shared-load/barrier work
+while keeping the 24 KiB shared-memory budget. S148 remains the runtime.
+
+[S150](cuda-four-output-rows-s150.md) qualifies that four-output-row prototype
+without changing production dispatch. Equal 96-row tiles retain four blocks
+per SM and identical FFMA counts, while executing 5.624% fewer warp
+instructions and about 23.3% fewer shared-load wavefronts. Sustained current
+4K horizontal-plus-vertical replay improves 4.07%/4.61%; tile128 improves
+4.81%/4.79%. Tile64 does better on some smaller large planes, but small-image
+results remain mixed. All 5,520 original guard fixtures, 1,080 added boundary
+fixtures, 48 capture preflights, 24 timing processes, and twelve CUDA
+sanitizer jobs pass. Next compare the new schedules with actual S148
+dispatch in complete encodes, including rolling48 controls and both
+coefficient-storage modes. No whole-encoder gain is claimed yet.
+
+[S151](cuda-integrated-four-output-rows-s151.md) compares those bodies inside
+complete resident encodes against actual S148 dispatch and rolling48, with
+wide/compact storage and opposite-order repeats. All 15,064 frozen-oracle
+encodes and eight integrated CUDA memory/init checks pass; all 223 existing
+GPU bodies and three prototype bodies remain instruction-exact. Each new
+tile improves all sixteen larger-image full-vertical primary comparisons
+and all 64 cross-label comparisons against each old control. Tile64 also
+improves HD, while tiles96/128 regress there. Tile96 saves roughly 0.66-0.94 ms
+across changed 4K vertical intervals, but ordinary whole-encode results are
+mixed and duplicate controls vary substantially. Next qualify a clean mixed
+64/96 policy at the existing eligibility boundaries, without tile128 or a
+new crossover claim. S148 remains the runtime; compact defaults and all
+unrelated allocation/routing are unchanged.
+
+[S152](cuda-four-output-row-production-s152.md) integrates and retains the
+mixed four-row64/96 policy at those existing boundaries, removing the old
+three-row production bodies without a compatibility switch. All 84 CTests,
+4,666 frozen-oracle encodes, and eighteen CUDA sanitizer jobs pass. The two
+new bodies are native-exact S150 prototypes; the other 221 GPU bodies are
+unchanged. Actual mixed dispatch improves all twenty eligible full-vertical
+primary comparisons and all eighty cross-label comparisons. Changed 4K
+vertical intervals save roughly 0.50-0.89 ms per instrumented encode, but
+ordinary whole-encoder timing remains mixed (12/24 favorable primaries).
+This is a retained stage optimization, not a dependable whole-throughput
+claim or an optimal-crossover claim. Compact storage remains opt-in. Next
+refresh the fully resident critical-path profile before further tuning.
+
+### Math and kernel strategy
+
+CUDA kernels use ordinary FP32 arithmetic and explicit decision-sensitive
+compile settings. Global fast-math remains disabled.
+Maximum reduction may use a standard CUDA reduction implementation because
+finite maximum is order-independent; sum-, norm-, and threshold-sensitive
+operations require fixed tolerances and CPU differential tests.
+
+Metal source is a valuable description of fusion and dataflow, but the CPU
+implementation remains the semantic oracle. Where Metal and CPU differ, the
+documented exact/resident contract determines which result CUDA must follow.
+
+## Implementation sequence
+
+### Phase 0: portable build and backend-neutral workflow
+
+1. Remove the unconditional non-Apple CMake failure.
+2. Make Objective-C++ and Metal dependencies conditional.
+3. Add a CPU-only Windows and Linux configuration.
+4. Add optional `gjxl_cuda` build plumbing without functional kernels.
+5. Generalize backend enums, AQ naming, workflow selection, summaries, CLI,
+   C API, and Rust API.
+6. Introduce an internal backend descriptor and resolver.
+7. Preserve all existing Metal behavior and numerical output.
+
+Exit criterion: CPU builds and tests run without Metal; macOS Metal behavior is
+unchanged; an unavailable forced CUDA request returns the correct status.
+
+### Phase 1: shared conformance suite and CUDA substrate
+
+1. Parameterize buffer, view, ownership, copy, submission, concurrency,
+   primitive, and transform tests.
+2. Implement CUDA status translation, device selection, buffers, streams,
+   events, and submissions.
+3. Implement synchronous base transfers and pinned staging helpers.
+4. Port affine, convolution, and maximum-reduction primitives.
+5. Implement simple forward and inverse DCTs.
+6. Add failure injection and allocation/submission accounting.
+
+Exit criterion: CUDA passes the generic substrate and transform tests, invalid
+descriptors submit no work, and concurrent waits return identical status.
+
+### Phase 2: maximum-throughput vertical slice
+
+The existing maximum-throughput mode is the smallest clean end-to-end CUDA
+milestone. It requires prepared AQ but intentionally omits AC search,
+reconstruction, Butteraugli, and dependent perceptual updates.
+
+Port:
+
+- inverse Gaborish preprocessing where enabled;
+- initial CfL;
+- initial quant gradient, erosion, modulation, and selection;
+- strategy-aware field adjustment;
+- resident quantizer and raw-quant construction;
+- DCT8 coefficient coding; and
+- final frame readback and assembly.
+
+Exit criterion: forced CUDA produces deterministic, independently decodable
+codestreams for odd, padded, small, 1080p, and 4K inputs; no score history is
+reported; repeated warm execution performs no device allocation.
+
+Current progress: the vertical slice is implemented and exposed through an
+explicitly forced CUDA workflow. Real-device tests cover odd padded geometry,
+CPU initial-field tolerances, byte-identical CPU frame serialization,
+deterministic prepared-operation reuse, zero steady-state device allocations,
+and failure-atomic direct and public calls. Pinned libjxl accepts the small and
+odd padded 1919x1079 maximum-throughput outputs, whose decoded samples are all
+finite. Fully-resident 3839x2159 coverage additionally demonstrates that the
+shared allocation and geometry path scales to odd padded 4K on the measured
+6 GB device. Repeating the 4K maximum-throughput case and the full matrix on
+other device classes remains qualification work rather than a functional gap.
+
+This is a vertical architecture and transfer proof, not qualification of the
+default quality path.
+
+### Phase 3: exact-coefficient workflow
+
+Port and validate:
+
+- all production transform shapes;
+- AC-strategy candidate evaluation;
+- inverse coefficient reconstruction and pixel scatter;
+- Gaborish and EPF postprocessing;
+- opsin-to-linear conversion;
+- prepared Butteraugli and score reduction; and
+- maximum-error reduction where required.
+
+Exit criterion: the exact track preserves CPU raw quantization, encoder frame,
+codestream bytes, control outcome, and existing numerical tolerances.
+
+Current progress: this phase is implemented for the forced exact track. The
+CUDA evaluator validates and groups all seven production strategies, stages
+the CPU frame's quantized AC and DC/LLF decisions into dequantized transform
+batches, applies final CfL before upload, and starts device work at inverse
+DCT. Reconstruction, scatter, Gaborish, EPF passes 0/1/2, opsin-to-linear,
+prepared Butteraugli, 16-norm block feedback, and normalized maximum-error
+feedback then remain on CUDA. An optional exact-linear handoff can skip the
+reconstruction tail for Butteraugli-only callers.
+
+Real-device differential coverage uses mixed transforms, an odd 257x17 source
+padded to 264x24, non-default Gaborish/EPF/Butteraugli parameters, strided and
+poisoned host outputs, both adaptive-quantization control modes, and injected
+completion failure. The exact Butteraugli workflow stays within the existing
+`2e-3` numerical contract (observed errors were below `3e-5` in block feedback
+and below `4e-6` in reconstructed RGB on compute capability 8.6). The
+maximum-error track stays within `2e-4`, preserves the CPU policy outcome, and
+emits byte-identical final codestreams. Compute Sanitizer reports zero memory
+errors. The odd padded 1919x1079 public workflow emits the same SHA-256
+codestream as CPU and passes pinned-libjxl decode with finite output. Broader
+corpus and cross-architecture gates remain part of production qualification
+rather than functional exact-mode implementation.
+
+### Phase 4: fully resident AQ
+
+Port:
+
+- resident initial quantization and AC-search handoff;
+- final resident CfL;
+- strategy-aware quant adjustment and quantizer selection;
+- forward coefficient caching;
+- resident coefficient decisions;
+- dependent Butteraugli policy updates;
+- final-frame-only materialization;
+- maximum-error resident control; and
+- optional diagnostic materialization.
+
+Only after ordinary stream execution is correct should kernel fusion, CUDA
+Graphs, allocation pools, stream pooling, or architecture-specific variants be
+considered.
+
+Exit criterion: all four GPU modes satisfy their distinct contracts; resident
+results are deterministic for a fixed CUDA backend, independently decodable,
+finite after decoding, and within established size and perceptual-quality
+gates.
+
+Current progress: the direct resident evaluator is implemented for all seven
+production transform strategies. It keeps the adjusted field, selected
+quantizer and raw-quant grid, cached forward coefficients, final CfL, adjusted
+coefficient decisions, inverse reconstruction, loop filters, color conversion,
+and metric inputs in CUDA memory. Both Butteraugli and maximum-error control
+produce valid frames and codestreams; iteration-zero mixed-strategy output is
+byte-identical to the CPU oracle, while later iterations are tested against the
+resident determinism contract because fixed final CfL intentionally differs
+from ordinary CPU evaluation. Bounded and full materialization agree exactly,
+caller output remains unchanged after injected completion failure, all 52
+CUDA-enabled tests pass, and Compute Sanitizer reports zero memory errors on
+compute capability 8.6.
+
+The fused end state is now implemented. CUDA accepts the integrated pipeline's
+resident source, inverse-Gaborish selection, initial quantization, initial CfL,
+and AC-strategy-search handoff. `EvaluateResidentButteraugliPolicy` initializes,
+evaluates, and updates the dependent quant field on the operation stream; the
+ordinary two-evaluation public path no longer reads back and re-uploads the
+field. Optional final scoring adds a diagnostic evaluation without changing
+the frame or codestream.
+
+All four modes pass the public-workflow contract on odd padded 1919x1079 input,
+including independent decode and finite-sample checks. Fully-resident CUDA also
+passes the same gates at odd padded 3839x2159 on a 6 GB compute-capability 8.6
+device. This completes the functional Phase 4 scope. It does not by itself
+qualify automatic selection across the NVIDIA product range.
+
+### Phase 5: production qualification
+
+Add:
+
+- real-GPU CI on at least two NVIDIA architecture classes;
+- CPU-only Windows, Linux, and macOS builds;
+- Compute Sanitizer coverage in a scheduled job;
+- toolkit and host-compiler compatibility matrices;
+- device-loss, out-of-memory, launch, completion, numeric, and readback tests;
+- concurrent prepared operations and concurrent public contexts;
+- warm and cold 1080p/4K benchmarks;
+- H2D/D2H byte and timing accounting;
+- peak VRAM and host-pinned-memory accounting;
+- exact-mode hashes and resident-mode determinism checks;
+- pinned `djxl` acceptance and decoded-pixel checks; and
+- named-corpus size and Butteraugli comparisons.
+
+Local qualification in this revision covers a Windows 11 host, CUDA 11.8,
+MSVC 19.37, and an RTX 3060 Laptop GPU (compute capability 8.6, 6 GB). It
+includes the complete CTest suite, CPU-only and CUDA builds, the public Rust
+wrapper in both modes, Compute Sanitizer, deterministic and failure-injection
+tests, all four public CUDA modes at odd padded 1080p, fully-resident CUDA at
+odd padded 4K, pinned-decoder acceptance, finite decoded samples, an exact-mode
+CPU/CUDA hash match, and scored/unscored resident hash stability.
+
+The remaining qualification work is deliberately external to that single-host
+evidence: automated real-GPU CI on at least one second architecture class,
+Linux/toolkit-version coverage, concurrent public-context stress, measured
+peak VRAM and pinned-host memory, explicit transfer accounting, repeatable cold
+and warm performance baselines, and named photographic-corpus quality/size
+comparisons.
+
+Automatic CUDA selection should remain disabled until this phase produces a
+documented device and workload qualification range.
+
+## Build and use
+
+CUDA is independent of Metal and is opt-in at configuration time:
+
+```sh
+cmake -S . -B build-cuda -G Ninja \
+  -DGJXL_ENABLE_CUDA=ON \
+  -DGJXL_ENABLE_METAL=OFF
+cmake --build build-cuda --parallel
+ctest --test-dir build-cuda --output-on-failure
+```
+
+CMake uses its ordinary CUDA compiler and architecture discovery. Toolchain
+files and CI should set `CMAKE_CUDA_ARCHITECTURES` explicitly when producing
+portable artifacts instead of relying on the development machine's native
+architecture.
+
+The CLI requires explicit CUDA selection while qualification is conservative:
+
+```sh
+build-cuda/gjxl_encode input.pfm output.jxl \
+  --backend cuda \
+  --gpu-aq fully-resident \
+  --distance 1.0
+```
+
+`--gpu-aq` also accepts `exact-coefficients`, `throughput`, and
+`maximum-throughput`. The rate-control options are the same as for CPU and
+Metal. The C API selects `GJXL_BACKEND_CUDA`, and Rust consumers enable the
+safe crate's `cuda` feature:
+
+```sh
+cargo test --manifest-path rust/Cargo.toml --workspace --features cuda
+```
+
+On Windows, setting `CUDA_PATH` is the most direct way for the Rust build
+script to find `cudart`; it also recognizes `CUDACXX` and
+`CMAKE_CUDA_COMPILER`. Linux additionally falls back to
+`/usr/local/cuda/lib64`.
+
+## Major risks
+
+### Numerical decision drift
+
+CUDA contraction, transcendentals, and reduction order can move values across
+quantization or search thresholds. The exact path limits this risk; resident
+CUDA requires its own deterministic quality gates. Global fast-math is the
+largest avoidable early risk.
+
+### Transfer-bound performance
+
+Metal's shared-memory handoff does not predict discrete-GPU performance. A CUDA
+kernel can be faster while the public encoder is slower because input upload,
+final coefficient readback, CPU repacking, or synchronization dominates.
+Every performance claim must use the complete in-memory encode boundary.
+
+### Memory capacity
+
+Prepared AQ owns large persistent and staging arenas, and earlier Metal
+measurements reached hundreds of megabytes at 1080p. CUDA must measure peak
+device memory separately from host memory, reject impossible preparations
+atomically, and account for concurrent encodes. Pooling should follow, not
+precede, a verified resource plan.
+
+### Third implementation drift
+
+CPU and Metal already duplicate some numerical logic and parameter layouts.
+CUDA increases the maintenance burden unless shared planning, generated
+constants, ABI checks, and differential fixtures are established early.
+
+### Overfitting one GPU
+
+The current Metal automatic path is deliberately qualified for one named Apple
+GPU. CUDA spans a much wider device and memory range. Kernel selection and
+automatic enablement must be based on explicit properties and measured device
+classes, not one development machine's name or timings.
+
+### Premature optimization
+
+Tensor cores, managed memory, graph capture, multi-stream scheduling, GPU
+entropy coding, and a device-native serializer are all plausible future work.
+None should block the first correct backend. The existing Metal roadmap's
+evidence-driven, complete-workflow measurement discipline should determine
+which of them is justified.
+
+## Acceptance contract
+
+A production CUDA backend should meet all of the following:
+
+- CPU-only builds remain independent of CUDA and Metal.
+- Forced CUDA fails early and clearly when unavailable or unsupported.
+- Automatic selection falls back only before pipeline execution; runtime CUDA
+  failures are not silently retried on CPU.
+- Exact mode preserves CPU decision and byte-level contracts.
+- Resident modes are deterministic per backend and meet explicit size and
+  decoded-quality gates.
+- Invalid inputs allocate and submit no work.
+- Operational failure commits no caller-visible partial output.
+- Repeated prepared evaluation performs zero steady-state device allocations.
+- Independent prepared objects are thread-safe and may progress without
+  sharing mutable scratch.
+- Final codestreams are accepted by the pinned independent decoder.
+- Performance is reported at the complete public encode boundary, alongside
+  transfer, synchronization, memory, and output-quality evidence.
+
+## Recommendation
+
+The functional implementation has now completed Phases 0 through 4 in the
+order proposed by the initial analysis: portable substrate, reusable
+primitives, maximum-throughput vertical slice, exact coefficients, and finally
+the fused resident pipeline. The next highest-value work is qualification, not
+additional kernel surface.
+
+Keep CUDA explicitly selected while collecting evidence on a second NVIDIA
+architecture, Linux and newer toolkit combinations, a named photographic
+corpus, concurrent contexts, transfer volume, memory pressure, and complete
+workflow performance. Use exact mode as the byte-level regression oracle and
+resident mode as the deterministic quality/performance track. Enable automatic
+selection only for device, geometry, and mode ranges supported by recorded
+data.
+
+The architectural critique remains relevant after functional completion. In
+particular, a shared immutable `PreparedAqPlan`, generated host/device ABI
+checks, and backend-parameterized conformance tests would reduce long-term
+Metal/CUDA drift. Those should be incremental refactors with unchanged output
+contracts, not prerequisites for using the forced CUDA backend.

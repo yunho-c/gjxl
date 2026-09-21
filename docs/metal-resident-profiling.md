@@ -67,6 +67,21 @@ Historical profiles predating this alignment retain their original execution
 path. Recollect data before using GPU stage proportions to discuss production
 bottlenecks; the new marker does not retroactively qualify older notebook data.
 
+## Integration with CUDA-enabled main
+
+The merge of main at `ebc4887` retains the shared Metal/CUDA JSON writer and
+adds the Metal execution-path marker, timestamp validity and indirect-grid
+metadata to that writer. Device-selection profiling is an explicit backend
+capability: Metal enables it, while CUDA retains its existing profiled CPU
+selection fallback. CUDA timestamps remain submission-local, with validity
+published only after event resolution. Shared selection calls preserve both
+the scratch buffer and its byte offset.
+
+The capture harness uses the backend-neutral `gpu_aq_mode` option introduced
+on main. Saved six-image Q80 measurements remain frozen at encoder revision
+`4f3e414`; merging source does not relabel them as measurements of the merged
+revision or replace the archived capture executable.
+
 ## Validation
 
 The focused tests compare ordinary and profiled bytes, decisions, submission
@@ -88,3 +103,12 @@ eliminated-host-phase assertions also fail in a fresh, unchanged `b1a7373` build
 those unrelated expectations were left unchanged. Local logs are in
 `build/profile-alignment-tests.log`, `build/profile-alignment-cli.log`, and
 `build/baseline-cli.log`.
+
+After integration with `ebc4887`, the full native Release build and standalone
+capture harness compiled successfully. All 13 focused CTest suites and the
+three profiling CLI checks passed. A bounded Kodak Q80 capture check across
+efforts 1–10 (two ordinary/profiled pairs each) passed byte, summary, submission
+count, timestamp and additive-partition validation. These checks are not a new
+performance study. Logs and captures are in `build/profile-main-merge-*`.
+CUDA runtime tests and the hosted device without timestamp counters were not
+available on this Mac; their fallback behavior and test paths are retained.

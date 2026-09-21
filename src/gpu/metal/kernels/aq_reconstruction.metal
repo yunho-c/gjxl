@@ -373,18 +373,27 @@ static float aq_upsample_scale(uint length, uint frequency) {
   return kScale[frequency];
 }
 
-static float aq_forward_basis(uint length, uint frequency, uint sample) {
-  const float alpha = frequency == 0u ? 0.7071067811865475244f : 1.0f;
-  const float angle =
-    (float(sample) + 0.5f) * float(frequency) * M_PI_F / float(length);
-  return 1.4142135623730950488f * alpha * cos(angle) / float(length);
+static float aq_inverse_basis(uint length, uint frequency, uint sample) {
+  // DC/LLF conversions only use lengths 1, 2 and 4. In particular, the DC
+  // basis is exactly one: multiplying rounded sqrt(2) and 1/sqrt(2) biases
+  // it downward and can move a DC coefficient across a quantization tie.
+  if (frequency == 0u) return 1.0f;
+  if (length == 2u) return sample == 0u ? 1.0f : -1.0f;
+  // Rounded values of sqrt(2) * cos((sample + .5) * frequency * pi / 4).
+  // Keeping the symmetric entries exact also avoids device-dependent cos
+  // approximations in this tiny transform.
+  constexpr float basis[12] = {
+    1.3065629648763766f, 0.5411961001461970f,
+    -0.5411961001461970f, -1.3065629648763766f,
+    1.0f, -1.0f, -1.0f, 1.0f,
+    0.5411961001461970f, -1.3065629648763766f,
+    1.3065629648763766f, -0.5411961001461970f,
+  };
+  return basis[(frequency - 1u) * 4u + sample];
 }
 
-static float aq_inverse_basis(uint length, uint frequency, uint sample) {
-  const float alpha = frequency == 0u ? 0.7071067811865475244f : 1.0f;
-  const float angle =
-    (float(sample) + 0.5f) * float(frequency) * M_PI_F / float(length);
-  return 1.4142135623730950488f * alpha * cos(angle);
+static float aq_forward_basis(uint length, uint frequency, uint sample) {
+  return aq_inverse_basis(length, frequency, sample) / float(length);
 }
 
 static int aq_round_dc(float value, device atomic_uint* error) {
@@ -1001,7 +1010,9 @@ static float aq_initial_quant_masking_sqrt(float value) {
 static float aq_initial_quant_log1p(float value) {
   const float sum = 1.0f + value;
   const float correction = (value - (sum - 1.0f)) / sum;
-  return log(sum) + correction;
+  // The correction repairs rounding in 1 + value, not an approximate log.
+  // Near a flat region the reciprocal mask amplifies that log error.
+  return metal::precise::log(sum) + correction;
 }
 
 kernel void gjxl_aq_initial_quant_gradient(

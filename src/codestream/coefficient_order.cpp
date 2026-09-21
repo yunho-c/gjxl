@@ -201,9 +201,9 @@ Status ValidateOrder(
 }
 
 // Isolate the contiguous update so both counter widths can vectorize.
-template <typename Count>
+template <typename Count, typename T>
 void CountCoefficientZeros(
-  const int32_t* coefficients, Count* counts, size_t size) {
+  const T* coefficients, Count* counts, size_t size) {
   for (size_t coefficient = 0; coefficient < size; ++coefficient) {
     counts[coefficient] += coefficients[coefficient] == 0;
   }
@@ -219,9 +219,9 @@ static_assert(Use32BitZeroCounts({65535, 65537}));
 static_assert(!Use32BitZeroCounts({65536, 65536}));
 static_assert(!Use32BitZeroCounts({std::numeric_limits<size_t>::max(), 2}));
 
-template <typename Count>
+template <typename Count, typename Group>
 Status CountGroupZeros(
-  const VarDctAcGroupView& group,
+  const Group& group,
   const AcStrategyGrid& strategies,
   ZeroCounts<Count>* zero_counts,
   bool sample_dct8,
@@ -279,7 +279,7 @@ Status CountGroupZeros(
         if (selected) {
           for (size_t channel = 0; channel < 3; ++channel) {
             Storage<Count>& counts = (*zero_counts)[family][channel];
-            const std::span<const int32_t> coefficients =
+            const auto coefficients =
               group.coefficients[channel].subspan(
                 source_offset, info->coefficient_count());
             // Validated anchors partition the frame's representable block
@@ -288,8 +288,14 @@ Status CountGroupZeros(
             // when that area fits, and uint64_t otherwise.
             static_assert(std::numeric_limits<size_t>::digits <=
                           std::numeric_limits<uint64_t>::digits);
-            CountCoefficientZeros(
-              coefficients.data(), counts.data(), coefficients.size());
+            if constexpr (requires { coefficients.data(); }) {
+              CountCoefficientZeros(
+                coefficients.data(), counts.data(), coefficients.size());
+            } else {
+              for (size_t i = 0; i < coefficients.size(); ++i) {
+                counts[i] += coefficients[i] == 0;
+              }
+            }
           }
         }
       }
@@ -307,13 +313,38 @@ Status CountGroupZeros(
   return Status::Ok();
 }
 
+// Metadata is identical for every native representation. This small value
+// does not materialize coefficient storage.
+VarDctAcGroupView GroupMetadata(const VarDctNativeAcGroupView& native) {
+  return std::visit([](const auto& group) {
+    return VarDctAcGroupView{
+      .block_x = group.block_x,
+      .block_y = group.block_y,
+      .block_extent = group.block_extent,
+      .used_coefficient_count = group.used_coefficient_count,
+    };
+  }, native);
+}
+
+template <typename Count>
+Status CountGroupZeros(
+    const VarDctNativeAcGroupView& native, const AcStrategyGrid& strategies,
+    ZeroCounts<Count>* counts, bool sample_dct8,
+    std::span<const uint8_t> decisions, uint16_t* present_mask) {
+  return std::visit([&](const auto& group) {
+    return CountGroupZeros(group, strategies, counts, sample_dct8,
+                           decisions, present_mask);
+  }, native);
+}
+
 Status PresentOrderMask(
-  std::span<const VarDctAcGroupView> groups,
+  std::span<const VarDctNativeAcGroupView> groups,
   const AcStrategyGrid& strategies,
   uint16_t* mask) {
 
   uint16_t present = 0;
-  for (const VarDctAcGroupView& group : groups) {
+  for (const auto& native : groups) {
+    const auto group = GroupMetadata(native);
     for (size_t y = 0; y < group.block_extent.height; ++y) {
       for (size_t x = 0; x < group.block_extent.width; ++x) {
         AcStrategyCell cell;
@@ -480,7 +511,7 @@ Status codestream_internal::ComputeCoefficientOrderStoragePlan(
                                         kFreshExact) ||
       !plan.tokens.AddVector<EntropyToken>(plan.maximum_tokens, kGrowing) ||
       !plan.working.Add(plan.orders) || !plan.working.Add(plan.tokens) ||
-      !plan.working.AddVector<VarDctAcGroupView>(plan.ac_group_count,
+      !plan.working.AddVector<VarDctNativeAcGroupView>(plan.ac_group_count,
                                                kFreshExact) ||
       // Global reduction plus worker arrays overlap until reduction finishes.
       !(Use32BitZeroCounts(blocks)
@@ -605,19 +636,19 @@ Status ComputeCoefficientOrdersWithCounts(
         }
       }
     } else {
-      Storage<VarDctAcGroupView> groups(frame.ac_group_count());
+      Storage<VarDctNativeAcGroupView> groups(frame.ac_group_count());
       size_t coefficient_count = 0;
       for (size_t group_index = 0; group_index < groups.size(); ++group_index) {
-        Status status = frame.GetAcGroup(group_index, &groups[group_index]);
+        Status status = frame.GetNativeAcGroup(group_index, &groups[group_index]);
         if (!status.ok()) {
           return status;
         }
-        if (groups[group_index].used_coefficient_count >
+        if (GroupMetadata(groups[group_index]).used_coefficient_count >
             std::numeric_limits<size_t>::max() - coefficient_count) {
           return Status::InvalidArgument(
             "Coefficient-order value count overflows");
         }
-        coefficient_count += groups[group_index].used_coefficient_count;
+        coefficient_count += GroupMetadata(groups[group_index]).used_coefficient_count;
       }
 
       if (behavior ==
@@ -640,7 +671,7 @@ Status ComputeCoefficientOrdersWithCounts(
         for (size_t group_index = 0; group_index < groups.size();
              ++group_index) {
           size_t anchor_count = 0;
-          if (!groups[group_index].block_extent.try_area(&anchor_count)) {
+          if (!GroupMetadata(groups[group_index]).block_extent.try_area(&anchor_count)) {
             return Status::InvalidArgument(
               "Coefficient-order sample count overflows");
           }

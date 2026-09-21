@@ -6,7 +6,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <span>
 
 namespace gjxl::vardct_frame_internal {
 
@@ -27,14 +26,14 @@ inline constexpr size_t OrderPopulationFamily(size_t coefficient_count) {
   return kOrderPopulationSizes.size();
 }
 
-// Optional, immutable producer cache with the completed frame's lifetime.
-// The producer guarantees exact zero counts from that frame's final AC and
-// strategies. Full counts are always present; pure DCT8 also has the pinned
-// group-first sampled counts. All absent-family/sample bins are zero. Consumers
-// check shape and bounds, not semantic equality (which requires a full scan).
-// Empty storage requests the CPU recount, including its wider counter fallback.
-struct CoefficientOrderPopulationView {
-  std::span<const uint32_t> counts;
+// An internal producer computes these exact populations from the same final
+// quantized AC and strategies it submits to frame assembly. Full counts are
+// always present. Only a pure DCT8 frame has sampled counts, using the pinned
+// AC-group-first PRNG traversal. All absent-family/sample bins are zero.
+// Assembly copies the data, checks its shape and bounds, and does not recount
+// coefficients; semantic equality is the producer's responsibility.
+struct CoefficientOrderPopulation {
+  std::array<uint32_t, kOrderPopulationCount> counts{};
   uint16_t present_mask = 0;
 };
 

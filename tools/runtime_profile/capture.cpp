@@ -29,7 +29,7 @@ int main(int argc, char** argv) try {
   const VarDctEncodingOptions encoding_options{
     .butteraugli_target = options.butteraugli_target, .effort = options.effort,
     .backend = VarDctBackendPreference::kMetal, .cpu_thread_count = options.cpu_thread_count,
-    .metal_aq_mode = GpuAdaptiveQuantizationMode::kFullyResident};
+    .gpu_aq_mode = GpuAdaptiveQuantizationMode::kFullyResident};
   std::vector<uint8_t> expected;
   VarDctEncodingSummary expected_summary;
   const auto before = gpu->stats().committed_submissions;

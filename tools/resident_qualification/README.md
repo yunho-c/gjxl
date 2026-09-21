@@ -11,6 +11,43 @@ committed `HEAD`. `--historical` selects candidate `07dd92e`, the runtime measur
 in the [historical scheduling record](../../docs/resident-scheduling-qualification.md).
 Fresh results are separate experiments, even with those same commits.
 
+## Physical Metal integration check
+
+For the CUDA integration, run the current committed revision on a physical
+Apple Silicon Mac with Xcode, the Metal compiler tools, CMake, Ninja and Python 3:
+
+```sh
+bash tools/resident_qualification/qualify_metal_integration.sh
+```
+
+The script requires a clean tracked checkout. It records the revision, OS,
+compiler and Metal device, rejects Apple Paravirtual, builds all native targets,
+requires successful stage timestamp capture, runs the full suite and focused
+Metal API/shader validation, then exercises finite-budget 4K and concurrent
+resident workloads. The qualification driver checks admission bounds and zero
+managed counters after trimming. Profile captures also compare ordinary and
+profiled codestreams and summaries.
+
+Dispatch capture runs when the device reports support. Some physical devices,
+including the previously measured M4 Pro, expose stage timestamps only. Their
+evidence explicitly records unsupported dispatch timestamps; the CLI suite
+checks rejection and output preservation. Such a run does not qualify dispatch
+capture on hardware that supports it.
+
+Results remain in unique directories under
+`build/metal-integration-qualification/evidence/`; `complete.txt` is written only
+after all applicable gates pass. Pass a build directory as the first argument
+to use another location. The manual `Physical Metal Qualification` workflow
+provides the same check for an existing self-hosted runner; its default labels
+are `self-hosted`, `macOS`, `ARM64`, `metal`. The local command can be used before
+that workflow is available on the repository's default branch.
+
+This is a current-revision runtime/resource check, not a paired performance or
+corpus-quality experiment. The historical controller below remains separate:
+its equal-metallib requirement excludes main-versus-integration comparisons
+when kernels differ. The shared driver supports both historical
+`metal_aq_mode` and current `gpu_aq_mode` header spellings.
+
 ## Dependencies
 
 Use Apple Silicon macOS, Xcode with Metal compiler tools, CMake 3.24+, Ninja,

@@ -10,6 +10,7 @@
 #include "codec/ac_strategy.h"
 #include "gpu/backend.h"
 #include "gpu/image.h"
+#include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/ac_strategy_selection.h"
 
 namespace gjxl {
@@ -21,6 +22,11 @@ struct Prepared;
 struct AcStrategyGpuSearchStats {
   std::array<size_t, kAcStrategyCount> candidate_counts{};
   size_t total_candidate_count = 0;
+  // Maximum reusable scratch ranges across stages, excluding alignment.
+  AcStrategyScratchRequirements scratch;
+  // Retained owning arena capacity: stage tables, costs, scratch, and padding.
+  // Excludes legacy input staging and externally owned resident inputs.
+  size_t resource_capacity_bytes = 0;
   bool device_selection = false;
   bool combined_aq_submission = false;
 };
@@ -29,6 +35,8 @@ struct ResidentAcStrategySearchInputs {
   ConstDeviceImage3View opsin;
   ConstDevicePlaneView quant_field;
   ConstDevicePlaneView pixel_mask;
+  ConstDevicePlaneView y_to_x;
+  ConstDevicePlaneView y_to_b;
 };
 
 struct DeferredAcStrategySearch {

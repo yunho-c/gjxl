@@ -1717,6 +1717,11 @@ MetalPreparedAqEvaluation::ReconfigureImpl(const AcStrategyGrid &strategies,
         return Status::InvalidArgument(
           "Prepared AQ reconfiguration metadata is invalid");
       }
+      if (cell.is_anchor && !chroma_from_luma_internal::StrategyFitsColorTile(
+            x, y, cell.strategy)) {
+        return Status::InvalidArgument(
+          "Prepared AQ reconfiguration strategy crosses a color tile");
+      }
     }
   }
 
@@ -2047,6 +2052,8 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       "Resident Butteraugli policy was not prepared");
   }
   if (input.iterations > 4 ||
+      (input.derive_color_correlation &&
+       (!input.adjust_initial_field || input.color_correlation_iterations > 20)) ||
       !ValidHostPlaneLayout(input.adjusted_initial_quant_field) ||
       input.adjusted_initial_quant_field.extent != block_extent_ ||
       !std::isfinite(input.quant_dc) || input.quant_dc <= 0.0f ||
@@ -2110,7 +2117,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       .quant_field = input.adjusted_initial_quant_field,
       .quant_dc = input.quant_dc,
   };
-  Status status = ValidateInput(evaluation_input);
+  Status status = ValidateInput(evaluation_input, input.derive_color_correlation);
   if (!status.ok()) return status;
   if (score_count != 0 && butteraugli_ == nullptr) {
     return Status::FailedPrecondition(
@@ -2222,6 +2229,14 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
   }
   reset_params_.test_error_mask = fail_numeric ? 512u : 0u;
   reset_params_.preserve_error = 0u;
+  if (input.derive_color_correlation) {
+    final_cfl_params_.nonlinear_iterations = input.color_correlation_iterations;
+    invariant_color_correlation_ready_ = true;
+    invariant_color_correlation_from_policy_ = true;
+    resident_forward_coefficients_ready_ = false;
+    resident_color_correlation_pending_ = true;
+    resident_color_correlation_readback_needed_ = false;
+  }
   status = UploadInput(evaluation_input);
   if (!status.ok()) {
     Invalidate();
@@ -2381,9 +2396,14 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
         append_reconstruction_stage(
           "aq.reconstruction.reset", ReconstructionProfileStage::kReset,
           iteration);
-        append_reconstruction_stage(
-          "aq.reconstruction.quantizer",
-          ReconstructionProfileStage::kQuantizer, iteration);
+        // First-use CfL selects its invariant quantizer and restores the
+        // evaluation quantizer inside the final_cfl stage. The standalone
+        // quantizer callback would otherwise record an empty stage here.
+        if (iteration != 0 || !profile_final_color_correlation) {
+          append_reconstruction_stage(
+            "aq.reconstruction.quantizer",
+            ReconstructionProfileStage::kQuantizer, iteration);
+        }
         if (iteration == 0 && profile_forward_coefficients) {
           for (size_t batch_index = 0; batch_index < batches_.size();
                ++batch_index) {
@@ -2518,11 +2538,13 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
             "aq.final_frame.reset", ReconstructionProfileStage::kReset,
             0, 0, "aq.final_frame");
         }
-        append_reconstruction_stage(
-          "aq.final_frame.quantizer",
-          ReconstructionProfileStage::kQuantizer,
-          static_cast<uint32_t>(resident_policy_iterations_), 0,
-          "aq.final_frame");
+        if (score_count != 0 || !profile_final_color_correlation) {
+          append_reconstruction_stage(
+            "aq.final_frame.quantizer",
+            ReconstructionProfileStage::kQuantizer,
+            static_cast<uint32_t>(resident_policy_iterations_), 0,
+            "aq.final_frame");
+        }
         if (score_count == 0 && profile_forward_coefficients) {
           for (size_t batch_index = 0; batch_index < batches_.size();
                ++batch_index) {
@@ -2957,10 +2979,21 @@ Status MetalPreparedAqEvaluation::PrepareInvariantColorCorrelationResident(
     return Status::FailedPrecondition(
       "Prepared resident color correlation requires ready state");
   }
-  // The next resident evaluation already uploads this field and selects its
-  // quantizer. Schedule final CfL in that same command buffer so no additional
-  // submission or host synchronization is introduced.
-  (void)quant_dc;
+  // Retain the caller's field, which may differ from the next evaluation's.
+  // Policy initialization uses this scratch only after invariant CfL has
+  // consumed it. Keeping the snapshot on the device adds neither an allocation
+  // nor a submission, and does not retain caller-owned host memory.
+  Status status = UploadPlane(
+      *backend_, quant_field, resident_policy_initial_field_);
+  if (!status.ok()) {
+    // Reject competing operations before releasing the lock for cleanup.
+    state_ = State::kInvalid;
+    lock.unlock();
+    Invalidate();
+    return status;
+  }
+  invariant_quant_dc_ = quant_dc;
+  invariant_color_correlation_from_policy_ = false;
   final_cfl_params_.nonlinear_iterations = nonlinear_iterations;
   invariant_color_correlation_ready_ = true;
   resident_forward_coefficients_ready_ = false;
@@ -4166,6 +4199,11 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
         return Status::InvalidArgument(
             "Prepared AQ strategy grid contains an unsupported strategy");
       }
+      if (cell.is_anchor && !chroma_from_luma_internal::StrategyFitsColorTile(
+            x, y, cell.strategy)) {
+        return Status::InvalidArgument(
+          "Prepared AQ strategy crosses a color tile");
+      }
       if (preparation.epf_sharpness.Row(y)[x] >= 8) {
         return Status::InvalidArgument(
             "Prepared AQ EPF sharpness is out of range");
@@ -4187,7 +4225,8 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
   return Status::Ok();
 }
 
-Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
+Status MetalPreparedAqEvaluation::ValidateInput(
+    AqEvaluationInput input, bool derive_color_correlation) const {
   if (final_transform_metadata_pending_ && !resident_strategy_pending_)
     return Status::FailedPrecondition(
       "AQ transform metadata requires successful reconfiguration");
@@ -4240,7 +4279,7 @@ Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
       input.epf_inverse_sigma.extent == block_extent_;
   if ((!resident_field && !frame_only_resident_quantizer_ &&
        !valid_host_quant) ||
-      (!resident_initial_cfl_ &&
+      (!resident_initial_cfl_ && !derive_color_correlation &&
        ((invariant_color_correlation_ready_ && host_cfl_specified) ||
         (!invariant_color_correlation_ready_ && !valid_host_cfl)))) {
     return Status::InvalidArgument(
@@ -5007,13 +5046,15 @@ void MetalPreparedAqEvaluation::EncodeResidentFrame(
   reset_params_.preserve_forward_coefficients =
     first_pass && !resident_forward_coefficients_ready_ ? 0u : 1u;
   if (first_pass) EncodeReconstructionReset(backend, encoder);
-  EncodeResidentQuantizer(backend, encoder);
+  if (!resident_color_correlation_pending_) {
+    EncodeResidentQuantizer(backend, encoder);
+  }
   if (first_pass) {
     if (!resident_forward_coefficients_ready_) {
       EncodeForwardCoefficients(backend, encoder);
     }
     if (resident_color_correlation_pending_) {
-      EncodeFinalColorCorrelation(backend, encoder);
+      EncodeInvariantColorCorrelation(backend, encoder);
       resident_color_correlation_pending_ = false;
       resident_color_correlation_readback_needed_ = true;
       resident_forward_coefficients_ready_ = true;

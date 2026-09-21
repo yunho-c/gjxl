@@ -93,7 +93,7 @@ int main(int argc, char **argv) {
           .cpu_thread_count = threads,
           .backend = backend == "cpu" ? gjxl::VarDctBackendPreference::kCpu
                                       : gjxl::VarDctBackendPreference::kMetal,
-          .metal_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
+          .gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
           .collect_final_butteraugli_score = false,
           .dc_prediction = variant.prediction == "weighted"
                                ? gjxl::VarDctDcPrediction::kWeighted
@@ -122,7 +122,7 @@ int main(int argc, char **argv) {
                            ? gjxl::VarDctExecutionBackend::kCpu
                            : gjxl::VarDctExecutionBackend::kMetal) &&
                   (backend == "cpu" ||
-                   summary.metal_aq_mode ==
+                   summary.gpu_aq_mode ==
                        gjxl::GpuAdaptiveQuantizationMode::kFullyResident) &&
                   summary.dc_prediction == variant.options.dc_prediction &&
                   summary.dc_quantization == variant.options.dc_quantization &&
@@ -181,7 +181,7 @@ int main(int argc, char **argv) {
     std::cout << std::setprecision(12)
               << "{\"schema_version\":1,\"revision\":\""
               << GJXL_QUALITY_REVISION << "\",\"backend\":\"" << backend
-              << "\",\"metal_aq_mode\":\"fully-resident\","
+              << "\",\"gpu_aq_mode\":\"fully-resident\","
               << "\"timing_semantics\":\"complete-encode-wall-time\",\"stage_"
                  "profile_enabled\":false,"
               << "\"collect_final_score\":false,\"order\":\"rotated-and-"

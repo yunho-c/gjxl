@@ -19,6 +19,11 @@ revision, libraries, embedded metallib, capture executable and collector source
 hashes. Use a new directory and freshly frozen configuration for another study;
 do not overwrite a completed run or mix different builds into its ledger.
 
+After the CUDA-main integration, the live harness uses `gpu_aq_mode`; the
+archived harness still uses the earlier `metal_aq_mode` API at its recorded
+source revision. Build the live harness against current libraries and keep
+the archived executable for reproducing the original study.
+
 The benchmark-style capture command requires an even `--samples` count and:
 
 ```sh

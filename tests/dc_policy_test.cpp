@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <stdexcept>
+#include <string_view>
 
 #include "benchmarks/synthetic_images.h"
 #include "codestream/batch_workflow.h"
@@ -74,6 +75,7 @@ void CheckPlans() {
             {257, 129}, {.encoding = Explicit(automatic)}, &explicit_cpu));
         Check(cpu == explicit_cpu,
               "Automatic CPU admission differs from resolved policy");
+#if GJXL_TEST_HAS_METAL
         automatic.backend = VarDctBackendPreference::kMetal;
         ResidentWorkflowStoragePlan resident, explicit_resident;
         Ok(ComputeResidentWorkflowStoragePlan(
@@ -84,7 +86,7 @@ void CheckPlans() {
               "Automatic resident admission differs from resolved policy");
         for (auto mode : {GpuAdaptiveQuantizationMode::kExactCoefficients,
                           GpuAdaptiveQuantizationMode::kMaximumThroughput}) {
-          automatic.metal_aq_mode = mode;
+          automatic.gpu_aq_mode = mode;
           MetalCompatibilityWorkflowStoragePlan compatibility,
               explicit_compatibility;
           Ok(ComputeMetalCompatibilityWorkflowStoragePlan(
@@ -96,12 +98,16 @@ void CheckPlans() {
               compatibility == explicit_compatibility,
               "Automatic compatibility admission differs from resolved policy");
         }
+#endif
       }
     }
   }
 }
 
-void CheckEncoding(ConstImage3FView image, VarDctBackendPreference backend) {
+void CheckEncoding(ConstImage3FView image, VarDctBackendPreference backend,
+                   GpuAdaptiveQuantizationMode mode =
+                       GpuAdaptiveQuantizationMode::kFullyResident,
+                   VarDctDcPrediction prediction = kDefaultDcPrediction) {
   std::vector<VarDctBatchEncodingRequest> requests;
   std::vector<std::vector<uint8_t>> expected_batch;
   for (int effort : {3, 4, 7}) {
@@ -113,6 +119,8 @@ void CheckEncoding(ConstImage3FView image, VarDctBackendPreference backend) {
         VarDctEncodingOptions automatic{.effort = effort,
                                         .cpu_thread_count = 2,
                                         .backend = backend,
+                                        .gpu_aq_mode = mode,
+                                        .dc_prediction = prediction,
                                         .dc_quantization = quantization,
                                         .adaptive_dc_smoothing = smoothing};
         const auto explicit_options = Explicit(automatic);
@@ -136,6 +144,25 @@ void CheckEncoding(ConstImage3FView image, VarDctBackendPreference backend) {
                   actual_summary.adaptive_dc_smoothing ==
                       *explicit_options.adaptive_dc_smoothing,
               "Summary did not report effective DC controls");
+        if (backend == VarDctBackendPreference::kCuda) {
+          auto scored_options = explicit_options;
+          scored_options.collect_final_butteraugli_score = true;
+          std::vector<uint8_t> scored;
+          VarDctEncodingSummary scored_summary;
+          Ok(EncodeLinearRgbVarDctCodestream(image, scored_options, &scored,
+                                             &scored_summary));
+          Check(scored == actual, "Final-score collection changed CUDA bytes");
+          Check(scored_summary.final_butteraugli_score_evaluated ==
+                    (mode != GpuAdaptiveQuantizationMode::kMaximumThroughput),
+                "CUDA score toggle did not respect the mode contract");
+          if (mode == GpuAdaptiveQuantizationMode::kExactCoefficients) {
+            auto cpu_options = explicit_options;
+            cpu_options.backend = VarDctBackendPreference::kCpu;
+            std::vector<uint8_t> cpu;
+            Ok(EncodeLinearRgbVarDctCodestream(image, cpu_options, &cpu));
+            Check(cpu == actual, "Exact CUDA DC controls differ from CPU bytes");
+          }
+        }
         if (quantization == DcQuantizationMode::kAutomatic &&
             !smoothing.has_value()) {
           requests.push_back({image, automatic});
@@ -157,12 +184,29 @@ void CheckEncoding(ConstImage3FView image, VarDctBackendPreference backend) {
 }
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
   try {
     CheckUintSearchPolicy();
     CheckPlans();
     Image3FBuffer image({64, 48});
     benchmark::FillBatchTexture(image.view());
+    if (argc == 2 && std::string_view(argv[1]) == "--cuda") {
+      const auto status = EnsureProductionCudaBackendAvailable();
+      if (status.code() == StatusCode::kUnavailable) return 77;
+      Ok(status);
+      for (auto mode : {GpuAdaptiveQuantizationMode::kExactCoefficients,
+                        GpuAdaptiveQuantizationMode::kFullyResident,
+                        GpuAdaptiveQuantizationMode::kThroughput,
+                        GpuAdaptiveQuantizationMode::kMaximumThroughput})
+        for (auto prediction : {VarDctDcPrediction::kGradient,
+                                VarDctDcPrediction::kWeighted})
+          CheckEncoding(image.const_view(), VarDctBackendPreference::kCuda, mode,
+                        prediction);
+      std::cout << "CUDA DC defaults, overrides, summaries and batch policy "
+                   "passed in all four modes.\n";
+      return 0;
+    }
+    Check(argc == 1, "Unknown DC policy test arguments");
     CheckEncoding(image.const_view(), VarDctBackendPreference::kCpu);
     CheckEncoding(image.const_view(), VarDctBackendPreference::kMetal);
     std::cout << "DC defaults, independent overrides, admission, and batch "

@@ -62,7 +62,6 @@ PHASES = {
 
 ELIMINATED_WORK_PHASES = {
     "codestream_coefficient_context_materialization_work",
-    "codestream_entropy_prefix_code_build_work",
     "codestream_entropy_ans_prefix_validation_work",
     "codestream_entropy_ans_value_collection_work",
     "codestream_entropy_ans_value_aggregation_work",
@@ -225,9 +224,14 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
             self.assertGreaterEqual(value, 0)
         for phase in PHASES:
             if phase in ELIMINATED_WORK_PHASES:
-                self.assertEqual(sample["phase_nanoseconds"][phase], 0)
-            elif phase.endswith("_work"):
-                self.assertGreater(sample["phase_nanoseconds"][phase], 0)
+                self.assertEqual(sample["phase_nanoseconds"][phase], 0, phase)
+        # Prefix/ANS branches depend on the encoded populations. A short
+        # executed substage can also round to zero at the host clock's
+        # resolution; only the aggregate work must have measurable duration.
+        self.assertGreater(sum(
+            value for phase, value in sample["phase_nanoseconds"].items()
+            if phase.endswith("_work")
+        ), 0)
         self.assertFalse(list(self.directory.glob("samples.json.tmp-*")))
 
     def test_external_pfm_input_uses_its_source_extent(self) -> None:
@@ -268,7 +272,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         self.assertEqual(document["density"], "high")
         self.assertIn("density=high", result.stdout)
 
-    def test_effort_nine_selects_high_density_entropy(self) -> None:
+    def test_effort_nine_selects_rate_optimized_entropy(self) -> None:
         destination = self.directory / "effort-nine.json"
         result = self.run_benchmark(
             "--effort",
@@ -286,7 +290,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         self.assertIn("effort=9", result.stdout)
         self.assertEqual(
             document["workloads"][0]["samples"][0]["entropy_behavior"],
-            "high-density",
+            "rate-optimized",
         )
 
     def test_maximum_compression_is_explicit_in_raw_samples(self) -> None:
@@ -376,6 +380,9 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
             str(destination),
         )
 
+        if result.returncode != 0 and "GPU stage-boundary timestamp sampling is unavailable" in result.stderr:
+            self.assertFalse(destination.exists())
+            self.skipTest("device lacks stage-boundary timestamp sampling")
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
         self.assertEqual(document["schema_version"], 4)
@@ -612,6 +619,9 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                     "--gpu-profile-output",
                     str(destination),
                 )
+                if result.returncode != 0 and "GPU stage-boundary timestamp sampling is unavailable" in result.stderr:
+                    self.assertFalse(destination.exists())
+                    self.skipTest("device lacks stage-boundary timestamp sampling")
                 self.assertEqual(result.returncode, 0, result.stderr)
                 document = json.loads(
                     destination.read_text(encoding="utf-8")
@@ -690,15 +700,22 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
             "--gpu-profile-output",
             str(capability_output),
         )
-        self.assertEqual(stage_result.returncode, 0, stage_result.stderr)
-        capability_document = json.loads(
-            capability_output.read_text(encoding="utf-8")
+        stage_unavailable = (
+            stage_result.returncode != 0 and
+            "GPU stage-boundary timestamp sampling is unavailable" in stage_result.stderr
         )
-        capabilities = capability_document["workloads"][0]["samples"][0][
-            "capabilities"
-        ]
-        if capabilities["dispatch_boundary"]:
-            self.skipTest("device supports dispatch-boundary timestamps")
+        if stage_unavailable:
+            self.assertFalse(capability_output.exists())
+        else:
+            self.assertEqual(stage_result.returncode, 0, stage_result.stderr)
+            capability_document = json.loads(
+                capability_output.read_text(encoding="utf-8")
+            )
+            capabilities = capability_document["workloads"][0]["samples"][0][
+                "capabilities"
+            ]
+            if capabilities["dispatch_boundary"]:
+                self.skipTest("device supports dispatch-boundary timestamps")
 
         destination = self.directory / "dispatch.json"
         destination.write_text("sentinel", encoding="utf-8")
@@ -715,6 +732,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(
+            "GPU stage-boundary timestamp sampling is unavailable" if stage_unavailable else
             "GPU dispatch-boundary timestamp sampling is unavailable",
             result.stderr,
         )

@@ -418,6 +418,8 @@ public:
     gpu_profile_internal::GpuProfilingMode mode,
     std::unique_ptr<GpuSubmission>* submission) override;
 
+  bool SupportsDeviceSelectionProfiling() const noexcept override { return true; }
+
   Status EvaluateAndSelectAcStrategyCandidateBatchesProfiled(
     std::span<const AcStrategyCandidateBatch> batches,
     AcStrategyDeviceSelection selection,
@@ -575,6 +577,12 @@ private:
     MetalBuffer* scratch_b = nullptr;
     MetalBuffer* rate_scratch = nullptr;
     MetalBuffer* costs = nullptr;
+    size_t matrices_offset_bytes = 0;
+    size_t candidates_offset_bytes = 0;
+    size_t scratch_a_offset_bytes = 0;
+    size_t scratch_b_offset_bytes = 0;
+    size_t rate_scratch_offset_bytes = 0;
+    size_t costs_offset_bytes = 0;
     const TransformPipeline* forward = nullptr;
     const TransformPipeline* inverse = nullptr;
     MetalAcStrategyBatchParams params{};
@@ -586,6 +594,7 @@ private:
     std::span<const ValidatedAcStrategyBatch> batches;
     struct Selection {
       std::array<const MetalBuffer*, 7> costs{};
+      std::array<size_t, 7> cost_offsets{};
       MetalBuffer* output = nullptr;
       size_t offset_bytes = 0;
       struct Params {
@@ -613,12 +622,14 @@ private:
   Status RequireMetalBuffer(
     const DeviceBuffer* buffer,
     size_t required_bytes,
+    size_t offset_bytes,
     std::string_view role,
     const MetalBuffer** out) const;
 
   Status RequireMetalBuffer(
     DeviceBuffer* buffer,
     size_t required_bytes,
+    size_t offset_bytes,
     std::string_view role,
     MetalBuffer** out) const;
 

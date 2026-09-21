@@ -34,7 +34,7 @@ namespace gjxl::codestream_internal {
 [[nodiscard]] constexpr uint32_t FinalColorCorrelationIterations(
   const VarDctEncodingOptions& options, bool selected_metal) noexcept {
   return selected_metal && options.effort >= 8 &&
-      options.metal_aq_mode == GpuAdaptiveQuantizationMode::kFullyResident &&
+      options.gpu_aq_mode == GpuAdaptiveQuantizationMode::kFullyResident &&
       options.density_mode == VarDctDensityMode::kDefault &&
       options.rate_control_mode != VarDctRateControlMode::kMaximumError
     ? 8u : 0u;
@@ -80,7 +80,7 @@ namespace gjxl::codestream_internal {
 [[nodiscard]] constexpr bool UseUniformInitialQuantization(
   const VarDctEncodingOptions& options) noexcept {
   return UseFixedDct8Strategy(options) &&
-    options.metal_aq_mode != GpuAdaptiveQuantizationMode::kMaximumThroughput;
+    options.gpu_aq_mode != GpuAdaptiveQuantizationMode::kMaximumThroughput;
 }
 
 inline void ConfigureInitialQuantizationPolicy(
@@ -108,7 +108,7 @@ struct ResidentEncodingInput {
   std::unique_ptr<PreparedResidentInput> owner;
 };
 
-/// Called after C-adapter memory/CPU admission. Requires forced resident Metal
+/// Called after C-adapter memory/CPU admission. Requires forced resident GPU
 /// encoding; failure leaves the output unchanged. The generator is invoked
 /// synchronously and is not retained.
 [[nodiscard]] Status
@@ -180,6 +180,10 @@ ResolveCoefficientOrderBehavior(
 struct VarDctEncodingProfile {
   /// Maximum CPU threads simultaneously participating in this encode.
   size_t peak_cpu_participants = 0;
+  /// Largest authoritative AC owner at a serializer handoff across attempts,
+  /// excluding other metadata/device scratch. Width belongs to that owner.
+  size_t ac_coefficient_bytes = 0;
+  size_t ac_storage_bytes = 0;
   uint64_t input_preparation_nanoseconds = 0;
   uint64_t input_geometry_and_storage_nanoseconds = 0;
   uint64_t input_color_transform_nanoseconds = 0;
@@ -211,6 +215,11 @@ struct VarDctEncodingProfile {
 /// Metal execution policy.
 [[nodiscard]] Status EnsureProductionMetalBackendAvailable();
 
+/// Initializes and validates the process-cached production CUDA backend.
+/// Used by frontends that promise eager failure for an explicitly forced
+/// CUDA execution policy.
+[[nodiscard]] Status EnsureProductionCudaBackendAvailable();
+
 [[nodiscard]] Status EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
   ConstImage3FView linear_rgb,
   VarDctEncodingOptions options,
@@ -231,7 +240,7 @@ EncodeLinearRgbVarDctCodestreamProfiledWithBackendForTesting(
   VarDctEncodingSummary* summary,
   VarDctEncodingProfile* profile);
 
-/// Diagnostic-only public-workflow entry point with resident Metal GPU
+/// Diagnostic-only public-workflow entry point with resident GPU
 /// timestamps. On failure, every caller-visible output remains unchanged.
 [[nodiscard]] Status
 EncodeLinearRgbVarDctCodestreamGpuProfiledWithBackendForTesting(

@@ -158,7 +158,7 @@ static int CheckQualityHelper(void) {
         "quality 100 mapping is incorrect");
   CHECK(fabsf(gjxl_distance_from_quality(90.0f) - 1.0f) < 1.0e-6f,
         "quality 90 mapping is incorrect");
-  CHECK(fabsf(gjxl_distance_from_quality(80.0f) - 1.9f) < 1.0e-6f,
+  CHECK(gjxl_distance_from_quality(80.0f) == 1.9f,
         "quality 80 mapping is incorrect");
   CHECK(fabsf(gjxl_distance_from_quality(30.0f) - 6.4f) < 1.0e-6f,
         "quality 30 mapping is incorrect");
@@ -240,6 +240,19 @@ static int CheckContexts(GJXLContext** cpu_context) {
   } else {
     CHECK(metal == NULL && gjxl_get_last_error()[0] != '\0',
           "unavailable Metal modified output or omitted a diagnostic");
+  }
+
+  options.backend = GJXL_BACKEND_CUDA;
+  GJXLContext* cuda = NULL;
+  const GJXLResult cuda_result = gjxl_context_create(&options, &cuda);
+  CHECK(cuda_result == GJXL_OK || cuda_result == GJXL_ERROR_UNAVAILABLE,
+        "forced CUDA returned the wrong result category");
+  if (cuda_result == GJXL_OK) {
+    CHECK(cuda != NULL, "forced CUDA returned no context");
+    gjxl_context_destroy(cuda);
+  } else {
+    CHECK(cuda == NULL && gjxl_get_last_error()[0] != '\0',
+          "unavailable CUDA modified output or omitted a diagnostic");
   }
 
   struct LargerContextOptions {

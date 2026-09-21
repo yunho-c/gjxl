@@ -147,12 +147,19 @@ class Session:
             try:
                 code = process.wait(timeout=timeout)
             except BaseException:
-                os.killpg(process.pid, signal.SIGTERM)
-                try:
+                if os.name == 'nt':
+                    # Terminate the owned process tree before closing its log;
+                    # Windows has neither killpg nor POSIX signal delivery.
+                    subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
+                                   capture_output=True, timeout=10)
                     process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait()
+                else:
+                    os.killpg(process.pid, signal.SIGTERM)
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.wait()
                 self.event('interrupted', command=command, pid=process.pid, log=log.name)
                 raise
         record = {'command': command, 'log': log.name, 'log_sha256': sha(log), 'exit': code,

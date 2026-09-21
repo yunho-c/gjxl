@@ -1,0 +1,86 @@
+name: Native Libraries
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cuda-compile:
+    name: Ubuntu CUDA 12.6 compile
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-native-toolchain
+      - name: Install pinned CUDA build components
+        run: python3 .github/actions/setup-cuda-linux/setup.py "$RUNNER_TEMP/gjxl-cuda"
+      - name: Configure CUDA libraries, tests and benchmarks
+        run: >-
+          cmake -S . -B build/cuda-compile -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CUDA_COMPILER="$RUNNER_TEMP/gjxl-cuda/toolkit/bin/nvcc"
+          -DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-13
+          -DCUDAToolkit_ROOT="$RUNNER_TEMP/gjxl-cuda/toolkit"
+          -DCMAKE_CUDA_ARCHITECTURES=86
+          -DGJXL_ENABLE_METAL=OFF -DGJXL_ENABLE_CUDA=ON
+          -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON
+          -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF
+      - name: Build CUDA targets (hosted runner has no GPU)
+        run: cmake --build build/cuda-compile --parallel 4
+
+  test:
+    name: ${{ matrix.os }} C++${{ matrix.standard }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, ubuntu-24.04, windows-2022]
+        standard: [20, 23]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/setup-native-toolchain
+      - name: Configure
+        run: cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=${{ matrix.standard }} -DGJXL_ENABLE_CUDA=OFF -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF
+      - name: Build
+        run: cmake --build build/ci --parallel 4
+      - name: Test
+        run: ctest --test-dir build/ci --output-on-failure --parallel 2
+      - name: Diagnose Metal baseline on failure
+        if: failure() && runner.os == 'macOS' && matrix.standard == 20 && github.event_name == 'pull_request'
+        continue-on-error: true
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          xcrun swift -e 'import Metal; for d in MTLCopyAllDevices() { print(d.name, d.maxThreadsPerThreadgroup) }'
+          git fetch --depth=1 origin "$BASE_SHA"
+          git worktree add --detach build/main-reference "$BASE_SHA"
+          git -C build/main-reference submodule update --init --recursive
+          # The hosted paravirtual GPU cannot create main's 1024-thread scalar
+          # DCT32 pipeline. Apply the launch-width and shader numerical fixes
+          # so the control reaches later resident contracts. The host-side
+          # invariant-CfL snapshot fix is deliberately excluded.
+          git diff "$BASE_SHA" HEAD -- src/gpu/metal/metal_backend.cpp src/gpu/metal/kernels/dct.metal src/gpu/metal/kernels/aq_reconstruction.metal > build/main-reference-dct.patch
+          git -C build/main-reference apply "$GITHUB_WORKSPACE/build/main-reference-dct.patch"
+          # Use the same valid mixed-transform fixture and failure diagnostics
+          # for the reconstruction control. Production code remains main plus
+          # the explicit shader/portability patches above.
+          cp tests/metal_aq_reconstruction_test.cpp build/main-reference/tests/metal_aq_reconstruction_test.cpp
+          cmake -S build/main-reference -B build/main-reference-build -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF
+          cmake --build build/main-reference-build --parallel 4 --target gjxl_codestream_encoder_test gjxl_metal_aq_evaluation_test gjxl_metal_aq_reconstruction_test gjxl_quantization_gpu_pipeline_test gjxl_encoding_benchmark
+          ctest --test-dir build/main-reference-build --output-on-failure -R '^(codestream_encoder|metal_aq_evaluation|metal_aq_reconstruction|metal_quantization_pipeline|encoding_benchmark_cli)$'
+      - name: Retain test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.os }}-cxx${{ matrix.standard }}
+          path: |
+            build/ci/Testing/Temporary/
+            build/main-reference-build/Testing/Temporary/

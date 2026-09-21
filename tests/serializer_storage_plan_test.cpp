@@ -192,13 +192,13 @@ bool PurePlans() {
                             {257, 259},
                             {2049, 257},
                             {3839, 2159},
-                            {1ul << 24, 1}}) {
+                            {size_t{1} << 24, 1}}) {
       for (auto prediction :
            {VarDctDcPrediction::kGradient, VarDctDcPrediction::kWeighted})
         for (auto entropy : {kBalanced, kHighDensity, kRateOptimized, kMaximumCompression}) {
           for (auto order : {kFull, kEffort7Dct8Sampled}) {
             size_t previous = 0;
-            for (size_t threads : {1ul, 2ul, 8ul, SIZE_MAX}) {
+            for (size_t threads : {size_t{1}, size_t{2}, size_t{8}, SIZE_MAX}) {
               SerializerStoragePlan plan;
               const SerializerStorageOptions options{
                   {entropy, order, prediction}, threads, true};
@@ -265,7 +265,7 @@ bool PurePlans() {
   SerializerStoragePlan plan;
   plan.maximum_output_bytes = 17;
   const auto sentinel = plan;
-  for (Extent2D extent : {Extent2D{}, {0, 1}, {SIZE_MAX, 1}, {1ul << 30, 1}}) {
+  for (Extent2D extent : {Extent2D{}, {0, 1}, {SIZE_MAX, 1}, {size_t{1} << 30, 1}}) {
     if (!FixtureCheck(!ComputeSerializerStoragePlan(extent, {}, &plan).ok() &&
                           plan == sentinel,
                       "Invalid serializer geometry changed output"))
@@ -353,7 +353,7 @@ bool RealEncodes() {
       .entropy_behavior = kBalanced, .dc_uint_search = true};
     std::vector<uint8_t> dc_oracle;
     if (!Oracle(f, dc_search, &dc_oracle)) return false;
-    for (size_t threads : {1ul, 8ul}) {
+    for (size_t threads : {size_t{1}, size_t{8}}) {
       if (!EncodeWithinPlan(f, {dc_search, threads, true}, dc_oracle))
         return false;
       ++count;
@@ -365,7 +365,7 @@ bool RealEncodes() {
           std::vector<uint8_t> oracle;
           if (!Oracle(f, {entropy, order, prediction}, &oracle))
             return false;
-          for (size_t threads : {0ul, 1ul, 2ul, 8ul}) {
+          for (size_t threads : {size_t{0}, size_t{1}, size_t{2}, size_t{8}}) {
             for (bool profile : {false, true}) {
               if (!EncodeWithinPlan(
                       f, {{entropy, order, prediction}, threads, profile},

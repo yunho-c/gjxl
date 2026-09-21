@@ -205,8 +205,9 @@ ComputeResidentAqProfileStoragePlan(Extent2D source, Extent2D coding,
   // Reserve the 20-dispatch parallel quantizer bound even when a small field
   // uses two dispatches. Reset + quantizer + four per-family coefficient/inverse/
   // scatter dispatches + filters + Opsin-to-linear + perceptual work + update.
-  // First use also gathers/transforms each family, computes final CfL and
-  // initializes the policy. Counting all first-use work bounds cached runs too.
+  // First use also selects a quantizer for the retained invariant CfL field,
+  // gathers/transforms each family, computes final CfL and initializes the
+  // policy. Counting all first-use work bounds cached runs too.
   const size_t dc_dispatches = 2 * size_t(policy.deferred_dc) +
     size_t(policy.adaptive_dc_smoothing) +
     size_t(policy.deferred_dc || policy.adaptive_dc_smoothing) * families;
@@ -215,7 +216,7 @@ ComputeResidentAqProfileStoragePlan(Extent2D source, Extent2D coding,
                            (butter.multiscale ? butter.resident_comparison
                                               : butter.comparison + families);
   p.maximum_dispatches =
-      p.metadata.score_count * per_score + 2 * families + 2 +
+      p.metadata.score_count * per_score + 20 + 2 * families + 2 +
       size_t(!policy.evaluate_final_field) * (20 + 2 * families + 2 * size_t(policy.deferred_dc));
   // Completed output counts coefficient zeros once per family after the
   // final integer stores, including when there are no scored passes.

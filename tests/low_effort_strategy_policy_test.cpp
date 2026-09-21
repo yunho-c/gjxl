@@ -23,8 +23,8 @@ bool Check(bool ok, const char* message) {
 }
 
 bool CheckPolicy() {
-  constexpr std::array<size_t, 10> updates{0, 0, 0, 0, 1, 1, 2, 3, 3, 4};
-  constexpr std::array<size_t, 10> error_updates{0, 0, 0, 1, 1, 1, 2, 3, 3, 4};
+  constexpr std::array<size_t, 10> updates{0, 0, 0, 0, 1, 1, 2, 3, 4, 4};
+  constexpr std::array<size_t, 10> error_updates{0, 0, 0, 1, 1, 1, 2, 3, 4, 4};
   for (int effort = 1; effort <= 10; ++effort) {
     for (auto density : {VarDctDensityMode::kDefault,
                          VarDctDensityMode::kHighDensity}) {
@@ -162,6 +162,7 @@ bool CheckSearchStorage() {
                cpu_search.aq.policy.evaluations == 2,
              "CPU low-effort search storage or AQ evaluation count is wrong"))
     return false;
+#if GJXL_TEST_HAS_METAL
   ResidentWorkflowStorageOptions metal;
   metal.encoding.backend = VarDctBackendPreference::kMetal;
   metal.encoding.effort = 4;
@@ -174,6 +175,9 @@ bool CheckSearchStorage() {
                  fixed.frontend.peak_bytes < search.frontend.peak_bytes &&
                  fixed.score_count == 0 && search.score_count == 1,
                "Resident low-effort search storage or AQ count is wrong");
+#else
+  return true;
+#endif
 }
 }  // namespace
 

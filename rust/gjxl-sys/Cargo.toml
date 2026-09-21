@@ -16,6 +16,7 @@ include = [
 [features]
 default = []
 native = ["dep:bindgen", "dep:cmake"]
+cuda = ["native"]
 
 [build-dependencies]
 bindgen = { version = "0.71", optional = true }

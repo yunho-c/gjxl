@@ -740,7 +740,13 @@ bool CheckManagedSerializerStorage() {
     if (encoded != expected || tracker.peak() < 2 || budget.snapshot().peak_backing_bytes == 0 ||
         budget.snapshot().committed_bytes() != 0 ||
         DefaultResourceBudget().snapshot().peak_backing_bytes != fallback_peak) {
-      std::cerr << "Managed parallel serialization changed bytes or leaked ownership\n";
+      std::cerr << "Managed parallel serialization failed: behavior="
+                << static_cast<int>(behavior) << " bytes_equal=" << (encoded == expected)
+                << " participants=" << tracker.peak()
+                << " backing_peak=" << budget.snapshot().peak_backing_bytes
+                << " committed=" << budget.snapshot().committed_bytes()
+                << " fallback_peak=" << fallback_peak << " -> "
+                << DefaultResourceBudget().snapshot().peak_backing_bytes << '\n';
       return false;
     }
     ResourceBudget tiny(1);

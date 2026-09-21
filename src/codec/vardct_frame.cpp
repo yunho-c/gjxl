@@ -8,6 +8,7 @@
 #include <limits>
 #include <new>
 #include <stdexcept>
+#include <type_traits>
 
 #include "core/managed_allocator.h"
 #include "codec/chroma_from_luma_internal.h"
@@ -55,6 +56,15 @@ Extent2D GroupBlockExtent(
 
 }  // namespace
 
+VarDctEncoderFrame& VarDctEncoderFrame::operator=(
+    const VarDctEncoderFrame& other) {
+  if (this != &other) {
+    VarDctEncoderFrame candidate(other);
+    *this = std::move(candidate);
+  }
+  return *this;
+}
+
 size_t VarDctEncoderFrame::AcGroupChannelOffset(
   size_t group_index,
   size_t channel) const noexcept {
@@ -94,11 +104,234 @@ ConstImage3FView VarDctEncoderFrame::dc() const noexcept {
 Status VarDctEncoderFrame::GetAcGroup(
   size_t group_index,
   VarDctAcGroupView* out) const {
-  return vardct_frame_internal::BorrowFrame(*this).GetAcGroup(group_index, out);
+
+  if (out == nullptr) {
+    return Status::InvalidArgument("VarDCT AC-group output is null");
+  }
+  VarDctNativeAcGroupView native;
+  if (Status status = GetNativeAcGroup(group_index, &native); !status.ok()) {
+    return status;
+  }
+  if (const auto *dense = std::get_if<VarDctAcGroupView>(&native)) {
+    *out = *dense;
+    return Status::Ok();
+  }
+  return Status::InvalidArgument("AC group is narrow or sparse; use GetNativeAcGroup");
+}
+
+Status
+VarDctEncoderFrame::GetNativeAcGroup(size_t group_index,
+                                     VarDctNativeAcGroupView *out) const {
+
+  if (out == nullptr) {
+    return Status::InvalidArgument("VarDCT AC-group output is null");
+  }
+  size_t group_count = 0;
+  if (!ac_group_extent_.try_area(&group_count) ||
+      !ac_validated_ ||
+      group_count != group_used_coefficient_count_.size() ||
+      group_index >= group_count ||
+      group_count > std::numeric_limits<size_t>::max() / 3 ||
+      group_count * 3 > std::numeric_limits<size_t>::max() /
+                            kVarDctAcGroupCoefficientCapacity) {
+    return Status::InvalidArgument("VarDCT AC-group index is invalid");
+  }
+  const size_t dense_count = ac_coefficients_.size() + ac_coefficients_i8_.size() +
+    ac_coefficients_i16_.size();
+  const bool sparse = sparse_ac_.index() != 0;
+  if (sparse) {
+    if (dense_count != 0 || sparse_group_offsets_.size() != group_count) {
+      return Status::InvalidArgument("Sparse VarDCT AC storage is invalid");
+    }
+  } else if ((ac_coefficients_.size() != 0) + (ac_coefficients_i8_.size() != 0) +
+               (ac_coefficients_i16_.size() != 0) != 1 ||
+             dense_count != group_count * 3 * kVarDctAcGroupCoefficientCapacity) {
+    return Status::InvalidArgument("Dense VarDCT AC storage is invalid");
+  }
+
+  size_t block_x = 0;
+  size_t block_y = 0;
+  const Extent2D block_extent = GroupBlockExtent(
+    geometry_.block_grid().blocks,
+    ac_group_extent_,
+    group_index,
+    &block_x,
+    &block_y);
+
+  if (sparse) {
+    return std::visit([&](const auto& storage) -> Status {
+      using Storage = std::decay_t<decltype(storage)>;
+      if constexpr (std::is_same_v<Storage, std::monostate>) {
+        return Status::InvalidArgument("Sparse VarDCT AC owner is absent");
+      } else {
+        const size_t begin = sparse_group_offsets_[group_index];
+        const size_t used = group_used_coefficient_count_[group_index];
+        if (!storage.ValidShape() || used > kVarDctAcGroupCoefficientCapacity ||
+            begin > storage.coefficient_count || 3 * used > storage.coefficient_count - begin) {
+          return Status::InvalidArgument("Sparse VarDCT AC group range is invalid");
+        }
+        VarDctSparseAcGroupViewT<typename Storage::value_type> result{
+          block_x, block_y, block_extent, used, {}};
+        for (size_t channel = 0; channel < 3; ++channel) {
+          result.coefficients[channel] = storage.view().subspan(begin + channel * used, used);
+        }
+        *out = result;
+        return Status::Ok();
+      }
+    }, sparse_ac_);
+  }
+
+  const auto make_group = [&]<typename T>(const T *data) {
+    VarDctAcGroupViewT<T> result{
+        .block_x = block_x,
+        .block_y = block_y,
+        .block_extent = block_extent,
+        .used_coefficient_count = group_used_coefficient_count_[group_index],
+    };
+    for (size_t channel = 0; channel < 3; ++channel) {
+      result.coefficients[channel] = {
+          data + AcGroupChannelOffset(group_index, channel),
+          kVarDctAcGroupCoefficientCapacity,
+      };
+    }
+    *out = result;
+  };
+  if (ac_coefficients_.size() != 0) {
+    make_group(ac_coefficients_.data());
+  } else if (ac_coefficients_i8_.size() != 0) {
+    make_group(ac_coefficients_i8_.data());
+  } else {
+    make_group(ac_coefficients_i16_.data());
+  }
+  return Status::Ok();
 }
 
 bool VarDctEncoderFrame::valid() const {
-  return vardct_frame_internal::BorrowFrame(*this).valid();
+  if (!ValidGeometry(geometry_) ||
+      !strategies_.complete() ||
+      strategies_.extent() != geometry_.block_grid().blocks ||
+      !quantizer_.valid() ||
+      !color_correlation_.valid() ||
+      color_correlation_.tile_extent() != ExpectedColorTileExtent(geometry_) ||
+      !profile_.valid()) {
+    return false;
+  }
+
+  size_t block_count = 0;
+  size_t group_count = 0;
+  const Extent2D blocks = geometry_.block_grid().blocks;
+  const Extent2D expected_group_extent{
+    (blocks.width + kVarDctAcGroupBlockDimension - 1) /
+      kVarDctAcGroupBlockDimension,
+    (blocks.height + kVarDctAcGroupBlockDimension - 1) /
+      kVarDctAcGroupBlockDimension,
+  };
+  if (!geometry_.block_grid().blocks.try_area(&block_count) ||
+      !ac_group_extent_.try_area(&group_count) ||
+      ac_group_extent_ != expected_group_extent ||
+      raw_quant_field_.size() != block_count ||
+      epf_sharpness_.size() != block_count ||
+      group_used_coefficient_count_.size() != group_count) {
+    return false;
+  }
+  for (size_t channel = 0; channel < 3; ++channel) {
+    if (quantized_dc_[channel].size() != block_count ||
+        dc_[channel].size() != block_count ||
+        !std::ranges::all_of(dc_[channel], [](float value) {
+          return std::isfinite(value);
+        })) {
+      return false;
+    }
+  }
+  std::array<float, 3> dc_steps = quantizer_.dc_steps();
+  for (float& step : dc_steps) step /= float(1u << profile_.extra_dc_precision);
+  for (size_t index = 0; index < block_count; ++index) {
+    const float reconstructed_y =
+      static_cast<float>(quantized_dc_[1][index]) * dc_steps[1];
+    const float reconstructed_b = profile_.extra_dc_precision != 0
+      ? std::fma(reconstructed_y, 1.0f,
+          static_cast<float>(quantized_dc_[2][index]) * dc_steps[2])
+      : static_cast<float>(quantized_dc_[2][index]) * dc_steps[2] + reconstructed_y;
+    if (dc_[0][index] !=
+          static_cast<float>(quantized_dc_[0][index]) * dc_steps[0] ||
+        dc_[1][index] != reconstructed_y ||
+        dc_[2][index] != reconstructed_b) {
+      return false;
+    }
+  }
+  if (!std::ranges::all_of(raw_quant_field_, [](int32_t value) {
+        return value >= 1 && value <= kMaxRawQuant;
+      }) ||
+      !std::ranges::all_of(
+        epf_sharpness_,
+        [](uint8_t value) { return value < 8; })) {
+    return false;
+  }
+
+  if (group_count > std::numeric_limits<size_t>::max() / 3 ||
+      group_count * 3 > std::numeric_limits<size_t>::max() /
+                            kVarDctAcGroupCoefficientCapacity) {
+    return false;
+  }
+
+  size_t sparse_offset = 0;
+
+  for (size_t group_index = 0; group_index < group_count; ++group_index) {
+    size_t block_x = 0;
+    size_t block_y = 0;
+    const Extent2D group_blocks = GroupBlockExtent(
+      blocks,
+      ac_group_extent_,
+      group_index,
+      &block_x,
+      &block_y);
+    size_t covered_blocks = 0;
+    if (!group_blocks.try_area(&covered_blocks) ||
+        covered_blocks > kVarDctAcGroupCoefficientCapacity / kJxlBlockArea) {
+      return false;
+    }
+    const size_t expected = covered_blocks * kJxlBlockArea;
+    if (group_used_coefficient_count_[group_index] != expected) {
+      return false;
+    }
+    if (sparse_ac_.index() != 0) {
+      if (sparse_group_offsets_.size() != group_count ||
+          sparse_group_offsets_[group_index] != sparse_offset ||
+          3 * expected > std::numeric_limits<size_t>::max() - sparse_offset) return false;
+      sparse_offset += 3 * expected;
+    }
+    VarDctNativeAcGroupView native;
+    // AC payloads and dense edge tails were validated by the producer.
+    // The private owner cannot change independently of its group metadata.
+    if (!GetNativeAcGroup(group_index, &native).ok())
+      return false;
+  }
+
+  if (sparse_ac_.index() != 0 && !std::visit([&](const auto& storage) {
+        using Storage = std::decay_t<decltype(storage)>;
+        if constexpr (std::is_same_v<Storage, std::monostate>) return false;
+        else return ac_validated_ && storage.ValidShape() &&
+          storage.coefficient_count == sparse_offset;
+      }, sparse_ac_)) return false;
+
+  const Status strategy_status = strategies_.ForEachAnchor(
+    [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
+      const AcStrategyInfo* info = GetAcStrategyInfo(strategy);
+      if (info == nullptr) {
+        return Status::InvalidArgument("Unknown AC strategy");
+      }
+      const size_t group_x = block_x / kVarDctAcGroupBlockDimension;
+      const size_t group_y = block_y / kVarDctAcGroupBlockDimension;
+      if ((block_x + info->covered_blocks.width - 1) /
+            kVarDctAcGroupBlockDimension != group_x ||
+          (block_y + info->covered_blocks.height - 1) /
+            kVarDctAcGroupBlockDimension != group_y) {
+        return Status::InvalidArgument(
+          "AC strategy crosses a VarDCT group boundary");
+      }
+      return Status::Ok();
+    });
+  return strategy_status.ok();
 }
 
 vardct_frame_internal::VarDctFrameView vardct_frame_internal::BorrowFrame(
@@ -117,7 +350,7 @@ vardct_frame_internal::VarDctFrameView vardct_frame_internal::BorrowFrame(
       return {};
     }
   }
-  return VarDctFrameView({
+  VarDctFrameView result({
     .input = {
       .geometry = frame.geometry_,
       .strategies = &frame.strategies_,
@@ -132,13 +365,20 @@ vardct_frame_internal::VarDctFrameView vardct_frame_internal::BorrowFrame(
     .ac_group_extent = frame.ac_group_extent_,
     .group_used_coefficient_count = frame.group_used_coefficient_count_,
     .ac_coefficients = frame.ac_coefficients_,
+    .coefficient_order_population = frame.coefficient_order_population_
+      ? CoefficientOrderPopulationView{frame.coefficient_order_population_->counts,
+          frame.coefficient_order_population_->present_mask}
+      : CoefficientOrderPopulationView{},
   });
+  result.native_owner_ = &frame;
+  return result;
 }
 
 Status vardct_frame_internal::VarDctFrameView::GetAcGroup(
   size_t group_index,
   VarDctAcGroupView* out) const {
 
+  if (native_owner_ != nullptr) return native_owner_->GetAcGroup(group_index, out);
   if (out == nullptr) {
     return Status::InvalidArgument("VarDCT AC-group output is null");
   }
@@ -186,6 +426,7 @@ Status vardct_frame_internal::VarDctFrameView::GetAcGroup(
 }
 
 bool vardct_frame_internal::VarDctFrameView::valid() const {
+  if (native_owner_ != nullptr) return native_owner_->valid();
   const auto population = coefficient_order_population();
   if (population.counts.empty() ? population.present_mask != 0
       : population.counts.size() != kOrderPopulationCount ||
@@ -325,13 +566,22 @@ bool vardct_frame_internal::VarDctFrameView::valid() const {
   return strategy_status.ok();
 }
 
+Status vardct_frame_internal::VarDctFrameView::GetNativeAcGroup(
+    size_t index, VarDctNativeAcGroupView* out) const {
+  if (out == nullptr) return Status::InvalidArgument("VarDCT AC-group output is null");
+  if (native_owner_ != nullptr) return native_owner_->GetNativeAcGroup(index, out);
+  VarDctAcGroupView group;
+  Status status = GetAcGroup(index, &group);
+  if (status.ok()) *out = group;
+  return status;
+}
+
 namespace vardct_frame_internal {
 namespace {
 
-bool CopyQuantizedCoefficients(
-  std::span<const int32_t> source,
-  bool reject_unwritten,
-  int32_t* destination) {
+template <typename T>
+bool CopyQuantizedCoefficients(std::span<const T> source, bool reject_unwritten,
+                               T *destination) {
 
   if (!reject_unwritten) {
     std::copy(source.begin(), source.end(), destination);
@@ -347,18 +597,18 @@ bool CopyQuantizedCoefficients(
   return found_unwritten == 0;
 }
 
-Status ValidateAssemblyInput(
-  const QuantizedFrameAssemblyInput& input,
-  size_t* block_count,
-  Extent2D* group_extent,
-  size_t* group_count) {
+template <typename T>
+Status ValidateAssemblyInput(const QuantizedFrameAssemblyInputT<T> &input,
+                             size_t *block_count, Extent2D *group_extent,
+                             size_t *group_count) {
 
   if (block_count == nullptr || group_extent == nullptr ||
       group_count == nullptr || input.strategies == nullptr ||
       !input.strategies->complete() || !input.raw_quant_field.valid() ||
       input.quantizer == nullptr || !input.quantizer->valid() ||
       !input.y_to_x.valid() || !input.y_to_b.valid() ||
-      !input.epf_sharpness.valid() || input.quantized_ac.empty() ||
+      !input.epf_sharpness.valid() ||
+      (input.sparse_ac_storage == nullptr && input.quantized_ac.empty()) ||
       !input.quantized_dc.valid() || !input.profile.valid() ||
       !ValidGeometry(input.geometry)) {
     return Status::InvalidArgument(
@@ -395,6 +645,23 @@ Status ValidateAssemblyInput(
       "Quantized VarDCT frame assembly group grid is too large");
   }
 
+  if (input.sparse_ac_storage != nullptr &&
+      (input.ac_group_storage != nullptr || !input.quantized_ac.empty() ||
+       !input.sparse_ac_storage->ValidShape() ||
+       *block_count > std::numeric_limits<size_t>::max() / (3 * kJxlBlockArea) ||
+       input.sparse_ac_storage->coefficient_count != *block_count * 3 * kJxlBlockArea)) {
+    return Status::InvalidArgument("Sparse VarDCT assembly storage is inconsistent");
+  }
+
+  if (input.ac_group_storage != nullptr &&
+      (input.ac_group_storage->size() !=
+         *group_count * 3 * kVarDctAcGroupCoefficientCapacity ||
+       input.quantized_ac.data() != input.ac_group_storage->data() ||
+       input.quantized_ac.size() != input.ac_group_storage->size())) {
+    return Status::InvalidArgument(
+      "Quantized VarDCT owned AC storage does not match its view");
+  }
+
   size_t anchor_count = 0;
   Status status = input.strategies->ForEachAnchor(
     [&](size_t, size_t, AcStrategyType) {
@@ -410,9 +677,9 @@ Status ValidateAssemblyInput(
 
 }  // namespace
 
-Status AssembleVarDctEncoderFrame(
-  QuantizedFrameAssemblyInput input,
-  VarDctEncoderFrame* out) {
+template <typename T>
+Status AssembleVarDctEncoderFrameImpl(QuantizedFrameAssemblyInputT<T> input,
+                                      VarDctEncoderFrame *out) {
 
   if (out == nullptr) {
     return Status::InvalidArgument(
@@ -433,6 +700,15 @@ Status AssembleVarDctEncoderFrame(
     const resource_budget_internal::ResourceClassScope resource_class(
       resource_budget_internal::ResourceClass::kCompletedFrame);
     VarDctEncoderFrame result;
+    OverwriteArray<T> *storage = nullptr;
+    if constexpr (std::is_same_v<T, int32_t>) {
+      storage = &result.ac_coefficients_;
+    } else {
+      if constexpr (std::is_same_v<T, int8_t>)
+        storage = &result.ac_coefficients_i8_;
+      else
+        storage = &result.ac_coefficients_i16_;
+    }
     result.geometry_ = input.geometry;
     result.strategies_ = *input.strategies;
     result.quantizer_ = *input.quantizer;
@@ -446,8 +722,22 @@ Status AssembleVarDctEncoderFrame(
     result.raw_quant_field_.resize(block_count);
     result.epf_sharpness_.resize(block_count);
     result.group_used_coefficient_count_.assign(group_count, 0);
-    result.ac_coefficients_.assign(
-      group_count * 3 * kVarDctAcGroupCoefficientCapacity, 0);
+    if (input.sparse_ac_storage != nullptr) {
+      result.sparse_group_offsets_.resize(group_count);
+      size_t packed = 0;
+      for (size_t group = 0; group < group_count; ++group) {
+        size_t x = 0, y = 0;
+        const auto extent = GroupBlockExtent(input.geometry.block_grid().blocks,
+                                             group_extent, group, &x, &y);
+        result.sparse_group_offsets_[group] = packed;
+        packed += 3 * extent.width * extent.height * kJxlBlockArea;
+      }
+      if (packed != input.sparse_ac_storage->coefficient_count) {
+        return Status::InvalidArgument("Sparse VarDCT packed layout is incomplete");
+      }
+    } else if (input.ac_group_storage == nullptr) {
+      storage->assign(group_count * 3 * kVarDctAcGroupCoefficientCapacity, 0);
+    }
     for (size_t channel = 0; channel < 3; ++channel) {
       result.quantized_dc_[channel].resize(block_count);
       result.dc_[channel].resize(block_count);
@@ -468,10 +758,10 @@ Status AssembleVarDctEncoderFrame(
         result.epf_sharpness_[index] = epf_sharpness;
       }
       for (size_t channel = 0; channel < 3; ++channel) {
-        if (!CopyQuantizedCoefficients(
-              {input.quantized_dc.plane[channel].Row(y), blocks.width},
-              input.reject_unwritten_coefficients,
-              result.quantized_dc_[channel].data() + y * blocks.width)) {
+        if (!CopyQuantizedCoefficients<int32_t>(
+                {input.quantized_dc.plane[channel].Row(y), blocks.width},
+                input.reject_unwritten_coefficients,
+                result.quantized_dc_[channel].data() + y * blocks.width)) {
           return Status::InvalidArgument(
             "Quantized VarDCT DC coefficients contain unwritten values");
         }
@@ -502,6 +792,7 @@ Status AssembleVarDctEncoderFrame(
     }
 
     size_t transform_index = 0;
+    std::array<size_t, 7> population_anchors{};
     status = input.strategies->ForEachAnchor(
       [&](size_t block_x, size_t block_y, AcStrategyType strategy) {
         if (transform_index >= input.transforms.size()) {
@@ -519,13 +810,21 @@ Status AssembleVarDctEncoderFrame(
             "Quantized VarDCT transform metadata does not match strategies");
         }
         const size_t coefficient_count = info->coefficient_count();
+        if (input.coefficient_order_population != nullptr) {
+          const size_t family = OrderPopulationFamily(coefficient_count);
+          if (family == population_anchors.size()) {
+            return Status::InvalidArgument("Quantized population family is unsupported");
+          }
+          ++population_anchors[family];
+        }
         if (transform.coefficient_count != coefficient_count) {
           return Status::InvalidArgument(
             "Quantized VarDCT transform coefficient count is invalid");
         }
         for (size_t offset : transform.coefficient_offsets) {
-          if (offset > input.quantized_ac.size() ||
-              coefficient_count > input.quantized_ac.size() - offset) {
+          if (input.sparse_ac_storage == nullptr &&
+              (offset > input.quantized_ac.size() ||
+               coefficient_count > input.quantized_ac.size() - offset)) {
             return Status::InvalidArgument(
               "Quantized VarDCT transform coefficient range is invalid");
           }
@@ -550,13 +849,22 @@ Status AssembleVarDctEncoderFrame(
             "Quantized VarDCT AC group coefficient capacity overflowed");
         }
         for (size_t channel = 0; channel < 3; ++channel) {
+          if (input.ac_group_storage != nullptr || input.sparse_ac_storage != nullptr) {
+            if (transform.coefficient_offsets[channel] !=
+                  result.AcGroupChannelOffset(group_index, channel) + group_offset) {
+              return Status::InvalidArgument(
+                "Quantized VarDCT owned AC transform offset is invalid");
+            }
+            continue;
+          }
           if (!CopyQuantizedCoefficients(
-                input.quantized_ac.subspan(
-                  transform.coefficient_offsets[channel], coefficient_count),
-                input.reject_unwritten_coefficients,
-                result.ac_coefficients_.data() +
-                  result.AcGroupChannelOffset(group_index, channel) +
-                  group_offset)) {
+                  input.quantized_ac.subspan(
+                      transform.coefficient_offsets[channel],
+                      coefficient_count),
+                  input.reject_unwritten_coefficients,
+                  storage->data() +
+                      result.AcGroupChannelOffset(group_index, channel) +
+                      group_offset)) {
             return Status::InvalidArgument(
               "Quantized VarDCT AC coefficients contain unwritten values");
           }
@@ -586,6 +894,96 @@ Status AssembleVarDctEncoderFrame(
           "Quantized data did not completely fill its VarDCT AC groups");
       }
     }
+    if (input.coefficient_order_population != nullptr) {
+      const auto& population = *input.coefficient_order_population;
+      if (block_count > std::numeric_limits<uint32_t>::max()) {
+        return Status::InvalidArgument("Quantized populations require wide counters");
+      }
+      uint16_t present = 0;
+      for (size_t family = 0; family < population_anchors.size(); ++family) {
+        if (population_anchors[family]) present |= uint16_t{1} << family;
+        for (size_t channel = 0; channel < 3; ++channel) {
+          for (size_t i = 0; i < kOrderPopulationSizes[family]; ++i) {
+            if (population.counts[channel * kOrderPopulationStride +
+                kOrderPopulationOffsets[family] + i] > population_anchors[family]) {
+              return Status::InvalidArgument("Quantized population exceeds anchor bound");
+            }
+          }
+        }
+      }
+      if (population.present_mask != present) {
+        return Status::InvalidArgument("Quantized population presence mask differs");
+      }
+      for (size_t channel = 0; channel < 3; ++channel) {
+        for (size_t i = 0; i < 64; ++i) {
+          const uint32_t sampled = population.counts[kOrderPopulationFullCount + channel * 64 + i];
+          if (sampled > population.counts[channel * kOrderPopulationStride + i] ||
+              (present != 1 && sampled != 0)) {
+            return Status::InvalidArgument("Quantized sampled population is invalid");
+          }
+        }
+      }
+      // Allocate before consuming caller storage; every failure remains atomic.
+      // Charge the population payload independently of the small shared-owner
+      // control block. Sharing immutable counts must not lose the backing's
+      // original resource domain when frames are copied or moved.
+      auto* owned_population = resource_budget_internal::
+        ManagedAllocator<CoefficientOrderPopulation>{}.allocate(1);
+      std::construct_at(owned_population, population);
+      result.coefficient_order_population_ =
+        std::shared_ptr<const CoefficientOrderPopulation>(owned_population,
+          [](const CoefficientOrderPopulation* value) noexcept {
+            std::destroy_at(value);
+            resource_budget_internal::ManagedAllocator<CoefficientOrderPopulation>{}
+              .deallocate(const_cast<CoefficientOrderPopulation*>(value), 1);
+          });
+    }
+    if (input.sparse_ac_storage != nullptr) {
+      status = input.sparse_ac_storage->Validate(input.reject_unwritten_coefficients,
+                                                 kUnwrittenQuantizedCoefficient);
+      if (!status.ok()) return status;
+      for (Status reclassified : {
+          input.sparse_ac_storage->masks.ReclassifyResource(
+              resource_budget_internal::ResourceClass::kCompletedFrame),
+          input.sparse_ac_storage->offsets.ReclassifyResource(
+              resource_budget_internal::ResourceClass::kCompletedFrame),
+          input.sparse_ac_storage->values.ReclassifyResource(
+              resource_budget_internal::ResourceClass::kCompletedFrame)}) {
+        if (!reclassified.ok()) return reclassified;
+      }
+      result.sparse_ac_ = std::move(*input.sparse_ac_storage);
+    } else if (input.ac_group_storage != nullptr) {
+      uint32_t invalid = 0;
+      for (size_t group_index = 0; group_index < group_count; ++group_index) {
+        const size_t used = result.group_used_coefficient_count_[group_index];
+        for (size_t channel = 0; channel < 3; ++channel) {
+          const T *coefficients =
+              input.ac_group_storage->data() +
+              result.AcGroupChannelOffset(group_index, channel);
+          if (input.reject_unwritten_coefficients) {
+            for (size_t index = 0; index < used; ++index) {
+              invalid |= static_cast<uint32_t>(
+                coefficients[index] == kUnwrittenQuantizedCoefficient);
+            }
+          }
+          for (size_t index = used; index < kVarDctAcGroupCoefficientCapacity;
+               ++index) {
+            invalid |= static_cast<uint32_t>(coefficients[index] != 0);
+          }
+        }
+      }
+      if (invalid != 0) {
+        return Status::InvalidArgument(
+          "Quantized VarDCT owned AC coefficients or tails are invalid");
+      }
+      status = input.ac_group_storage->ReclassifyResource(
+          resource_budget_internal::ResourceClass::kCompletedFrame);
+      if (!status.ok()) return status;
+      *storage = std::move(*input.ac_group_storage);
+    }
+    // Borrowed dense assembly writes only active ranges into zeroed storage;
+    // owned dense and sparse assembly exhaustively checked their input above.
+    result.ac_validated_ = true;
     *out = std::move(result);
     return Status::Ok();
   } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
@@ -597,6 +995,39 @@ Status AssembleVarDctEncoderFrame(
     return Status::InvalidArgument(
       "Quantized VarDCT frame assembly dimensions are too large");
   }
+}
+
+const CoefficientOrderPopulation* GetCoefficientOrderPopulation(
+  const VarDctEncoderFrame& frame) noexcept {
+  return frame.coefficient_order_population_.get();
+}
+
+Status AssembleVarDctEncoderFrame(QuantizedFrameAssemblyInput input,
+                                  VarDctEncoderFrame *out) {
+  return AssembleVarDctEncoderFrameImpl(input, out);
+}
+Status AssembleVarDctEncoderFrame(QuantizedFrameAssemblyInputT<int8_t> input,
+                                  VarDctEncoderFrame *out) {
+  return AssembleVarDctEncoderFrameImpl(input, out);
+}
+Status AssembleVarDctEncoderFrame(QuantizedFrameAssemblyInputT<int16_t> input,
+                                  VarDctEncoderFrame *out) {
+  return AssembleVarDctEncoderFrameImpl(input, out);
+}
+
+AcStorageInfo GetAcStorageInfo(const VarDctEncoderFrame &frame) noexcept {
+  if (frame.sparse_ac_.index() != 0) {
+    return std::visit([](const auto& storage) -> AcStorageInfo {
+      using Storage = std::decay_t<decltype(storage)>;
+      if constexpr (std::is_same_v<Storage, std::monostate>) return {};
+      else return {sizeof(typename Storage::value_type), storage.bytes(), true};
+    }, frame.sparse_ac_);
+  }
+  if (frame.ac_coefficients_i8_.size() != 0)
+    return {1, frame.ac_coefficients_i8_.size()};
+  if (frame.ac_coefficients_i16_.size() != 0)
+    return {2, frame.ac_coefficients_i16_.size() * sizeof(int16_t)};
+  return {4, frame.ac_coefficients_.size() * sizeof(int32_t)};
 }
 
 }  // namespace vardct_frame_internal
