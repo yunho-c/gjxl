@@ -995,21 +995,20 @@ namespace {
 
 Status FindAcStrategyGridImpl(
   ConstImage3FView opsin,
-  Extent2D resident_opsin_extent,
+  Extent2D prepared_opsin_extent,
   ConstPlaneF32View quant_field,
   ConstPlaneF32View pixel_mask,
   const ColorCorrelationMap& color_correlation,
   AcStrategySearchOptions options,
   const ac_strategy_internal::CandidateCostTableView* candidate_costs,
   AcStrategyGrid* out) {
-
   if (out == nullptr) {
     return Status::InvalidArgument(
       "AC-strategy grid output is null");
   }
   const Extent2D opsin_extent = opsin.valid()
-    ? opsin.extent() : resident_opsin_extent;
-  if ((!opsin.valid() && resident_opsin_extent.empty()) ||
+    ? opsin.extent() : prepared_opsin_extent;
+  if ((!opsin.valid() && prepared_opsin_extent.empty()) ||
       !BlockGrid::IsPaddedPixelExtent(opsin_extent)) {
     return Status::InvalidArgument(
       "AC-strategy search requires a padded opsin image");
@@ -1021,17 +1020,16 @@ Status FindAcStrategyGridImpl(
     return Status::InvalidArgument(
       "AC-strategy search dimensions are too large");
   }
-  if (!quant_field.valid() || quant_field.extent != block_extent ||
-      (!(candidate_costs != nullptr && !resident_opsin_extent.empty() &&
-         pixel_mask.data == nullptr && pixel_mask.extent == Extent2D{} &&
-         pixel_mask.stride == 0) &&
-       (!pixel_mask.valid() || pixel_mask.extent != opsin_extent)) ||
-      !color_correlation.valid()) {
+  if ((candidate_costs == nullptr || prepared_opsin_extent.empty()) &&
+      (!quant_field.valid() || quant_field.extent != block_extent ||
+        !pixel_mask.valid() || pixel_mask.extent != opsin_extent ||
+        !color_correlation.valid())) {
     return Status::InvalidArgument(
       "AC-strategy search fields have invalid geometry");
   }
   const Extent2D expected_tile_extent = ColorTileExtent(opsin_extent);
-  if (color_correlation.tile_extent() != expected_tile_extent ||
+  if (((candidate_costs == nullptr || prepared_opsin_extent.empty()) &&
+       color_correlation.tile_extent() != expected_tile_extent) ||
       !std::isfinite(options.butteraugli_target) ||
       options.butteraugli_target <= 0.0f) {
     return Status::InvalidArgument(
@@ -1071,7 +1069,9 @@ Status FindAcStrategyGridImpl(
           .pixel_mask = pixel_mask,
           .butteraugli_target = options.butteraugli_target,
           .dense_dct32_search = options.dense_dct32_search,
-          .cfl_factors = color_correlation.AcFactors(tile_x, tile_y),
+          .cfl_factors = candidate_costs == nullptr
+            ? color_correlation.AcFactors(tile_x, tile_y)
+            : std::array<float, 3>{},
           .tile_block_x = block_x,
           .tile_block_y = block_y,
           .tile_block_extent = {tile_width, tile_height},
@@ -1105,9 +1105,7 @@ Status FindAcStrategyGrid(
   const ColorCorrelationMap& color_correlation,
   AcStrategySearchOptions options,
   AcStrategyGrid* out) {
-
-  return FindAcStrategyGridImpl(
-    opsin,
+  return FindAcStrategyGridImpl(opsin,
     {},
     quant_field,
     pixel_mask,
@@ -1127,10 +1125,20 @@ Status FindAcStrategyGridFromCandidateCosts(
   AcStrategySearchOptions options,
   const CandidateCostTableView& candidate_costs,
   AcStrategyGrid* out) {
+  return FindAcStrategyGridImpl(opsin, {}, quant_field, pixel_mask,
+    color_correlation, options, &candidate_costs, out);
+}
 
-  return FindAcStrategyGridImpl(
-    opsin,
-    {},
+Status FindAcStrategyGridFromCandidateCosts(
+  Extent2D opsin_extent,
+  ConstPlaneF32View quant_field,
+  ConstPlaneF32View pixel_mask,
+  const ColorCorrelationMap& color_correlation,
+  AcStrategySearchOptions options,
+  const CandidateCostTableView& candidate_costs,
+  AcStrategyGrid* out) {
+  return FindAcStrategyGridImpl({},
+    opsin_extent,
     quant_field,
     pixel_mask,
     color_correlation,

@@ -17,12 +17,22 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
 #include <fcntl.h>
 #include <sys/stat.h>
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <io.h>
+#include <process.h>
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 
 #include "codestream/workflow.h"
 #include "core/ac_strategy.h"
@@ -33,6 +43,90 @@
 namespace {
 
 namespace fs = std::filesystem;
+
+[[nodiscard]] int ProcessId() noexcept {
+#if defined(_WIN32)
+  return _getpid();
+#else
+  return getpid();
+#endif
+}
+
+[[nodiscard]] int OpenExclusive(const fs::path& path) noexcept {
+#if defined(_WIN32)
+  return _wopen(
+    path.c_str(),
+    _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY,
+    _S_IREAD | _S_IWRITE);
+#else
+  return open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR);
+#endif
+}
+
+[[nodiscard]] size_t MaximumDescriptorWrite() noexcept {
+#if defined(_WIN32)
+  return static_cast<size_t>(std::numeric_limits<unsigned int>::max());
+#else
+  return static_cast<size_t>(std::numeric_limits<ssize_t>::max());
+#endif
+}
+
+[[nodiscard]] std::ptrdiff_t WriteDescriptor(
+  int descriptor,
+  const void* data,
+  size_t size) noexcept {
+
+#if defined(_WIN32)
+  return static_cast<std::ptrdiff_t>(
+    _write(descriptor, data, static_cast<unsigned int>(size)));
+#else
+  return static_cast<std::ptrdiff_t>(write(descriptor, data, size));
+#endif
+}
+
+[[nodiscard]] int SynchronizeDescriptor(int descriptor) noexcept {
+#if defined(_WIN32)
+  return _commit(descriptor);
+#else
+  return fsync(descriptor);
+#endif
+}
+
+[[nodiscard]] int CloseDescriptor(int descriptor) noexcept {
+#if defined(_WIN32)
+  return _close(descriptor);
+#else
+  return close(descriptor);
+#endif
+}
+
+[[nodiscard]] bool CommitTemporaryFile(
+  const fs::path& temporary,
+  const fs::path& destination,
+  std::string* error) {
+
+#if defined(_WIN32)
+  if (MoveFileExW(
+        temporary.c_str(), destination.c_str(),
+        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0) {
+    return true;
+  }
+  const std::error_code code(
+    static_cast<int>(GetLastError()), std::system_category());
+  if (error != nullptr) {
+    *error = code.message();
+  }
+  return false;
+#else
+  if (std::rename(temporary.c_str(), destination.c_str()) == 0) {
+    return true;
+  }
+  if (error != nullptr) {
+    *error = std::strerror(errno);
+  }
+  return false;
+#endif
+}
 
 struct Options {
   fs::path input;
@@ -54,7 +148,7 @@ struct Options {
     gjxl::VarDctDensityMode::kDefault;
   gjxl::VarDctCompressionMode compression_mode =
     gjxl::VarDctCompressionMode::kAutomatic;
-  gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
+  gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode =
     gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
   gjxl::VarDctDcPrediction dc_prediction = gjxl::kDefaultDcPrediction;
   gjxl::DcQuantizationMode dc_quantization = gjxl::DcQuantizationMode::kAutomatic;
@@ -75,13 +169,15 @@ struct Options {
     *backend = gjxl::VarDctBackendPreference::kCpu;
   } else if (text == "metal") {
     *backend = gjxl::VarDctBackendPreference::kMetal;
+  } else if (text == "cuda") {
+    *backend = gjxl::VarDctBackendPreference::kCuda;
   } else {
     return false;
   }
   return true;
 }
 
-[[nodiscard]] bool ParseMetalAqMode(
+[[nodiscard]] bool ParseGpuAqMode(
   std::string_view text,
   gjxl::GpuAdaptiveQuantizationMode* mode) {
 
@@ -100,6 +196,34 @@ struct Options {
     return false;
   }
   return true;
+}
+
+[[nodiscard]] std::string_view ExecutionBackendName(
+  gjxl::VarDctExecutionBackend backend) {
+  switch (backend) {
+    case gjxl::VarDctExecutionBackend::kCpu:
+      return "CPU";
+    case gjxl::VarDctExecutionBackend::kMetal:
+      return "Metal";
+    case gjxl::VarDctExecutionBackend::kCuda:
+      return "CUDA";
+  }
+  return "unknown backend";
+}
+
+[[nodiscard]] std::string_view GpuAqModeName(
+  gjxl::GpuAdaptiveQuantizationMode mode) {
+  switch (mode) {
+    case gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients:
+      return "exact-coefficient AQ";
+    case gjxl::GpuAdaptiveQuantizationMode::kFullyResident:
+      return "fully-resident AQ";
+    case gjxl::GpuAdaptiveQuantizationMode::kThroughput:
+      return "throughput AQ";
+    case gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput:
+      return "maximum-throughput AQ";
+  }
+  return "unknown AQ mode";
 }
 
 [[nodiscard]] bool ParseTargetSizeSelection(
@@ -335,9 +459,9 @@ struct Options {
       candidate.compression_mode =
         gjxl::VarDctCompressionMode::kMaximumCompression;
       maximum_compression_set = true;
-    } else if (argument == "--metal-aq") {
+    } else if (argument == "--gpu-aq" || argument == "--metal-aq") {
       if (index + 1 >= argc ||
-          !ParseMetalAqMode(argv[++index], &candidate.metal_aq_mode)) {
+          !ParseGpuAqMode(argv[++index], &candidate.gpu_aq_mode)) {
         return false;
       }
     } else if (argument == "--collect-final-score") {
@@ -358,22 +482,23 @@ struct Options {
       (target_search_option_set &&
        candidate.rate_control_mode ==
          gjxl::VarDctRateControlMode::kButteraugliTarget) ||
-      (candidate.metal_aq_mode ==
+      (candidate.gpu_aq_mode ==
          gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput &&
        candidate.rate_control_mode ==
          gjxl::VarDctRateControlMode::kMaximumError) ||
       (candidate.density_mode == gjxl::VarDctDensityMode::kHighDensity &&
        (candidate.rate_control_mode ==
           gjxl::VarDctRateControlMode::kMaximumError ||
-        candidate.metal_aq_mode ==
+        candidate.gpu_aq_mode ==
           gjxl::GpuAdaptiveQuantizationMode::kThroughput ||
-        candidate.metal_aq_mode ==
+        candidate.gpu_aq_mode ==
           gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput)) ||
-      ((candidate.metal_aq_mode ==
+      ((candidate.gpu_aq_mode ==
           gjxl::GpuAdaptiveQuantizationMode::kThroughput ||
-        candidate.metal_aq_mode ==
+        candidate.gpu_aq_mode ==
           gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput) &&
-       candidate.backend != gjxl::VarDctBackendPreference::kMetal)) {
+       candidate.backend != gjxl::VarDctBackendPreference::kMetal &&
+       candidate.backend != gjxl::VarDctBackendPreference::kCuda)) {
     return false;
   }
   *options = std::move(candidate);
@@ -393,12 +518,9 @@ struct Options {
   int descriptor = -1;
   for (size_t attempt = 0; attempt < 100; ++attempt) {
     temporary = destination;
-    temporary += ".tmp." + std::to_string(getpid()) + "." +
+    temporary += ".tmp." + std::to_string(ProcessId()) + "." +
       std::to_string(attempt);
-    descriptor = open(
-      temporary.c_str(),
-      O_WRONLY | O_CREAT | O_EXCL,
-      S_IRUSR | S_IWUSR);
+    descriptor = OpenExclusive(temporary);
     if (descriptor >= 0) {
       break;
     }
@@ -415,7 +537,7 @@ struct Options {
 
   const auto fail = [&](std::string message) {
     const int saved_errno = errno;
-    close(descriptor);
+    (void)CloseDescriptor(descriptor);
     std::error_code ignored;
     fs::remove(temporary, ignored);
     if (message.empty()) {
@@ -429,8 +551,8 @@ struct Options {
     const size_t remaining = bytes.size() - offset;
     const size_t request = std::min(
       remaining,
-      static_cast<size_t>(std::numeric_limits<ssize_t>::max()));
-    const ssize_t written = write(
+      MaximumDescriptorWrite());
+    const std::ptrdiff_t written = WriteDescriptor(
       descriptor,
       bytes.data() + offset,
       request);
@@ -447,12 +569,12 @@ struct Options {
     }
     offset += static_cast<size_t>(written);
   }
-  if (fsync(descriptor) != 0) {
+  if (SynchronizeDescriptor(descriptor) != 0) {
     return fail(
       "Unable to synchronize temporary output: " +
       std::string(std::strerror(errno)));
   }
-  if (close(descriptor) != 0) {
+  if (CloseDescriptor(descriptor) != 0) {
     descriptor = -1;
     std::error_code ignored;
     fs::remove(temporary, ignored);
@@ -462,12 +584,12 @@ struct Options {
   }
   descriptor = -1;
 
-  if (std::rename(temporary.c_str(), destination.c_str()) != 0) {
-    const std::string message = std::strerror(errno);
+  std::string commit_error;
+  if (!CommitTemporaryFile(temporary, destination, &commit_error)) {
     std::error_code ignored;
     fs::remove(temporary, ignored);
     return gjxl::Status::Internal(
-      "Unable to commit output atomically: " + message);
+      "Unable to commit output atomically: " + commit_error);
   }
   return gjxl::Status::Ok();
 }
@@ -483,8 +605,8 @@ void PrintUsage(const char* executable) {
                "[--dc-quantization auto|round|prediction-aware] [--adaptive-dc-smoothing|--no-adaptive-dc-smoothing] "
                "[--high-density] "
                "[--maximum-compression] "
-               "[--backend auto|cpu|metal] "
-               "[--metal-aq exact-coefficients|fully-resident|throughput|"
+               "[--backend auto|cpu|metal|cuda] "
+               "[--gpu-aq exact-coefficients|fully-resident|throughput|"
                "maximum-throughput] "
                "[--collect-final-score] "
                "INPUT.pfm OUTPUT.jxl\n";
@@ -523,7 +645,7 @@ int main(int argc, char** argv) {
        .target_size_maximum_attempts = options.target_size_maximum_attempts,
        .target_size_selection = options.target_size_selection,
        .backend = options.backend,
-       .metal_aq_mode = options.metal_aq_mode,
+       .gpu_aq_mode = options.gpu_aq_mode,
        .collect_final_butteraugli_score =
            options.collect_final_butteraugli_score,
        .dc_prediction = options.dc_prediction,
@@ -581,21 +703,11 @@ int main(int argc, char** argv) {
                 << " evaluations)";
       break;
   }
-  std::cout << " using "
-            << (summary.execution_backend ==
-                    gjxl::VarDctExecutionBackend::kMetal
-                  ? (summary.metal_aq_mode ==
-                           gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients
-                       ? "Metal exact-coefficient AQ"
-                       : (summary.metal_aq_mode ==
-                                gjxl::GpuAdaptiveQuantizationMode::kThroughput
-                            ? "Metal throughput AQ"
-                            : (summary.metal_aq_mode ==
-                                     gjxl::GpuAdaptiveQuantizationMode::
-                                       kMaximumThroughput
-                                 ? "Metal maximum-throughput AQ"
-                                 : "Metal fully-resident AQ")))
-                  : "CPU")
+  std::cout << " using " << ExecutionBackendName(summary.execution_backend);
+  if (summary.execution_backend != gjxl::VarDctExecutionBackend::kCpu) {
+    std::cout << ' ' << GpuAqModeName(summary.gpu_aq_mode);
+  }
+  std::cout
             << (summary.density_mode ==
                       gjxl::VarDctDensityMode::kHighDensity
                   ? " with high-density AQ"

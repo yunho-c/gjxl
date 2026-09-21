@@ -22,6 +22,10 @@
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/primitives.h"
 
+namespace gjxl::aq_evaluation_internal {
+struct ResidentEncodingPolicySetup;
+}
+
 namespace gjxl::gpu_profile_internal {
 
 template <typename T>
@@ -291,6 +295,22 @@ public:
     ConstPlaneF32View input,
     PlaneF32View output,
     GpuProfilingMode mode,
+    GpuExecutionProfile* profile) = 0;
+};
+
+/// Optional diagnostics for the encoding-only resident frontend. These methods
+/// preserve device-owned initial fields and policy setup without requiring
+/// their diagnostic host materialization.
+class PreparedAqEncodingProfiler {
+public:
+  virtual ~PreparedAqEncodingProfiler() = default;
+  [[nodiscard]] virtual Status ComputeInitialQuantizationForEncodingProfiled(
+    InitialQuantizationOptions options, GpuProfilingMode mode,
+    GpuExecutionProfile* profile) = 0;
+  [[nodiscard]] virtual Status PrepareResidentEncodingPolicyProfiled(
+    float butteraugli_target,
+    aq_evaluation_internal::ResidentEncodingPolicySetup* setup,
+    uint32_t nonlinear_iterations, GpuProfilingMode mode,
     GpuExecutionProfile* profile) = 0;
 };
 

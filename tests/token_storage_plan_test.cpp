@@ -48,7 +48,7 @@ bool Empty(const ResourceBudget &budget) {
 
 bool CheckVectorBounds() {
   for (size_t n :
-       {size_t{0}, 1ul, 2ul, 3ul, 7ul, 31ul, 32ul, 33ul, 255ul, 1025ul}) {
+       {size_t{0}, size_t{1}, size_t{2}, size_t{3}, size_t{7}, size_t{31}, size_t{32}, size_t{33}, size_t{255}, size_t{1025}}) {
     for (auto policy : {kFreshExact, kReusedExact, kGrowing}) {
       HostStorageBound bound;
       if (!Check(bound.AddVector<uint32_t>(n, policy),
@@ -142,7 +142,7 @@ bool CheckPurePlans() {
                      "AC reservation differs from frozen recipe"))
             return false;
         }
-        for (size_t contexts : {495ul, 1980ul, 7425ul, 65534ul}) {
+        for (size_t contexts : {size_t{495}, size_t{1980}, size_t{7425}, size_t{65534}}) {
           for (bool fixed : {false, true}) {
             AcGroupTokenStoragePlan plan;
             if (!Ok(ComputeAcGroupTokenStoragePlan({w, h}, b, contexts, fixed,
@@ -220,15 +220,15 @@ bool CheckPurePlans() {
 }
 
 bool CheckGroupClassSum() {
-  for (size_t h : {1ul, 7ul, 31ul, 32ul, 33ul, 65ul, 255ul, 256ul, 257ul}) {
-    for (size_t w : {1ul, 9ul, 32ul, 33ul, 63ul, 64ul, 257ul, 513ul}) {
+  for (size_t h : {size_t{1}, size_t{7}, size_t{31}, size_t{32}, size_t{33}, size_t{65}, size_t{255}, size_t{256}, size_t{257}}) {
+    for (size_t w : {size_t{1}, size_t{9}, size_t{32}, size_t{33}, size_t{63}, size_t{64}, size_t{257}, size_t{513}}) {
       for (bool exhaustive : {false, true}) {
         TokenizationStorageOptions options{
             .exhaustive = exhaustive,
             .collect_fixed_populations = !exhaustive,
             .context_count = 7425,
-            .order_count = exhaustive ? 2ul : 1ul,
-            .map_count = exhaustive ? 6ul : 1ul,
+            .order_count = exhaustive ? size_t{2} : size_t{1},
+            .map_count = exhaustive ? size_t{6} : size_t{1},
             .workers = 8};
         TokenizationStoragePlan plan;
         if (!Ok(ComputeTokenizationStoragePlan({w, h}, options, &plan)))
@@ -237,7 +237,7 @@ bool CheckGroupClassSum() {
         size_t ac_groups = 0;
         for (size_t y = 0; y < h; y += 32) {
           for (size_t x = 0; x < w; x += 32) {
-            Extent2D extent{std::min(32ul, w - x), std::min(32ul, h - y)};
+            Extent2D extent{std::min(size_t{32}, w - x), std::min(size_t{32}, h - y)};
             AcGroupTokenStoragePlan group;
             if (!Ok(ComputeAcGroupTokenStoragePlan(extent,
                                                    extent.width * extent.height,
@@ -253,14 +253,14 @@ bool CheckGroupClassSum() {
           }
         }
         AcGroupTokenStoragePlan largest;
-        const Extent2D extent{std::min(32ul, w), std::min(32ul, h)};
+        const Extent2D extent{std::min(size_t{32}, w), std::min(size_t{32}, h)};
         if (!Ok(ComputeAcGroupTokenStoragePlan(extent,
                                                extent.width * extent.height,
                                                7425, !exhaustive, &largest)))
           return false;
         if (exhaustive) {
           if (!expected.Add(largest.template_scratch,
-                            std::min(8ul, 2 * ac_groups)) ||
+                            std::min(size_t{8}, 2 * ac_groups)) ||
               !expected.AddVector<SimpleAcGroupTokenTemplate>(ac_groups,
                                                               kFreshExact, 2) ||
               !expected.AddVector<Storage<uint16_t>>(ac_groups, kFreshExact,
@@ -270,7 +270,7 @@ bool CheckGroupClassSum() {
           HostStorageBound natural;
           if (!Ok(ComputeAcNaturalOrderStorageBound(&natural)) ||
               !expected.Add(natural) ||
-              !expected.Add(largest.direct_scratch, std::min(8ul, ac_groups)) ||
+              !expected.Add(largest.direct_scratch, std::min(size_t{8}, ac_groups)) ||
               !expected.AddVector<SimpleAcGroupTokenData>(ac_groups,
                                                           kFreshExact) ||
               !expected.AddVector<PreparedFixedAnsCluster>(7425, kFreshExact))
@@ -286,15 +286,15 @@ bool CheckGroupClassSum() {
             sizeof(EntropyToken) *
                 (6 * w * h + 2 * ((w + 7) / 8) * ((h + 7) / 8)) +
             dc_groups * sizeof(SimpleDcGroupTokenStreams) +
-            std::min(w, 256ul) * std::min(h, 256ul) * (sizeof(DcAnchor) + 1);
-        const size_t largest_dc_blocks = std::min(w, 256ul) * std::min(h, 256ul);
-        const size_t largest_dc_tiles = ((std::min(w, 256ul) + 7) / 8) *
-                                       ((std::min(h, 256ul) + 7) / 8);
+            std::min(w, size_t{256}) * std::min(h, size_t{256}) * (sizeof(DcAnchor) + 1);
+        const size_t largest_dc_blocks = std::min(w, size_t{256}) * std::min(h, size_t{256});
+        const size_t largest_dc_tiles = ((std::min(w, size_t{256}) + 7) / 8) *
+                                       ((std::min(h, size_t{256}) + 7) / 8);
         if (!Check(plan.ac_group_count == ac_groups && plan.ac == expected &&
                        plan.dc_group_count == dc_groups &&
                        plan.maximum_ac_tokens == 195 * w * h &&
                        plan.maximum_dc_tokens == 6 * w * h + 2 * ((w + 7) / 8) * ((h + 7) / 8) &&
-                       plan.maximum_ac_group_tokens == 195 * std::min(w, 32ul) * std::min(h, 32ul) &&
+                       plan.maximum_ac_group_tokens == 195 * std::min(w, size_t{32}) * std::min(h, size_t{32}) &&
                        plan.maximum_dc_group_stream_tokens == 3 * largest_dc_blocks + 2 * largest_dc_tiles &&
                        plan.dc.retained_bytes == dc_expected &&
                        plan.dc.peak_bytes == dc_expected,
@@ -340,7 +340,7 @@ bool CheckGroupClassSum() {
       return false;
   }
   // A large valid request is planned without allocating its image or tokens.
-  return Ok(ComputeTokenizationStoragePlan({1ul << 24, 1}, options, &plan));
+  return Ok(ComputeTokenizationStoragePlan({size_t{1} << 24, 1}, options, &plan));
 }
 
 
@@ -385,8 +385,8 @@ bool CheckRealTokenizers(const FrameFixture &fixture, bool exhaustive,
   TokenizationStorageOptions options{.exhaustive = exhaustive,
                                      .collect_fixed_populations = fixed,
                                      .context_count = map.ac_context_count(),
-                                     .order_count = exhaustive ? 2ul : 1ul,
-                                     .map_count = exhaustive ? 6ul : 1ul,
+                                     .order_count = exhaustive ? size_t{2} : size_t{1},
+                                     .map_count = exhaustive ? size_t{6} : size_t{1},
                                      .workers = workers};
   TokenizationStoragePlan plan;
   if (!Ok(ComputeTokenizationStoragePlan(fixture.blocks, options, &plan)))
@@ -639,7 +639,7 @@ int main() {
       if (!fixture.Create(family == 7 ? Extent2D{65, 33} : Extent2D{9, 7},
                           family, pattern))
         return EXIT_FAILURE;
-      for (size_t workers : {1ul, 8ul}) {
+      for (size_t workers : {size_t{1}, size_t{8}}) {
         if (!CheckRealTokenizers(fixture, false, false, workers) ||
             !CheckRealTokenizers(fixture, false, true, workers) ||
             !CheckRealTokenizers(fixture, true, false, workers))

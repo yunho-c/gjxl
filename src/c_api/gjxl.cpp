@@ -169,6 +169,9 @@ GJXLResult ParseBackend(GJXLBackend backend,
     case GJXL_BACKEND_METAL:
       *preference = gjxl::VarDctBackendPreference::kMetal;
       return GJXL_OK;
+    case GJXL_BACKEND_CUDA:
+      *preference = gjxl::VarDctBackendPreference::kCuda;
+      return GJXL_OK;
     default:
       return Fail(GJXL_ERROR_INVALID_ARGUMENT,
                   "Context backend is not recognized");
@@ -408,6 +411,13 @@ GJXLResult gjxl_context_create(
         return result;
       }
     }
+    if (backend == gjxl::VarDctBackendPreference::kCuda) {
+      const GJXLResult result = TranslateStatus(
+        gjxl::codestream_internal::EnsureProductionCudaBackendAvailable());
+      if (result != GJXL_OK) {
+        return result;
+      }
+    }
 
     auto candidate = std::make_unique<GJXLContext>();
     candidate->backend = backend;
@@ -561,7 +571,8 @@ GJXLResult gjxl_encode(
       gjxl::resource_budget_internal::ResourceClass::kInput);
     gjxl::Image3FBuffer linear_rgb;
     gjxl::codestream_internal::CodestreamBuffer codestream;
-    if (context->backend == gjxl::VarDctBackendPreference::kMetal) {
+    if (context->backend == gjxl::VarDctBackendPreference::kMetal ||
+        context->backend == gjxl::VarDctBackendPreference::kCuda) {
       gjxl::codestream_internal::ResidentEncodingInput resident_input;
       result = TranslateStatus(gjxl::codestream_internal::PrepareResidentEncodingInput(
         {image->width, image->height}, encoding_options,
@@ -632,11 +643,13 @@ const char* gjxl_get_last_error(void) noexcept {
 
 float gjxl_distance_from_quality(float quality) noexcept {
   ClearLastError();
-  return quality >= 100.0 ? 0.0
+  // Preserve main's double intermediates and make the public float conversion
+  // explicit for MSVC /W4 /WX. Float intermediates change canonical distances.
+  return static_cast<float>(quality >= 100.0 ? 0.0
        : quality >= 30.0
          ? 0.1 + (100.0 - quality) * 0.09
          : 53.0 / 3000.0 * quality * quality -
-           23.0 / 20.0 * quality + 25.0;
+           23.0 / 20.0 * quality + 25.0);
 }
 
 }  // extern "C"

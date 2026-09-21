@@ -341,7 +341,7 @@ bool PurePlans() {
                  "Frontend representation counts differ"))
         return false;
       size_t previous = 0;
-      for (size_t workers : {1ul, 2ul, 8ul, SIZE_MAX, 0ul}) {
+      for (size_t workers : {size_t{1}, size_t{2}, size_t{8}, SIZE_MAX, size_t{0}}) {
         PreparedForwardStoragePlan plan;
         if (!Ok(ComputePreparedForwardStoragePlan(geometry.padded_frame(),
                                                   workers, &plan)) ||

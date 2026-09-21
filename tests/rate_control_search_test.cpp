@@ -425,7 +425,7 @@ bool CheckResidentDiagnosticScoresDoNotBreakTies() {
         ? 100.0
         : 0.0);
     summary->execution_backend = gjxl::VarDctExecutionBackend::kMetal;
-    summary->metal_aq_mode =
+    summary->gpu_aq_mode =
       gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
     return gjxl::Status::Ok();
   };

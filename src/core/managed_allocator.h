@@ -152,6 +152,16 @@ public:
     reinterpret_cast<Header*>(backing)->allocation.Reset();
   }
 
+  /// Transfer a backing's ownership category without changing its domain.
+  /// Untracked caller storage remains untracked. Use only at an exclusive,
+  /// validated ownership handoff, with the allocation's original base pointer.
+  [[nodiscard]] static Status ReclassifyBacking(T* pointer, ResourceClass owner) {
+    if (pointer == nullptr) return Status::Ok();
+    auto* backing = reinterpret_cast<std::byte*>(pointer) - sizeof(Header);
+    auto& allocation = reinterpret_cast<Header*>(backing)->allocation;
+    return allocation.valid() ? allocation.Reclassify(owner) : Status::Ok();
+  }
+
   template <typename U>
   [[nodiscard]] bool operator==(const ManagedAllocator<U, Owner>&) const noexcept {
     return true;

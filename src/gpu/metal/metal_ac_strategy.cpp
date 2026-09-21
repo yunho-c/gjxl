@@ -402,7 +402,7 @@ Status MetalBackend::ValidateAcStrategySelection(
   };
   AcStrategyEncodeContext::Selection result;
   Status status = RequireMetalBuffer(selection.output,
-    selection.offset_bytes + block_count + tile_count,
+    block_count + tile_count, selection.offset_bytes,
     "AC selection output", &result.output);
   if (!status.ok()) return status;
   for (size_t i = 0; i < batches.size(); ++i) {
@@ -422,17 +422,20 @@ Status MetalBackend::ValidateAcStrategySelection(
       batch.matrices, batch.candidates, batch.costs, batch.scratch_a, batch.scratch_b,
       batch.resident_opsin.plane[0].buffer, batch.resident_opsin.plane[1].buffer,
       batch.resident_opsin.plane[2].buffer, batch.resident_pixel_mask.buffer,
-      batch.resident_quant_field.buffer};
+      batch.resident_quant_field.buffer, batch.resident_y_to_x.buffer,
+      batch.resident_y_to_b.buffer};
     for (const auto* buffer : forbidden) {
       if (buffer != nullptr && selection.output == buffer)
         return Status::InvalidArgument("AC selection output aliases an input or cost buffer");
     }
     if (count != 0) {
       status = RequireMetalBuffer(batch.costs, count * sizeof(float),
-        "AC selection costs", &result.costs[i]);
+        batch.costs_offset_bytes, "AC selection costs", &result.costs[i]);
       if (!status.ok()) return status;
+      result.cost_offsets[i] = batch.costs_offset_bytes;
     } else {
       result.costs[i] = result.costs[0];  // Never indexed by an empty family.
+      result.cost_offsets[i] = result.cost_offsets[0];
     }
   }
   const float target = batches[0].butteraugli_target;
@@ -475,6 +478,7 @@ bool MetalBackend::TryMultiply(
 Status MetalBackend::RequireMetalBuffer(
   const DeviceBuffer* buffer,
   size_t required_bytes,
+  size_t offset_bytes,
   std::string_view role,
   const MetalBuffer** out) const {
 
@@ -482,7 +486,8 @@ Status MetalBackend::RequireMetalBuffer(
     return Status::InvalidArgument(
       std::string(role) + " buffer is null");
   }
-  if (buffer->size_bytes() < required_bytes) {
+  if (offset_bytes > buffer->size_bytes() ||
+      required_bytes > buffer->size_bytes() - offset_bytes) {
     return Status::InvalidArgument(
       std::string(role) + " buffer is too small");
   }
@@ -499,6 +504,7 @@ Status MetalBackend::RequireMetalBuffer(
 Status MetalBackend::RequireMetalBuffer(
   DeviceBuffer* buffer,
   size_t required_bytes,
+  size_t offset_bytes,
   std::string_view role,
   MetalBuffer** out) const {
 
@@ -506,6 +512,7 @@ Status MetalBackend::RequireMetalBuffer(
   Status status = RequireMetalBuffer(
     static_cast<const DeviceBuffer*>(buffer),
     required_bytes,
+    offset_bytes,
     role,
     &validated);
   if (!status.ok()) {
@@ -612,9 +619,17 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
           "AC-strategy batch input strides are invalid");
     }
     for (size_t channel = 0; channel < 3; ++channel) {
+      size_t channel_offset = 0;
+      if (!TryMultiply(channel, batch.opsin_plane_stride, &channel_offset) ||
+          !TryMultiply(channel_offset, sizeof(float), &channel_offset) ||
+          batch.opsin_offset_bytes >
+            std::numeric_limits<size_t>::max() - channel_offset) {
+        return Status::InvalidArgument(
+          "AC-strategy packed opsin offset overflows");
+      }
       opsin_views[channel] = {
           batch.opsin,
-          channel * batch.opsin_plane_stride * sizeof(float),
+          batch.opsin_offset_bytes + channel_offset,
           DeviceElementType::kF32,
           batch.pixel_extent,
           batch.opsin_row_stride,
@@ -622,7 +637,7 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
     }
     mask_view = {
         batch.pixel_mask,
-        0,
+        batch.pixel_mask_offset_bytes,
         DeviceElementType::kF32,
         batch.pixel_extent,
         batch.pixel_mask_row_stride,
@@ -709,37 +724,24 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
     batch.strategy, batch.candidate_count, &scratch);
   if (!scratch_status.ok()) return scratch_status;
 
-  const std::array<const DeviceBuffer*, 7> inputs = {
-    opsin_views[0].buffer,
-    opsin_views[1].buffer,
-    opsin_views[2].buffer,
-    mask_view.buffer,
-    quant_view.buffer,
-    batch.matrices,
-    batch.candidates,
+  const std::array<size_t, 6> buffer_offsets = {
+    batch.matrices_offset_bytes,
+    batch.candidates_offset_bytes,
+    batch.scratch_a_offset_bytes,
+    batch.scratch_b_offset_bytes,
+    batch.rate_scratch_offset_bytes,
+    batch.costs_offset_bytes,
   };
-  const std::array<DeviceBuffer*, 4> outputs = {
-    batch.scratch_a,
-    scratch.scratch_b_bytes == 0 ? nullptr : batch.scratch_b,
-    batch.rate_scratch,
-    batch.costs,
-  };
-  for (size_t index = 0; index < outputs.size(); ++index) {
-    if (index == 1 && scratch.scratch_b_bytes == 0) continue;
-    if (outputs[index] == nullptr) {
-      return Status::InvalidArgument(
-        "AC-strategy batch output buffer is null");
-    }
-    for (size_t other = index + 1; other < outputs.size(); ++other) {
-      if (outputs[index] == outputs[other]) {
-        return Status::InvalidArgument(
-          "AC-strategy batch output buffers must not alias");
-      }
-    }
-    if (std::ranges::find(inputs, outputs[index]) != inputs.end()) {
-      return Status::InvalidArgument(
-        "AC-strategy batch input and output buffers must not alias");
-    }
+  if (std::ranges::any_of(buffer_offsets,
+        [](size_t offset) { return offset % alignof(float) != 0; })) {
+    return Status::InvalidArgument(
+      "AC-strategy batch buffer offset alignment is invalid");
+  }
+  if (!use_resident &&
+      (batch.opsin_offset_bytes % alignof(float) != 0 ||
+       batch.pixel_mask_offset_bytes % alignof(float) != 0)) {
+    return Status::InvalidArgument(
+      "AC-strategy packed input offset alignment is invalid");
   }
 
   ValidatedAcStrategyBatch validated;
@@ -757,8 +759,8 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
   if (!status.ok()) return status;
   validated.pixel_mask = resolved_mask.buffer;
   validated.pixel_mask_offset_bytes = resolved_mask.view.offset_bytes;
+  ResolvedConstPlane resolved_quant;
   if (use_device_quant_norm) {
-    ResolvedConstPlane resolved_quant;
     status = ResolvePlane(quant_view, &resolved_quant);
     if (!status.ok()) return status;
     validated.quant_field = resolved_quant.buffer;
@@ -767,6 +769,7 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
   status = RequireMetalBuffer(
     batch.matrices,
     matrix_bytes,
+    batch.matrices_offset_bytes,
     "Quantization matrix",
     &validated.matrices);
   if (!status.ok()) {
@@ -775,6 +778,7 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
   status = RequireMetalBuffer(
     batch.candidates,
     candidate_bytes,
+    batch.candidates_offset_bytes,
     "Candidate",
     &validated.candidates);
   if (!status.ok()) {
@@ -782,29 +786,74 @@ Status MetalBackend::ValidateAcStrategyCandidateBatch(
   }
   if (!use_device_quant_norm) {
     validated.quant_field = validated.candidates;
+    validated.quant_field_offset_bytes = batch.candidates_offset_bytes;
   }
   status = RequireMetalBuffer(
-    batch.scratch_a, scratch.scratch_a_bytes, "Scratch A", &validated.scratch_a);
+    batch.scratch_a, scratch.scratch_a_bytes, batch.scratch_a_offset_bytes, "Scratch A", &validated.scratch_a);
   if (!status.ok()) {
     return status;
   }
   if (scratch.scratch_b_bytes != 0) {
     status = RequireMetalBuffer(
-      batch.scratch_b, scratch.scratch_b_bytes, "Scratch B", &validated.scratch_b);
+      batch.scratch_b, scratch.scratch_b_bytes, batch.scratch_b_offset_bytes, "Scratch B", &validated.scratch_b);
     if (!status.ok()) return status;
   }
   status = RequireMetalBuffer(
     batch.rate_scratch,
     rate_bytes,
+    batch.rate_scratch_offset_bytes,
     "Rate scratch",
     &validated.rate_scratch);
   if (!status.ok()) {
     return status;
   }
   status = RequireMetalBuffer(
-    batch.costs, cost_bytes, "Cost", &validated.costs);
+    batch.costs, cost_bytes, batch.costs_offset_bytes,
+    "Cost", &validated.costs);
   if (!status.ok()) {
     return status;
+  }
+  validated.matrices_offset_bytes = batch.matrices_offset_bytes;
+  validated.candidates_offset_bytes = batch.candidates_offset_bytes;
+  validated.scratch_a_offset_bytes = batch.scratch_a_offset_bytes;
+  validated.scratch_b_offset_bytes = batch.scratch_b_offset_bytes;
+  validated.rate_scratch_offset_bytes = batch.rate_scratch_offset_bytes;
+  validated.costs_offset_bytes = batch.costs_offset_bytes;
+
+  const std::array<DeviceMemoryRange, 7> input_ranges = {
+    resolved_opsin[0].range,
+    resolved_opsin[1].range,
+    resolved_opsin[2].range,
+    resolved_mask.range,
+    use_device_quant_norm ? resolved_quant.range : DeviceMemoryRange{},
+    DeviceMemoryRange{batch.matrices, batch.matrices_offset_bytes,
+                      matrix_bytes},
+    DeviceMemoryRange{batch.candidates, batch.candidates_offset_bytes,
+                      candidate_bytes},
+  };
+  const std::array<DeviceMemoryRange, 4> output_ranges = {
+    DeviceMemoryRange{batch.scratch_a, batch.scratch_a_offset_bytes,
+                      scratch.scratch_a_bytes},
+    DeviceMemoryRange{batch.scratch_b, batch.scratch_b_offset_bytes,
+                      scratch.scratch_b_bytes},
+    DeviceMemoryRange{batch.rate_scratch, batch.rate_scratch_offset_bytes,
+                      rate_bytes},
+    DeviceMemoryRange{batch.costs, batch.costs_offset_bytes, cost_bytes},
+  };
+  for (size_t index = 0; index < output_ranges.size(); ++index) {
+    for (size_t other = index + 1; other < output_ranges.size(); ++other) {
+      if (DeviceRangesOverlap(output_ranges[index], output_ranges[other])) {
+        return Status::InvalidArgument(
+          "AC-strategy batch output buffers must not alias");
+      }
+    }
+    for (DeviceMemoryRange input : input_ranges) {
+      if (input.buffer != nullptr &&
+          DeviceRangesOverlap(output_ranges[index], input)) {
+        return Status::InvalidArgument(
+          "AC-strategy batch input and output buffers must not alias");
+      }
+    }
   }
 
   const AcStrategyPipelines::FusedStages& fused =
@@ -883,7 +932,7 @@ void MetalBackend::EncodeAcStrategySubmission(
     const auto& selection = *ac.selection;
     encoder->setComputePipelineState(backend.ac_strategy_pipelines_.select_greedy.get());
     for (size_t i = 0; i < selection.costs.size(); ++i)
-      encoder->setBuffer(selection.costs[i]->handle(), 0, i);
+      encoder->setBuffer(selection.costs[i]->handle(), selection.cost_offsets[i], i);
     encoder->setBuffer(selection.output->handle(), selection.offset_bytes, 7);
     encoder->setBytes(&selection.params, sizeof(selection.params), 8);
     DispatchMetalThreads(encoder,
@@ -915,15 +964,15 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
       encoder->setBuffer(validated.opsin[channel]->handle(),
                         validated.opsin_offset_bytes[channel], channel);
     }
-    encoder->setBuffer(validated.candidates->handle(), 0, 3);
+    encoder->setBuffer(validated.candidates->handle(), validated.candidates_offset_bytes, 3);
     encoder->setBuffer(validated.quant_field->handle(),
                       validated.quant_field_offset_bytes, 4);
-    encoder->setBuffer(validated.matrices->handle(), 0, 5);
+    encoder->setBuffer(validated.matrices->handle(), validated.matrices_offset_bytes, 5);
     encoder->setBuffer(validated.pixel_mask->handle(),
                       validated.pixel_mask_offset_bytes, 6);
-    encoder->setBuffer(validated.costs->handle(), 0, 7);
-    encoder->setBuffer(validated.scratch_a->handle(), 0, 8);
-    encoder->setBuffer(validated.rate_scratch->handle(), 0, 9);
+    encoder->setBuffer(validated.costs->handle(), validated.costs_offset_bytes, 7);
+    encoder->setBuffer(validated.scratch_a->handle(), validated.scratch_a_offset_bytes, 8);
+    encoder->setBuffer(validated.rate_scratch->handle(), validated.rate_scratch_offset_bytes, 9);
     encoder->setBytes(&validated.params, sizeof(validated.params), 10);
     DispatchMetalThreadgroups(encoder,
       MTL::Size(validated.params.candidate_count, 1, 1),
@@ -934,11 +983,11 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
       encoder->setBuffer(validated.opsin[channel]->handle(),
                          validated.opsin_offset_bytes[channel], channel);
     }
-    encoder->setBuffer(validated.candidates->handle(), 0, 3);
-    encoder->setBuffer(validated.scratch_b->handle(), 0, 4);
+    encoder->setBuffer(validated.candidates->handle(), validated.candidates_offset_bytes, 3);
+    encoder->setBuffer(validated.scratch_b->handle(), validated.scratch_b_offset_bytes, 4);
     encoder->setBuffer(validated.quant_field->handle(),
                        validated.quant_field_offset_bytes, 5);
-    encoder->setBuffer(validated.costs->handle(), 0, 6);
+    encoder->setBuffer(validated.costs->handle(), validated.costs_offset_bytes, 6);
     encoder->setBytes(&validated.params, sizeof(validated.params), 7);
     DispatchMetalThreadgroups(
       encoder,
@@ -953,8 +1002,10 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
       encoder->setBuffer(validated.opsin[channel]->handle(),
                          validated.opsin_offset_bytes[channel], channel);
     }
-    encoder->setBuffer(validated.candidates->handle(), 0, 3);
-    encoder->setBuffer(validated.scratch_a->handle(), 0, 4);
+    encoder->setBuffer(validated.candidates->handle(),
+                       validated.candidates_offset_bytes, 3);
+    encoder->setBuffer(validated.scratch_a->handle(),
+                       validated.scratch_a_offset_bytes, 4);
     encoder->setBytes(&validated.params, sizeof(validated.params), 5);
     DispatchMetalThreads(
       encoder,
@@ -965,26 +1016,34 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
 
     EncodeTransformBatch(
       encoder, TransformDirection::kForward, validated.strategy,
-      *validated.scratch_a, 0, *validated.scratch_b, 0,
+      *validated.scratch_a, validated.scratch_a_offset_bytes,
+      *validated.scratch_b, validated.scratch_b_offset_bytes,
       validated.transform_count);
   }
 
   const NS::UInteger reduction_bytes =
     validated.params.coefficient_count * sizeof(float);
   MetalBuffer* residual_pixels = nullptr;
+  size_t residual_pixels_offset_bytes = 0;
   if (fused.candidate_loss) {
     residual_pixels = validated.scratch_a;
+    residual_pixels_offset_bytes = validated.scratch_a_offset_bytes;
   } else if (fused.residual_inverse) {
     encoder->setComputePipelineState(fused.residual_inverse.get());
-    encoder->setBuffer(validated.scratch_b->handle(), 0, 0);
-    encoder->setBuffer(validated.matrices->handle(), 0, 1);
-    encoder->setBuffer(validated.candidates->handle(), 0, 2);
+    encoder->setBuffer(validated.scratch_b->handle(),
+                       validated.scratch_b_offset_bytes, 0);
+    encoder->setBuffer(validated.matrices->handle(),
+                       validated.matrices_offset_bytes, 1);
+    encoder->setBuffer(validated.candidates->handle(),
+                       validated.candidates_offset_bytes, 2);
     encoder->setBuffer(validated.quant_field->handle(),
                        validated.quant_field_offset_bytes, 3);
-    encoder->setBuffer(validated.scratch_a->handle(), 0, 4);
-    encoder->setBuffer(validated.rate_scratch->handle(), 0, 5);
+    encoder->setBuffer(validated.scratch_a->handle(),
+                       validated.scratch_a_offset_bytes, 4);
+    encoder->setBuffer(validated.rate_scratch->handle(),
+                       validated.rate_scratch_offset_bytes, 5);
     encoder->setBytes(&validated.params, sizeof(validated.params), 6);
-    encoder->setBuffer(validated.costs->handle(), 0, 7);
+    encoder->setBuffer(validated.costs->handle(), validated.costs_offset_bytes, 7);
     if (fused.reduces_loss) {
       encoder->setBuffer(validated.pixel_mask->handle(),
                          validated.pixel_mask_offset_bytes, 8);
@@ -998,17 +1057,23 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
         static_cast<NS::UInteger>(validated.transform_count), 1, 1),
       MTL::Size(fused.residual_inverse_threads_per_threadgroup, 1, 1));
     residual_pixels = validated.scratch_a;
+    residual_pixels_offset_bytes = validated.scratch_a_offset_bytes;
   } else {
     encoder->setComputePipelineState(ac_strategy_pipelines_.residual.get());
-    encoder->setBuffer(validated.scratch_b->handle(), 0, 0);
-    encoder->setBuffer(validated.matrices->handle(), 0, 1);
-    encoder->setBuffer(validated.candidates->handle(), 0, 2);
+    encoder->setBuffer(validated.scratch_b->handle(),
+                       validated.scratch_b_offset_bytes, 0);
+    encoder->setBuffer(validated.matrices->handle(),
+                       validated.matrices_offset_bytes, 1);
+    encoder->setBuffer(validated.candidates->handle(),
+                       validated.candidates_offset_bytes, 2);
     encoder->setBuffer(validated.quant_field->handle(),
                        validated.quant_field_offset_bytes, 3);
-    encoder->setBuffer(validated.scratch_a->handle(), 0, 4);
-    encoder->setBuffer(validated.rate_scratch->handle(), 0, 5);
+    encoder->setBuffer(validated.scratch_a->handle(),
+                       validated.scratch_a_offset_bytes, 4);
+    encoder->setBuffer(validated.rate_scratch->handle(),
+                       validated.rate_scratch_offset_bytes, 5);
     encoder->setBytes(&validated.params, sizeof(validated.params), 6);
-    encoder->setBuffer(validated.costs->handle(), 0, 7);
+    encoder->setBuffer(validated.costs->handle(), validated.costs_offset_bytes, 7);
     encoder->setThreadgroupMemoryLength(reduction_bytes, 0);
     encoder->setThreadgroupMemoryLength(reduction_bytes, 1);
     DispatchMetalThreadgroups(
@@ -1019,20 +1084,25 @@ void MetalBackend::EncodeAcStrategyCandidateBatch(
 
     EncodeTransformBatch(
       encoder, TransformDirection::kInverse, validated.strategy,
-      *validated.scratch_a, 0, *validated.scratch_b, 0,
+      *validated.scratch_a, validated.scratch_a_offset_bytes,
+      *validated.scratch_b, validated.scratch_b_offset_bytes,
       validated.transform_count);
     residual_pixels = validated.scratch_b;
+    residual_pixels_offset_bytes = validated.scratch_b_offset_bytes;
   }
 
   encoder->setComputePipelineState(fused.reduces_loss
     ? ac_strategy_pipelines_.cost_from_loss.get()
     : ac_strategy_pipelines_.cost.get());
-  encoder->setBuffer(residual_pixels->handle(), 0, 0);
+  encoder->setBuffer(residual_pixels->handle(), residual_pixels_offset_bytes, 0);
   encoder->setBuffer(validated.pixel_mask->handle(),
                      validated.pixel_mask_offset_bytes, 1);
-  encoder->setBuffer(validated.candidates->handle(), 0, 2);
-  encoder->setBuffer(validated.rate_scratch->handle(), 0, 3);
-  encoder->setBuffer(validated.costs->handle(), 0, 4);
+  encoder->setBuffer(validated.candidates->handle(),
+                     validated.candidates_offset_bytes, 2);
+  encoder->setBuffer(validated.rate_scratch->handle(),
+                     validated.rate_scratch_offset_bytes, 3);
+  encoder->setBuffer(validated.costs->handle(),
+                     validated.costs_offset_bytes, 4);
   encoder->setBuffer(validated.quant_field->handle(),
                      validated.quant_field_offset_bytes, 5);
   encoder->setBytes(&validated.params, sizeof(validated.params), 6);

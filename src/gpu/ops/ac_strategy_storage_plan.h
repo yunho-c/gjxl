@@ -38,6 +38,10 @@ struct StoragePlan {
   size_t maximum_scratch_b_bytes = 0;
   size_t maximum_rate_bytes = 0;
   size_t device_bytes = 0;
+  // CUDA packs these requests into two arenas, with 256-byte aligned views.
+  // Other backends keep their separate-buffer device_bytes inventory.
+  size_t input_arena_bytes = 0;
+  size_t resource_arena_bytes = 0;
   bool operator==(const StoragePlan &) const = default;
 };
 

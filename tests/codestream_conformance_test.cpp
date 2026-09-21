@@ -23,8 +23,15 @@
 #include <system_error>
 #include <vector>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
 #include <sys/wait.h>
 #include <unistd.h>
+#endif
 
 #include "codec/chroma_from_luma.h"
 #include "codec/butteraugli.h"
@@ -363,6 +370,7 @@ gjxl::Status PrepareFixture(
   profile.loop_filter.gaborish = fixture.gaborish;
   profile.adaptive_dc_smoothing = fixture.adaptive_dc_smoothing;
   if (metal) {
+#if GJXL_TEST_HAS_METAL
     std::unique_ptr<gjxl::GpuBackend> gpu;
     status = gjxl::CreateEmbeddedMetalBackend({}, &gpu);
     if (!status.ok()) return status;
@@ -382,6 +390,9 @@ gjxl::Status PrepareFixture(
       .y_to_x = color_correlation.y_to_x_map(),
       .y_to_b = color_correlation.y_to_b_map(),
       .epf_inverse_sigma = View(sigma, blocks)}, &result.frame);
+#else
+    return gjxl::Status::Unavailable("Metal conformance backend is not built");
+#endif
   } else {
   status = gjxl::ComputeQuantizedCoefficients(
     preprocessed.const_view(),
@@ -584,6 +595,8 @@ bool ReadPfm(const fs::path& path, PfmImage* image, std::string* error) {
   return true;
 }
 
+#if !defined(_WIN32)
+
 std::string ShellQuote(const fs::path& path) {
   const std::string value = path.string();
   std::string result = "'";
@@ -596,6 +609,34 @@ std::string ShellQuote(const fs::path& path) {
   }
   return result + "'";
 }
+
+#else
+
+std::wstring WindowsQuote(std::wstring_view argument) {
+  std::wstring result = L"\"";
+  size_t backslashes = 0;
+  for (wchar_t c : argument) {
+    if (c == L'\\') {
+      ++backslashes;
+      continue;
+    }
+    if (c == L'\"') {
+      result.append(2 * backslashes + 1, L'\\');
+      result.push_back(L'\"');
+    } else {
+      result.append(backslashes, L'\\');
+      result.push_back(c);
+    }
+    backslashes = 0;
+  }
+  result.append(2 * backslashes, L'\\');
+  result.push_back(L'\"');
+  return result;
+}
+
+#endif
+
+#if !defined(_WIN32)
 
 int ExitCode(int status) {
   if (status == -1) {
@@ -610,11 +651,56 @@ int ExitCode(int status) {
   return -1;
 }
 
+#endif
+
 int RunTool(
   const fs::path& executable,
   std::span<const std::string> arguments,
   const fs::path& log) {
 
+#if defined(_WIN32)
+  std::wstring command = WindowsQuote(executable.native());
+  for (const std::string& argument : arguments) {
+    command.push_back(L' ');
+    command += WindowsQuote(fs::path(argument).native());
+  }
+
+  SECURITY_ATTRIBUTES security{};
+  security.nLength = sizeof(security);
+  security.bInheritHandle = TRUE;
+  const HANDLE log_handle = CreateFileW(
+    log.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &security, CREATE_ALWAYS,
+    FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (log_handle == INVALID_HANDLE_VALUE) {
+    return -1;
+  }
+
+  STARTUPINFOW startup{};
+  startup.cb = sizeof(startup);
+  startup.dwFlags = STARTF_USESTDHANDLES;
+  startup.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+  startup.hStdOutput = log_handle;
+  startup.hStdError = log_handle;
+  PROCESS_INFORMATION process{};
+  const BOOL started = CreateProcessW(
+    executable.c_str(), command.data(), nullptr, nullptr, TRUE,
+    CREATE_NO_WINDOW, nullptr, nullptr, &startup, &process);
+  CloseHandle(log_handle);
+  if (!started) {
+    return -1;
+  }
+  const DWORD wait_result = WaitForSingleObject(process.hProcess, INFINITE);
+  DWORD exit_code = static_cast<DWORD>(-1);
+  const BOOL queried = GetExitCodeProcess(process.hProcess, &exit_code);
+  CloseHandle(process.hThread);
+  CloseHandle(process.hProcess);
+  if (wait_result != WAIT_OBJECT_0 || !queried) {
+    return -1;
+  }
+  return exit_code <= static_cast<DWORD>(std::numeric_limits<int>::max())
+    ? static_cast<int>(exit_code)
+    : -1;
+#else
   std::string command = ShellQuote(executable);
   for (const std::string& argument : arguments) {
     command += ' ';
@@ -622,6 +708,7 @@ int RunTool(
   }
   command += " >" + ShellQuote(log) + " 2>&1";
   return ExitCode(std::system(command.c_str()));
+#endif
 }
 
 bool ReadText(const fs::path& path, std::string* text) {
@@ -655,8 +742,18 @@ bool ContainsMetadata(
     "Transfer function: Linear",
     "Rendering intent: Relative",
   };
-  for (const std::string& expected : required) {
-    if (info.find(expected) == std::string_view::npos) {
+  // Distribution jxlinfo 0.7 uses field names and a compact color-space line;
+  // the pinned decoder uses the expanded labels above. Require the same values
+  // with either spelling, so the system-tool smoke test remains useful.
+  const std::array<std::string_view, 10> legacy = {
+    "", "num_color_channels: 3", "num_extra_channels: 0", "", "", "",
+    "Color space: RGB, D65,", "sRGB primaries,", "Linear transfer function,",
+    "rendering intent: Relative",
+  };
+  for (size_t index = 0; index < required.size(); ++index) {
+    const std::string& expected = required[index];
+    if (info.find(expected) == std::string_view::npos &&
+        (legacy[index].empty() || info.find(legacy[index]) == std::string_view::npos)) {
       *error = "jxlinfo is missing: " + expected;
       return false;
     }
@@ -763,7 +860,10 @@ std::vector<Fixture> FullFixtures() {
      .pattern = Pattern::kGradient, .gaborish = false},
     {"single-block-impulse", {8, 8}, Pattern::kImpulse,
      gjxl::AcStrategyType::kDct8, false, {3541, 10}, 29, false,
-     11459255244783164287ull},
+     // Current adaptive DC tree and native context-map policy. Independently
+     // reproduced from main bb7b714's codec/serializer on the GNU toolchain;
+     // the integrated MSVC and GNU builds produce the same bytes.
+     8627470560574437943ull},
     {"odd-gradient", {13, 17}, Pattern::kGradient},
     {"random", {17, 11}, Pattern::kRandom},
     {"texture", {24, 19}, Pattern::kTexture},

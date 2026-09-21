@@ -90,7 +90,7 @@ bool PublicationRecipe() {
         }
   const WorkflowPublicationStoragePlan sentinel{.scores={5,7}, .output={11,13}};
   auto p = sentinel;
-  for (size_t attempts : {0ul, 65ul, std::numeric_limits<size_t>::max()})
+  for (size_t attempts : {size_t{0}, size_t{65}, std::numeric_limits<size_t>::max()})
     if (!Check(!ComputeWorkflowPublicationStoragePlan(bytes, 3, attempts, true, true, &p).ok() && p == sentinel,
                "Invalid publication attempts changed output")) return false;
   return Check(

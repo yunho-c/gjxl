@@ -110,8 +110,9 @@ bool StringPointers() {
 }
 
 // Observe actual rebound allocations without using the private node type or
-// copying a layout into the test. Pointer arrays are buckets; other requests
-// are nodes. Both sides of bucket replacement contribute to the physical peak.
+// copying a layout into the test. Nodes request one element; bucket arrays
+// request multiple elements (including MSVC's unchecked iterator arrays).
+// Both sides of bucket replacement contribute to the physical peak.
 struct AllocationLog {
   size_t nodes = 0, buckets = 0, peak = 0;
   void Add(size_t bytes, bool pointer) {
@@ -128,11 +129,11 @@ struct ObservedAllocator {
   ObservedAllocator(const ObservedAllocator<U>& other) : log(other.log) {}
   T* allocate(size_t n) {
     auto* data = std::allocator<T>{}.allocate(n);
-    log->Add(n * sizeof(T), std::is_pointer_v<T>);
+    log->Add(n * sizeof(T), n != 1);
     return data;
   }
   void deallocate(T* data, size_t n) {
-    (std::is_pointer_v<T> ? log->buckets : log->nodes) -= n * sizeof(T);
+    (n != 1 ? log->buckets : log->nodes) -= n * sizeof(T);
     std::allocator<T>{}.deallocate(data, n);
   }
   template <typename U>
@@ -147,16 +148,18 @@ bool HashBacking() {
   AllocationLog log;
   {
     Map values{ObservedAllocator<Entry>(&log)};
-    if (!Check(values.max_load_factor() == 1 && log.nodes + log.buckets == 0,
+    if (!Check(values.max_load_factor() == 1 &&
+                 log.nodes == Backing::kEmptyNodeCount * Backing::kNodeBytes &&
+                 log.buckets == Backing::kEmptyBucketBytes,
                "Empty hash-map contract changed")) return false;
     for (uint32_t i = 0; i < 4096; ++i) {
       ++values[i];
       ++values[i]; // Duplicate insertion must not allocate another node.
       const size_t n = values.size();
-      if (!Check(log.nodes == n * Backing::kNodeBytes &&
-                 log.buckets == values.bucket_count() * sizeof(void*) &&
-                 log.buckets <= n * Backing::kRetainedBucketBytesPerEntry &&
-                 log.peak <= n * (Backing::kNodeBytes + Backing::kPeakBucketBytesPerEntry),
+      if (!Check(log.nodes == (n + Backing::kEmptyNodeCount) * Backing::kNodeBytes &&
+                 log.buckets == values.bucket_count() * Backing::kPointersPerBucket * sizeof(void*) &&
+                 log.buckets <= Backing::kEmptyBucketBytes + n * Backing::kRetainedBucketBytesPerEntry &&
+                 log.peak <= Backing::kEmptyBytes + n * (Backing::kNodeBytes + Backing::kPeakBucketBytesPerEntry),
                  "Observed hash node/bucket allocation exceeds its contract")) return false;
     }
   }

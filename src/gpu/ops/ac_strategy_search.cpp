@@ -3,10 +3,6 @@
 
 #include "gpu/ops/ac_strategy_search.h"
 
-#include "core/managed_allocator.h"
-
-#include "core/resource_context.h"
-
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -27,54 +23,99 @@
 #include "gpu/buffer.h"
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/ac_strategy_selection.h"
+#include "gpu/ops/ac_strategy_search_test.h"
 #include "gpu/ops/ac_strategy_search_profile_internal.h"
+#include "gpu/scratch.h"
 #include "gpu/ops/ac_strategy_storage_plan.h"
+#include "core/managed_allocator.h"
 #ifdef GJXL_FRONTIER_EXPERIMENT
 #include "gpu/ops/ac_strategy_capture_internal.h"
 #endif
 
 namespace gjxl {
 using resource_budget_internal::ManagedVector;
-
 namespace {
+
+thread_local bool cpu_selection_for_testing = false;
 
 constexpr size_t kColorTileBlockDimension =
   kColorTileDimension / kJxlBlockDimension;
+constexpr size_t kArenaAlignment = 256;
 static_assert(kColorTileBlockDimension == 8);
 
+bool TryMultiply(size_t left, size_t right, size_t* result) {
+  if (result == nullptr ||
+      (right != 0 && left > std::numeric_limits<size_t>::max() / right)) {
+    return false;
+  }
+  *result = left * right;
+  return true;
+}
+
 Status ValidateSearchInputs(
-  GpuBackend& gpu,
   ConstImage3FView opsin,
-  const ResidentAcStrategySearchInputs* resident,
+  Extent2D resident_opsin_extent,
   ConstPlaneF32View quant_field,
   ConstPlaneF32View pixel_mask,
   const ColorCorrelationMap& color_correlation,
+  bool resident_fields,
+  bool resident_cfl,
   AcStrategySearchOptions options,
   AcStrategyGrid* out,
-  ac_strategy_search_internal::StoragePlan* storage_plan) {
-  if (out == nullptr || storage_plan == nullptr) {
+  Extent2D* block_extent,
+  Extent2D* tile_extent,
+  size_t* pixel_count,
+  size_t* block_count) {
+  if (out == nullptr || block_extent == nullptr || tile_extent == nullptr ||
+      pixel_count == nullptr || block_count == nullptr) {
     return Status::InvalidArgument("GPU AC-strategy search output is null");
   }
-  const Extent2D opsin_extent = opsin.valid()
-    ? opsin.extent()
-    : resident == nullptr ? Extent2D{} : resident->opsin.plane[0].extent;
-  const Status status = ac_strategy_search_internal::ComputeStoragePlan(
-    opsin_extent, resident != nullptr, storage_plan, &gpu,
-    options.dense_dct32_search);
-  if (!status.ok()) return status;
-  if (!quant_field.valid() || quant_field.extent != storage_plan->block_extent ||
-      (!(resident != nullptr && pixel_mask.data == nullptr &&
-         pixel_mask.extent == Extent2D{} && pixel_mask.stride == 0) &&
-       (!pixel_mask.valid() || pixel_mask.extent != opsin_extent)) ||
-      !color_correlation.valid()) {
+  const Extent2D pixel_extent =
+    resident_fields ? resident_opsin_extent : opsin.extent();
+  if ((!resident_fields && !opsin.valid()) || pixel_extent.empty() ||
+      pixel_extent.width % kJxlBlockDimension != 0 ||
+      pixel_extent.height % kJxlBlockDimension != 0) {
+    return Status::InvalidArgument(
+      "GPU AC-strategy search requires a padded opsin image");
+  }
+  *block_extent = {pixel_extent.width / kJxlBlockDimension,
+                   pixel_extent.height / kJxlBlockDimension};
+  if (!pixel_extent.try_area(pixel_count) ||
+      !block_extent->try_area(block_count)) {
+    return Status::InvalidArgument(
+      "GPU AC-strategy search dimensions are too large");
+  }
+  const auto empty_plane = [](ConstPlaneF32View plane) {
+    return plane.data == nullptr && plane.extent == Extent2D{} && plane.stride == 0;
+  };
+  if ((!(resident_fields && empty_plane(quant_field)) &&
+       (!quant_field.valid() || quant_field.extent != *block_extent)) ||
+      (!(resident_fields && empty_plane(pixel_mask)) &&
+       (!pixel_mask.valid() || pixel_mask.extent != pixel_extent)) ||
+      (!resident_cfl && !color_correlation.valid())) {
     return Status::InvalidArgument(
       "GPU AC-strategy search fields have invalid geometry");
   }
-  if (color_correlation.tile_extent() != storage_plan->tile_extent ||
+  *tile_extent = {
+    pixel_extent.width / kColorTileDimension +
+      static_cast<size_t>(pixel_extent.width % kColorTileDimension != 0),
+    pixel_extent.height / kColorTileDimension +
+      static_cast<size_t>(pixel_extent.height % kColorTileDimension != 0),
+  };
+  if ((!resident_cfl &&
+       color_correlation.tile_extent() != *tile_extent) ||
       !std::isfinite(options.butteraugli_target) ||
       options.butteraugli_target <= 0.0f) {
     return Status::InvalidArgument(
       "GPU AC-strategy search options or color map are invalid");
+  }
+  constexpr size_t kUint32Maximum = std::numeric_limits<uint32_t>::max();
+  if (pixel_extent.width > kUint32Maximum ||
+      pixel_extent.height > kUint32Maximum || *pixel_count > kUint32Maximum ||
+      block_extent->width > kUint32Maximum ||
+      block_extent->height > kUint32Maximum) {
+    return Status::InvalidArgument(
+      "GPU AC-strategy search exceeds 32-bit indexing limits");
   }
   return Status::Ok();
 }
@@ -134,6 +175,7 @@ Status MakeCandidates(
   ConstPlaneF32View quant_field,
   const ColorCorrelationMap& color_correlation,
   bool device_quant_norm,
+  bool device_cfl,
   size_t candidate_count,
   ManagedVector<AcStrategyCandidate>* candidates) {
   if (candidates == nullptr) {
@@ -151,8 +193,8 @@ Status MakeCandidates(
       const size_t block_x = tile_x * kColorTileBlockDimension;
       const size_t tile_width =
         std::min(kColorTileBlockDimension, block_extent.width - block_x);
-      const std::array<float, 3> cfl =
-        color_correlation.AcFactors(tile_x, tile_y);
+      const std::array<float, 3> cfl = device_cfl
+        ? std::array<float, 3>{} : color_correlation.AcFactors(tile_x, tile_y);
       for (size_t local_y = 0; local_y + covered.height <= tile_height;
         local_y += staged.anchor_step) {
         for (size_t local_x = 0; local_x + covered.width <= tile_width;
@@ -187,66 +229,68 @@ Status MakeCandidates(
     Status::Internal("GPU AC-strategy enumeration disagrees with its storage plan");
 }
 
-Status EnsureAllocation(
-  GpuBackend& gpu,
-  size_t size_bytes,
-  std::unique_ptr<DeviceBuffer>* buffer) {
+// CUDA reuses its qualified packed arenas. Other backends preserve main's
+// separate buffer capacities and allocation peaks, which their plans bound.
+struct SearchDeviceBuffer : DevicePlaneView {
+  std::unique_ptr<DeviceBuffer> separate;
 
-  if (buffer == nullptr) {
-    return Status::InvalidArgument(
-      "GPU AC-strategy allocation request is invalid");
-  }
-  if (size_bytes == 0) {
-    buffer->reset();
+  Status Prepare(GpuBackend& gpu, DeviceScratchArena& arena, size_t bytes) {
+    if (gpu.kind() == BackendKind::kCuda) {
+      return arena.AllocatePlane(DeviceElementType::kU8, {bytes, 1},
+                                 bytes, kArenaAlignment, this);
+    }
+    if (bytes == 0) {
+      *this = {};
+      return Status::Ok();
+    }
+    if (separate == nullptr || separate->size_bytes() < bytes ||
+        !gpu.owns(*separate)) {
+      std::unique_ptr<DeviceBuffer> replacement;
+      Status status = gpu.Allocate(bytes, &replacement);
+      if (!status.ok()) return status;
+      separate = std::move(replacement);
+    }
+    static_cast<DevicePlaneView&>(*this) =
+      {separate.get(), 0, DeviceElementType::kU8, {bytes, 1}, bytes};
     return Status::Ok();
   }
-  if (*buffer != nullptr && (*buffer)->size_bytes() >= size_bytes &&
-      gpu.owns(**buffer)) {
-    return Status::Ok();
-  }
-  std::unique_ptr<DeviceBuffer> replacement;
-  Status status = gpu.Allocate(size_bytes, &replacement);
-  if (!status.ok()) return status;
-  *buffer = std::move(replacement);
-  return Status::Ok();
-}
-
-Status EnsureAndUpload(
-  GpuBackend& gpu,
-  const void* data,
-  size_t size_bytes,
-  std::unique_ptr<DeviceBuffer>* buffer) {
-  Status status = EnsureAllocation(gpu, size_bytes, buffer);
-  if (!status.ok()) {
-    return status;
-  }
-  return gpu.CopyHostToDevice(**buffer, data, size_bytes);
-}
+};
 
 struct StrategyResources {
   ac_strategy_internal::CandidateStage staged;
   ManagedVector<AcStrategyCandidate> candidates;
   ManagedVector<float> matrices;
   ManagedVector<float> costs;
-  std::unique_ptr<DeviceBuffer> device_candidates;
-  std::unique_ptr<DeviceBuffer> device_matrices;
-  std::unique_ptr<DeviceBuffer> device_costs;
+  SearchDeviceBuffer device_candidates;
+  SearchDeviceBuffer device_matrices;
+  SearchDeviceBuffer device_costs;
 };
 
 }  // namespace
 
 namespace ac_strategy_search_internal {
 
+ScopedCpuSelectionForTesting::ScopedCpuSelectionForTesting() noexcept
+    : previous_(cpu_selection_for_testing) {
+  cpu_selection_for_testing = true;
+}
+
+ScopedCpuSelectionForTesting::~ScopedCpuSelectionForTesting() {
+  cpu_selection_for_testing = previous_;
+}
+
 struct Prepared {
   GpuBackend* backend = nullptr;
   std::array<StrategyResources,
              ac_strategy_internal::kCandidateStages.size()> resources;
   std::array<ManagedVector<float>, kAcStrategyCount> cost_storage;
-  std::unique_ptr<DeviceBuffer> device_opsin;
-  std::unique_ptr<DeviceBuffer> device_mask;
-  std::unique_ptr<DeviceBuffer> scratch_a;
-  std::unique_ptr<DeviceBuffer> scratch_b;
-  std::unique_ptr<DeviceBuffer> rate_scratch;
+  DeviceScratchArena input_arena;
+  DeviceScratchArena resource_arena;
+  SearchDeviceBuffer device_opsin;
+  SearchDeviceBuffer device_mask;
+  SearchDeviceBuffer scratch_a;
+  SearchDeviceBuffer scratch_b;
+  SearchDeviceBuffer rate_scratch;
 };
 
 }  // namespace ac_strategy_search_internal
@@ -257,7 +301,7 @@ void PreparedAcStrategySearch::Reset() noexcept { impl_.reset(); }
 
 bool CanDeferAcStrategySearch(GpuBackend &gpu,
                               AcStrategySearchOptions options) {
-  if (options.dense_dct32_search ||
+  if (cpu_selection_for_testing || options.dense_dct32_search ||
       dynamic_cast<GpuAcStrategySelection *>(&gpu) == nullptr)
     return false;
 #ifdef GJXL_FRONTIER_EXPERIMENT
@@ -279,36 +323,54 @@ static Status FindAcStrategyGridGpuImpl(
     DeferredAcStrategySearch *deferred = nullptr) {
   const resource_budget_internal::ResourceClassScope resource_class(
     resource_budget_internal::ResourceClass::kAcSearch);
-  ac_strategy_search_internal::StoragePlan storage_plan;
-  Status status = ValidateSearchInputs(gpu, opsin, resident,
+  Extent2D block_extent;
+  Extent2D tile_extent;
+  size_t pixel_count = 0;
+  size_t block_count = 0;
+  const bool resident_cfl = resident != nullptr &&
+    resident->y_to_x.buffer != nullptr && resident->y_to_b.buffer != nullptr;
+  const Extent2D resident_opsin_extent =
+    resident == nullptr ? Extent2D{} : resident->opsin.plane[0].extent;
+  Status status = ValidateSearchInputs(opsin,
+    resident_opsin_extent,
     quant_field,
     pixel_mask,
     color_correlation,
+    resident != nullptr,
+    resident_cfl,
     options,
     out,
-    &storage_plan);
+    &block_extent,
+    &tile_extent,
+    &pixel_count,
+    &block_count);
   if (!status.ok()) {
     return status;
   }
-  const Extent2D block_extent = storage_plan.block_extent;
-  const Extent2D tile_extent = storage_plan.tile_extent;
-  const size_t pixel_count = storage_plan.pixel_count;
-  const size_t block_count = storage_plan.block_count;
-  const Extent2D opsin_extent = opsin.valid()
-    ? opsin.extent() : resident->opsin.plane[0].extent;
+  ac_strategy_search_internal::StoragePlan storage_plan;
+  status = ac_strategy_search_internal::ComputeStoragePlan(
+    resident == nullptr ? opsin.extent() : resident_opsin_extent,
+    resident != nullptr, &storage_plan, &gpu, options.dense_dct32_search);
+  if (!status.ok()) return status;
   if (resident != nullptr) {
     status = ValidateDeviceImage3View(resident->opsin, gpu.id());
     if (!status.ok()) return status;
-    if (std::ranges::any_of(
-          resident->opsin.plane,
+    if (std::ranges::any_of(resident->opsin.plane,
           [&](ConstDevicePlaneView plane) {
             return plane.element_type != DeviceElementType::kF32 ||
-              plane.extent != opsin_extent;
+                   plane.extent != resident_opsin_extent;
           }) ||
         resident->quant_field.element_type != DeviceElementType::kF32 ||
         resident->quant_field.extent != block_extent ||
         resident->pixel_mask.element_type != DeviceElementType::kF32 ||
-        resident->pixel_mask.extent != opsin_extent) {
+        resident->pixel_mask.extent != resident_opsin_extent ||
+        ((resident->y_to_x.buffer != nullptr) !=
+          (resident->y_to_b.buffer != nullptr)) ||
+        (resident_cfl &&
+          (resident->y_to_x.element_type != DeviceElementType::kI8 ||
+            resident->y_to_b.element_type != DeviceElementType::kI8 ||
+            resident->y_to_x.extent != tile_extent ||
+            resident->y_to_b.extent != tile_extent))) {
       return Status::InvalidArgument(
           "Resident GPU AC-strategy inputs have invalid geometry");
     }
@@ -318,6 +380,12 @@ static Status FindAcStrategyGridGpuImpl(
     if (status.ok()) {
       status = ComputeDevicePlaneRange(
           resident->pixel_mask, gpu.id(), &range);
+    }
+    if (status.ok() && resident_cfl) {
+      status = ComputeDevicePlaneRange(resident->y_to_x, gpu.id(), &range);
+    }
+    if (status.ok() && resident_cfl) {
+      status = ComputeDevicePlaneRange(resident->y_to_b, gpu.id(), &range);
     }
     if (!status.ok()) return status;
   }
@@ -350,22 +418,7 @@ static Status FindAcStrategyGridGpuImpl(
       ? PackOpsin(opsin, pixel_count) : ManagedVector<float>{};
     const ManagedVector<float> packed_mask = resident == nullptr
       ? PackPlane(pixel_mask) : ManagedVector<float>{};
-    if (resident == nullptr) {
-      status = EnsureAndUpload(gpu,
-        packed_opsin.data(),
-        storage_plan.opsin_bytes,
-        &state.device_opsin);
-      if (!status.ok()) {
-        return status;
-      }
-      status = EnsureAndUpload(gpu,
-        packed_mask.data(),
-        storage_plan.mask_bytes,
-        &state.device_mask);
-      if (!status.ok()) {
-        return status;
-      }
-    }
+    const size_t input_capacity = storage_plan.input_arena_bytes;
 
     auto *device_selector = resident != nullptr &&
                                     profiling_session == nullptr &&
@@ -380,8 +433,11 @@ static Status FindAcStrategyGridGpuImpl(
     auto& resources = state.resources;
     auto& cost_storage = state.cost_storage;
     AcStrategyGpuSearchStats result_stats;
-    for (size_t i = 0; i < stages.size(); ++i) {
-      const auto& stage_plan = storage_plan.stages[i];
+    const size_t maximum_scratch_a_bytes = storage_plan.maximum_scratch_a_bytes;
+    const size_t maximum_scratch_b_bytes = storage_plan.maximum_scratch_b_bytes;
+    const size_t maximum_rate_bytes = storage_plan.maximum_rate_bytes;
+    const size_t resource_capacity = storage_plan.resource_arena_bytes;
+    for (size_t i = 0; i < ac_strategy_internal::kCandidateStages.size(); ++i) {
       StrategyResources& resource = resources[i];
       resource.staged = stages[i];
       status = MakeCandidates(resource.staged,
@@ -390,7 +446,8 @@ static Status FindAcStrategyGridGpuImpl(
         quant_field,
         color_correlation,
         resident != nullptr,
-        stage_plan.candidate_count,
+        resident_cfl,
+        storage_plan.stages[i].candidate_count,
         &resource.candidates);
       if (!status.ok()) {
         return status;
@@ -399,7 +456,7 @@ static Status FindAcStrategyGridGpuImpl(
       if (!status.ok()) {
         return status;
       }
-      if (resource.matrices.size() != stage_plan.matrix_bytes / sizeof(float)) {
+      if (resource.matrices.size() != storage_plan.stages[i].matrix_bytes / sizeof(float)) {
         return Status::Internal("GPU AC-strategy matrices disagree with storage plan");
       }
       if (device_selector == nullptr || i == 0)
@@ -414,75 +471,124 @@ static Status FindAcStrategyGridGpuImpl(
         resource.candidates.size();
       result_stats.total_candidate_count += resource.candidates.size();
 
-      if (resource.candidates.empty()) {
-        continue;
-      }
-      status = EnsureAndUpload(gpu,
-        resource.candidates.data(),
-        stage_plan.candidate_bytes,
-        &resource.device_candidates);
-      if (!status.ok()) {
-        return status;
-      }
-      status = EnsureAndUpload(gpu,
-        resource.matrices.data(),
-        stage_plan.matrix_bytes,
-        &resource.device_matrices);
-      if (!status.ok()) {
-        return status;
-      }
-      status = EnsureAllocation(
-        gpu, stage_plan.cost_bytes,
-        &resource.device_costs);
-      if (!status.ok()) {
-        return status;
-      }
     }
 
-    status = EnsureAllocation(gpu, storage_plan.maximum_scratch_a_bytes, &state.scratch_a);
-    if (!status.ok()) {
-      return status;
-    }
-    status = EnsureAllocation(gpu, storage_plan.maximum_scratch_b_bytes, &state.scratch_b);
-    if (!status.ok()) {
-      return status;
-    }
-    status = EnsureAllocation(gpu, storage_plan.maximum_rate_bytes, &state.rate_scratch);
-    if (!status.ok()) {
-      return status;
+    if (resident == nullptr) {
+      status = gpu.kind() == BackendKind::kCuda
+        ? state.input_arena.Prepare(gpu, input_capacity) : Status::Ok();
+      if (status.ok()) {
+        status = state.device_opsin.Prepare(gpu, state.input_arena,
+          packed_opsin.size() * sizeof(float));
+      }
+      if (status.ok()) {
+        status = state.device_mask.Prepare(gpu, state.input_arena,
+          packed_mask.size() * sizeof(float));
+      }
+      if (status.ok()) {
+        status = gpu.CopyHostToDevice(*state.device_opsin.buffer,
+          packed_opsin.data(), packed_opsin.size() * sizeof(float),
+          state.device_opsin.offset_bytes);
+      }
+      if (status.ok()) {
+        status = gpu.CopyHostToDevice(*state.device_mask.buffer,
+          packed_mask.data(), packed_mask.size() * sizeof(float),
+          state.device_mask.offset_bytes);
+      }
+      if (!status.ok()) return status;
     }
 
-    std::array<AcStrategyCandidateBatch,
-               ac_strategy_internal::kCandidateStages.size()> batches;
+    status = gpu.kind() == BackendKind::kCuda
+      ? state.resource_arena.Prepare(gpu, resource_capacity) : Status::Ok();
+    if (!status.ok()) return status;
+    result_stats.scratch = {
+      maximum_scratch_a_bytes, maximum_scratch_b_bytes, maximum_rate_bytes};
+    result_stats.resource_capacity_bytes = state.resource_arena.capacity_bytes();
+    for (StrategyResources& resource : resources) {
+      if (resource.candidates.empty()) continue;
+      status = resource.device_candidates.Prepare(gpu, state.resource_arena,
+          resource.candidates.size() * sizeof(AcStrategyCandidate));
+      if (status.ok()) {
+        status = resource.device_matrices.Prepare(gpu, state.resource_arena,
+          resource.matrices.size() * sizeof(float));
+      }
+      if (status.ok()) {
+        status = resource.device_costs.Prepare(gpu, state.resource_arena,
+          resource.candidates.size() * sizeof(float));
+      }
+      if (status.ok()) {
+        status = gpu.CopyHostToDevice(*resource.device_candidates.buffer,
+          resource.candidates.data(),
+          resource.candidates.size() * sizeof(AcStrategyCandidate),
+          resource.device_candidates.offset_bytes);
+      }
+      if (status.ok()) {
+        status = gpu.CopyHostToDevice(*resource.device_matrices.buffer,
+          resource.matrices.data(),
+          resource.matrices.size() * sizeof(float),
+          resource.device_matrices.offset_bytes);
+      }
+      if (!status.ok()) return status;
+    }
+    status = state.scratch_a.Prepare(gpu, state.resource_arena,
+          maximum_scratch_a_bytes);
+    if (maximum_scratch_b_bytes == 0) state.scratch_b = {};
+    if (status.ok() && maximum_scratch_b_bytes != 0) {
+      status = state.scratch_b.Prepare(gpu, state.resource_arena,
+          maximum_scratch_b_bytes);
+    }
+    if (status.ok()) {
+      status = state.rate_scratch.Prepare(gpu, state.resource_arena,
+          maximum_rate_bytes);
+    }
+    if (!status.ok()) return status;
+
+    std::array<AcStrategyCandidateBatch, ac_strategy_internal::kCandidateStages.size()> batches;
     for (size_t i = 0; i < resources.size(); ++i) {
       StrategyResources& resource = resources[i];
       batches[i] = {
         .strategy = resource.staged.strategy,
-        .opsin = resident == nullptr ? state.device_opsin.get() : nullptr,
-        .pixel_mask = resident == nullptr ? state.device_mask.get() : nullptr,
-        .matrices = resource.device_matrices.get(),
-        .candidates = resource.device_candidates.get(),
-        .resident_opsin = resident == nullptr
-          ? ConstDeviceImage3View{} : resident->opsin,
-        .resident_pixel_mask = resident == nullptr
-          ? ConstDevicePlaneView{} : resident->pixel_mask,
-        .resident_quant_field = resident == nullptr
-          ? ConstDevicePlaneView{} : resident->quant_field,
-        .scratch_a = state.scratch_a.get(),
-        .scratch_b = state.scratch_b.get(),
-        .rate_scratch = state.rate_scratch.get(),
-        .costs = resource.device_costs.get(),
-        .pixel_extent = opsin_extent,
+        .opsin = resident == nullptr ? state.device_opsin.buffer : nullptr,
+        .pixel_mask = resident == nullptr ? state.device_mask.buffer : nullptr,
+        .matrices = resource.device_matrices.buffer,
+        .candidates = resource.device_candidates.buffer,
+        .resident_opsin =
+          resident == nullptr ? ConstDeviceImage3View{} : resident->opsin,
+        .resident_pixel_mask =
+          resident == nullptr ? ConstDevicePlaneView{} : resident->pixel_mask,
+        .resident_quant_field =
+          resident == nullptr ? ConstDevicePlaneView{} : resident->quant_field,
+        .resident_y_to_x =
+          resident == nullptr ? ConstDevicePlaneView{} : resident->y_to_x,
+        .resident_y_to_b =
+          resident == nullptr ? ConstDevicePlaneView{} : resident->y_to_b,
+        .scratch_a = state.scratch_a.buffer,
+        .scratch_b = state.scratch_b.buffer,
+        .rate_scratch = state.rate_scratch.buffer,
+        .costs = resource.device_costs.buffer,
+        .opsin_offset_bytes =
+          resident == nullptr ? state.device_opsin.offset_bytes : 0,
+        .pixel_mask_offset_bytes =
+          resident == nullptr ? state.device_mask.offset_bytes : 0,
+        .matrices_offset_bytes = resource.device_matrices.offset_bytes,
+        .candidates_offset_bytes = resource.device_candidates.offset_bytes,
+        .scratch_a_offset_bytes = state.scratch_a.offset_bytes,
+        .scratch_b_offset_bytes = state.scratch_b.offset_bytes,
+        .rate_scratch_offset_bytes = state.rate_scratch.offset_bytes,
+        .costs_offset_bytes = resource.device_costs.offset_bytes,
+        .pixel_extent =
+          resident == nullptr ? opsin.extent() : resident_opsin_extent,
         .opsin_row_stride = resident == nullptr
-          ? opsin.width() : resident->opsin.plane[0].row_stride,
+                              ? opsin.width()
+                              : resident->opsin.plane[0].row_stride,
         .opsin_plane_stride = pixel_count,
-        .pixel_mask_row_stride = pixel_mask.extent.width,
+        .pixel_mask_row_stride =
+          resident == nullptr ? pixel_mask.extent.width : 0,
         .candidate_count = resource.candidates.size(),
         .butteraugli_target = options.butteraugli_target,
       };
     }
     if (deferred) {
-      *deferred = {batches, {block_extent, state.rate_scratch.get(), 0}};
+      *deferred = {batches, {block_extent, state.rate_scratch.buffer, state.rate_scratch.offset_bytes}};
       result_stats.device_selection = true;
       if (stats)
         *stats = result_stats;
@@ -491,7 +597,7 @@ static Status FindAcStrategyGridGpuImpl(
     std::unique_ptr<GpuSubmission> submission;
     if (device_selector != nullptr) {
       status = device_selector->EvaluateAndSelectAcStrategyCandidateBatches(
-        batches, {block_extent, state.rate_scratch.get(), 0}, &submission);
+        batches, {block_extent, state.rate_scratch.buffer, state.rate_scratch.offset_bytes}, &submission);
     } else if (profiling_session == nullptr) {
       status = EvaluateAcStrategyCandidateBatches(
         gpu, batches, &submission);
@@ -512,9 +618,6 @@ static Status FindAcStrategyGridGpuImpl(
         gpu_profile_internal::GpuWallStageKind::kPreparation,
         preparation_begin);
       if (!status.ok()) {
-        // The submission is already committed. Drain it before a caller can
-        // reset/reuse prepared buffers or their borrowed inputs, including on
-        // a diagnostic allocation failure. Preserve the original typed error.
         (void)submission->Wait();
         return status;
       }
@@ -555,8 +658,8 @@ static Status FindAcStrategyGridGpuImpl(
       const size_t bytes = block_count + tile_count;
       if (bytes > resources[0].costs.size() * sizeof(float))
         return Status::Internal("Device AC selection exceeds its readback owner");
-      status = gpu.CopyDeviceToHost(*state.rate_scratch,
-        resources[0].costs.data(), bytes);
+      status = gpu.CopyDeviceToHost(*state.rate_scratch.buffer,
+        resources[0].costs.data(), bytes, state.rate_scratch.offset_bytes);
       if (!status.ok()) return status;
       const auto* cells = reinterpret_cast<const uint8_t*>(resources[0].costs.data());
       for (size_t tile = 0; tile < tile_count; ++tile) {
@@ -582,7 +685,8 @@ static Status FindAcStrategyGridGpuImpl(
           AcStrategyCell cell;
           status = result.Get(x, y, &cell);
           if (!status.ok() || cells[y * block_extent.width + x] !=
-              ((static_cast<uint8_t>(cell.strategy) << 1) | cell.is_anchor))
+               ((static_cast<uint8_t>(cell.strategy) << 1) |
+                static_cast<uint8_t>(cell.is_anchor)))
             return Status::Internal("Device AC selection produced inconsistent cells");
         }
       }
@@ -593,9 +697,10 @@ static Status FindAcStrategyGridGpuImpl(
     }
     for (StrategyResources& resource : resources) {
       if (!resource.candidates.empty()) {
-        status = gpu.CopyDeviceToHost(*resource.device_costs,
+        status = gpu.CopyDeviceToHost(*resource.device_costs.buffer,
           resource.costs.data(),
-          resource.costs.size() * sizeof(float));
+          resource.costs.size() * sizeof(float),
+          resource.device_costs.offset_bytes);
         if (!status.ok()) {
           return status;
         }
@@ -621,13 +726,14 @@ static Status FindAcStrategyGridGpuImpl(
     const auto merge_begin = profiling_session == nullptr
       ? gpu_profile_internal::GpuProfilingSession::TimePoint{}
       : gpu_profile_internal::GpuProfilingSession::BeginWallStage();
-    status = opsin.valid()
-      ? ac_strategy_internal::FindAcStrategyGridFromCandidateCosts(
-          opsin, quant_field, pixel_mask, color_correlation, options, table,
-          out)
-      : ac_strategy_internal::FindAcStrategyGridFromResidentCandidateCosts(
-          resident->opsin.plane[0].extent, quant_field, pixel_mask,
-          color_correlation, options, table, out);
+    status = ac_strategy_internal::FindAcStrategyGridFromCandidateCosts(
+      resident == nullptr ? opsin.extent() : resident_opsin_extent,
+      quant_field,
+      pixel_mask,
+      color_correlation,
+      options,
+      table,
+      out);
     if (!status.ok()) {
       return status;
     }
@@ -712,8 +818,8 @@ Status FindAcStrategyGridGpuResident(
       prepared->impl_ =
         std::make_unique<ac_strategy_search_internal::Prepared>();
     } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
-      return failure.status();
-    } catch (const std::bad_alloc&) {
+    return failure.status();
+  } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
         "Unable to allocate prepared GPU AC-strategy search state");
     }
@@ -747,8 +853,8 @@ Status gpu_profile_internal::FindAcStrategyGridGpuResidentProfiled(
       prepared->impl_ =
         std::make_unique<ac_strategy_search_internal::Prepared>();
     } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
-      return failure.status();
-    } catch (const std::bad_alloc&) {
+    return failure.status();
+  } catch (const std::bad_alloc&) {
       return Status::OutOfMemory(
         "Unable to allocate prepared GPU AC-strategy search state");
     }

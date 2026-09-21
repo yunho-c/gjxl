@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -85,7 +86,7 @@ struct Fixture {
       for (size_t i = 0; i < image.plane(c).size(); ++i)
         image.plane(c)[i] = 0.05f + 0.8f * ((i * (c + 3)) % 127) / 127.0f;
     options.backend = metal ? VarDctBackendPreference::kMetal : VarDctBackendPreference::kCpu;
-    if (exact) options.metal_aq_mode = GpuAdaptiveQuantizationMode::kExactCoefficients;
+    if (exact) options.gpu_aq_mode = GpuAdaptiveQuantizationMode::kExactCoefficients;
     options.effort = 7; // Includes the coefficient-order path, unlike lower efforts.
     options.execution_domain = domain;
     options.cpu_thread_count = 1;
@@ -109,6 +110,10 @@ void SingleFailures(bool metal, bool exact = false, std::optional<Site> selected
       fixture.options.cpu_thread_count = threads;
       for (Kind kind : {Kind::kSystemError, Kind::kBadAlloc}) {
         for (size_t before : {0, 1, 2}) {
+          // Frontend/serializer dispatch caps even an explicit per-image
+          // limit at hardware concurrency; the caller consumes one slot.
+          if (before >=
+              std::max(1u, std::thread::hardware_concurrency()) - 1) continue;
           WorkerLaunchFaultForTesting fault{site, before, kind};
           fault.context = &fixture;
           fault.before_failure = +[](void* context) noexcept {
@@ -268,6 +273,8 @@ void PreparedForwardFailures() {
     Ok(frontend_storage_internal::ComputePreparedForwardStoragePlan(fixture.image.extent(), threads, &plan));
     for (Kind kind : {Kind::kSystemError, Kind::kBadAlloc}) {
       for (size_t before : {0, 1, 2}) {
+        if (before >=
+            std::max(1u, std::thread::hardware_concurrency()) - 1) continue;
         WorkerLaunchFaultForTesting fault{Site::kForwardTransforms, before, kind};
         PreparedForwardDctCoefficients result;
         result.pixel_extent = {8, 8};

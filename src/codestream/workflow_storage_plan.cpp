@@ -11,6 +11,9 @@
 #include "codestream/compatibility_workflow_storage_plan.h"
 #include "codestream/encoding_result_internal.h"
 #include "codestream/resident_workflow_storage_plan.h"
+#if defined(GJXL_ENABLE_CUDA)
+#include "codestream/cuda_workflow_storage_plan.h"
+#endif
 
 namespace gjxl::codestream_internal {
 namespace {
@@ -26,6 +29,8 @@ template <class Plan> void CopyBase(const Plan &base, WorkflowStoragePlan *p) {
   p->output = base.output;
   if constexpr (requires { base.idle_pool_capacity; })
     p->idle_pool_capacity = base.idle_pool_capacity;
+  if constexpr (requires { base.cuda_idle_capacity; })
+    p->cuda_idle_capacity = base.cuda_idle_capacity;
 }
 } // namespace
 
@@ -48,6 +53,18 @@ Status ComputeWorkflowStoragePlan(Extent2D source,
   CpuWorkflowStorageOptions plain{e, o.collect_timing, o.collect_profile};
   Status status;
   switch (o.route) {
+  case WorkflowStorageRoute::kCuda: {
+#if defined(GJXL_ENABLE_CUDA)
+    CudaWorkflowStoragePlan cuda;
+    status = ComputeCudaWorkflowStoragePlan(
+      source, {e, o.collect_timing, o.collect_profile, o.collect_gpu_profile}, &cuda);
+    if (!status.ok()) return status;
+    CopyBase(cuda, &p);
+    break;
+#else
+    return Status::Unavailable("CUDA workflow storage is not built");
+#endif
+  }
   case WorkflowStorageRoute::kCpu: {
     if (o.collect_gpu_profile)
       return Status::InvalidArgument("CPU route cannot produce GPU profiles");
@@ -58,6 +75,7 @@ Status ComputeWorkflowStoragePlan(Extent2D source,
     CopyBase(cpu, &p);
     break;
   }
+#if defined(GJXL_ENABLE_METAL)
   case WorkflowStorageRoute::kMetal: {
     if ((e.backend != VarDctBackendPreference::kMetal &&
          e.backend != VarDctBackendPreference::kAutomatic) ||
@@ -67,8 +85,8 @@ Status ComputeWorkflowStoragePlan(Extent2D source,
       return Status::InvalidArgument(
           "Metal route conflicts with workflow policy");
     const bool resident =
-        (e.metal_aq_mode == GpuAdaptiveQuantizationMode::kFullyResident ||
-         e.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput) &&
+        (e.gpu_aq_mode == GpuAdaptiveQuantizationMode::kFullyResident ||
+         e.gpu_aq_mode == GpuAdaptiveQuantizationMode::kThroughput) &&
         e.rate_control_mode != VarDctRateControlMode::kMaximumError;
     if (resident) {
       ResidentWorkflowStoragePlan base;
@@ -107,6 +125,11 @@ Status ComputeWorkflowStoragePlan(Extent2D source,
     p.idle_pool_capacity = base.metal.idle_pool_capacity;
     break;
   }
+#else
+  case WorkflowStorageRoute::kMetal:
+  case WorkflowStorageRoute::kAutomaticExactSearch:
+    return Status::Unavailable("Metal workflow storage is not built");
+#endif
   default:
     return Status::InvalidArgument("Workflow storage route is invalid");
   }
@@ -140,6 +163,8 @@ BatchWorkflowStorageAccumulator::AddRequest(const WorkflowStoragePlan *plan) {
     return Status::InvalidArgument(
         "Batch requires complete timed workflow plans");
   auto retained = retained_;
+  if (plan != nullptr && plan->cuda_idle_capacity >
+      std::numeric_limits<size_t>::max() - cuda_idle_capacity_) return Overflow();
   if (plan != nullptr &&
       !retained.Add({plan->output.retained_bytes, plan->output.retained_bytes}))
     return Overflow();
@@ -147,6 +172,7 @@ BatchWorkflowStorageAccumulator::AddRequest(const WorkflowStoragePlan *plan) {
   if (plan != nullptr) {
     ++encodable_;
     retained_ = retained;
+    cuda_idle_capacity_ += plan->cuda_idle_capacity;
     maximum_working_ = std::max(maximum_working_, plan->working.peak_bytes);
     for (size_t i = 0; i < idle_.size(); ++i)
       idle_[i] = std::max(idle_[i], plan->idle_pool_capacity[i]);
@@ -188,6 +214,7 @@ BatchWorkflowStorageAccumulator::Finish(size_t max_in_flight,
   for (size_t bytes : idle_)
     if (!p.idle_pools.Add({bytes, bytes}))
       return Overflow();
+  if (!p.idle_pools.Add({cuda_idle_capacity_, cuda_idle_capacity_})) return Overflow();
   // Keep caches when the hard limit permits it; otherwise require trimming
   // before a completed worker reuses its slot. Never discard retained results.
   if (p.idle_pools.peak_bytes > limit - p.minimum_required_bytes) {

@@ -65,6 +65,7 @@ ComputeEntropyAggregationStoragePlan(size_t maximum_values,
     if (!plan.output.AddVector<WeightedValue>(unique, kFreshExact) ||
         !plan.scratch.AddVector<uint64_t>(kEntropyDenseValueCount,
                                           kFreshExact) ||
+        !plan.scratch.Add({Backing::kEmptyBytes, Backing::kEmptyBytes}) ||
         !plan.scratch.Add({Backing::kNodeBytes, Backing::kNodeBytes}, sparse) ||
         !plan.scratch.Add({Backing::kRetainedBucketBytesPerEntry,
                           Backing::kPeakBucketBytesPerEntry}, sparse))

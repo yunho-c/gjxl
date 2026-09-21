@@ -9,14 +9,18 @@
 
 #include "codestream/batch_workflow.h"
 #include "codestream/workflow.h"
+#if defined(GJXL_DOWNSTREAM_HAS_METAL)
 #include "gpu/metal/metal_backend.h"
+#endif
 
 int main() {
+#if defined(GJXL_DOWNSTREAM_HAS_METAL)
   std::unique_ptr<gjxl::GpuBackend> embedded_backend;
   if (!gjxl::CreateEmbeddedMetalBackend({}, &embedded_backend).ok() ||
       embedded_backend == nullptr) {
     return EXIT_FAILURE;
   }
+#endif
   constexpr gjxl::Extent2D kExtent{1, 1};
   const std::array<float, 3> pixel = {0.2f, 0.3f, 0.4f};
   const gjxl::ConstImage3FView image{{

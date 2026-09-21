@@ -12,16 +12,24 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <string_view>
 #include <vector>
 
 #include "codec/ac_strategy.h"
 #include "codec/chroma_from_luma.h"
 #include "core/ac_strategy.h"
 #include "core/image.h"
+#ifdef GJXL_TEST_CUDA
+#include "gpu/cuda/cuda_backend.h"
+#else
 #include "gpu/metal/metal_backend.h"
+#endif
 #include "gpu/ops/ac_strategy_search.h"
+#ifdef GJXL_TEST_CUDA
+#include "gpu/ops/ac_strategy_search_profile_internal.h"
+#endif
 
-#ifndef GJXL_METALLIB_PATH
+#if !defined(GJXL_TEST_CUDA) && !defined(GJXL_METALLIB_PATH)
 #error "GJXL_METALLIB_PATH must point to the test metallib"
 #endif
 
@@ -90,6 +98,7 @@ struct SearchFixture {
   std::vector<float> pixel_mask;
 };
 
+#ifndef GJXL_TEST_CUDA
 gjxl::MetalBackendOptions OptionsFor(
   gjxl::MetalDctImplementation implementation) {
 
@@ -110,6 +119,8 @@ gjxl::MetalBackendOptions OptionsFor(
     .inverse_dct16x32 = implementation,
   };
 }
+
+#endif
 
 bool GridsEqual(
   const gjxl::AcStrategyGrid& expected, const gjxl::AcStrategyGrid& actual) {
@@ -250,7 +261,7 @@ bool CheckValidationAndAtomicCommit(gjxl::GpuBackend& gpu) {
 }
 
 bool CheckPreparedResidentReuse(gjxl::GpuBackend& gpu,
-                               gjxl::Extent2D extent = {128, 96}) {
+  gjxl::Extent2D extent = {128, 96}) {
   const SearchFixture fixture(extent, 0.35f);
   size_t pixel_count = 0;
   size_t block_count = 0;
@@ -326,17 +337,68 @@ bool CheckPreparedResidentReuse(gjxl::GpuBackend& gpu,
   gjxl::PreparedAcStrategySearch prepared;
   gjxl::AcStrategyGrid first;
   gjxl::AcStrategyGrid second;
-  gjxl::AcStrategyGpuSearchStats first_stats;
+  gjxl::AcStrategyGpuSearchStats stats;
   if (!gjxl::FindAcStrategyGridGpuResident(
         gpu, fixture.Opsin(), fixture.QuantField(), fixture.PixelMask(),
-        color_map, resident, {.butteraugli_target = 1.2f}, &first, &first_stats,
-        &prepared).ok() || !first_stats.device_selection) {
+        color_map, resident, {.butteraugli_target = 1.2f}, &first, &stats,
+        &prepared).ok() ||
+      stats.device_selection != gjxl::CanDeferAcStrategySearch(gpu, {})) {
     return false;
   }
   const gjxl::GpuBackendStats after_first = gpu.stats();
+  // Independently reconstruct the exact owning arena layout from the staged
+  // counts. This catches a planner that queries compact sizes but allocates
+  // or separates the ranges using the obsolete full-buffer formula.
+  size_t expected_capacity = 0;
+  gjxl::AcStrategyScratchRequirements expected_scratch;
+  size_t conservative_packed = 0;
+  const auto Append = [&](size_t bytes) {
+    if (bytes == 0) return;
+    expected_capacity = (expected_capacity + 255) / 256 * 256 + bytes;
+  };
+  for (size_t i = 0; i < stats.candidate_counts.size(); ++i) {
+    const size_t count = stats.candidate_counts[i];
+    if (count == 0) continue;
+    const auto strategy = static_cast<gjxl::AcStrategyType>(i);
+    const size_t coefficients = gjxl::GetAcStrategyInfo(strategy)->coefficient_count();
+    Append(count * sizeof(gjxl::AcStrategyCandidate));
+    Append(6 * coefficients * sizeof(float));
+    Append(count * sizeof(float));
+    gjxl::AcStrategyScratchRequirements scratch;
+    if (!gjxl::GetAcStrategyScratchRequirements(gpu, strategy, count,
+          &scratch).ok()) return false;
+    expected_scratch.scratch_a_bytes =
+      std::max(expected_scratch.scratch_a_bytes, scratch.scratch_a_bytes);
+    expected_scratch.scratch_b_bytes =
+      std::max(expected_scratch.scratch_b_bytes, scratch.scratch_b_bytes);
+    expected_scratch.rate_scratch_bytes =
+      std::max(expected_scratch.rate_scratch_bytes, scratch.rate_scratch_bytes);
+    conservative_packed = std::max(conservative_packed,
+      count * 3 * coefficients * sizeof(float));
+  }
+  Append(expected_scratch.scratch_a_bytes);
+  Append(expected_scratch.scratch_b_bytes);
+  Append(expected_scratch.rate_scratch_bytes);
+#ifdef GJXL_TEST_CUDA
+  if (expected_scratch.scratch_b_bytes != 0) {
+    std::cerr << "CUDA AC search still requires forward coefficient scratch\n";
+    return false;
+  }
+#endif
+  // CUDA packs scratch into one aligned arena; Metal retains independently
+  // allocated buffers and therefore has no resource-arena capacity.
+  if (stats.resource_capacity_bytes !=
+        (gpu.kind() == gjxl::BackendKind::kCuda ? expected_capacity : 0) ||
+      stats.scratch.scratch_a_bytes != expected_scratch.scratch_a_bytes ||
+      stats.scratch.scratch_b_bytes != expected_scratch.scratch_b_bytes ||
+      stats.scratch.rate_scratch_bytes != expected_scratch.rate_scratch_bytes) {
+    std::cerr << "Prepared AC search allocated the wrong scratch layout\n";
+    return false;
+  }
+  const size_t first_capacity = stats.resource_capacity_bytes;
   if (!gjxl::FindAcStrategyGridGpuResident(
         gpu, fixture.Opsin(), fixture.QuantField(), fixture.PixelMask(),
-        color_map, resident, {.butteraugli_target = 0.9f}, &second, nullptr,
+        color_map, resident, {.butteraugli_target = 0.9f}, &second, &stats,
         &prepared).ok()) {
     return false;
   }
@@ -345,8 +407,66 @@ bool CheckPreparedResidentReuse(gjxl::GpuBackend& gpu,
         after_first.successful_allocations ||
       after_second.committed_submissions !=
         after_first.committed_submissions + 1 ||
+      stats.resource_capacity_bytes != first_capacity ||
       !first.complete() || !second.complete()) {
     std::cerr << "Prepared resident AC search did not reuse allocations\n";
+    return false;
+  }
+#ifdef GJXL_TEST_CUDA
+  auto* profiler = dynamic_cast<gjxl::gpu_profile_internal::GpuSubmissionProfiler*>(&gpu);
+  if (profiler == nullptr) return false;
+  gjxl::gpu_profile_internal::GpuProfilingSession session(
+    gjxl::gpu_profile_internal::GpuProfilingMode::kStage,
+    profiler->QueryGpuProfilingCapabilities());
+  gjxl::AcStrategyGrid profiled;
+  const auto profile_status = gjxl::gpu_profile_internal::FindAcStrategyGridGpuResidentProfiled(
+    gpu, fixture.Opsin(), fixture.QuantField(), {}, color_map, resident,
+    {.butteraugli_target = 0.9f}, &profiled, &prepared, &session);
+  auto profile = std::move(session).Finish();
+  if (!profile_status.ok() || !GridsEqual(second, profiled) ||
+      profile.submissions.size() != 1 || profile.wall_stages.empty() ||
+      profile.submissions.front().stages.size() != 1 ||
+      profile.submissions.front().stages.front().gpu_nanoseconds == 0) {
+    std::cerr << "Profiled AC search changed results or omitted timings: "
+              << profile_status.message() << '\n';
+    return false;
+  }
+#endif
+  std::cout << "Prepared AC search " << extent.width << 'x' << extent.height
+            << " arena_bytes=" << stats.resource_capacity_bytes
+            << " scratch_a_bytes=" << stats.scratch.scratch_a_bytes
+            << " scratch_b_bytes=" << stats.scratch.scratch_b_bytes
+            << " rate_bytes=" << stats.scratch.rate_scratch_bytes
+            << " conservative_a_bytes=" << conservative_packed << '\n';
+  // Shrink the logical views without changing their owning input buffers or
+  // row strides, then restore the original layout. The scratch arena must
+  // retain capacity, reset all offsets, and require no new allocation.
+  auto small_resident = resident;
+  for (auto& plane : small_resident.opsin.plane) plane.extent = {64, 64};
+  small_resident.pixel_mask.extent = {64, 64};
+  small_resident.quant_field.extent = {8, 8};
+  auto small_opsin = fixture.Opsin();
+  for (auto& plane : small_opsin.plane) plane.extent = {64, 64};
+  auto small_quant = fixture.QuantField();
+  small_quant.extent = {8, 8};
+  auto small_mask = fixture.PixelMask();
+  small_mask.extent = {64, 64};
+  gjxl::ColorCorrelationMap small_color;
+  gjxl::AcStrategyGrid small_grid;
+  gjxl::AcStrategyGrid restored;
+  if (!gjxl::ComputeInitialColorCorrelationMap(small_opsin, &small_color).ok() ||
+      !gjxl::FindAcStrategyGridGpuResident(gpu, small_opsin, small_quant,
+        small_mask, small_color, small_resident, {.butteraugli_target = 1.2f},
+        &small_grid, &stats, &prepared).ok() ||
+      small_grid.extent() != gjxl::Extent2D{8, 8} || !small_grid.complete() ||
+      stats.resource_capacity_bytes != first_capacity ||
+      !gjxl::FindAcStrategyGridGpuResident(gpu, fixture.Opsin(),
+        fixture.QuantField(), fixture.PixelMask(), color_map, resident,
+        {.butteraugli_target = 1.2f}, &restored, &stats, &prepared).ok() ||
+      stats.resource_capacity_bytes != first_capacity ||
+      gpu.stats().successful_allocations != after_first.successful_allocations ||
+      !GridsEqual(first, restored)) {
+    std::cerr << "Prepared AC search failed shrink/restore reuse\n";
     return false;
   }
   gjxl::AcStrategyGrid omitted;
@@ -398,8 +518,8 @@ bool CheckPreparedResidentReuse(gjxl::GpuBackend& gpu,
           color_map, options, &expected).ok() ||
         !gjxl::FindAcStrategyGridGpuResident(
           gpu, {}, fixture.QuantField(), {}, color_map, resident,
-          options, &omitted, &first_stats, &prepared).ok() ||
-        first_stats.device_selection == dense ||
+          options, &omitted, &stats, &prepared).ok() ||
+        stats.device_selection != gjxl::CanDeferAcStrategySearch(gpu, options) ||
         !GridsEqual(expected, omitted)) {
       std::cerr << "Prepared AC policy transition changed placement\n";
       return false;
@@ -421,8 +541,21 @@ bool CheckPreparedResidentReuse(gjxl::GpuBackend& gpu,
 
 }  // namespace
 
-int main() {
+int main(int argc, char** argv) {
   std::unique_ptr<gjxl::GpuBackend> gpu;
+#ifdef GJXL_TEST_CUDA
+  const gjxl::Status create_status = gjxl::CreateCudaBackend(&gpu);
+  if (!create_status.ok()) {
+    std::cerr << "CUDA backend unavailable: " << create_status.message() << '\n';
+    return 77;
+  }
+  if (argc == 2 && std::string_view(argv[1]) == "--memory-4k") {
+    return CheckPreparedResidentReuse(*gpu, {3840, 2160})
+      ? EXIT_SUCCESS : EXIT_FAILURE;
+  }
+#else
+  (void)argc;
+  (void)argv;
   const gjxl::Status create_status =
     gjxl::CreateMetalBackend(
       GJXL_METALLIB_PATH,
@@ -433,6 +566,7 @@ int main() {
               << '\n';
     return EXIT_FAILURE;
   }
+#endif
   if (!CheckSearchParity(*gpu, {8, 8}, 1.2f, 0.0f, false) ||
       !CheckSearchParity(*gpu, {32, 32}, 0.8f, 0.2f, false) ||
       !CheckSearchParity(*gpu, {64, 64}, 1.2f, 0.0f, true) ||
@@ -459,6 +593,7 @@ int main() {
     }
   }
 
+#ifndef GJXL_TEST_CUDA
   std::unique_ptr<gjxl::GpuBackend> scalar_gpu;
   const gjxl::Status scalar_status =
     gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &scalar_gpu);
@@ -483,5 +618,6 @@ int main() {
               << factored_status.message() << '\n';
     return EXIT_FAILURE;
   }
+#endif
   return EXIT_SUCCESS;
 }

@@ -35,7 +35,11 @@ if(GJXL_CHECK_INSTALLED_HEADERS)
   add_library(gjxl_installed_headers OBJECT ${header_sources})
   target_link_libraries(gjxl_installed_headers PRIVATE gjxl::c gjxl::codestream)
   target_compile_features(gjxl_installed_headers PRIVATE c_std_11)
-  target_compile_options(gjxl_installed_headers PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  if(MSVC)
+    target_compile_options(gjxl_installed_headers PRIVATE /W4 /WX)
+  else()
+    target_compile_options(gjxl_installed_headers PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  endif()
   # Combining translation units or pre-including other headers would hide a
   # missing dependency in the installed interface.
   set_target_properties(gjxl_installed_headers PROPERTIES
@@ -66,6 +70,14 @@ target_link_libraries(
     gjxl::codestream
 )
 
+if(TARGET gjxl::metal)
+  target_compile_definitions(
+    gjxl_codestream_consumer
+    PRIVATE
+      GJXL_DOWNSTREAM_HAS_METAL=1
+  )
+endif()
+
 add_executable(
   gjxl_c_consumer
   c_api_consumer.c
@@ -83,14 +95,18 @@ target_compile_features(
     c_std_11
 )
 
-target_compile_options(
-  gjxl_c_consumer
-  PRIVATE
-    -Wall
-    -Wextra
-    -Wpedantic
-    -Werror
-)
+if(MSVC)
+  target_compile_options(gjxl_c_consumer PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    gjxl_c_consumer
+    PRIVATE
+      -Wall
+      -Wextra
+      -Wpedantic
+      -Werror
+  )
+endif()
 
 target_link_libraries(
   gjxl_c_consumer
@@ -101,4 +117,8 @@ target_link_libraries(
 add_executable(gjxl_domain_consumer execution_domain_consumer.cpp legacy_context_consumer.c legacy_domain_consumer.c)
 target_link_libraries(gjxl_domain_consumer PRIVATE gjxl::c gjxl::codestream)
 target_compile_features(gjxl_domain_consumer PRIVATE c_std_11)
-target_compile_options(gjxl_domain_consumer PRIVATE -Wall -Wextra -Wpedantic -Werror)
+if(MSVC)
+  target_compile_options(gjxl_domain_consumer PRIVATE /W4 /WX)
+else()
+  target_compile_options(gjxl_domain_consumer PRIVATE -Wall -Wextra -Wpedantic -Werror)
+endif()

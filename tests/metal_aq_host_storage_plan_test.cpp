@@ -261,10 +261,10 @@ struct Fixture {
            std::array<std::tuple<size_t, size_t, AcStrategyType>, 6>{
                {{0, 0, AcStrategyType::kDct32x32},
                 {4, 0, AcStrategyType::kDct32x16},
-                {6, 0, AcStrategyType::kDct16x32},
-                {10, 0, AcStrategyType::kDct16x16},
-                {6, 2, AcStrategyType::kDct16x8},
-                {7, 2, AcStrategyType::kDct8x16}}})
+                {4, 4, AcStrategyType::kDct16x32},
+                {8, 0, AcStrategyType::kDct16x16},
+                {10, 0, AcStrategyType::kDct16x8},
+                {10, 2, AcStrategyType::kDct8x16}}})
         if (!Ok(mixed.Set(x, y, type)))
           return false;
     } else if (blocks.width >= 2 && blocks.height >= 2) {
@@ -631,6 +631,9 @@ bool CheckProfileInputs(GpuBackend &gpu) {
             shape.maximum_submission_id_length =
                 observed.submissions[0].submission_id.size();
             for (const auto &stage : observed.submissions[0].stages) {
+              if (!Check(!stage.dispatches.empty(),
+                         "Resident AQ profile contains an empty stage"))
+                return false;
               if ((stage.stage_id == "butteraugli.resident_reduction" &&
                    !Check(stage.dispatches.size() == family_count +
                               ButteraugliReductionDispatchCount(anchors),

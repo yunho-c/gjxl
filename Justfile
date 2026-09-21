@@ -71,6 +71,12 @@ metal-encode-benchmark workload="padded_4k" implementation="simd" samples="7" wa
     cmake --build "{{ build_dir }}/release" --target gjxl_encoding_benchmark -j
     "{{ build_dir }}/release/gjxl_encoding_benchmark" --scope metal-public-workflow --workload "{{ workload }}" --implementation "{{ implementation }}" --gpu-aq "{{ gpu_aq }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
 
+# Measure the public CPU/CUDA encoder boundary with wall-time stage profiles.
+cuda-encode-benchmark workload="padded_1080p" samples="5" warmups="2" gpu_aq="fully-resident":
+    cmake -S . -B "{{ build_dir }}/cuda-profile" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_ENABLE_CUDA=ON -DGJXL_ENABLE_METAL=OFF -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF
+    cmake --build "{{ build_dir }}/cuda-profile" --target gjxl_cuda_encoding_benchmark -j
+    "{{ build_dir }}/cuda-profile/gjxl_cuda_encoding_benchmark" --workload "{{ workload }}" --gpu-aq "{{ gpu_aq }}" --samples "{{ samples }}" --warmups "{{ warmups }}"
+
 # Run the codestream regression set from a natural image through 4K.
 encoding-regression-benchmark implementation="simd" samples="5" warmups="2" gpu_aq="fully-resident" distance="1.0":
     cmake -S . -B "{{ build_dir }}/release" -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DHWY_ENABLE_TESTS=OFF

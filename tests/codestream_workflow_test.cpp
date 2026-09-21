@@ -590,11 +590,11 @@ bool CheckEffortPolicy() {
       std::cerr << "Initial quantization effort boundary changed\n";
       return false;
     }
-    options.metal_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput;
+    options.gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput;
     ConfigureInitialQuantizationPolicy(options, &pipeline);
     if (pipeline.uniform_initial_quantization ||
         !pipeline.adaptive_quantization.profile.loop_filter.gaborish) return false;
-    options.metal_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
+    options.gpu_aq_mode = gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
     options.density_mode = gjxl::VarDctDensityMode::kHighDensity;
     ConfigureInitialQuantizationPolicy(options, &pipeline);
     if (pipeline.uniform_initial_quantization ||
@@ -669,6 +669,7 @@ bool CheckEffortPolicy() {
     }
   }
 
+#if GJXL_TEST_HAS_METAL
   for (const int32_t effort : {1, 2, 3, 4, 5, 7, 8, 9, 10}) {
     const size_t index = static_cast<size_t>(effort - 1);
     const size_t expected_score_count = effort <= 4
@@ -686,7 +687,7 @@ bool CheckEffortPolicy() {
         summary.final_butteraugli_score_evaluated ||
         summary.execution_backend !=
           gjxl::VarDctExecutionBackend::kMetal ||
-        summary.metal_aq_mode !=
+        summary.gpu_aq_mode !=
           gjxl::GpuAdaptiveQuantizationMode::kFullyResident ||
         summary.entropy_behavior !=
           (effort >= 8 ? gjxl::VarDctEntropyBehavior::kRateOptimized
@@ -722,6 +723,7 @@ bool CheckEffortPolicy() {
       }
     }
   }
+#endif
   return true;
 }
 
@@ -785,7 +787,7 @@ bool CheckCompressionPolicy() {
     for (auto mode : {gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients,
                       gjxl::GpuAdaptiveQuantizationMode::kThroughput,
                       gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput})
-      if (FinalColorCorrelationIterations({.effort = effort, .metal_aq_mode = mode}, true) != 0)
+      if (FinalColorCorrelationIterations({.effort = effort, .gpu_aq_mode = mode}, true) != 0)
         return false;
     if (FinalColorCorrelationIterations(
           {.effort = effort, .density_mode = VarDctDensityMode::kHighDensity}, true) != 0 ||
@@ -985,38 +987,38 @@ bool CheckInvalidRequestsAreAtomic() {
           {.butteraugli_target = 1.0f,
            .density_mode = gjxl::VarDctDensityMode::kHighDensity,
            .backend = gjxl::VarDctBackendPreference::kMetal,
-           .metal_aq_mode =
+           .gpu_aq_mode =
                gjxl::GpuAdaptiveQuantizationMode::kThroughput}) ||
       !rejected_atomically(
           image.View(),
           {.butteraugli_target = 1.0f,
            .density_mode = gjxl::VarDctDensityMode::kHighDensity,
            .backend = gjxl::VarDctBackendPreference::kMetal,
-           .metal_aq_mode =
+           .gpu_aq_mode =
                gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput}) ||
       !rejected_atomically(
           image.View(),
           {.butteraugli_target = 1.0f,
            .backend = gjxl::VarDctBackendPreference::kCpu,
-           .metal_aq_mode =
+           .gpu_aq_mode =
                gjxl::GpuAdaptiveQuantizationMode::kThroughput}) ||
       !rejected_atomically(
           image.View(),
           {.butteraugli_target = 1.0f,
            .backend = gjxl::VarDctBackendPreference::kAutomatic,
-           .metal_aq_mode =
+           .gpu_aq_mode =
                gjxl::GpuAdaptiveQuantizationMode::kThroughput}) ||
       !rejected_atomically(
           image.View(),
           {.butteraugli_target = 1.0f,
            .backend = gjxl::VarDctBackendPreference::kCpu,
-           .metal_aq_mode =
+           .gpu_aq_mode =
                gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput}) ||
       !rejected_atomically(
           image.View(),
           {.butteraugli_target = 1.0f,
            .backend = gjxl::VarDctBackendPreference::kAutomatic,
-           .metal_aq_mode =
+           .gpu_aq_mode =
                gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput}) ||
       !rejected_atomically(
           image.View(),
@@ -1024,13 +1026,13 @@ bool CheckInvalidRequestsAreAtomic() {
              gjxl::VarDctRateControlMode::kMaximumError,
            .maximum_error = {0.01f, 0.01f, 0.01f},
            .backend = gjxl::VarDctBackendPreference::kMetal,
-           .metal_aq_mode =
+           .gpu_aq_mode =
                gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput}) ||
       !rejected_atomically(
           image.View(),
           {.butteraugli_target = 1.0f,
            .backend = gjxl::VarDctBackendPreference::kMetal,
-           .metal_aq_mode =
+           .gpu_aq_mode =
                static_cast<gjxl::GpuAdaptiveQuantizationMode>(99)})) {
     std::cerr << "Invalid workflow request changed output\n";
     return false;
@@ -1334,8 +1336,9 @@ bool CheckTargetSizeControl() {
 }
 
 bool CheckPreparationCacheTrim() {
-  if (!gjxl::TrimVarDctPreparationCache().ok() ||
-      gjxl::MetalButteraugliProcessCacheBytesForTesting() != 0) return false;
+  if (!gjxl::TrimVarDctPreparationCache().ok()) return false;
+#if GJXL_TEST_HAS_METAL
+  if (gjxl::MetalButteraugliProcessCacheBytesForTesting() != 0) return false;
   const auto available =
     gjxl::codestream_internal::EnsureProductionMetalBackendAvailable();
   if (!available.ok()) return available.code() == gjxl::StatusCode::kUnavailable;
@@ -1355,6 +1358,7 @@ bool CheckPreparationCacheTrim() {
       !gjxl::EncodeLinearRgbVarDctCodestream(image.View(), options, &after).ok() ||
       before != after ||
       gjxl::MetalButteraugliProcessCacheBytesForTesting() == 0) return false;
+#endif
   return gjxl::TrimVarDctPreparationCache().ok();
 }
 
