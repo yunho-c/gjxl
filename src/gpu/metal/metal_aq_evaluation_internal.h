@@ -451,6 +451,12 @@ private:
       const ResidentAqProfileInputOptions&,
       ResidentAqProfileInputStoragePlan*);
   enum class ResidentProfileStage : uint8_t {
+    kStrategyCandidate,
+    kStrategySelection,
+    kStrategyMetadata,
+    kStrategyDispatch,
+    kQuantFieldAdjustment,
+    kPolicyBounds,
     kReconstruction,
     kPolicyInitialize,
     kGaborish,
@@ -516,6 +522,8 @@ private:
   Status ReconfigureImpl(const AcStrategyGrid &, ConstPlaneU8View,
                          bool metadata_on_device);
   Status FinishResidentStrategyMetadata(AcStrategyGrid *);
+  void EncodeResidentStrategyMetadataOnly(MetalBackend &,
+                                    MTL::ComputeCommandEncoder *);
   void EncodeResidentStrategyMetadata(MetalBackend &,
                                       MTL::ComputeCommandEncoder *);
   bool resident_strategy_metadata_enabled_ = false;

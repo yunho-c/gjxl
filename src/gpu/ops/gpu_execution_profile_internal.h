@@ -48,6 +48,9 @@ struct GpuProfilingCapabilities {
 enum class GpuDispatchKind : uint8_t {
   kThreads,
   kThreadgroups,
+  // GPU-generated arguments. grid is resolved from shared arguments only
+  // after completion; profiling never replaces the indirect dispatch.
+  kIndirectThreadgroups,
 };
 
 struct GpuExtent3D {
@@ -67,6 +70,7 @@ struct GpuDispatchProfile {
   uint64_t begin_timestamp = 0;
   uint64_t end_timestamp = 0;
   uint64_t gpu_nanoseconds = 0;
+  bool timestamp_valid = false;
 
   bool operator==(const GpuDispatchProfile&) const = default;
 };
@@ -79,6 +83,8 @@ struct GpuStageProfile {
   uint64_t begin_timestamp = 0;
   uint64_t end_timestamp = 0;
   uint64_t gpu_nanoseconds = 0;
+  // False for a verified empty indirect stage, or before timestamp resolution.
+  bool timestamp_valid = false;
   ProfileStorage<GpuDispatchProfile> dispatches;
 
   bool operator==(const GpuStageProfile&) const = default;
@@ -311,6 +317,13 @@ public:
 class GpuAcStrategyEvaluationProfiler {
 public:
   virtual ~GpuAcStrategyEvaluationProfiler() = default;
+
+  [[nodiscard]] virtual Status EvaluateAndSelectAcStrategyCandidateBatchesProfiled(
+    std::span<const AcStrategyCandidateBatch> batches,
+    AcStrategyDeviceSelection selection, GpuProfilingMode mode,
+    std::unique_ptr<GpuSubmission>* submission) {
+    return Status::Unavailable("Device AC selection profiling is unavailable");
+  }
 
   [[nodiscard]] virtual Status EvaluateAcStrategyCandidateBatchesProfiled(
     std::span<const AcStrategyCandidateBatch> batches,

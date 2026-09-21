@@ -13,6 +13,7 @@
 #include "gpu/ops/aq_evaluation.h"
 
 namespace gjxl {
+namespace gpu_profile_internal { class GpuProfilingSession; }
 
 /// Selects where GPU adaptive-quantization evaluation begins.
 enum class GpuAdaptiveQuantizationMode {
@@ -192,7 +193,8 @@ struct PreparedAdaptiveQuantization {
     AdaptiveQuantizationOptions, GpuAdaptiveQuantizationMode,
     PreparedAdaptiveQuantization *, const DeferredAcStrategySearch &,
     AcStrategyGrid *, AdaptiveQuantizationOutput,
-    AdaptiveQuantizationMaterialization = {});
+    AdaptiveQuantizationMaterialization = {},
+    gpu_profile_internal::GpuProfilingSession * = nullptr);
 
 [[nodiscard]] Status RunPreparedGpuAdaptiveQuantization(
   GpuBackend& gpu,

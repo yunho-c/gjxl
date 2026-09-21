@@ -43,6 +43,8 @@ struct ActiveDispatchProfile {
   GpuProfilingMode mode = GpuProfilingMode::kDisabled;
   MTL::CounterSampleBuffer* sample_buffer = nullptr;
   gpu_profile_internal::GpuStageProfile* stage = nullptr;
+  gpu_profile_internal::ProfileStorage<MetalIndirectDispatchRecord>* indirect = nullptr;
+  size_t stage_index = 0;
   size_t next_sample = 0;
   size_t maximum_samples = 0;
   bool overflow = false;
@@ -78,14 +80,20 @@ size_t g_next_pipeline_registry_victim = 0;
 
 void EncodeProfiledDispatch(
     MTL::ComputeCommandEncoder* encoder, GpuDispatchKind kind,
-    MTL::Size grid, MTL::Size threads_per_threadgroup) {
-  ActiveDispatchProfile* active = g_active_dispatch_profile;
-  if (active == nullptr || active->stage == nullptr) {
+    MTL::Size grid, MTL::Size threads_per_threadgroup,
+    MTL::Buffer* arguments = nullptr, NS::UInteger offset = 0) {
+  const auto dispatch = [&] {
     if (kind == GpuDispatchKind::kThreads) {
       encoder->dispatchThreads(grid, threads_per_threadgroup);
+    } else if (kind == GpuDispatchKind::kIndirectThreadgroups) {
+      encoder->dispatchThreadgroups(arguments, offset, threads_per_threadgroup);
     } else {
       encoder->dispatchThreadgroups(grid, threads_per_threadgroup);
     }
+  };
+  ActiveDispatchProfile* active = g_active_dispatch_profile;
+  if (active == nullptr || active->stage == nullptr) {
+    dispatch();
     return;
   }
 
@@ -115,6 +123,10 @@ void EncodeProfiledDispatch(
       },
       .invocation = static_cast<uint32_t>(invocation),
     });
+    if (kind == GpuDispatchKind::kIndirectThreadgroups) {
+      active->indirect->push_back(
+          {NS::RetainPtr(arguments), offset, active->stage_index, invocation});
+    }
   } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
     active->allocation_failed = true;
     if (active->allocation_failure.ok()) active->allocation_failure = failure.status();
@@ -123,11 +135,7 @@ void EncodeProfiledDispatch(
   } catch (const std::length_error&) {
     active->allocation_failed = true;
   }
-  if (kind == GpuDispatchKind::kThreads) {
-    encoder->dispatchThreads(grid, threads_per_threadgroup);
-  } else {
-    encoder->dispatchThreadgroups(grid, threads_per_threadgroup);
-  }
+  dispatch();
   if (active->mode == GpuProfilingMode::kDispatch && !active->overflow) {
     encoder->sampleCountersInBuffer(
       active->sample_buffer, active->next_sample++, true);
@@ -158,14 +166,16 @@ public:
     NS::SharedPtr<MTL::CounterSampleBuffer> counter_sample_buffer = {},
     GpuSubmissionProfile profile = {},
     GpuProfilingMode profiling_mode = GpuProfilingMode::kDisabled,
-    size_t resolved_sample_count = 0)
+    size_t resolved_sample_count = 0,
+    gpu_profile_internal::ProfileStorage<MetalIndirectDispatchRecord> indirect = {})
     : command_buffer_(std::move(command_buffer)),
       command_queue_(std::move(command_queue)),
       device_(std::move(device)),
       test_fail_completion_(test_fail_completion),
       counter_sample_buffer_(std::move(counter_sample_buffer)),
       profile_(std::move(profile)), profiling_mode_(profiling_mode),
-      resolved_sample_count_(resolved_sample_count) {}
+      resolved_sample_count_(resolved_sample_count),
+      indirect_(std::move(indirect)) {}
 
   ~MetalSubmission() override = default;
 
@@ -239,9 +249,29 @@ public:
 
     try {
       GpuSubmissionProfile candidate = profile_;
+      for (const auto& record : indirect_) {
+        const auto* contents = static_cast<const uint8_t*>(record.arguments->contents());
+        if (contents == nullptr || record.offset > record.arguments->length() ||
+            record.arguments->length() - record.offset < 3 * sizeof(uint32_t))
+          return Status::DeviceError("Indirect profile arguments are not host-readable");
+        std::array<uint32_t, 3> grid;
+        std::memcpy(grid.data(), contents + record.offset, sizeof(grid));
+        candidate.stages[record.stage].dispatches[record.dispatch].grid =
+            {grid[0], grid[1], grid[2]};
+      }
+      const auto empty_dispatch = [](const GpuDispatchProfile& dispatch) {
+        return dispatch.kind == GpuDispatchKind::kIndirectThreadgroups &&
+            (dispatch.grid.width == 0 || dispatch.grid.height == 0 ||
+             dispatch.grid.depth == 0);
+      };
       const auto* bytes = static_cast<const uint8_t*>(resolved->bytes());
       if (profiling_mode_ == GpuProfilingMode::kStage) {
         for (size_t index = 0; index < candidate.stages.size(); ++index) {
+          // GPU-empty indirect encoders may leave counter slots unwritten.
+          // Their zero work is known from completed arguments, not a timestamp.
+          const auto& stage = candidate.stages[index];
+          if (!stage.dispatches.empty() &&
+              std::ranges::all_of(stage.dispatches, empty_dispatch)) continue;
           MTL::CounterResultTimestamp begin{};
           MTL::CounterResultTimestamp end{};
           std::memcpy(
@@ -252,9 +282,11 @@ public:
               end.timestamp == MTL::CounterErrorValue ||
               end.timestamp < begin.timestamp) {
             return Status::DeviceError(
-              "Metal timestamp counter returned an invalid stage interval");
+              "Metal timestamp counter returned an invalid stage interval: " +
+              std::string(candidate.stages[index].stage_id));
           }
           candidate.stages[index].begin_timestamp = begin.timestamp;
+          candidate.stages[index].timestamp_valid = true;
           candidate.stages[index].end_timestamp = end.timestamp;
           candidate.stages[index].gpu_nanoseconds =
             end.timestamp - begin.timestamp;
@@ -269,6 +301,7 @@ public:
               &begin, bytes + sample_index++ * sizeof(begin), sizeof(begin));
             std::memcpy(
               &end, bytes + sample_index++ * sizeof(end), sizeof(end));
+            if (empty_dispatch(dispatch)) continue;
             if (begin.timestamp == MTL::CounterErrorValue ||
                 end.timestamp == MTL::CounterErrorValue ||
                 end.timestamp < begin.timestamp) {
@@ -276,12 +309,17 @@ public:
                 "Metal timestamp counter returned an invalid dispatch interval");
             }
             dispatch.begin_timestamp = begin.timestamp;
+            dispatch.timestamp_valid = true;
             dispatch.end_timestamp = end.timestamp;
             dispatch.gpu_nanoseconds = end.timestamp - begin.timestamp;
           }
-          if (!stage.dispatches.empty()) {
-            stage.begin_timestamp = stage.dispatches.front().begin_timestamp;
-            stage.end_timestamp = stage.dispatches.back().end_timestamp;
+          for (const auto& dispatch : stage.dispatches) {
+            if (!dispatch.timestamp_valid) continue;
+            if (!stage.timestamp_valid) stage.begin_timestamp = dispatch.begin_timestamp;
+            stage.timestamp_valid = true;
+            stage.end_timestamp = dispatch.end_timestamp;
+          }
+          if (stage.timestamp_valid) {
             stage.gpu_nanoseconds =
               stage.end_timestamp - stage.begin_timestamp;
           }
@@ -309,6 +347,7 @@ private:
   GpuSubmissionProfile profile_;
   GpuProfilingMode profiling_mode_ = GpuProfilingMode::kDisabled;
   size_t resolved_sample_count_ = 0;
+  gpu_profile_internal::ProfileStorage<MetalIndirectDispatchRecord> indirect_;
   std::once_flag wait_once_;
   Status completion_status_;
 };
@@ -329,6 +368,14 @@ void DispatchMetalThreadgroups(
   EncodeProfiledDispatch(
     encoder, GpuDispatchKind::kThreadgroups, threadgroups_per_grid,
     threads_per_threadgroup);
+}
+
+void DispatchMetalIndirectThreadgroups(
+    MTL::ComputeCommandEncoder* encoder, MTL::Buffer* arguments,
+    NS::UInteger offset, MTL::Size threads_per_threadgroup) {
+  EncodeProfiledDispatch(encoder, GpuDispatchKind::kIndirectThreadgroups,
+                        MTL::Size(0, 0, 0), threads_per_threadgroup,
+                        arguments, offset);
 }
 
 void RegisterMetalComputePipeline(
@@ -599,6 +646,7 @@ Status MetalBackend::SubmitComputeProfiled(
     label, NS::UTF8StringEncoding));
 
   GpuSubmissionProfile profile;
+  gpu_profile_internal::ProfileStorage<MetalIndirectDispatchRecord> indirect;
   try {
     profile.stages.reserve(stages.size());
   } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
@@ -613,6 +661,7 @@ Status MetalBackend::SubmitComputeProfiled(
   ActiveDispatchProfile active_dispatch{
     .mode = mode,
     .sample_buffer = sample_buffer.get(),
+    .indirect = &indirect,
     .maximum_samples = allocated_sample_count,
   };
   for (size_t index = 0; index < stages.size(); ++index) {
@@ -658,6 +707,7 @@ Status MetalBackend::SubmitComputeProfiled(
         "Metal stage profile metadata is too large");
     }
     active_dispatch.stage = &profile.stages.back();
+    active_dispatch.stage_index = index;
     encoder->setLabel(NS::String::string(
       stage.stage_id, NS::UTF8StringEncoding));
     {
@@ -692,7 +742,8 @@ Status MetalBackend::SubmitComputeProfiled(
   }
   std::unique_ptr<GpuSubmission> pending(new MetalSubmission(
     command_buffer, command_queue_, device_, fail_completion,
-    sample_buffer, std::move(profile), mode, resolved_sample_count));
+    sample_buffer, std::move(profile), mode, resolved_sample_count,
+    std::move(indirect)));
   raw_command_buffer->commit();
   RecordCommittedSubmission();
   *submission = std::move(pending);

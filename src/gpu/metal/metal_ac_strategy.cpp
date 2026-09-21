@@ -446,6 +446,16 @@ Status MetalBackend::ValidateAcStrategySelection(
   return Status::Ok();
 }
 
+Status MetalBackend::EvaluateAndSelectAcStrategyCandidateBatchesProfiled(
+    std::span<const AcStrategyCandidateBatch> batches,
+    AcStrategyDeviceSelection selection,
+    gpu_profile_internal::GpuProfilingMode mode,
+    std::unique_ptr<GpuSubmission>* submission) {
+  if (mode == gpu_profile_internal::GpuProfilingMode::kDisabled)
+    return Status::InvalidArgument("Profiled AC-strategy mode is disabled");
+  return SubmitAcStrategyCandidatesImpl(batches, mode, submission, &selection);
+}
+
 Status MetalBackend::EvaluateAcStrategyCandidateBatchesProfiled(
   std::span<const AcStrategyCandidateBatch> batches,
   gpu_profile_internal::GpuProfilingMode mode,
@@ -1091,8 +1101,6 @@ Status MetalBackend::SubmitAcStrategyCandidatesImpl(
 
   AcStrategyEncodeContext::Selection validated_selection;
   if (selection != nullptr) {
-    if (mode != gpu_profile_internal::GpuProfilingMode::kDisabled)
-      return Status::Unsupported("Device AC selection profiling is not implemented");
     Status status = ValidateAcStrategySelection(batches, *selection, &validated_selection);
     if (!status.ok()) return status;
   }
@@ -1113,7 +1121,8 @@ Status MetalBackend::SubmitAcStrategyCandidatesImpl(
   planning = ComputeAcSubmissionStoragePlan(
     {.batches = batches.size(),
      .nonempty_batches = validated_batches.size(),
-     .profiling = true}, &storage);
+     .profiling = true,
+     .device_selection = selection != nullptr}, &storage);
   if (!planning.ok()) return planning;
   try {
     contexts.resize(storage.stage_capacity);
@@ -1134,6 +1143,15 @@ Status MetalBackend::SubmitAcStrategyCandidatesImpl(
       .group_id = kAcStrategyProfileGroupId,
       .encode = &MetalBackend::EncodeAcStrategyProfileStage,
       .context = &contexts[index],
+    };
+  }
+  const AcStrategyEncodeContext selection_context{{}, &validated_selection};
+  if (selection != nullptr) {
+    stages.back() = {
+      .stage_id = "frontend.ac_strategy.select",
+      .group_id = kAcStrategyProfileGroupId,
+      .encode = &MetalBackend::EncodeAcStrategySubmission,
+      .context = &selection_context,
     };
   }
   return SubmitComputeProfiled(

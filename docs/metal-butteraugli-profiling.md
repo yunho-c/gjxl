@@ -7,6 +7,11 @@ boundaries. The benchmark enables profiling with `--gpu-profile stage` and
 `--gpu-profile-output PATH` in a resident, Metal-only public workflow.
 Capture ordinary wall-time samples separately from GPU profiles.
 
+The current resident path also profiles GPU selection, combined ACS/AQ, and
+indirect family dispatch. See [resident profiling](metal-resident-profiling.md)
+for its boundaries and the remaining instrumentation overhead. The measurements
+below describe their recorded historical build, not this later path alignment.
+
 ## Phase boundaries
 
 Reference and distorted psycho-image construction expose eight stages per
