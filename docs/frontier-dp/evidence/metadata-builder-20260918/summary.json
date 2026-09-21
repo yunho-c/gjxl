@@ -1,0 +1,32 @@
+[
+  {
+    "pixels": 3008000,
+    "process_medians_ms": [
+      0.572625,
+      0.396083,
+      0.384749
+    ],
+    "median_ms": 0.396083,
+    "scratch_bytes": 196880
+  },
+  {
+    "pixels": 8294400,
+    "process_medians_ms": [
+      0.54525,
+      0.780249,
+      0.531833
+    ],
+    "median_ms": 0.54525,
+    "scratch_bytes": 541200
+  },
+  {
+    "pixels": 24000000,
+    "process_medians_ms": [
+      1.02842,
+      1.02383,
+      1.01479
+    ],
+    "median_ms": 1.02383,
+    "scratch_bytes": 1565456
+  }
+]

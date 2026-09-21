@@ -81,7 +81,7 @@ ctest --test-dir "$build_dir" --output-on-failure --parallel 1 2>&1 \
   | tee "$evidence_dir/ctest.log"
 MTL_DEBUG_LAYER=1 MTL_SHADER_VALIDATION=1 \
   ctest --test-dir "$build_dir" --output-on-failure --parallel 1 \
-    -R '^(metal_aq_reconstruction|metal_aq_evaluation|metal_quantization_pipeline|metal_dc_processing|metal_submission_storage_plan)$' 2>&1 \
+    -R '^(metal_aq_reconstruction|metal_aq_evaluation|metal_quantization_pipeline|metal_dc_processing|metal_submission_storage_plan|metal_ac_strategy_search|metal_aq_strategy_metadata)$' 2>&1 \
   | tee "$evidence_dir/metal-validation.log"
 
 "$build_dir/gjxl_metal_qualification" --synthetic 3839x2159 --count 7 \

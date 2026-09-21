@@ -381,21 +381,18 @@ private:
 };
 
 Status RunGpuAdaptiveQuantizationImpl(
-  GpuBackend& gpu,
-  ConstImage3FView original_linear_rgb,
-  ConstImage3FView opsin,
-  const AcStrategyGrid& strategies,
-  ConstPlaneF32View initial_quant_field,
-  ConstPlaneU8View epf_sharpness,
-  AdaptiveQuantizationOptions options,
-  GpuAdaptiveQuantizationMode mode,
-  adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization*
-    reusable,
-  GpuAdaptiveQuantizationPolicyOutput* bounded_output,
-  AdaptiveQuantizationOutput* full_output,
-  adaptive_quantization_gpu_internal::AdaptiveQuantizationMaterialization
-    materialization,
-  gpu_profile_internal::GpuProfilingSession* profiling_session) {
+    GpuBackend &gpu, ConstImage3FView original_linear_rgb,
+    ConstImage3FView opsin, const AcStrategyGrid &strategies,
+    ConstPlaneF32View initial_quant_field, ConstPlaneU8View epf_sharpness,
+    AdaptiveQuantizationOptions options, GpuAdaptiveQuantizationMode mode,
+    adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization *reusable,
+    GpuAdaptiveQuantizationPolicyOutput *bounded_output,
+    AdaptiveQuantizationOutput *full_output,
+    adaptive_quantization_gpu_internal::AdaptiveQuantizationMaterialization
+        materialization,
+    gpu_profile_internal::GpuProfilingSession *profiling_session,
+    const DeferredAcStrategySearch *deferred_search = nullptr,
+    AcStrategyGrid *selected_output = nullptr) {
 
   const bool profiling = profiling_session != nullptr;
   const bool resident_initial =
@@ -403,12 +400,27 @@ Status RunGpuAdaptiveQuantizationImpl(
   const bool resident_prepared_input =
     HasDeviceImage(materialization.resident_original_linear_rgb) &&
     HasDeviceImage(materialization.resident_coding_opsin);
+  const Extent2D block_extent = deferred_search
+                                    ? deferred_search->selection.block_extent
+                                    : strategies.extent();
+  if (deferred_search &&
+      (profiling || !reusable || !selected_output ||
+       mode == GpuAdaptiveQuantizationMode::kExactCoefficients ||
+       options.control_mode != AdaptiveQuantizationControlMode::kButteraugli))
+    return Status::InvalidArgument(
+        "Deferred AQ search requires an unprofiled resident policy");
 
   Status status = ValidateMode(mode);
   const bool resident_opsin_only = !opsin.valid() && reusable != nullptr &&
     reusable->resident_coding_opsin.plane[0].buffer != nullptr;
   if (status.ok()) {
-    if (resident_initial) {
+    if (deferred_search) {
+      status = aqi::ValidateDeferredAdaptiveQuantizationPolicyInputs(
+        original_linear_rgb,
+        opsin.valid() ? opsin.extent()
+                      : reusable->resident_coding_opsin.plane[0].extent,
+        block_extent, initial_quant_field, epf_sharpness, options);
+    } else if (resident_initial) {
       if (mode == GpuAdaptiveQuantizationMode::kExactCoefficients ||
           options.control_mode !=
             AdaptiveQuantizationControlMode::kButteraugli) {
@@ -454,11 +466,10 @@ Status RunGpuAdaptiveQuantizationImpl(
         return Status::InvalidArgument(
           "GPU adaptive-quantization bounded output is null");
       }
-      status = ValidateOutput(strategies.extent(), *bounded_output);
+      status = ValidateOutput(block_extent, *bounded_output);
     } else {
-      status = ValidateFullOutput(
-        original_linear_rgb.extent(), strategies.extent(), options,
-        *full_output, materialization);
+      status = ValidateFullOutput(original_linear_rgb.extent(), block_extent,
+                                  options, *full_output, materialization);
     }
   }
   if (!status.ok()) {
@@ -580,8 +591,12 @@ Status RunGpuAdaptiveQuantizationImpl(
       const auto reconfigure_begin = profiling
         ? gpu_profile_internal::GpuProfilingSession::BeginWallStage()
         : gpu_profile_internal::GpuProfilingSession::TimePoint{};
-      status = reusable->evaluation->Reconfigure(
-        strategies, epf_sharpness);
+      status =
+          deferred_search
+              ? reusable->evaluation->ReconfigureResidentStrategySearch(
+                    deferred_search->batches, deferred_search->selection,
+                    epf_sharpness)
+              : reusable->evaluation->Reconfigure(strategies, epf_sharpness);
       if (status.ok() && profiling) {
         status = profiling_session->EndWallStage(
           "frontend.reconfigure_aq",
@@ -589,6 +604,9 @@ Status RunGpuAdaptiveQuantizationImpl(
           reconfigure_begin);
       }
     } else if (status.ok()) {
+      if (deferred_search)
+        return Status::FailedPrecondition(
+            "Deferred AQ search requires compatible preparation");
       reusable->resident_coding_opsin = {};
       reusable->evaluation.reset();
       status = prepare_evaluation(&reusable->evaluation);
@@ -604,6 +622,7 @@ Status RunGpuAdaptiveQuantizationImpl(
         reusable->resident_quantization = resident_quantization;
         reusable->omit_initial_search_data = false;
         reusable->frame_only_resident_frontend = false;
+        reusable->resident_strategy_metadata = false;
       }
     }
     prepared = reusable->evaluation.get();
@@ -632,6 +651,10 @@ Status RunGpuAdaptiveQuantizationImpl(
     ConstPlaneF32View policy_initial = initial_quant_field;
     aqi::ButteraugliPolicySetup resident_policy_setup;
     bool resident_policy_prepared = false;
+    const bool fused_policy_initialization =
+        resident_quantization && !resident_initial && !profiling &&
+        options.control_mode == AdaptiveQuantizationControlMode::kButteraugli &&
+        prepared->SupportsResidentPolicyInitialization();
     const float adjustment_target =
       options.control_mode == AdaptiveQuantizationControlMode::kMaximumError
         ? 1.0f
@@ -673,9 +696,9 @@ Status RunGpuAdaptiveQuantizationImpl(
       resident_policy_setup = {
         setup.quant_dc, setup.lower_bound, setup.upper_bound};
       resident_policy_prepared = true;
-    } else if (resident_quantization) {
+    } else if (resident_quantization && !fused_policy_initialization) {
       size_t block_count = 0;
-      if (!strategies.extent().try_area(&block_count)) {
+      if (!block_extent.try_area(&block_count)) {
         return Status::InvalidArgument(
           "Resident AQ block grid is too large");
       }
@@ -686,18 +709,16 @@ Status RunGpuAdaptiveQuantizationImpl(
       if (profiling) {
         gpu_profile_internal::GpuExecutionProfile adjustment_profile;
         status = prepared_profiler->AdjustQuantFieldResidentProfiled(
-          adjustment_target, initial_quant_field,
-          {adjusted_initial.data(), strategies.extent(),
-           strategies.extent().width},
-          profiling_session->mode(), &adjustment_profile);
+            adjustment_target, initial_quant_field,
+            {adjusted_initial.data(), block_extent, block_extent.width},
+            profiling_session->mode(), &adjustment_profile);
         if (status.ok()) {
           status = profiling_session->Append(std::move(adjustment_profile));
         }
       } else {
         status = prepared->AdjustQuantFieldResident(
-          adjustment_target, initial_quant_field,
-          {adjusted_initial.data(), strategies.extent(),
-           strategies.extent().width});
+            adjustment_target, initial_quant_field,
+            {adjusted_initial.data(), block_extent, block_extent.width});
       }
       if (status.ok() && profiling) {
         status = profiling_session->EndWallStage(
@@ -706,9 +727,8 @@ Status RunGpuAdaptiveQuantizationImpl(
           adjustment_begin);
       }
       if (!status.ok()) return status;
-      policy_initial = {
-        adjusted_initial.data(), strategies.extent(),
-        strategies.extent().width};
+      policy_initial = {adjusted_initial.data(), block_extent,
+                        block_extent.width};
     }
 
     prepared_coefficients_internal::PreparedForwardDctCoefficients
@@ -716,7 +736,8 @@ Status RunGpuAdaptiveQuantizationImpl(
     const auto cfl_begin = profiling
       ? gpu_profile_internal::GpuProfilingSession::BeginWallStage()
       : gpu_profile_internal::GpuProfilingSession::TimePoint{};
-    if (resident_quantization && !resident_initial) {
+    if (resident_quantization && !resident_initial &&
+        !fused_policy_initialization) {
       float invariant_quant_dc = 0.0f;
       status = ComputeInitialQuantDc(
         adjustment_target, &invariant_quant_dc);
@@ -746,13 +767,16 @@ Status RunGpuAdaptiveQuantizationImpl(
       if (resident_policy_prepared) {
         setup = resident_policy_setup;
       } else {
-        status = aqi::PrepareButteraugliPolicy(
-          policy_initial, options.butteraugli_target, &setup);
+        status = fused_policy_initialization
+                     ? ComputeInitialQuantDc(options.butteraugli_target,
+                                             &setup.quant_dc)
+                     : aqi::PrepareButteraugliPolicy(
+                           policy_initial, options.butteraugli_target, &setup);
       }
       if (!status.ok()) return status;
 
       size_t block_count = 0;
-      if (!strategies.extent().try_area(&block_count)) {
+      if (!block_extent.try_area(&block_count)) {
         return Status::InvalidArgument(
           "Resident AQ block grid is too large");
       }
@@ -767,18 +791,18 @@ Status RunGpuAdaptiveQuantizationImpl(
       VarDctEncoderFrame fused_frame;
       std::unique_ptr<vardct_frame_internal::CompletedVarDctFrame>
         completed_frame;
+      AcStrategyGrid selected_grid;
       AqResidentButteraugliPolicyOutput fused_output{
-        .score_history = &fused_result.score_history,
+          .score_history = &fused_result.score_history,
+          .strategies = deferred_search ? &selected_grid : nullptr,
       };
       if (materialization.quant_field) {
-        fused_output.quant_field = {
-          fused_result.quant_field.data(), strategies.extent(),
-          strategies.extent().width};
+        fused_output.quant_field = {fused_result.quant_field.data(),
+                                    block_extent, block_extent.width};
       }
       if (materialization.block_distance_map) {
-        fused_output.block_distance_map = {
-          fused_result.block_distance.data(), strategies.extent(),
-          strategies.extent().width};
+        fused_output.block_distance_map = {fused_result.block_distance.data(),
+                                           block_extent, block_extent.width};
       }
       if (full_output != nullptr) {
         if (materialization.reconstructed_linear_rgb) {
@@ -799,8 +823,11 @@ Status RunGpuAdaptiveQuantizationImpl(
           .lower_bound = setup.lower_bound,
           .upper_bound = setup.upper_bound,
           .iterations = options.iterations,
-          .evaluate_final_field =
-            materialization.final_perceptual_evaluation,
+          .evaluate_final_field = materialization.final_perceptual_evaluation,
+          .adjust_initial_field = fused_policy_initialization,
+          .derive_color_correlation = fused_policy_initialization,
+          .color_correlation_iterations = options.fast_color_correlation
+            ? 0u : options.color_correlation_iterations,
       };
       if (profiling) {
         const auto policy_begin =
@@ -823,6 +850,8 @@ Status RunGpuAdaptiveQuantizationImpl(
           resident_input, fused_output);
       }
       if (status.ok()) {
+        if (selected_output)
+          *selected_output = std::move(selected_grid);
         if (full_output == nullptr) {
           CopyContiguousPlane(
             fused_result.quant_field, bounded_output->quant_field);
@@ -853,7 +882,7 @@ Status RunGpuAdaptiveQuantizationImpl(
         }
         return Status::Ok();
       }
-      if (status.code() != StatusCode::kUnavailable) {
+      if (deferred_search || status.code() != StatusCode::kUnavailable) {
         if (reusable != nullptr) reusable->evaluation.reset();
         return status;
       }
@@ -1459,6 +1488,26 @@ Status RunGpuAdaptiveQuantization(
     gpu, original_linear_rgb, opsin, strategies, initial_quant_field,
     epf_sharpness, options, mode, nullptr, nullptr, &output, {},
     nullptr);
+}
+
+Status adaptive_quantization_gpu_internal::
+    RunPreparedGpuAdaptiveQuantizationWithSearch(
+        GpuBackend &gpu, ConstImage3FView original, ConstImage3FView opsin,
+        ConstPlaneF32View quant, ConstPlaneU8View sharpness,
+        AdaptiveQuantizationOptions options, GpuAdaptiveQuantizationMode mode,
+        PreparedAdaptiveQuantization *prepared,
+        const DeferredAcStrategySearch &search, AcStrategyGrid *selected,
+        AdaptiveQuantizationOutput output,
+        AdaptiveQuantizationMaterialization materialization) {
+  const AcStrategyGrid empty;
+  const Status status = RunGpuAdaptiveQuantizationImpl(
+      gpu, original, opsin, empty, quant, sharpness, options, mode, prepared,
+      nullptr, &output, materialization, nullptr, &search, selected);
+  // A failure before submission may leave a bound, unconsumed prefix. Drop
+  // the borrower before its search owner can be reset or reused.
+  if (!status.ok() && prepared)
+    prepared->evaluation.reset();
+  return status;
 }
 
 Status adaptive_quantization_gpu_internal::

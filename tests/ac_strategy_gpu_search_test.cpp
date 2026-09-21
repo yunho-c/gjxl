@@ -341,7 +341,8 @@ bool CheckPreparedResidentReuse(gjxl::GpuBackend& gpu,
   if (!gjxl::FindAcStrategyGridGpuResident(
         gpu, fixture.Opsin(), fixture.QuantField(), fixture.PixelMask(),
         color_map, resident, {.butteraugli_target = 1.2f}, &first, &stats,
-        &prepared).ok()) {
+        &prepared).ok() ||
+      stats.device_selection != gjxl::CanDeferAcStrategySearch(gpu, {})) {
     return false;
   }
   const gjxl::GpuBackendStats after_first = gpu.stats();
@@ -487,6 +488,25 @@ bool CheckPreparedResidentReuse(gjxl::GpuBackend& gpu,
     std::cerr << "Malformed optional host mask was not rejected atomically\n";
     return false;
   }
+  if (extent == gjxl::Extent2D{128, 96}) {
+    const float original = packed_opsin[0][0];
+    packed_opsin[0][0] = std::numeric_limits<float>::quiet_NaN();
+    if (!gpu.CopyHostToDevice(*device_opsin[0], packed_opsin[0].data(), sizeof(float)).ok())
+      return false;
+    gjxl::AcStrategyGpuSearchStats untouched;
+    untouched.total_candidate_count = 777;
+    const auto rejected = gjxl::FindAcStrategyGridGpuResident(
+      gpu, {}, fixture.QuantField(), {}, color_map, resident,
+      {.butteraugli_target = 0.9f}, &omitted, &untouched, &prepared);
+    if (rejected.ok() || untouched.total_candidate_count != 777 ||
+        untouched.device_selection || !GridsEqual(second, omitted)) {
+      std::cerr << "Invalid device selection was not rejected atomically\n";
+      return false;
+    }
+    packed_opsin[0][0] = original;
+    if (!gpu.CopyHostToDevice(*device_opsin[0], packed_opsin[0].data(), sizeof(float)).ok())
+      return false;
+  }
   // Changing placement policy must rebuild candidates, including when shrinking
   // back to sparse after a dense search retained larger buffers.
   for (bool dense : {true, true, false, true, false}) {
@@ -498,7 +518,8 @@ bool CheckPreparedResidentReuse(gjxl::GpuBackend& gpu,
           color_map, options, &expected).ok() ||
         !gjxl::FindAcStrategyGridGpuResident(
           gpu, {}, fixture.QuantField(), {}, color_map, resident,
-          options, &omitted, nullptr, &prepared).ok() ||
+          options, &omitted, &stats, &prepared).ok() ||
+        stats.device_selection != gjxl::CanDeferAcStrategySearch(gpu, options) ||
         !GridsEqual(expected, omitted)) {
       std::cerr << "Prepared AC policy transition changed placement\n";
       return false;
@@ -560,6 +581,16 @@ int main(int argc, char** argv) {
       !CheckValidationAndAtomicCommit(*gpu) ||
       !CheckPreparedResidentReuse(*gpu)) {
     return EXIT_FAILURE;
+  }
+  // Exercise all partial-tile shapes after full rows and columns. These paths
+  // distinguish per-family row prefixes from full-tile candidate counts.
+  for (size_t h = 1; h <= 8; ++h) {
+    for (size_t w = 1; w <= 8; ++w) {
+      if (!CheckPreparedResidentReuse(*gpu, {(8 + w) * 8, (8 + h) * 8})) {
+        std::cerr << "Resident selection failed for partial shape " << w << 'x' << h << '\n';
+        return EXIT_FAILURE;
+      }
+    }
   }
 
 #ifndef GJXL_TEST_CUDA

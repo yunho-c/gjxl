@@ -51,6 +51,9 @@ Status ComputeAqHostStoragePlan(const AqHostStorageOptions &o,
       (o.frame_only &&
        (o.reconfigure || o.exact_coefficients || o.reconstructed_rgb_readback ||
         o.resident_quant_field_readback)) ||
+      (o.resident_strategy_metadata &&
+       (!o.reconfigure || !o.resident_quantization || o.frame_only ||
+        o.metric != AqEvaluationMetric::kButteraugli)) ||
       (o.reconstruct_exact_coefficients && !o.exact_coefficients) ||
       (o.resident_quant_field_readback && !o.resident_quantization) ||
       (o.initial_pixel_mask_readback && !o.resident_initial_quant))
@@ -149,6 +152,12 @@ Status ComputeAqHostStoragePlan(const AqHostStorageOptions &o,
                                                            kFreshExact) ||
         (o.resident_quantization &&
          !AddColorMetadata(blocks, tiles, &replacement)))
+      return Overflow();
+    // Compact-map materialization and optional atomic grid publication overlap
+    // the host metadata rebuild after device completion. Completed output grids
+    // are accounted by the independent completed-frame plan.
+    if (o.resident_strategy_metadata &&
+        !replacement.AddVector<uint8_t>(blocks, kFreshExact, 2))
       return Overflow();
     temporary.peak_bytes =
         std::max(temporary.peak_bytes, replacement.peak_bytes);

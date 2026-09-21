@@ -207,7 +207,7 @@ static_assert(std::is_trivially_copyable_v<AqReconstructionParams>);
 static_assert(sizeof(AqReconstructionParams) == 148);
 static_assert(sizeof(AqResetParams) == 32);
 static_assert(sizeof(AqResidentPolicyInitializeParams) == 20);
-static_assert(sizeof(AqResidentPolicyUpdateParams) == 44);
+static_assert(sizeof(AqResidentPolicyUpdateParams) == 48);
 static_assert(std::is_standard_layout_v<AqInitialCflParams>);
 static_assert(std::is_trivially_copyable_v<AqInitialCflParams>);
 static_assert(sizeof(AqInitialCflParams) == 24);
@@ -868,6 +868,7 @@ Status MetalPreparedAqEvaluation::Prepare(
   frame_only_resident_quantizer_ =
       preparation.frame_only_resident_quantizer;
   resident_quantization_ = preparation.resident_quantization;
+  resident_strategy_metadata_enabled_ = preparation.resident_strategy_metadata;
   borrowed_original_linear_rgb_ =
     preparation.resident_original_linear_rgb.plane[0].buffer != nullptr;
   borrowed_coding_opsin_ =
@@ -1059,29 +1060,33 @@ Status MetalPreparedAqEvaluation::Prepare(
   }
 
   AqStoragePlan storage_plan;
-  status = ComputeAqStoragePlan({
-    .source_extent = source_extent_,
-    .coding_extent = coding_extent_,
-    .anchor_capacity_count = anchor_capacity_count,
-    .maximum_coefficient_count = maximum_coefficient_count_,
-    .initial_quant_sort_count = initial_quant_sort_count_,
-    .filter_scratch_image_count = filter_scratch_image_count_,
-    .frame_only = frame_only_,
-    .evaluation_free = options_.evaluation_free,
-    .borrowed_original_linear_rgb = borrowed_original_linear_rgb_,
-    .borrowed_coding_opsin = borrowed_coding_opsin_,
-    .needs_reconstructed = needs_reconstructed,
-    .frame_only_resident_initial_quant = frame_only_resident_initial_quant_,
-    .omit_initial_search_data = omit_initial_search_data_,
-    .frame_only_resident_quantizer = frame_only_resident_quantizer_,
-    .resident_quantization = resident_quantization_,
-    .uses_butteraugli_sinks = uses_butteraugli_sinks_,
-    .metric = options_.metric,
-    .dc_quantization = options_.dc_quantization,
-    .dc_prediction = options_.dc_prediction,
-    .extra_dc_precision = options_.profile.extra_dc_precision,
-    .adaptive_dc_smoothing = options_.profile.adaptive_dc_smoothing,
-  }, &storage_plan);
+  status = ComputeAqStoragePlan(
+      {
+          .source_extent = source_extent_,
+          .coding_extent = coding_extent_,
+          .anchor_capacity_count = anchor_capacity_count,
+          .maximum_coefficient_count = maximum_coefficient_count_,
+          .initial_quant_sort_count = initial_quant_sort_count_,
+          .filter_scratch_image_count = filter_scratch_image_count_,
+          .frame_only = frame_only_,
+          .evaluation_free = options_.evaluation_free,
+          .borrowed_original_linear_rgb = borrowed_original_linear_rgb_,
+          .borrowed_coding_opsin = borrowed_coding_opsin_,
+          .needs_reconstructed = needs_reconstructed,
+          .frame_only_resident_initial_quant =
+              frame_only_resident_initial_quant_,
+          .omit_initial_search_data = omit_initial_search_data_,
+          .frame_only_resident_quantizer = frame_only_resident_quantizer_,
+          .resident_quantization = resident_quantization_,
+          .uses_butteraugli_sinks = uses_butteraugli_sinks_,
+          .metric = options_.metric,
+          .dc_quantization = options_.dc_quantization,
+          .dc_prediction = options_.dc_prediction,
+          .extra_dc_precision = options_.profile.extra_dc_precision,
+          .adaptive_dc_smoothing = options_.profile.adaptive_dc_smoothing,
+          .resident_strategy_metadata = resident_strategy_metadata_enabled_,
+      },
+      &storage_plan);
   if (!status.ok()) return status;
   status = backend_->AcquireAqScratchArena(
     MetalAqScratchArena::kPersistent, storage_plan.persistent_bytes, &persistent_);
@@ -1190,6 +1195,10 @@ Status MetalPreparedAqEvaluation::Prepare(
     if (!status.ok()) return status;
     status = staging_.BindPlane(storage_plan.resident_policy_scores, &resident_policy_scores_);
     if (!status.ok()) return status;
+    status = staging_.BindPlane(storage_plan.resident_policy_bounds,
+                                &resident_policy_bounds_);
+    if (!status.ok())
+      return status;
     status = staging_.BindPlane(storage_plan.resident_quant_histogram, &resident_quant_histogram_);
     if (!status.ok()) return status;
     status = staging_.BindPlane(storage_plan.resident_quant_selection_state, &resident_quant_selection_state_);
@@ -1274,6 +1283,19 @@ Status MetalPreparedAqEvaluation::Prepare(
     if (!status.ok())
       return status;
     status = staging_.BindPlane(storage_plan.quant_probe_dequantized, &quant_probe_dequantized_);
+    if (!status.ok())
+      return status;
+  }
+  if (resident_strategy_metadata_enabled_) {
+    resident_strategy_metadata_.blocks = block_extent_;
+    for (size_t i = 0; i < kMetadataScratchPlaneCount; ++i) {
+      status = staging_.BindPlane(storage_plan.strategy_metadata[i],
+                                  &resident_strategy_metadata_.planes[i]);
+      if (!status.ok())
+        return status;
+    }
+    status = staging_.BindPlane(storage_plan.strategy_dispatch,
+                                &resident_strategy_parameters_);
     if (!status.ok())
       return status;
   }
@@ -1668,6 +1690,13 @@ Status MetalPreparedAqEvaluation::Prepare(
 Status MetalPreparedAqEvaluation::Reconfigure(
   const AcStrategyGrid& strategies,
   ConstPlaneU8View epf_sharpness) {
+  return ReconfigureImpl(strategies, epf_sharpness, false);
+}
+
+Status
+MetalPreparedAqEvaluation::ReconfigureImpl(const AcStrategyGrid &strategies,
+                                           ConstPlaneU8View epf_sharpness,
+                                           bool metadata_on_device) {
 
   if (frame_only_) {
     return Status::FailedPrecondition(
@@ -1696,7 +1725,7 @@ Status MetalPreparedAqEvaluation::Reconfigure(
     }
   }
 
-  Status status = BeginOperation();
+  Status status = metadata_on_device ? Status::Ok() : BeginOperation();
   if (!status.ok()) {
     return status;
   }
@@ -1863,41 +1892,42 @@ Status MetalPreparedAqEvaluation::Reconfigure(
       transform_layouts.push_back(transform);
     }
 
-    status = UploadPlane(
-      *backend_,
-      ConstPlaneI32View{
-        strategy_records.data(), strategies_.extent, strategies_.row_stride},
-      strategies_);
-    if (status.ok()) {
-      status = UploadPlane(
-        *backend_,
-        ConstPlaneI32View{
-          anchor_records.data(), {2 * anchor_offset, 1}, 2 * anchor_offset},
-        anchors_);
-    }
-    if (status.ok()) {
-      status = UploadPlane(*backend_, epf_sharpness, epf_sharpness_);
-    }
-    if (status.ok() && resident_quantization_) {
-      status = UploadPlane(
-        *backend_,
-        ConstPlaneI32View{
-          color_transform_records.data(),
-          {color_transform_records.size(), 1},
-          color_transform_records.size()},
-        color_transform_records_);
-    }
-    if (status.ok() && resident_quantization_) {
-      status = UploadPlane(
-        *backend_,
-        ConstPlaneI32View{color_tile_offsets.data(),
-                          {tile_extent_.width * tile_extent_.height + 1, 1},
-                          color_tile_offsets.size()},
-        color_tile_offsets_);
-    }
-    if (!status.ok()) {
-      Invalidate();
-      return status;
+    if (!metadata_on_device) {
+      status = UploadPlane(*backend_,
+                           ConstPlaneI32View{strategy_records.data(),
+                                             strategies_.extent,
+                                             strategies_.row_stride},
+                           strategies_);
+      if (status.ok()) {
+        status = UploadPlane(*backend_,
+                             ConstPlaneI32View{anchor_records.data(),
+                                               {2 * anchor_offset, 1},
+                                               2 * anchor_offset},
+                             anchors_);
+      }
+      if (status.ok()) {
+        status = UploadPlane(*backend_, epf_sharpness, epf_sharpness_);
+      }
+      if (status.ok() && resident_quantization_) {
+        status =
+            UploadPlane(*backend_,
+                        ConstPlaneI32View{color_transform_records.data(),
+                                          {color_transform_records.size(), 1},
+                                          color_transform_records.size()},
+                        color_transform_records_);
+      }
+      if (status.ok() && resident_quantization_) {
+        status = UploadPlane(
+            *backend_,
+            ConstPlaneI32View{color_tile_offsets.data(),
+                              {tile_extent_.width * tile_extent_.height + 1, 1},
+                              color_tile_offsets.size()},
+            color_tile_offsets_);
+      }
+      if (!status.ok()) {
+        Invalidate();
+        return status;
+      }
     }
 
     strategies_host_ = strategies;
@@ -1909,14 +1939,23 @@ Status MetalPreparedAqEvaluation::Reconfigure(
     row_major_anchors_ = std::move(row_major_anchors);
     final_transform_layouts_ = std::move(transform_layouts);
     final_transform_metadata_pending_ = false;
+    if (!metadata_on_device) {
+      strategy_dispatch_ = {};
+      strategy_dispatch_families_ = {};
+      resident_strategy_pending_ = false;
+      resident_search_batch_count_ = 0;
+      resident_strategy_metadata_.selection = {};
+    }
     anchor_count_ = anchor_offset;
     final_cfl_params_.transform_count =
       static_cast<uint32_t>(anchor_count_);
-    invariant_color_correlation_ready_ = false;
-    resident_forward_coefficients_ready_ = false;
-    resident_color_correlation_pending_ = false;
-    resident_color_correlation_readback_needed_ = false;
-    CompleteOperation();
+    if (!metadata_on_device) {
+      invariant_color_correlation_ready_ = false;
+      resident_forward_coefficients_ready_ = false;
+      resident_color_correlation_pending_ = false;
+      resident_color_correlation_readback_needed_ = false;
+      CompleteOperation();
+    }
     return Status::Ok();
   } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
     Invalidate();
@@ -2007,21 +2046,29 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       profiling_mode, &candidate_profile);
     if (!profile_status.ok()) return profile_status;
   }
+  if (profiling && DeviceStrategyDispatch())
+    return Status::Unavailable(
+        "Device strategy dispatch profiling is not enabled");
   if (!resident_quantization_ ||
       options_.metric != AqEvaluationMetric::kButteraugli) {
     return Status::Unavailable(
       "Resident Butteraugli policy was not prepared");
   }
   if (input.iterations > 4 ||
+      (input.derive_color_correlation &&
+       (!input.adjust_initial_field || input.color_correlation_iterations > 20)) ||
       !ValidHostPlaneLayout(input.adjusted_initial_quant_field) ||
       input.adjusted_initial_quant_field.extent != block_extent_ ||
       !std::isfinite(input.quant_dc) || input.quant_dc <= 0.0f ||
       !std::isfinite(input.butteraugli_target) ||
       input.butteraugli_target <= 0.0f ||
-      !std::isfinite(input.lower_bound) || input.lower_bound <= 0.0f ||
-      !std::isfinite(input.upper_bound) ||
-      input.upper_bound < input.lower_bound ||
-      input.upper_bound / input.lower_bound >= 253.0f) {
+      (input.adjust_initial_field &&
+       (profiling || !SupportsResidentPolicyInitialization())) ||
+      (!input.adjust_initial_field &&
+       (!std::isfinite(input.lower_bound) || input.lower_bound <= 0.0f ||
+        !std::isfinite(input.upper_bound) ||
+        input.upper_bound < input.lower_bound ||
+        input.upper_bound / input.lower_bound >= 253.0f))) {
     return Status::InvalidArgument(
       "Resident Butteraugli policy input is invalid");
   }
@@ -2037,9 +2084,9 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
   const bool reconstruction_requested = std::ranges::any_of(
     output.reconstructed_linear_rgb.plane,
     [](PlaneF32View plane) { return PlaneDescriptorSpecified(plane); });
-  if ((quant_field_requested &&
-       (!ValidHostPlaneLayout(output.quant_field) ||
-        output.quant_field.extent != block_extent_)) ||
+  if ((output.strategies && !resident_strategy_metadata_enabled_) ||
+      (quant_field_requested && (!ValidHostPlaneLayout(output.quant_field) ||
+                                 output.quant_field.extent != block_extent_)) ||
       (block_map_requested &&
        (!ValidHostPlaneLayout(output.block_distance_map) ||
         output.block_distance_map.extent != block_extent_)) ||
@@ -2073,7 +2120,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       .quant_field = input.adjusted_initial_quant_field,
       .quant_dc = input.quant_dc,
   };
-  Status status = ValidateInput(evaluation_input);
+  Status status = ValidateInput(evaluation_input, input.derive_color_correlation);
   if (!status.ok()) return status;
   if (score_count != 0 && butteraugli_ == nullptr) {
     return Status::FailedPrecondition(
@@ -2083,19 +2130,23 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     const auto batches =
       MakeResidentButteraugliBatches(block_reduction_params_);
     status = ValidatePreparedMetalButteraugliResidentEncoding(
-      *butteraugli_,
-      {
-        .distorted_linear_rgb = {{{reconstructed_linear_[0],
-                                   reconstructed_linear_[1],
-                                   reconstructed_linear_[2]}}},
-        .anchors = MakeResidentAnchors(anchors_, anchor_count_),
-        .block_distance = block_distance_,
-        .score_partials =
-          MakeResidentScorePartials(score_partials_, anchor_count_),
-        .score = score_,
-        .error = reconstruction_error_,
-        .batches = batches,
-      });
+        *butteraugli_,
+        {
+            .distorted_linear_rgb = {{{reconstructed_linear_[0],
+                                       reconstructed_linear_[1],
+                                       reconstructed_linear_[2]}}},
+            .anchors = MakeResidentAnchors(anchors_, DeviceStrategyDispatch()
+                                                         ? block_count_
+                                                         : anchor_count_),
+            .block_distance = block_distance_,
+            .score_partials = MakeResidentScorePartials(
+                score_partials_,
+                DeviceStrategyDispatch() ? block_count_ : anchor_count_),
+            .score = score_,
+            .error = reconstruction_error_,
+            .batches = batches,
+            .strategy_dispatch = strategy_dispatch_,
+        });
   } else if (score_count != 0) {
     status = ValidatePreparedMetalButteraugliEncoding(
       *butteraugli_,
@@ -2125,6 +2176,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
 
   resource_budget_internal::PublicationVector<double> candidate_scores;
   VarDctEncoderFrame candidate_frame;
+  AcStrategyGrid candidate_strategies;
   std::unique_ptr<MetalCompletedVarDctFrame> candidate_completed_frame;
   uint64_t output_prepare_nanoseconds = 0;
   if (output.completed_frame != nullptr) {
@@ -2180,6 +2232,14 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
   }
   reset_params_.test_error_mask = fail_numeric ? 512u : 0u;
   reset_params_.preserve_error = 0u;
+  if (input.derive_color_correlation) {
+    final_cfl_params_.nonlinear_iterations = input.color_correlation_iterations;
+    invariant_color_correlation_ready_ = true;
+    invariant_color_correlation_from_policy_ = true;
+    resident_forward_coefficients_ready_ = false;
+    resident_color_correlation_pending_ = true;
+    resident_color_correlation_readback_needed_ = false;
+  }
   status = UploadInput(evaluation_input);
   if (!status.ok()) {
     Invalidate();
@@ -2198,6 +2258,17 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     input.butteraugli_target;
   resident_policy_update_params_.lower_bound = input.lower_bound;
   resident_policy_update_params_.upper_bound = input.upper_bound;
+  resident_policy_adjust_initial_field_ = input.adjust_initial_field;
+  resident_policy_update_params_.use_device_bounds = input.adjust_initial_field;
+  if (input.adjust_initial_field) {
+    status = PrepareQuantFieldAdjustmentParams(input.butteraugli_target);
+    if (!status.ok()) {
+      Invalidate();
+      return status;
+    }
+    initial_quant_gradient_params_.test_error_mask =
+        fail_numeric ? 262144u : 0u;
+  }
 
   std::unique_ptr<GpuSubmission> submission;
   if (profiling) {
@@ -2543,6 +2614,26 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
           std::to_string(device_error) + ")")
       : status;
   }
+  const bool materialized_strategy = resident_strategy_pending_;
+  if (materialized_strategy) {
+    status = FinishResidentStrategyMetadata(
+        output.strategies ? &candidate_strategies : nullptr);
+    if (!status.ok()) {
+      Invalidate();
+      return status;
+    }
+  } else if (output.strategies) {
+    try {
+      candidate_strategies = strategies_host_;
+    } catch (const resource_budget_internal::ManagedAllocationFailure &e) {
+      Invalidate();
+      return e.status();
+    } catch (const std::bad_alloc &) {
+      Invalidate();
+      return Status::OutOfMemory(
+          "Selected strategy snapshot allocation failed");
+    }
+  }
   if (resident_color_correlation_readback_needed_) {
     status = ReadbackColorCorrelation();
     if (!status.ok()) {
@@ -2552,6 +2643,9 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     resident_color_correlation_readback_needed_ = false;
   }
   candidate_readback_stats.control_bytes = sizeof(device_error);
+  if (materialized_strategy)
+    candidate_readback_stats.mapped_frame_bytes +=
+        block_count_ + tile_extent_.width * tile_extent_.height;
 
   if (score_count != 0) {
     status = backend_->CopyDeviceToHost(
@@ -2604,10 +2698,13 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     }
     if (status.ok()) {
       candidate_readback_stats.quantizer_bytes = sizeof(resident_quantizer);
-      candidate_readback_stats.mapped_frame_bytes =
-        ((candidate_completed_frame == nullptr ? coefficient_value_count_ :
-            completed_coefficients_.extent.width + completed_order_population_.extent.width) +
-          4 * block_count_) * sizeof(int32_t);
+      candidate_readback_stats.mapped_frame_bytes +=
+          ((candidate_completed_frame == nullptr
+                ? coefficient_value_count_
+                : completed_coefficients_.extent.width +
+                      completed_order_population_.extent.width) +
+           4 * block_count_) *
+          sizeof(int32_t);
     }
   }
   if (reconstruction_requested) {
@@ -2746,6 +2843,8 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     candidate_completed_frame->allocation_cache = backend_->registry_;
     *output.completed_frame = std::move(candidate_completed_frame);
   }
+  if (output.strategies)
+    *output.strategies = std::move(candidate_strategies);
   last_readback_stats_ = candidate_readback_stats;
   resident_forward_coefficients_ready_ = true;
   if (profiling) *profile = std::move(candidate_profile);
@@ -2824,7 +2923,7 @@ Status MetalPreparedAqEvaluation::PrepareInvariantColorCorrelationResident(
     return Status::InvalidArgument("Resident final CfL iteration limit is invalid");
 
   if (!resident_quantization_ || frame_only_ ||
-      final_transform_metadata_pending_) {
+      (final_transform_metadata_pending_ && !resident_strategy_pending_)) {
     return Status::FailedPrecondition(
       "Resident final color correlation was not prepared");
   }
@@ -2863,6 +2962,7 @@ Status MetalPreparedAqEvaluation::PrepareInvariantColorCorrelationResident(
     return status;
   }
   invariant_quant_dc_ = quant_dc;
+  invariant_color_correlation_from_policy_ = false;
   final_cfl_params_.nonlinear_iterations = nonlinear_iterations;
   invariant_color_correlation_ready_ = true;
   resident_forward_coefficients_ready_ = false;
@@ -2998,7 +3098,8 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
     auto frame = std::make_unique<MetalCompletedVarDctFrame>();
     status = FrameGeometry::Create(source_extent_, &frame->geometry);
     if (!status.ok()) return status;
-    frame->strategies = strategies_host_;
+    if (!resident_strategy_pending_)
+      frame->strategies = strategies_host_;
     frame->profile = options_.profile;
     frame->sharpness = epf_sharpness_host_;
     frame->raw_quant.resize(block_count_);
@@ -3009,41 +3110,55 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
     frame->group_extent = storage_plan.group_extent;
     const size_t group_count = storage_plan.group_count;
     frame->group_used.assign(group_count, 0);
-    ManagedVector<uint32_t> destinations(anchor_count_);
+    ManagedVector<uint32_t> destinations(
+        resident_strategy_pending_ ? 0 : anchor_count_);
     uint16_t present_mask = 0;
-    for (const auto& batch : batches_) {
-      if (batch.anchor_count != 0) {
-        const size_t family = vardct_frame_internal::OrderPopulationFamily(batch.coefficient_count);
-        if (family >= vardct_frame_internal::kOrderPopulationSizes.size()) {
-          return Status::Internal("Completed Metal population family is invalid");
+    if (resident_strategy_pending_) {
+      for (size_t gy = 0; gy < frame->group_extent.height; ++gy)
+        for (size_t gx = 0; gx < frame->group_extent.width; ++gx)
+          frame->group_used[gy * frame->group_extent.width + gx] =
+              64 * std::min(dim, block_extent_.width - gx * dim) *
+              std::min(dim, block_extent_.height - gy * dim);
+    } else {
+      for (const auto &batch : batches_) {
+        if (batch.anchor_count != 0) {
+          const size_t family = vardct_frame_internal::OrderPopulationFamily(
+              batch.coefficient_count);
+          if (family >= vardct_frame_internal::kOrderPopulationSizes.size()) {
+            return Status::Internal(
+                "Completed Metal population family is invalid");
+          }
+          present_mask |= uint16_t{1} << family;
         }
-        present_mask |= uint16_t{1} << family;
       }
-    }
-    // Build from the authoritative post-search anchors on every output
-    // request, not from the provisional preparation's strategy grid.
-    for (const AqAnchor& anchor : row_major_anchors_) {
-      const auto& batch = batches_[anchor.batch_index];
-      const auto* info = GetAcStrategyInfo(anchor.strategy);
-      const size_t gx = anchor.block_x / dim;
-      const size_t gy = anchor.block_y / dim;
-      if (info == nullptr ||
-          (anchor.block_x + info->covered_blocks.width - 1) / dim != gx ||
-          (anchor.block_y + info->covered_blocks.height - 1) / dim != gy) {
-        return Status::InvalidArgument("Completed Metal transform crosses a group");
+      // Build from the authoritative post-search anchors on every output
+      // request, not from the provisional preparation's strategy grid.
+      for (const AqAnchor &anchor : row_major_anchors_) {
+        const auto &batch = batches_[anchor.batch_index];
+        const auto *info = GetAcStrategyInfo(anchor.strategy);
+        const size_t gx = anchor.block_x / dim;
+        const size_t gy = anchor.block_y / dim;
+        if (info == nullptr ||
+            (anchor.block_x + info->covered_blocks.width - 1) / dim != gx ||
+            (anchor.block_y + info->covered_blocks.height - 1) / dim != gy) {
+          return Status::InvalidArgument(
+              "Completed Metal transform crosses a group");
+        }
+        const size_t group = gy * frame->group_extent.width + gx;
+        size_t &used = frame->group_used[group];
+        if (batch.coefficient_count > cap - used) {
+          return Status::Internal("Completed Metal group capacity overflow");
+        }
+        if (present_mask == 1 &&
+            batch.anchor_offset + anchor.index_in_batch !=
+                anchor.block_y * block_extent_.width + anchor.block_x) {
+          return Status::Internal(
+              "Completed Metal DCT8 sample mapping is invalid");
+        }
+        destinations[batch.anchor_offset + anchor.index_in_batch] =
+            static_cast<uint32_t>(group * 3 * cap + used);
+        used += batch.coefficient_count;
       }
-      const size_t group = gy * frame->group_extent.width + gx;
-      size_t& used = frame->group_used[group];
-      if (batch.coefficient_count > cap - used) {
-        return Status::Internal("Completed Metal group capacity overflow");
-      }
-      if (present_mask == 1 && batch.anchor_offset + anchor.index_in_batch !=
-            anchor.block_y * block_extent_.width + anchor.block_x) {
-        return Status::Internal("Completed Metal DCT8 sample mapping is invalid");
-      }
-      destinations[batch.anchor_offset + anchor.index_in_batch] =
-        static_cast<uint32_t>(group * 3 * cap + used);
-      used += batch.coefficient_count;
     }
     status = backend_->AcquireCompletedFrameAllocation(
       storage_plan.capacity_bytes, &frame->allocation);
@@ -3070,7 +3185,7 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
     std::fill_n(populations, vardct_frame_internal::kOrderPopulationCount, 0u);
     auto* samples = reinterpret_cast<uint8_t*>(base + storage_plan.order_samples.offset_bytes);
     std::fill_n(samples, anchor_count_, uint8_t{0});
-    if (present_mask == 1) {
+    if (resident_strategy_pending_ || present_mask == 1) {
       // Pure DCT8's single batch is raster-ordered. Generate decisions in the
       // encoder's AC-group-first order, then remap to the batch anchor index.
       uint64_t a = 0x94D049BB133111EBull, b = 0xBF58476D1CE4E5B9ull;
@@ -3108,6 +3223,14 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
       frame->allocation.get(), samples_plane.offset_bytes, samples_plane.element_type,
       samples_plane.extent, samples_plane.row_stride};
     completed_sample_dct8_ = present_mask == 1;
+    if (resident_strategy_pending_) {
+      resident_strategy_metadata_.planes[kMetadataDestinations] =
+          completed_destinations_;
+      status = MetalAqStrategyMetadata::Validate(*backend_,
+                                                 resident_strategy_metadata_);
+      if (!status.ok())
+        return status;
+    }
     *out = std::move(frame);
     return Status::Ok();
   } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
@@ -3140,6 +3263,22 @@ Status MetalPreparedAqEvaluation::FinishCompletedFrame(
   if (!status.ok()) return status;
   if (raw_quant.size() != block_count_ || quantized_dc.size() != 3 * block_count_) {
     return Status::Internal("Completed Metal metadata dimensions changed");
+  }
+  if (!frame.strategies.valid()) {
+    try {
+      frame.strategies = strategies_host_;
+    } catch (const resource_budget_internal::ManagedAllocationFailure &e) {
+      return e.status();
+    } catch (const std::bad_alloc &) {
+      return Status::OutOfMemory(
+          "Completed strategy snapshot allocation failed");
+    }
+    frame.population.present_mask = 0;
+    for (const auto &b : batches_)
+      if (b.anchor_count)
+        frame.population.present_mask |=
+            uint16_t{1} << vardct_frame_internal::OrderPopulationFamily(
+                b.coefficient_count);
   }
   // These block-resolution fields are snapshotted so temporary AQ storage can
   // be reused/destroyed immediately. The full-resolution AC plane is borrowed.
@@ -3245,6 +3384,9 @@ Status MetalPreparedAqEvaluation::AssembleFrameFromCompletedDeviceBuffers(
 Status MetalPreparedAqEvaluation::SubmitEvaluation(
   AqEvaluationInput input,
   bool profiling_reserved) {
+  if (DeviceStrategyDispatch())
+    return Status::Unavailable(
+        "Device strategy dispatch is restricted to resident policy evaluation");
   if (options_.evaluation_free) {
     return Status::FailedPrecondition(
       "Evaluation-free preparation cannot evaluate a quantization field");
@@ -3264,19 +3406,23 @@ Status MetalPreparedAqEvaluation::SubmitEvaluation(
     const auto batches =
       MakeResidentButteraugliBatches(block_reduction_params_);
     status = ValidatePreparedMetalButteraugliResidentEncoding(
-      *butteraugli_,
-      {
-        .distorted_linear_rgb = {{{reconstructed_linear_[0],
-                                   reconstructed_linear_[1],
-                                   reconstructed_linear_[2]}}},
-        .anchors = MakeResidentAnchors(anchors_, anchor_count_),
-        .block_distance = block_distance_,
-        .score_partials =
-          MakeResidentScorePartials(score_partials_, anchor_count_),
-        .score = score_,
-        .error = reconstruction_error_,
-        .batches = batches,
-      });
+        *butteraugli_,
+        {
+            .distorted_linear_rgb = {{{reconstructed_linear_[0],
+                                       reconstructed_linear_[1],
+                                       reconstructed_linear_[2]}}},
+            .anchors = MakeResidentAnchors(anchors_, DeviceStrategyDispatch()
+                                                         ? block_count_
+                                                         : anchor_count_),
+            .block_distance = block_distance_,
+            .score_partials = MakeResidentScorePartials(
+                score_partials_,
+                DeviceStrategyDispatch() ? block_count_ : anchor_count_),
+            .score = score_,
+            .error = reconstruction_error_,
+            .batches = batches,
+            .strategy_dispatch = strategy_dispatch_,
+        });
     if (!status.ok()) return status;
   } else if (options_.metric == AqEvaluationMetric::kButteraugli) {
     status = ValidatePreparedMetalButteraugliEncoding(
@@ -3791,6 +3937,89 @@ Status MetalPreparedAqEvaluation::GetReadbackStats(
   return Status::Ok();
 }
 
+Status MetalPreparedAqEvaluation::GetStrategyMetadataSnapshot(
+    MetalAqStrategyMetadataSnapshot *output) {
+  if (!output || !resident_quantization_ || final_transform_metadata_pending_)
+    return Status::InvalidArgument(
+        "AQ strategy metadata snapshot is unavailable");
+  Status status = BeginOperation();
+  if (!status.ok())
+    return status;
+  try {
+    MetalAqStrategyMetadataSnapshot candidate;
+    for (size_t f = 0; f < batches_.size(); ++f) {
+      const auto &b = batches_[f];
+      const std::array<uint32_t, 5> words{
+          uint32_t(b.strategy), uint32_t(b.anchor_offset),
+          uint32_t(b.anchor_count), uint32_t(b.coefficient_offset),
+          uint32_t(b.coefficient_count)};
+      std::copy(words.begin(), words.end(), candidate.families.begin() + 5 * f);
+    }
+    const auto read = [&](ConstDevicePlaneView plane, size_t n,
+                          std::vector<uint32_t> *out) {
+      out->resize(n);
+      return backend_->CopyDeviceToHost(*plane.buffer, out->data(), 4 * n,
+                                        plane.offset_bytes);
+    };
+    status = read(strategies_, 2 * block_count_, &candidate.strategies);
+    if (status.ok())
+      status = read(anchors_, 2 * anchor_count_, &candidate.anchors);
+    if (status.ok())
+      status = read(color_transform_records_, 6 * anchor_count_,
+                    &candidate.color_records);
+    if (status.ok())
+      status = read(color_tile_offsets_,
+                    tile_extent_.width * tile_extent_.height + 1,
+                    &candidate.color_offsets);
+    std::unique_ptr<MetalCompletedVarDctFrame> frame;
+    if (status.ok())
+      status = PrepareCompletedFrame(&frame);
+    if (status.ok())
+      status =
+          read(completed_destinations_, anchor_count_, &candidate.destinations);
+    if (status.ok()) {
+      candidate.control = {0u, uint32_t(anchor_count_),
+                           frame->population.present_mask,
+                           uint32_t(coefficient_value_count_)};
+      *output = std::move(candidate);
+    }
+    // These borrowed views must not outlive the snapshot's temporary owner.
+    completed_coefficients_ = {};
+    completed_destinations_ = {};
+    completed_order_population_ = {};
+    completed_order_samples_ = {};
+    completed_sample_dct8_ = false;
+  } catch (const std::bad_alloc &) {
+    status = Status::OutOfMemory("AQ metadata snapshot allocation failed");
+    completed_coefficients_ = {};
+    completed_destinations_ = {};
+    completed_order_population_ = {};
+    completed_order_samples_ = {};
+    completed_sample_dct8_ = false;
+  }
+  CompleteOperation();
+  return status;
+}
+
+Status MetalPreparedAqEvaluation::GetResidentPolicyBounds(float *lower,
+                                                          float *upper) const {
+  std::unique_lock lock(mutex_, std::try_to_lock);
+  if (!lock.owns_lock() || state_ != State::kReady ||
+      !resident_policy_adjust_initial_field_ || lower == nullptr ||
+      upper == nullptr) {
+    return Status::FailedPrecondition("Resident policy bounds are unavailable");
+  }
+  float bounds[2];
+  Status status = backend_->CopyDeviceToHost(
+      *resident_policy_bounds_.buffer, bounds, sizeof(bounds),
+      resident_policy_bounds_.offset_bytes);
+  if (status.ok()) {
+    *lower = bounds[0];
+    *upper = bounds[1];
+  }
+  return status;
+}
+
 Status MetalPreparedAqEvaluation::ValidatePreparation(
     const AqEvaluationPreparation& preparation,
     bool host_images_are_finite) const {
@@ -3965,8 +4194,9 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
   return Status::Ok();
 }
 
-Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
-  if (final_transform_metadata_pending_)
+Status MetalPreparedAqEvaluation::ValidateInput(
+    AqEvaluationInput input, bool derive_color_correlation) const {
+  if (final_transform_metadata_pending_ && !resident_strategy_pending_)
     return Status::FailedPrecondition(
       "AQ transform metadata requires successful reconfiguration");
   const bool resident_field = input.quant_field.valid();
@@ -4018,7 +4248,7 @@ Status MetalPreparedAqEvaluation::ValidateInput(AqEvaluationInput input) const {
       input.epf_inverse_sigma.extent == block_extent_;
   if ((!resident_field && !frame_only_resident_quantizer_ &&
        !valid_host_quant) ||
-      (!resident_initial_cfl_ &&
+      (!resident_initial_cfl_ && !derive_color_correlation &&
        ((invariant_color_correlation_ready_ && host_cfl_specified) ||
         (!invariant_color_correlation_ready_ && !valid_host_cfl)))) {
     return Status::InvalidArgument(
@@ -4540,7 +4770,7 @@ void MetalPreparedAqEvaluation::EncodeBlockReduction(
     MetalBackend::AsMetalBuffer(*reconstruction_error_.buffer);
   for (size_t batch_index = 0; batch_index < batches_.size(); ++batch_index) {
     const AqStrategyBatch& batch = batches_[batch_index];
-    if (batch.anchor_count == 0) {
+    if (!DeviceStrategyDispatch() && batch.anchor_count == 0) {
       continue;
     }
     encoder->setBuffer(distance->handle(), distance_map.offset_bytes, 0);
@@ -4548,6 +4778,14 @@ void MetalPreparedAqEvaluation::EncodeBlockReduction(
     encoder->setBuffer(block->handle(), block_distance_.offset_bytes, 2);
     encoder->setBuffer(
       error->handle(), reconstruction_error_.offset_bytes, 3);
+    if (DeviceStrategyDispatch()) {
+      BindStrategyParameters(
+          encoder, batch_index,
+          offsetof(gjxl_aq_dispatch::Record, block_reduction), 4);
+      DispatchStrategy(encoder, batch_index, gjxl_aq_dispatch::kTransforms,
+                       MTL::Size(kBlockReductionThreadCount, 1, 1));
+      continue;
+    }
     encoder->setBytes(
       &block_reduction_params_[batch_index],
       sizeof(block_reduction_params_[batch_index]), 4);
@@ -4634,20 +4872,25 @@ void MetalPreparedAqEvaluation::EncodeEvaluationSubmission(
       const auto batches =
         MakeResidentButteraugliBatches(self.block_reduction_params_);
       EncodePreparedMetalButteraugliResident(
-        *self.butteraugli_, encoder,
-        {
-          .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
-                                     self.reconstructed_linear_[1],
-                                     self.reconstructed_linear_[2]}}},
-          .anchors = MakeResidentAnchors(
-            self.anchors_, self.anchor_count_),
-          .block_distance = self.block_distance_,
-          .score_partials = MakeResidentScorePartials(
-            self.score_partials_, self.anchor_count_),
-          .score = self.score_,
-          .error = self.reconstruction_error_,
-          .batches = batches,
-        });
+          *self.butteraugli_, encoder,
+          {
+              .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
+                                         self.reconstructed_linear_[1],
+                                         self.reconstructed_linear_[2]}}},
+              .anchors = MakeResidentAnchors(self.anchors_,
+                                             self.DeviceStrategyDispatch()
+                                                 ? self.block_count_
+                                                 : self.anchor_count_),
+              .block_distance = self.block_distance_,
+              .score_partials = MakeResidentScorePartials(
+                  self.score_partials_, self.DeviceStrategyDispatch()
+                                            ? self.block_count_
+                                            : self.anchor_count_),
+              .score = self.score_,
+              .error = self.reconstruction_error_,
+              .batches = batches,
+              .strategy_dispatch = self.strategy_dispatch_,
+          });
     } else {
       EncodePreparedMetalButteraugli(
         *self.butteraugli_, encoder,
@@ -4671,6 +4914,14 @@ void MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission(
     const void* context) {
   auto& self = *static_cast<MetalPreparedAqEvaluation*>(
     const_cast<void*>(context));
+  if (self.resident_strategy_pending_)
+    self.EncodeResidentStrategyMetadata(backend, encoder);
+  if (self.DeviceStrategyDispatch())
+    self.EncodeStrategyDispatch(backend, encoder);
+  if (self.resident_policy_adjust_initial_field_) {
+    EncodeQuantFieldAdjustmentSubmission(backend, encoder, context);
+    self.EncodeResidentPolicyBounds(backend, encoder);
+  }
   const size_t evaluation_count =
     self.resident_policy_iterations_ +
     static_cast<size_t>(self.resident_evaluate_final_field_);
@@ -4687,20 +4938,25 @@ void MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission(
       const auto batches =
         MakeResidentButteraugliBatches(self.block_reduction_params_);
       EncodePreparedMetalButteraugliResident(
-        *self.butteraugli_, encoder,
-        {
-          .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
-                                     self.reconstructed_linear_[1],
-                                     self.reconstructed_linear_[2]}}},
-          .anchors = MakeResidentAnchors(
-            self.anchors_, self.anchor_count_),
-          .block_distance = self.block_distance_,
-          .score_partials = MakeResidentScorePartials(
-            self.score_partials_, self.anchor_count_),
-          .score = self.score_,
-          .error = self.reconstruction_error_,
-          .batches = batches,
-        });
+          *self.butteraugli_, encoder,
+          {
+              .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
+                                         self.reconstructed_linear_[1],
+                                         self.reconstructed_linear_[2]}}},
+              .anchors = MakeResidentAnchors(self.anchors_,
+                                             self.DeviceStrategyDispatch()
+                                                 ? self.block_count_
+                                                 : self.anchor_count_),
+              .block_distance = self.block_distance_,
+              .score_partials = MakeResidentScorePartials(
+                  self.score_partials_, self.DeviceStrategyDispatch()
+                                            ? self.block_count_
+                                            : self.anchor_count_),
+              .score = self.score_,
+              .error = self.reconstruction_error_,
+              .batches = batches,
+              .strategy_dispatch = self.strategy_dispatch_,
+          });
     } else {
       EncodePreparedMetalButteraugli(
         *self.butteraugli_, encoder,
@@ -4730,7 +4986,11 @@ void MetalPreparedAqEvaluation::EncodeResidentReconstruction(
     uint32_t iteration) {
   write_completed_coefficients_ = completed_coefficients_.buffer != nullptr &&
     iteration == resident_policy_iterations_;
-  reset_params_.preserve_error = iteration == 0 ? 0u : 1u;
+  reset_params_.preserve_error =
+      iteration == 0 && !resident_policy_adjust_initial_field_ &&
+              !resident_strategy_pending_
+          ? 0u
+          : 1u;
   reset_params_.preserve_forward_coefficients =
     iteration == 0 && !resident_forward_coefficients_ready_ ? 0u : 1u;
   const bool prepared_color_correlation =
@@ -4747,7 +5007,11 @@ void MetalPreparedAqEvaluation::EncodeResidentFrame(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) {
   write_completed_coefficients_ = completed_coefficients_.buffer != nullptr;
   const bool first_pass = resident_policy_iterations_ == 0;
-  reset_params_.preserve_error = first_pass ? 0u : 1u;
+  reset_params_.preserve_error =
+      first_pass && !resident_policy_adjust_initial_field_ &&
+              !resident_strategy_pending_
+          ? 0u
+          : 1u;
   reset_params_.preserve_forward_coefficients =
     first_pass && !resident_forward_coefficients_ready_ ? 0u : 1u;
   if (first_pass) EncodeReconstructionReset(backend, encoder);
@@ -4770,6 +5034,30 @@ void MetalPreparedAqEvaluation::EncodeResidentFrame(
     EncodeReconstructionCoefficientBatch(backend, encoder, batch_index, false);
   }
   EncodeDcQuantization(backend, encoder);
+}
+
+void MetalPreparedAqEvaluation::EncodeResidentPolicyBounds(
+    MetalBackend &backend, MTL::ComputeCommandEncoder *encoder) const {
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.resident_policy_bounds_reset.get());
+  BindPlane(encoder, resident_policy_bounds_, 0);
+  DispatchThreads1d(encoder, 1);
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.resident_policy_extrema.get());
+  BindPlane(encoder, resident_quant_field_, 0);
+  BindPlane(encoder, resident_policy_bounds_, 1);
+  BindPlane(encoder, reconstruction_error_, 2);
+  encoder->setBytes(&resident_policy_initialize_params_,
+                    sizeof(resident_policy_initialize_params_), 3);
+  DispatchMetalThreadgroups(
+      encoder,
+      MTL::Size(std::min<size_t>(64, (block_count_ + 255) / 256), 1, 1),
+      MTL::Size(256, 1, 1));
+  encoder->setComputePipelineState(
+      backend.aq_pipelines_.resident_policy_bounds.get());
+  BindPlane(encoder, resident_policy_bounds_, 0);
+  BindPlane(encoder, reconstruction_error_, 1);
+  DispatchThreads1d(encoder, 1);
 }
 
 void MetalPreparedAqEvaluation::EncodeResidentPolicyInitialize(
@@ -4805,6 +5093,7 @@ void MetalPreparedAqEvaluation::EncodeResidentPolicyUpdate(
   encoder->setBytes(
     &resident_policy_update_params_,
     sizeof(resident_policy_update_params_), 7);
+  BindPlane(encoder, resident_policy_bounds_, 8);
   DispatchThreads1d(encoder, block_count_);
 }
 
@@ -4872,21 +5161,26 @@ void MetalPreparedAqEvaluation::EncodeResidentProfileStage(
       const auto batches =
         MakeResidentButteraugliBatches(self.block_reduction_params_);
       EncodePreparedMetalButteraugliResidentProfileStage(
-        *self.butteraugli_, encoder,
-        {
-          .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
-                                     self.reconstructed_linear_[1],
-                                     self.reconstructed_linear_[2]}}},
-          .anchors = MakeResidentAnchors(
-            self.anchors_, self.anchor_count_),
-          .block_distance = self.block_distance_,
-          .score_partials = MakeResidentScorePartials(
-            self.score_partials_, self.anchor_count_),
-          .score = self.score_,
-          .error = self.reconstruction_error_,
-          .batches = batches,
-        },
-        stage.butteraugli_stage, stage.psycho_stage);
+          *self.butteraugli_, encoder,
+          {
+              .distorted_linear_rgb = {{{self.reconstructed_linear_[0],
+                                         self.reconstructed_linear_[1],
+                                         self.reconstructed_linear_[2]}}},
+              .anchors = MakeResidentAnchors(self.anchors_,
+                                             self.DeviceStrategyDispatch()
+                                                 ? self.block_count_
+                                                 : self.anchor_count_),
+              .block_distance = self.block_distance_,
+              .score_partials = MakeResidentScorePartials(
+                  self.score_partials_, self.DeviceStrategyDispatch()
+                                            ? self.block_count_
+                                            : self.anchor_count_),
+              .score = self.score_,
+              .error = self.reconstruction_error_,
+              .batches = batches,
+              .strategy_dispatch = self.strategy_dispatch_,
+          },
+          stage.butteraugli_stage, stage.psycho_stage);
       break;
     }
     case ResidentProfileStage::kBlockReduction:
@@ -4908,6 +5202,18 @@ Status CreateAqPipelines(
     return Status::InvalidArgument("AQ pipeline output is null");
   }
   AqPipelines pipelines;
+  const std::array metadata_names{
+      "gjxl_aq_metadata_reset",        "gjxl_aq_metadata_count",
+      "gjxl_aq_metadata_tile_count",   "gjxl_aq_metadata_prefix",
+      "gjxl_aq_metadata_scatter",      "gjxl_aq_metadata_cfl",
+      "gjxl_aq_metadata_destinations", "gjxl_aq_strategy_dispatch",
+      "gjxl_aq_metadata_error"};
+  for (size_t i = 0; i < metadata_names.size(); ++i) {
+    Status metadata_status = CreateAqPipeline(
+        device, library, metadata_names[i], &pipelines.strategy_metadata[i]);
+    if (!metadata_status.ok())
+      return metadata_status;
+  }
   Status status = CreateAqPipeline(
     device, library, "gjxl_aq_reduce_block_distance_f32",
     &pipelines.block_reduction);
@@ -4940,69 +5246,83 @@ Status CreateAqPipelines(
       "Metal cannot launch the AQ maximum-error threadgroup");
   }
   const std::array<
-    std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>, 43>
-    reconstruction = {{
-      {"gjxl_aq_reset_exact_evaluation", &pipelines.reset_exact_evaluation},
-      {"gjxl_aq_reset_exact_coefficients", &pipelines.reset_exact_coefficients},
-      {"gjxl_aq_reset_reconstruction", &pipelines.reset_reconstruction},
-      {"gjxl_aq_reset_frame_encoding", &pipelines.reset_frame_encoding},
-      {"gjxl_aq_initial_cfl", &pipelines.initial_cfl},
-      {"gjxl_aq_final_cfl", &pipelines.final_cfl},
-      {"gjxl_aq_reset_initial_quant", &pipelines.reset_initial_quant},
-      {"gjxl_aq_resident_input_transform", &pipelines.resident_input_transform},
-      {"gjxl_aq_resident_input_statistics",
-       &pipelines.resident_input_statistics},
-      {"gjxl_aq_initial_quant_gradient", &pipelines.initial_quant_gradient},
-      {"gjxl_aq_initial_quant_fuzzy_erosion",
-       &pipelines.initial_quant_fuzzy_erosion},
-      {"gjxl_aq_validate_initial_mask", &pipelines.validate_initial_mask},
-      {"gjxl_aq_initial_quant_modulation", &pipelines.initial_quant_modulation},
-      {"gjxl_aq_uniform_initial_quant", &pipelines.uniform_initial_quant},
-      {"gjxl_aq_initial_quant_sort_prepare",
-       &pipelines.initial_quant_sort_prepare},
-      {"gjxl_aq_initial_quant_sort_step", &pipelines.initial_quant_sort_step},
-      {"gjxl_aq_initial_quant_capture_median",
-       &pipelines.initial_quant_capture_median},
-      {"gjxl_aq_initial_quant_deviation_prepare",
-       &pipelines.initial_quant_deviation_prepare},
-      {"gjxl_aq_initial_quant_finalize_quantizer",
-       &pipelines.initial_quant_finalize_quantizer},
-      {"gjxl_aq_initial_quant_raw_quant", &pipelines.initial_quant_raw_quant},
-      {"gjxl_aq_adjust_quant_field", &pipelines.adjust_quant_field},
-      {"gjxl_aq_resident_quant_small", &pipelines.resident_quant_small},
-      {"gjxl_aq_resident_quant_select_initialize",
-       &pipelines.resident_quant_select_initialize},
-      {"gjxl_aq_resident_quant_histogram", &pipelines.resident_quant_histogram},
-      {"gjxl_aq_resident_quant_select_bucket",
-       &pipelines.resident_quant_select_bucket},
-      {"gjxl_aq_resident_quant_finalize_quantizer",
-       &pipelines.resident_quant_finalize_quantizer},
-      {"gjxl_aq_resident_policy_initialize",
-       &pipelines.resident_policy_initialize},
-      {"gjxl_aq_resident_policy_update", &pipelines.resident_policy_update},
-      {"gjxl_aq_gather_transform_pixels", &pipelines.gather_transform_pixels},
-      {"gjxl_aq_select_adjusted_quantization",
-       &pipelines.select_adjusted_quantization},
-      {"gjxl_aq_select_adjusted_quantization_parallel",
-       &pipelines.select_adjusted_quantization_parallel},
-      {"gjxl_aq_encode_reconstruction_coefficients",
-       &pipelines.encode_reconstruction_coefficients},
-      {"gjxl_aq_encode_scored_coefficients",
-       &pipelines.encode_scored_coefficients},
-      {"gjxl_aq_count_coefficient_zeros", &pipelines.count_coefficient_zeros},
-      {"gjxl_aq_encode_final_coefficients",
-       &pipelines.encode_final_coefficients},
-      {"gjxl_aq_dc_quantize", &pipelines.dc_quantize},
-      {"gjxl_aq_dc_quantize_simd_wave", &pipelines.dc_quantize_simd_wave},
-      {"gjxl_aq_dc_smooth", &pipelines.dc_smooth},
-      {"gjxl_aq_dc_low_frequencies", &pipelines.dc_low_frequencies},
-      {"gjxl_aq_encode_frame_coefficients",
-       &pipelines.encode_frame_coefficients},
-      {"gjxl_aq_scatter_reconstructed_pixels",
-       &pipelines.scatter_reconstructed_pixels},
-      {"gjxl_aq_quantization_probe", &pipelines.quantization_probe},
-      {"gjxl_aq_adjustment_probe", &pipelines.adjustment_probe},
-    }};
+      std::pair<std::string_view, NS::SharedPtr<MTL::ComputePipelineState> *>,
+      46>
+      reconstruction = {{
+          {"gjxl_aq_reset_exact_evaluation", &pipelines.reset_exact_evaluation},
+          {"gjxl_aq_reset_exact_coefficients",
+           &pipelines.reset_exact_coefficients},
+          {"gjxl_aq_reset_reconstruction", &pipelines.reset_reconstruction},
+          {"gjxl_aq_reset_frame_encoding", &pipelines.reset_frame_encoding},
+          {"gjxl_aq_initial_cfl", &pipelines.initial_cfl},
+          {"gjxl_aq_final_cfl", &pipelines.final_cfl},
+          {"gjxl_aq_reset_initial_quant", &pipelines.reset_initial_quant},
+          {"gjxl_aq_resident_input_transform",
+           &pipelines.resident_input_transform},
+          {"gjxl_aq_resident_input_statistics",
+           &pipelines.resident_input_statistics},
+          {"gjxl_aq_initial_quant_gradient", &pipelines.initial_quant_gradient},
+          {"gjxl_aq_initial_quant_fuzzy_erosion",
+           &pipelines.initial_quant_fuzzy_erosion},
+          {"gjxl_aq_validate_initial_mask", &pipelines.validate_initial_mask},
+          {"gjxl_aq_initial_quant_modulation",
+           &pipelines.initial_quant_modulation},
+          {"gjxl_aq_uniform_initial_quant", &pipelines.uniform_initial_quant},
+          {"gjxl_aq_initial_quant_sort_prepare",
+           &pipelines.initial_quant_sort_prepare},
+          {"gjxl_aq_initial_quant_sort_step",
+           &pipelines.initial_quant_sort_step},
+          {"gjxl_aq_initial_quant_capture_median",
+           &pipelines.initial_quant_capture_median},
+          {"gjxl_aq_initial_quant_deviation_prepare",
+           &pipelines.initial_quant_deviation_prepare},
+          {"gjxl_aq_initial_quant_finalize_quantizer",
+           &pipelines.initial_quant_finalize_quantizer},
+          {"gjxl_aq_initial_quant_raw_quant",
+           &pipelines.initial_quant_raw_quant},
+          {"gjxl_aq_adjust_quant_field", &pipelines.adjust_quant_field},
+          {"gjxl_aq_resident_quant_small", &pipelines.resident_quant_small},
+          {"gjxl_aq_resident_quant_select_initialize",
+           &pipelines.resident_quant_select_initialize},
+          {"gjxl_aq_resident_quant_histogram",
+           &pipelines.resident_quant_histogram},
+          {"gjxl_aq_resident_quant_select_bucket",
+           &pipelines.resident_quant_select_bucket},
+          {"gjxl_aq_resident_quant_finalize_quantizer",
+           &pipelines.resident_quant_finalize_quantizer},
+          {"gjxl_aq_resident_policy_initialize",
+           &pipelines.resident_policy_initialize},
+          {"gjxl_aq_resident_policy_update", &pipelines.resident_policy_update},
+          {"gjxl_aq_resident_policy_bounds_reset",
+           &pipelines.resident_policy_bounds_reset},
+          {"gjxl_aq_resident_policy_extrema",
+           &pipelines.resident_policy_extrema},
+          {"gjxl_aq_resident_policy_bounds", &pipelines.resident_policy_bounds},
+          {"gjxl_aq_gather_transform_pixels",
+           &pipelines.gather_transform_pixels},
+          {"gjxl_aq_select_adjusted_quantization",
+           &pipelines.select_adjusted_quantization},
+          {"gjxl_aq_select_adjusted_quantization_parallel",
+           &pipelines.select_adjusted_quantization_parallel},
+          {"gjxl_aq_encode_reconstruction_coefficients",
+           &pipelines.encode_reconstruction_coefficients},
+          {"gjxl_aq_encode_scored_coefficients",
+           &pipelines.encode_scored_coefficients},
+          {"gjxl_aq_count_coefficient_zeros",
+           &pipelines.count_coefficient_zeros},
+          {"gjxl_aq_encode_final_coefficients",
+           &pipelines.encode_final_coefficients},
+          {"gjxl_aq_dc_quantize", &pipelines.dc_quantize},
+          {"gjxl_aq_dc_quantize_simd_wave", &pipelines.dc_quantize_simd_wave},
+          {"gjxl_aq_dc_smooth", &pipelines.dc_smooth},
+          {"gjxl_aq_dc_low_frequencies", &pipelines.dc_low_frequencies},
+          {"gjxl_aq_encode_frame_coefficients",
+           &pipelines.encode_frame_coefficients},
+          {"gjxl_aq_scatter_reconstructed_pixels",
+           &pipelines.scatter_reconstructed_pixels},
+          {"gjxl_aq_quantization_probe", &pipelines.quantization_probe},
+          {"gjxl_aq_adjustment_probe", &pipelines.adjustment_probe},
+      }};
   for (const auto &[name, pipeline] : reconstruction) {
     status = CreateAqPipeline(device, library, name, pipeline);
     if (!status.ok()) {
@@ -5329,6 +5649,23 @@ Status GetMetalAqReadbackStatsForTesting(
       "AQ readback stats require a Metal prepared evaluation");
   }
   return metal->GetReadbackStats(stats);
+}
+
+Status
+GetMetalAqStrategyMetadataForTesting(PreparedAqEvaluation &prepared,
+                                     MetalAqStrategyMetadataSnapshot *output) {
+  auto *metal = AsMetalPrepared(prepared);
+  if (!metal)
+    return Status::InvalidArgument("AQ metadata requires Metal preparation");
+  return metal->GetStrategyMetadataSnapshot(output);
+}
+
+Status GetMetalAqResidentPolicyBoundsForTesting(PreparedAqEvaluation &prepared,
+                                                float *lower, float *upper) {
+  auto *metal = dynamic_cast<MetalPreparedAqEvaluation *>(&prepared);
+  if (metal == nullptr)
+    return Status::InvalidArgument("AQ state is not Metal");
+  return metal->GetResidentPolicyBounds(lower, upper);
 }
 
 Status ValidateMetalAqGeometryForTesting(

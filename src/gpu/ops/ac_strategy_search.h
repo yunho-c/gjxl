@@ -11,6 +11,7 @@
 #include "gpu/backend.h"
 #include "gpu/image.h"
 #include "gpu/ops/ac_strategy.h"
+#include "gpu/ops/ac_strategy_selection.h"
 
 namespace gjxl {
 
@@ -26,6 +27,8 @@ struct AcStrategyGpuSearchStats {
   // Retained owning arena capacity: stage tables, costs, scratch, and padding.
   // Excludes legacy input staging and externally owned resident inputs.
   size_t resource_capacity_bytes = 0;
+  bool device_selection = false;
+  bool combined_aq_submission = false;
 };
 
 struct ResidentAcStrategySearchInputs {
@@ -35,6 +38,16 @@ struct ResidentAcStrategySearchInputs {
   ConstDevicePlaneView y_to_x;
   ConstDevicePlaneView y_to_b;
 };
+
+struct DeferredAcStrategySearch {
+  std::array<AcStrategyCandidateBatch, 7> batches;
+  AcStrategyDeviceSelection selection;
+};
+
+/// False for dense search, missing selector capability or experiment controls
+/// that require the CPU candidate table. Performs no work or allocation.
+[[nodiscard]] bool CanDeferAcStrategySearch(GpuBackend &,
+                                            AcStrategySearchOptions);
 
 class PreparedAcStrategySearch;
 
@@ -59,6 +72,18 @@ public:
   /// finished. Borrowed inputs and returned grids are unaffected. The empty
   /// owner can be used again; do not call concurrently with a search.
   void Reset() noexcept;
+
+  /// Prepares scoring/selection descriptors without submitting or waiting.
+  /// This owner and all resident inputs must remain alive and unchanged until
+  /// the consuming AQ call returns, including its failure path. Reset/reuse is
+  /// allowed only afterward. Failure leaves the descriptor and stats unchanged.
+  [[nodiscard]] Status PrepareDeferred(GpuBackend &, ConstImage3FView,
+                                       ConstPlaneF32View, ConstPlaneF32View,
+                                       const ColorCorrelationMap &,
+                                       ResidentAcStrategySearchInputs,
+                                       AcStrategySearchOptions,
+                                       DeferredAcStrategySearch *,
+                                       AcStrategyGpuSearchStats * = nullptr);
 
   PreparedAcStrategySearch(const PreparedAcStrategySearch&) = delete;
   PreparedAcStrategySearch& operator=(const PreparedAcStrategySearch&) =
@@ -92,8 +117,10 @@ private:
   AcStrategyGrid* out,
   AcStrategyGpuSearchStats* stats = nullptr);
 
-/// Runs the same CPU merge policy while candidate evaluation consumes the
+/// Preserves the CPU merge policy while candidate evaluation consumes the
 /// prepared opsin, quant field, and pixel mask directly from device memory.
+/// Ordinary Metal selection also executes on device; the selected grid is
+/// materialized synchronously before return. Dense search retains CPU selection.
 /// The host quant field remains a search-policy input. The host pixel mask may
 /// be entirely empty: candidate costs already consumed the resident mask and
 /// the CPU merge does not use its pixels. The host Opsin view may also be empty

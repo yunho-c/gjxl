@@ -157,15 +157,19 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
   const size_t filter_images = evaluation_free ? 0 : std::min(
       size_t{2}, size_t(filters.gaborish) + filters.epf_options.iterations);
   const bool sinks = !evaluation_free && source.width >= 15 && source.height >= 15;
+  const bool resident_strategy_metadata =
+      !fixed_dct8 && !UseDenseDct32Search(e) && !o.collect_gpu_profile;
   AqHostStoragePlan host;
-  status = ComputeAqHostStoragePlan({.source_extent = source,
-                                     .coding_extent = coding,
-                                     .resident_initial_quant = true,
-                                     .resident_ac_strategy_inputs = true,
-                                     .resident_quantization = true,
-                                     .defer_final_transform_metadata = true,
-                                     .reconfigure = true},
-                                    &host);
+  status = ComputeAqHostStoragePlan(
+      {.source_extent = source,
+       .coding_extent = coding,
+       .resident_initial_quant = true,
+       .resident_ac_strategy_inputs = true,
+       .resident_quantization = true,
+       .defer_final_transform_metadata = true,
+       .reconfigure = true,
+       .resident_strategy_metadata = resident_strategy_metadata},
+      &host);
   if (!status.ok())
     return status;
   // The checked AQ host geometry includes the tighter 32-bit coefficient bound.
@@ -186,29 +190,32 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
   ac_strategy_search_internal::HostStoragePlan ac_host;
   if (!(status = ComputeResidentInputStoragePlan(source, coding, &input))
            .ok() ||
-      !(status =
-            ComputeAqStoragePlan({.source_extent = source,
-                                  .coding_extent = coding,
-                                  .anchor_capacity_count = p.blocks,
-                                  .maximum_coefficient_count = max_coefficients,
-                                  .filter_scratch_image_count = filter_images,
-                                  .evaluation_free = evaluation_free,
-                                  .borrowed_original_linear_rgb = true,
-                                  .borrowed_coding_opsin = true,
-                                  .needs_reconstructed = !evaluation_free || filters.gaborish,
-                                  .frame_only_resident_initial_quant = true,
-                                  .omit_initial_search_data = fixed_dct8,
-                                  .resident_quantization = true,
-                                  .uses_butteraugli_sinks = sinks,
-                                  .dc_quantization = ResolveDcQuantization(e),
-                                  .dc_prediction = e.dc_prediction,
-                                  .extra_dc_precision = uint8_t(ResolveDcQuantization(e) == DcQuantizationMode::kPredictionAware),
-                                  .adaptive_dc_smoothing = ResolveAdaptiveDcSmoothing(e)},
-                                 &aq))
+      !(status = ComputeAqStoragePlan(
+            {.source_extent = source,
+             .coding_extent = coding,
+             .anchor_capacity_count = p.blocks,
+             .maximum_coefficient_count = max_coefficients,
+             .filter_scratch_image_count = filter_images,
+             .evaluation_free = evaluation_free,
+             .borrowed_original_linear_rgb = true,
+             .borrowed_coding_opsin = true,
+             .needs_reconstructed = !evaluation_free || filters.gaborish,
+             .frame_only_resident_initial_quant = true,
+             .omit_initial_search_data = fixed_dct8,
+             .resident_quantization = true,
+             .uses_butteraugli_sinks = sinks,
+             .dc_quantization = ResolveDcQuantization(e),
+             .dc_prediction = e.dc_prediction,
+             .extra_dc_precision =
+                 uint8_t(ResolveDcQuantization(e) ==
+                         DcQuantizationMode::kPredictionAware),
+             .adaptive_dc_smoothing = ResolveAdaptiveDcSmoothing(e),
+             .resident_strategy_metadata = resident_strategy_metadata},
+            &aq))
            .ok() ||
       (!evaluation_free && !(status = ComputeButteraugliStoragePlan(
-            source, sinks && filter_images == 2, &butter))
-           .ok()) ||
+                                 source, sinks && filter_images == 2, &butter))
+                                .ok()) ||
       !(status = ComputeCompletedFrameStoragePlan(source, coding, p.blocks,
                                                   &completed))
            .ok() ||
@@ -335,11 +342,13 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
           {completed.capacity_bytes, completed.capacity_bytes}) ||
       !p.completion_phase.Add(completed_host.working) ||
       !p.completion_phase.Add(p.serializer.working) ||
-      (p.maximum_attempts > 1 && !p.completion_phase.Add(ac_work)))
+      ((p.maximum_attempts > 1 || resident_strategy_metadata) &&
+       !p.completion_phase.Add(ac_work)))
     return Overflow();
   // AQ/input buffers may enter idle pools before serialization, so retain
   // their charge in common. AC storage has no pool and really ends after the
-  // final placement; it does not overlap that attempt's completed frame/tail.
+  // final placement in the synchronous path. Combined ACS/AQ retains it
+  // through completed-frame creation; that overlap is charged above.
   p.working = Either(p.search_phase, p.completion_phase);
   *out = p;
   return Status::Ok();

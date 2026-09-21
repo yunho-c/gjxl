@@ -27,6 +27,7 @@
 #include "gpu/metal/metal_backend.h"
 #include "gpu/metal/metal_submission_storage_plan.h"
 #include "gpu/ops/ac_strategy.h"
+#include "gpu/ops/ac_strategy_selection.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/aq_evaluation_internal.h"
 #include "gpu/ops/butteraugli.h"
@@ -125,6 +126,7 @@ struct PrimitivePipelines {
 };
 
 struct AqPipelines {
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 9> strategy_metadata;
   NS::SharedPtr<MTL::ComputePipelineState> block_reduction;
   NS::SharedPtr<MTL::ComputePipelineState> maximum_error_reduction;
   NS::SharedPtr<MTL::ComputePipelineState> reset_exact_evaluation;
@@ -155,6 +157,9 @@ struct AqPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> resident_quant_small;
   NS::SharedPtr<MTL::ComputePipelineState> resident_policy_initialize;
   NS::SharedPtr<MTL::ComputePipelineState> resident_policy_update;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_policy_bounds_reset;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_policy_extrema;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_policy_bounds;
   NS::SharedPtr<MTL::ComputePipelineState> gather_transform_pixels;
   NS::SharedPtr<MTL::ComputePipelineState> select_adjusted_quantization;
   NS::SharedPtr<MTL::ComputePipelineState> select_adjusted_quantization_parallel;
@@ -196,6 +201,7 @@ struct AcStrategyPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> residual;
   NS::SharedPtr<MTL::ComputePipelineState> cost;
   NS::SharedPtr<MTL::ComputePipelineState> cost_from_loss;
+  NS::SharedPtr<MTL::ComputePipelineState> select_greedy;
   std::array<FusedStages, kAcStrategyCount> fused;
   NS::UInteger gather_threads_per_threadgroup = 0;
 };
@@ -256,6 +262,7 @@ struct ButteraugliPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> final_l2_masked_ac;
   NS::SharedPtr<MTL::ComputePipelineState> crop;
   NS::SharedPtr<MTL::ComputePipelineState> compose;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_parameters;
   NS::SharedPtr<MTL::ComputePipelineState> resident_reduction;
   NS::SharedPtr<MTL::ComputePipelineState> resident_reduction_small;
   NS::SharedPtr<MTL::ComputePipelineState> maximum_reduction;
@@ -308,6 +315,7 @@ private:
 class MetalBackend final
   : public GpuBackend,
     public GpuAcStrategyEvaluation,
+    public GpuAcStrategySelection,
     public gpu_profile_internal::GpuAcStrategyEvaluationProfiler,
     public gpu_profile_internal::GpuSubmissionProfiler,
     public GpuImagePrimitives,
@@ -387,6 +395,11 @@ public:
     std::span<const AcStrategyCandidateBatch> batches,
     std::unique_ptr<GpuSubmission>* submission) override;
 
+  Status EvaluateAndSelectAcStrategyCandidateBatches(
+    std::span<const AcStrategyCandidateBatch> batches,
+    AcStrategyDeviceSelection selection,
+    std::unique_ptr<GpuSubmission>* submission) override;
+
   Status EvaluateAcStrategyCandidateBatchesProfiled(
     std::span<const AcStrategyCandidateBatch> batches,
     gpu_profile_internal::GpuProfilingMode mode,
@@ -452,6 +465,7 @@ private:
   friend Status ComputeAcSubmissionStoragePlan(
     const AcSubmissionStorageOptions&, AcSubmissionStoragePlan*);
   friend class MetalPreparedAqEvaluation;
+  friend class MetalAqStrategyMetadata;
   friend class MetalPreparedResidentInput;
   friend class MetalPreparedDeviceButteraugli;
   friend struct MetalCacheAdmissionTestAccess;
@@ -557,6 +571,16 @@ private:
 
   struct AcStrategyEncodeContext {
     std::span<const ValidatedAcStrategyBatch> batches;
+    struct Selection {
+      std::array<const MetalBuffer*, 7> costs{};
+      MetalBuffer* output = nullptr;
+      size_t offset_bytes = 0;
+      struct Params {
+        uint32_t width, height, tiles_x, tiles_y;
+        float multiplier;
+      } params{};
+    };
+    const Selection* selection = nullptr;
   };
 
   struct AcStrategyProfileContext {
@@ -608,7 +632,13 @@ private:
   Status SubmitAcStrategyCandidatesImpl(
     std::span<const AcStrategyCandidateBatch> batches,
     gpu_profile_internal::GpuProfilingMode mode,
-    std::unique_ptr<GpuSubmission>* submission);
+    std::unique_ptr<GpuSubmission>* submission,
+    const AcStrategyDeviceSelection* selection = nullptr);
+
+  Status ValidateAcStrategySelection(
+    std::span<const AcStrategyCandidateBatch> batches,
+    AcStrategyDeviceSelection selection,
+    AcStrategyEncodeContext::Selection* validated) const;
 
   Status SubmitCompute(
     const char* label,

@@ -1,0 +1,51 @@
+{
+  "revision": "407cd057df28f2a9cdde4b752683eaf3a0a964df",
+  "files": {
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/indirect-aq-dispatch-20260918/metadata-test": "8b4fbd6a0d4395257ecc09f7bfb4a2fb34ec5377409cd0141ca7b9b36e0fa31a",
+    "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/indirect-aq-dispatch-20260918/gjxl.metallib": "a49daa5969e527e6b0a182a23b8bb7718d3e170619c357b3295e5e823530ff31"
+  },
+  "sources": {
+    "CMakeLists.txt": "c40c438aece8b1eb6d36ecc0708c2d9ff6e0de4cc64cb05a5e61ce4e9ec664ee",
+    "src/gpu/metal/kernels/aq_strategy_dispatch.h": "0fc58748e83b4bc955b2b2b66bb304e1606808e6989331b8b7e757d10a3b948d",
+    "src/gpu/metal/kernels/aq_strategy_metadata.metal": "79443920ab6e69802d310de2d6718f29079425254322ef43063dae19d8e57d0b",
+    "src/gpu/metal/kernels/butteraugli.metal": "9d661c38a28d2011b2e306caea0b6ad849e6a7809b1e42f37ea7ac6069bca7c5",
+    "src/gpu/metal/metal_aq_evaluation.cpp": "b6ce4d2b445835d7d5e74df4103d34056b2f244d2b2d43e48e24879b52c61abb",
+    "src/gpu/metal/metal_aq_evaluation_internal.h": "da1cce24f1e61181bbca1ccd4c8b58e3947b00e5cd1dabc0dec885bf604d007e",
+    "src/gpu/metal/metal_aq_evaluation_test.h": "163e073f1790d4406b9b9751dd3187671d5c7f3ea1131a4cd08a4910b45e71db",
+    "src/gpu/metal/metal_aq_reconstruction.cpp": "f61c6d86293dc2e8a334c37ecb0bb887ed491b61b8034db6aa19e135afcb0ce9",
+    "src/gpu/metal/metal_aq_strategy_dispatch.cpp": "7aabf8b63f24a2cbdb7cc6749018c09bb0c7e6298e36b8a632b2a0120694701c",
+    "src/gpu/metal/metal_backend_internal.h": "152868e9b2bf5bab0c4c77dd1968919ff9f2ba26db78207f7ac24cad081b0371",
+    "src/gpu/metal/metal_butteraugli.cpp": "4f4a6391796b6414a74a0c4d20e6dc7c0881b5001614edaac1831a9d12d1a3cb",
+    "src/gpu/metal/metal_butteraugli_encoding.h": "468bcfa1b61574bfc6ce1d6e6a879da9b5834726e2cfac66547527689ec4f7ab",
+    "tests/metal_aq_strategy_metadata_test.cpp": "9dde14516c8bb62da4c2fbb6c0e81380dbc476fff3cd1d987e733450cdf0d8f8",
+    "tools/frontier_dp/metadata_experiment.py": "af3411317ccfe953e47031e0ad408309f9ab3d6d057040cd5df38aebdb54bf17"
+  },
+  "commands": [
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/indirect-aq-dispatch-20260918/metadata-test",
+        "--metallib",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/indirect-aq-dispatch-20260918/gjxl.metallib"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/indirect-aq-dispatch-20260918/normal.log",
+      "started_unix": 1789708604.6477902,
+      "finished_unix": 1789708605.337269
+    },
+    {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/indirect-aq-dispatch-20260918/metadata-test",
+        "--metallib",
+        "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/indirect-aq-dispatch-20260918/gjxl.metallib"
+      ],
+      "log": "/Users/yunhocho/GitHub/gjxl-frontier-dp/build/frontier/results/indirect-aq-dispatch-20260918/validation.log",
+      "started_unix": 1789708605.3375082,
+      "finished_unix": 1789708606.713842
+    }
+  ],
+  "completed": true,
+  "protocol": "Normal and Metal-validation CPU-builder and indirect AQ consumer parity; no timing",
+  "checks": {
+    "normal": "27 GPU-family/indirect AQ consumer cases matched CPU dispatch exactly\n292 exact CPU-builder/GPU-metadata cases passed; guards, failure and reuse passed\n",
+    "validation": "2026-09-18 01:16:45.345 metadata-test[16809:322330602] Metal API Validation Enabled\n2026-09-18 01:16:45.345 metadata-test[16809:322330602] Metal GPU Validation Enabled\n27 GPU-family/indirect AQ consumer cases matched CPU dispatch exactly\n292 exact CPU-builder/GPU-metadata cases passed; guards, failure and reuse passed\n"
+  }
+}

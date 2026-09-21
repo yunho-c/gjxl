@@ -12,18 +12,19 @@
 #include <mutex>
 #include <vector>
 
-#include "core/managed_allocator.h"
-#include "core/ac_strategy.h"
 #include "codec/vardct_frame_internal.h"
+#include "core/ac_strategy.h"
+#include "core/managed_allocator.h"
+#include "gpu/metal/kernels/aq_strategy_dispatch.h"
 #include "gpu/metal/metal_aq_butteraugli_test.h"
 #include "gpu/metal/metal_aq_evaluation_profile.h"
-#include "gpu/metal/metal_aq_profile_storage_plan.h"
 #include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_aq_postprocess_test.h"
+#include "gpu/metal/metal_aq_profile_storage_plan.h"
 #include "gpu/metal/metal_aq_reconstruction_test.h"
 #include "gpu/metal/metal_backend_internal.h"
-#include "gpu/metal/metal_dc_processing_internal.h"
 #include "gpu/metal/metal_butteraugli_encoding.h"
+#include "gpu/metal/metal_dc_processing_internal.h"
 #include "gpu/scratch.h"
 
 namespace gjxl::metal_internal {
@@ -101,6 +102,7 @@ struct AqResidentPolicyUpdateParams {
   float butteraugli_target;
   float lower_bound;
   float upper_bound;
+  uint32_t use_device_bounds;
 };
 
 struct AqInitialCflParams {
@@ -342,6 +344,10 @@ public:
   Status EvaluateResidentButteraugliPolicy(
       AqResidentButteraugliPolicyInput input,
       AqResidentButteraugliPolicyOutput output) override;
+  bool SupportsResidentPolicyInitialization() const noexcept override {
+    return resident_quantization_ && !frame_only_ &&
+           (!final_transform_metadata_pending_ || resident_strategy_pending_);
+  }
   Status EvaluateResidentButteraugliPolicyProfiled(
       AqResidentButteraugliPolicyInput input,
       AqResidentButteraugliPolicyOutput output,
@@ -365,6 +371,15 @@ public:
       gpu_profile_internal::GpuExecutionProfile* profile) override;
   Status Reconfigure(const AcStrategyGrid& strategies,
                      ConstPlaneU8View epf_sharpness) override;
+  bool SupportsResidentStrategies() const noexcept override;
+  Status ReconfigureResidentStrategies(ConstDevicePlaneView selection,
+                                       ConstPlaneU8View epf_sharpness) override;
+  bool SupportsResidentStrategySearch() const noexcept override {
+    return SupportsResidentStrategies();
+  }
+  Status ReconfigureResidentStrategySearch(
+      std::span<const AcStrategyCandidateBatch>, AcStrategyDeviceSelection,
+      ConstPlaneU8View) override;
   Status EncodeFrame(AqEvaluationInput input,
                      VarDctEncoderFrame *frame) override;
   Status ComputeInitialQuantization(
@@ -397,6 +412,13 @@ public:
   Status FailNextResidentStaging();
   Status SetWaitObserver(bool *observed);
   Status GetReadbackStats(MetalAqReadbackStatsForTesting* stats) const;
+  Status GetStrategyMetadataSnapshot(MetalAqStrategyMetadataSnapshot *output);
+  // Internal dispatch-consumer qualification seam. Borrowed buffers must
+  // outlive policy completion; ordinary callers do not enable it until handoff
+  // integration.
+  Status BindStrategyDispatchForTesting(ConstDevicePlaneView families,
+                                        DevicePlaneView parameters);
+  Status GetResidentPolicyBounds(float *lower, float *upper) const;
   Status RunBlockReduction(ConstPlaneF32View distance_map,
                            PlaneF32View block_distance_map);
 
@@ -472,16 +494,44 @@ private:
     ConstDevicePlaneView distance_map;
   };
 
+  bool DeviceStrategyDispatch() const {
+    return strategy_dispatch_.buffer != nullptr;
+  }
+  void EncodeStrategyDispatch(MetalBackend &,
+                              MTL::ComputeCommandEncoder *) const;
+  void BindStrategyParameters(MTL::ComputeCommandEncoder *, size_t batch,
+                              size_t member_offset, size_t binding) const;
+  void DispatchStrategy(MTL::ComputeCommandEncoder *, size_t batch,
+                        gjxl_aq_dispatch::Dispatch dispatch,
+                        MTL::Size threads) const;
+  ConstDevicePlaneView strategy_dispatch_families_;
+  DevicePlaneView strategy_dispatch_;
+
   enum class State {
     kReady,
     kBusy,
     kInvalid,
   };
 
+  Status ReconfigureImpl(const AcStrategyGrid &, ConstPlaneU8View,
+                         bool metadata_on_device);
+  Status FinishResidentStrategyMetadata(AcStrategyGrid *);
+  void EncodeResidentStrategyMetadata(MetalBackend &,
+                                      MTL::ComputeCommandEncoder *);
+  bool resident_strategy_metadata_enabled_ = false;
+  bool resident_strategy_pending_ = false;
+  size_t resident_search_batch_count_ = 0;
+  std::array<MetalBackend::ValidatedAcStrategyBatch, 7>
+      resident_search_batches_;
+  MetalBackend::AcStrategyEncodeContext::Selection resident_search_selection_;
+  AqStrategyMetadataDescriptor resident_strategy_metadata_;
+  DevicePlaneView resident_strategy_parameters_;
+
   Status ValidatePreparation(
     const AqEvaluationPreparation& preparation,
     bool host_images_are_finite) const;
-  Status ValidateInput(AqEvaluationInput input) const;
+  Status ValidateInput(AqEvaluationInput input,
+                       bool derive_color_correlation = false) const;
   Status ValidateOutput(AqEvaluationOutput output) const;
   Status InitializeGpuExecutionProfile(
       gpu_profile_internal::GpuProfilingMode mode,
@@ -492,6 +542,7 @@ private:
       PlaneF32View output,
       gpu_profile_internal::GpuProfilingMode mode,
       gpu_profile_internal::GpuExecutionProfile* profile);
+  Status PrepareQuantFieldAdjustmentParams(float butteraugli_target);
   Status ComputeInitialQuantizationImpl(
       InitialQuantizationOptions options,
       InitialQuantFieldOutput output,
@@ -642,6 +693,8 @@ private:
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
       DevicePlaneView quant_field, DevicePlaneView raw_quant,
       AqInitialQuantSelectionParams params) const;
+  void EncodeResidentPolicyBounds(MetalBackend &backend,
+                                  MTL::ComputeCommandEncoder *encoder) const;
   void EncodeForwardCoefficients(MetalBackend& backend,
                                  MTL::ComputeCommandEncoder* encoder) const;
   void EncodeFinalColorCorrelation(
@@ -685,6 +738,7 @@ private:
   DevicePlaneView initial_quantizer_params_;
   DevicePlaneView resident_quant_field_;
   DevicePlaneView resident_policy_initial_field_;
+  DevicePlaneView resident_policy_bounds_;
   DevicePlaneView resident_policy_scores_;
   DevicePlaneView resident_quant_histogram_;
   DevicePlaneView resident_quant_selection_state_;
@@ -740,6 +794,7 @@ private:
   AqResetParams reset_params_{};
   AqResidentPolicyInitializeParams resident_policy_initialize_params_{};
   AqResidentPolicyUpdateParams resident_policy_update_params_{};
+  bool resident_policy_adjust_initial_field_ = false;
   AqInitialCflParams initial_cfl_params_{};
   AqFinalCflParams final_cfl_params_{};
   AqInitialQuantGradientParams initial_quant_gradient_params_{};
@@ -749,6 +804,7 @@ private:
   AqInitialQuantSelectionParams initial_quant_selection_params_{};
   AqInitialQuantSelectionParams resident_quant_selection_params_{};
   float invariant_quant_dc_ = 0.0f;
+  bool invariant_color_correlation_from_policy_ = false;
   std::array<AqQuantFieldAdjustmentParams, 7>
     quant_field_adjustment_params_{};
   std::array<AqBlockReductionParams, 7> block_reduction_params_{};

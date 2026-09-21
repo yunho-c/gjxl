@@ -467,14 +467,39 @@ an intermediate build appear complete.
   two-dispatch small quantizer or the twenty-dispatch fallback, instead of
   assuming the latter. Nonempty-stage checks cover both first use and reuse;
   existing output and storage-bound comparisons remain. The changed C++ tests
-  pass local MSVC syntax checks; physical validation of this fix is pending.
+  pass local MSVC syntax checks. The physical rerun below validates this fix.
+- The supplied physical rerun qualifies `9771e658efedbf8caba8f8e875e4c4817374b730`
+  on the same Apple M4 Pro, macOS 15.6 and Apple Clang 17.0.0. The archive
+  `gjxl-metal-evidence-rerun.tar.gz` has SHA-256
+  `9580236d7945ff7408f96eee4031c27426a6f27684d4361b9cbaa9b5f00248c5`.
+  Its `20260921T150022Z-94667` run passes all 152 native tests (336.44 s),
+  all five focused Metal API/shader validation tests, and two real stage
+  captures with 194 nonempty stages and 379 dispatch records each. Dispatch
+  timestamp support remains explicitly unavailable on this device. Seven
+  odd-4K samples and 56 images across seven concurrent batch samples pass
+  deterministic-output, finite-admission, CPU-limit and trim checks. The
+  recorded committed peaks equal their admitted limits: 4,074,855,328 and
+  580,997,122 bytes respectively; both CPU peaks are three. The completion
+  marker is `PASS physical Metal integration qualification`. This closes the
+  pinned revision's physical qualification; it does not qualify newer main.
+- Reconciliation with main `b1a7373` retains its Metal device AC selector,
+  strategy metadata, indirect dispatch and fused AQ initialization, alongside
+  CUDA's resident inputs, packed scratch and conservative admission. CUDA
+  continues using its established CPU selector after GPU candidate scoring;
+  implementing the new optional device selector on CUDA is a separate
+  performance extension. The merge explicitly distinguishes invariant CfL
+  prepared from a caller's retained quantizer snapshot from CfL derived after
+  fused device quantization adjustment. The initialization test alternates
+  supplied CfL, explicit snapshots and device-derived CfL on a reused
+  evaluator. Physical validation now also covers AC search and strategy
+  metadata under Metal API/shader validation.
 
 ## Outstanding integration risks
 
 - Main advanced to `b1a7373` (PR #30) while physical qualification was pending.
-  Its resident AC-strategy/AQ handoff changes are not in this pinned integration
-  yet and require reconciliation before the final merge. The physical-Mac
-  results above describe `7e8c1d6`, not that newer main revision.
+  The reconciled source includes its resident AC-strategy/AQ handoff, but the
+  physical-Mac pass above qualifies `9771e65`. The combined revision needs
+  final CUDA/hosted CI and one physical-Mac qualification before merging.
 - Extend production exact-mode qualification beyond the current device;
   the four-photo control is not a universal numerical or cross-toolchain
   guarantee. Linux userland/CUDA 12.6 is now exercised through WSL on the same
@@ -485,9 +510,10 @@ an intermediate build appear complete.
   intentional; tightening them requires new allocation evidence. The completed
   dense effort-10 oracle, all-effort public matrix, policy-quality controls and
   whole-call memory/performance runs are recorded above.
-- Rerun the physical Metal check after correcting its first-run profiling
-  failures, then complete shader validation and pressure tests. Hosted Apple
-  Paravirtual does not supply this evidence.
+- Run the physical Metal check on the reconciled revision after local and
+  hosted checks pass. The previous revision needs no further rerun; this
+  checks the newly combined Metal code. Hosted Apple Paravirtual cannot
+  replace physical GPU timestamps and execution evidence.
 - CUDA and Metal share diagnostic APIs and JSON publication, but CUDA's stage
   records aggregate whole submissions. Individual dispatch timings are present;
   finer semantic stage aggregation remains a documented difference. Do not
@@ -495,4 +521,5 @@ an intermediate build appear complete.
 - Finish final-head hosted CI and acceptance review. Integration remains
   published as draft PR #29 and is not ready to merge. The bounded matched
   performance/memory and policy-quality evidence is recorded above; physical
-  Apple GPU and broader NVIDIA qualification remain open.
+  Apple GPU qualification of the combined revision and broader NVIDIA
+  qualification remain open.

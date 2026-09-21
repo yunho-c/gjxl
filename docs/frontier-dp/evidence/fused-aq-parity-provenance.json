@@ -1,0 +1,28 @@
+{
+  "revision": "7ab1db38f7dec064678c6c010121d05571866eb0",
+  "sources": {
+    "CMakeLists.txt": "adf67b74479449dcfe2291d239362b422c187c7d6ab2e110a34ccf18ffe97b4a",
+    "src/gpu/ops/ac_strategy_search.cpp": "95d6897c0916cffb7c5c348bf8d0cd3c3dc1c41e458313765f883424d67bd0b2",
+    "src/gpu/ops/ac_strategy_search.h": "8c990d207ad85bd220bbe194179a2ee1fa04c73c96e14cded85188c2a5f6efa7",
+    "src/gpu/ops/ac_strategy_selection.h": "2a9b016a6a06e07e5ccbe39f87c5f1e807b00493133184c115425471d3989373",
+    "src/gpu/metal/metal_ac_strategy.cpp": "c9f7f95efc11c11c9a89a9bfd8049c976172c3c6473ac2d9c63fdcaecff355fc",
+    "src/gpu/metal/metal_backend_internal.h": "43fd9658535dc5f53deb909457f46c8ff336e5c18e409570804bd08bd9946576",
+    "src/gpu/metal/kernels/ac_strategy_select.metal": "6127f65b7c9708770ea6cad8ebe6da3cb5994e12bc45444c29b74051033b8585",
+    "tools/frontier_dp/check_native_encodes.py": "d752578319d6918d20f7a02e82bbce2ba972b118070c4b979000d12d8c093207",
+    "src/gpu/metal/kernels/aq_reconstruction.metal": "77506cf78c5c7b8f12284173f7ffe7f10f4d92fa1427a2277e8fe864d1acd184",
+    "src/gpu/metal/metal_aq_evaluation.cpp": "894a5493e50810775d7758075dbbf37bea5af71165cae348e286009ef1b67c6b",
+    "src/gpu/metal/metal_aq_evaluation_internal.h": "1e57a5b1801000f4f227218c2c9362b7910f61bba83185a5f09cd556cc4e1fde",
+    "src/gpu/metal/metal_aq_reconstruction.cpp": "dae6c16e7a73e7b2f1a6a95687e6d6c924ac96ff686701167fc0e2a0c6be4cb2",
+    "src/gpu/metal/metal_storage_plan.cpp": "85e16e3d306dbdd3245c2b28674f265d62f81e61dce69462b039040dd8376c50",
+    "src/gpu/metal/metal_storage_plan.h": "5eaf8c11cb4356af061306a82acb284aef92a7c99886b46d16540239d6f29c16",
+    "src/gpu/ops/adaptive_quantization.cpp": "5a5aa3dcf52b56881d4e7b07bf9b9a6d089df0edf6c977c5da4bb4603772bb20",
+    "src/gpu/ops/aq_evaluation.h": "cb21ccd9ce2658f07f5ff8aa9d4df010c267f4e8e48293c0096d440d11c6b424"
+  },
+  "binary_sha256": "bf13f759a195907dc9454b9112a7d6da84f1d7a5c3487c477fedcb12315f4504",
+  "control_manifest_sha256": "1e7e4fc6702fe16b0459a53b44c1c282e1ba463863dbbecdb089e6ea0abafc13",
+  "observations_sha256": "57147822ba368ff6447acaaacc2945a57548c76658009de951dcc8a9c8746aa9",
+  "completed": true,
+  "byte_identical": 60,
+  "artifact_directory": "build/frontier/results/fused-aq-encode-parity-20260918-v2",
+  "commands_count": 60
+}

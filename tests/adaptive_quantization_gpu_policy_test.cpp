@@ -587,7 +587,7 @@ bool CheckFullyResidentCase(
       before_bounded.successful_allocations;
   if (bounded_allocations > 3 ||
       after_bounded.committed_submissions !=
-          before_bounded.committed_submissions + 3) {
+          before_bounded.committed_submissions + 2) {
     std::cerr << "Fully resident bounded resource count differs\n";
     return false;
   }
@@ -603,7 +603,7 @@ bool CheckFullyResidentCase(
       before_full.successful_allocations;
   if (full_allocations > 3 ||
       after_full.committed_submissions !=
-          before_full.committed_submissions + 3 ||
+          before_full.committed_submissions + 2 ||
       !bounded.PaddingPoisoned() || !full.PaddingPoisoned() ||
       !full.frame.valid() ||
       bounded.score_history.size() != iterations + 1 ||

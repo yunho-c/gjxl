@@ -97,6 +97,26 @@ public:
     return status;
   }
 
+  bool CanDefer(AcStrategySearchOptions options) const noexcept {
+    return resident_ && prepared_ && !profiling_session_ &&
+           CanDeferAcStrategySearch(gpu_, options);
+  }
+  Status PrepareDeferred(
+      quantization_pipeline_internal::DeferredStrategyQuantizationInput input,
+      DeferredAcStrategySearch *deferred) {
+    if (!CanDefer(input.search_options) || !input.initial_color_correlation)
+      return Status::Unavailable("Deferred strategy provider is unavailable");
+    return prepared_->PrepareDeferred(
+        gpu_, input.opsin, input.initial_quant_field, input.pixel_mask,
+        *input.initial_color_correlation, *resident_, input.search_options,
+        deferred, &stats_);
+  }
+  void FinishDeferred(bool success) {
+    stats_.combined_aq_submission = success;
+    if (!retain_storage_ && prepared_)
+      prepared_->Reset();
+  }
+
   [[nodiscard]] const AcStrategyGpuSearchStats& stats() const noexcept {
     return stats_;
   }
@@ -152,6 +172,40 @@ public:
     return RunGpuAdaptiveQuantization(
       gpu_, original_linear_rgb, opsin, strategies, initial_quant_field,
       epf_sharpness, options, mode_, output);
+  }
+
+  bool SupportsDeferredSearch(
+      const AcStrategySearchProvider &search,
+      AcStrategySearchOptions options) const noexcept override {
+    const auto *gpu_search =
+        dynamic_cast<const GpuAcStrategySearchProvider *>(&search);
+    return gpu_search && gpu_search->CanDefer(options) && !profiling_session_ &&
+           mode_ != GpuAdaptiveQuantizationMode::kExactCoefficients &&
+           prepared_ && prepared_->evaluation &&
+           prepared_->evaluation->SupportsResidentStrategySearch();
+  }
+  Status FindWithDeferredSearch(
+      AcStrategySearchProvider &search,
+      quantization_pipeline_internal::DeferredStrategyQuantizationInput input,
+      AcStrategyGrid *selected, AdaptiveQuantizationOutput output) override {
+    auto *gpu_search = dynamic_cast<GpuAcStrategySearchProvider *>(&search);
+    if (!gpu_search || !SupportsDeferredSearch(search, input.search_options))
+      return Status::Unavailable(
+          "Deferred quantization provider is unavailable");
+    // No work is outstanding until AQ commits; the synchronous call drains it
+    // on all exits. Search storage is released only after that consumer
+    // returns.
+    DeferredAcStrategySearch deferred;
+    Status status = gpu_search->PrepareDeferred(input, &deferred);
+    if (status.ok())
+      status = adaptive_quantization_gpu_internal::
+          RunPreparedGpuAdaptiveQuantizationWithSearch(
+              gpu_, input.original_linear_rgb, input.opsin,
+              input.initial_quant_field, input.epf_sharpness,
+              input.adaptive_options, mode_, prepared_, deferred, selected,
+              output, materialization_);
+    gpu_search->FinishDeferred(status.ok());
+    return status;
   }
 
 private:
@@ -240,6 +294,11 @@ Status PrepareResidentFrontend(
     .dc_quantization = options.adaptive_quantization.dc_quantization,
     .dc_prediction = options.adaptive_quantization.dc_prediction,
   };
+  const bool resident_strategy_metadata =
+      !options.fixed_dct8 && !profiling_session &&
+      evaluation_options.metric == AqEvaluationMetric::kButteraugli &&
+      CanDeferAcStrategySearch(
+          gpu, {.dense_dct32_search = options.dense_dct32_search});
   const bool same_preparation =
     state.evaluation != nullptr &&
     state.quantization_pipeline_generation == prepared.generation &&
@@ -251,7 +310,8 @@ Status PrepareResidentFrontend(
     SameDeviceImageIdentity(
       state.input_resident_coding_opsin, prepared.resident_coding_opsin) &&
     state.resident_quantization && !state.frame_only_resident_frontend &&
-    state.omit_initial_search_data == omit_initial_search_data;
+    state.omit_initial_search_data == omit_initial_search_data &&
+    state.resident_strategy_metadata == resident_strategy_metadata;
   bool compatible = same_preparation &&
     state.evaluation_options == evaluation_options;
   Status status = Status::Ok();
@@ -292,22 +352,23 @@ Status PrepareResidentFrontend(
     if (!status.ok()) return status;
     provisional_strategies.fill_dct8();
     const AqEvaluationPreparation evaluation_preparation{
-      .original_linear_rgb = original_linear_rgb,
-      .coding_opsin = prepared.coding_opsin,
-      .resident_original_linear_rgb = prepared.resident_original_linear_rgb,
-      .resident_coding_opsin = prepared.resident_coding_opsin,
-      .strategies = &provisional_strategies,
-      .epf_sharpness = {prepared.epf_sharpness.data(), prepared.block_extent,
-                        prepared.block_extent.width},
-      .options = evaluation_options,
-      .resident_initial_cfl = true,
-      .frame_only_resident_initial_quant = true,
-      .resident_ac_strategy_inputs = true,
-      .omit_initial_search_data = omit_initial_search_data,
-      .resident_quantization = true,
-      .coefficient_decision_mode =
-        AcCoefficientDecisionMode::kAdjustedSharedQuant,
-      .defer_final_transform_metadata = true,
+        .original_linear_rgb = original_linear_rgb,
+        .coding_opsin = prepared.coding_opsin,
+        .resident_original_linear_rgb = prepared.resident_original_linear_rgb,
+        .resident_coding_opsin = prepared.resident_coding_opsin,
+        .strategies = &provisional_strategies,
+        .epf_sharpness = {prepared.epf_sharpness.data(), prepared.block_extent,
+                          prepared.block_extent.width},
+        .options = evaluation_options,
+        .resident_initial_cfl = true,
+        .frame_only_resident_initial_quant = true,
+        .resident_ac_strategy_inputs = true,
+        .omit_initial_search_data = omit_initial_search_data,
+        .resident_quantization = true,
+        .coefficient_decision_mode =
+            AcCoefficientDecisionMode::kAdjustedSharedQuant,
+        .defer_final_transform_metadata = true,
+        .resident_strategy_metadata = resident_strategy_metadata,
     };
     auto* const validated_preparation = HasValidatedHostImages(
         prepared, original_linear_rgb)
@@ -365,6 +426,7 @@ Status PrepareResidentFrontend(
     state.resident_original_linear_rgb = prepared.resident_original_linear_rgb;
     state.resident_coding_opsin = prepared.resident_coding_opsin;
     state.omit_initial_search_data = omit_initial_search_data;
+    state.resident_strategy_metadata = resident_strategy_metadata;
   }
 
   constexpr float kMaximumErrorInitializationTarget = 1.0f;

@@ -6,6 +6,7 @@
 #include <array>
 #include <cstddef>
 
+#include "gpu/metal/metal_aq_strategy_metadata.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/scratch.h"
 
@@ -42,6 +43,7 @@ struct AqStoragePlanOptions {
   VarDctDcPrediction dc_prediction = VarDctDcPrediction::kGradient;
   uint8_t extra_dc_precision = 0;
   bool adaptive_dc_smoothing = false;
+  bool resident_strategy_metadata = false;
 };
 
 struct AqStoragePlan {
@@ -70,6 +72,7 @@ struct AqStoragePlan {
   DevicePlaneLayout resident_quant_field;
   DevicePlaneLayout resident_policy_initial_field;
   DevicePlaneLayout resident_policy_scores;
+  DevicePlaneLayout resident_policy_bounds;
   DevicePlaneLayout resident_quant_histogram;
   DevicePlaneLayout resident_quant_selection_state;
   DevicePlaneLayout resident_quant_statistics;
@@ -93,6 +96,8 @@ struct AqStoragePlan {
   DevicePlaneLayout quant_probe_input;
   DevicePlaneLayout quant_probe_quantized;
   DevicePlaneLayout quant_probe_dequantized;
+  std::array<DevicePlaneLayout, kMetadataScratchPlaneCount> strategy_metadata;
+  DevicePlaneLayout strategy_dispatch;
   bool operator==(const AqStoragePlan &) const = default;
 };
 

@@ -71,6 +71,7 @@ struct AqResidentPolicyUpdateParams {
   float butteraugli_target;
   float lower_bound;
   float upper_bound;
+  uint use_device_bounds;
 };
 
 struct AqInitialCflParams {
@@ -1716,6 +1717,66 @@ kernel void gjxl_aq_resident_policy_initialize(
   }
 }
 
+kernel void gjxl_aq_resident_policy_bounds_reset(
+  device atomic_uint* bounds [[buffer(0)]], uint index [[thread_position_in_grid]]) {
+  if (index == 0) {
+    atomic_store_explicit(bounds, 0x7f800000u, memory_order_relaxed);
+    atomic_store_explicit(bounds + 1, 0u, memory_order_relaxed);
+  }
+}
+
+kernel void gjxl_aq_resident_policy_extrema(
+  device const float* quant [[buffer(0)]],
+  device atomic_uint* bounds [[buffer(1)]],
+  device atomic_uint* error [[buffer(2)]],
+  constant AqResidentPolicyInitializeParams& p [[buffer(3)]],
+  uint index [[thread_position_in_grid]], uint tid [[thread_index_in_threadgroup]]) {
+  threadgroup uint minimum[256], maximum[256];
+  uint count = p.block_width * p.block_height;
+  uint threads = min(64u, (count + 255u) / 256u) * 256u;
+  uint lo = 0x7f800000u, hi = 0u;
+  for (uint i = index; i < count; i += threads) {
+    uint bits = as_type<uint>(quant[(i / p.block_width) * p.quant_stride + i % p.block_width]);
+    if (bits == 0 || bits >= 0x7f800000u) {
+      atomic_fetch_or_explicit(error, 1048576u, memory_order_relaxed);
+      continue;
+    }
+    lo = min(lo, bits); hi = max(hi, bits);
+  }
+  minimum[tid] = lo; maximum[tid] = hi;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (uint stride = 128; stride; stride /= 2) {
+    if (tid < stride) {
+      minimum[tid] = min(minimum[tid], minimum[tid + stride]);
+      maximum[tid] = max(maximum[tid], maximum[tid + stride]);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  if (tid == 0) {
+    atomic_fetch_min_explicit(bounds, minimum[0], memory_order_relaxed);
+    atomic_fetch_max_explicit(bounds + 1, maximum[0], memory_order_relaxed);
+  }
+}
+
+kernel void gjxl_aq_resident_policy_bounds(
+  device float* bounds [[buffer(0)]], device atomic_uint* error [[buffer(1)]],
+  uint index [[thread_position_in_grid]]) {
+  if (index != 0) return;
+  const float minimum = bounds[0], maximum = bounds[1];
+  const float ratio = precise::divide(maximum, minimum);
+  const float deviation = precise::sqrt(precise::divide(250.0f, ratio));
+  const float asymmetry = min(2.0f, deviation);
+  const float lower = precise::divide(minimum, asymmetry * deviation);
+  const float upper = maximum * precise::divide(deviation, asymmetry);
+  if (!isfinite(lower) || !isfinite(upper) || lower <= 0.0f || upper < lower ||
+      precise::divide(upper, lower) >= 253.0f || upper > 0x1p47f) {
+    atomic_fetch_or_explicit(error, 1048576u, memory_order_relaxed);
+    bounds[0] = 1.0f; bounds[1] = 1.0f;
+  } else {
+    bounds[0] = lower; bounds[1] = upper;
+  }
+}
+
 kernel void gjxl_aq_resident_policy_update(
   device float* quant_field [[buffer(0)]],
   device const float* initial_quant_field [[buffer(1)]],
@@ -1725,7 +1786,11 @@ kernel void gjxl_aq_resident_policy_update(
   device const uint* quantizer_params [[buffer(5)]],
   device atomic_uint* error [[buffer(6)]],
   constant AqResidentPolicyUpdateParams& params [[buffer(7)]],
+  device const float* bounds [[buffer(8)]],
   uint index [[thread_position_in_grid]]) {
+
+  const float lower_bound = params.use_device_bounds ? bounds[0] : params.lower_bound;
+  const float upper_bound = params.use_device_bounds ? bounds[1] : params.upper_bound;
 
   const uint block_count = params.block_width * params.block_height;
   const uint global_scale = quantizer_params[0];
@@ -1752,9 +1817,9 @@ kernel void gjxl_aq_resident_policy_update(
       !isfinite(distance) || distance < 0.0f ||
       !isfinite(params.butteraugli_target) ||
       params.butteraugli_target <= 0.0f ||
-      !isfinite(params.lower_bound) || params.lower_bound <= 0.0f ||
-      !isfinite(params.upper_bound) ||
-      params.upper_bound < params.lower_bound || global_scale == 0u) {
+      !isfinite(lower_bound) || lower_bound <= 0.0f ||
+      !isfinite(upper_bound) ||
+      upper_bound < lower_bound || global_scale == 0u) {
     atomic_fetch_or_explicit(error, 1048576u, memory_order_relaxed);
     return;
   }
@@ -1764,7 +1829,7 @@ kernel void gjxl_aq_resident_policy_update(
     const float initial_clamp = 0.4f * quant + 0.6f * initial;
     if (quant < initial_clamp) {
       quant = clamp(
-        initial_clamp, params.lower_bound, params.upper_bound);
+        initial_clamp, lower_bound, upper_bound);
     }
   }
   const float difference = distance / params.butteraugli_target;
@@ -1789,7 +1854,7 @@ kernel void gjxl_aq_resident_policy_update(
     return;
   }
   quant_field[quant_index] = clamp(
-    quant, params.lower_bound, params.upper_bound);
+    quant, lower_bound, upper_bound);
 }
 
 kernel void gjxl_aq_reset_frame_encoding(

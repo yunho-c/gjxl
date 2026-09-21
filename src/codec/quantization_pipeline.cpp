@@ -510,6 +510,12 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
   const ColorCorrelationMap& initial_color_correlation = resident_only_initial
     ? empty_color_correlation : prepared.initial_color_correlation;
 
+  const AcStrategySearchOptions search_options{
+      .butteraugli_target = control_target,
+      .dense_dct32_search = options.dense_dct32_search};
+  const bool deferred_search =
+      !options.fixed_dct8 && adaptive_quantization.SupportsDeferredSearch(
+                                 strategy_search, search_options);
   if (options.fixed_dct8) {
     // The selected grid is still owned by this preparation. Build the new
     // grid before replacing it so allocation failure preserves the old grid.
@@ -518,7 +524,7 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
     if (!status.ok()) return status;
     fixed.fill_dct8();
     prepared.strategies = std::move(fixed);
-  } else {
+  } else if (!deferred_search) {
     status = strategy_search.Find(
       pipeline_opsin,
       initial_quant,
@@ -537,15 +543,27 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
   adaptive_options.butteraugli_target = control_target;
   // Providers commit atomically, so the selected caller-owned output can be
   // the staging destination without another prepared copy of every result.
-  status = adaptive_quantization.Find(
-    original_linear_rgb,
-    pipeline_opsin,
-    prepared.strategies,
-    initial_quant,
-    {prepared.epf_sharpness.data(), block_extent, block_extent.width},
-    adaptive_options,
-    prepared.butteraugli_reference.get(),
-    output.adaptive_quantization);
+  if (deferred_search) {
+    status = adaptive_quantization.FindWithDeferredSearch(
+        strategy_search,
+        {.original_linear_rgb = original_linear_rgb,
+         .opsin = pipeline_opsin,
+         .initial_quant_field = initial_quant,
+         .pixel_mask = pixel_mask,
+         .initial_color_correlation = &initial_color_correlation,
+         .epf_sharpness = {prepared.epf_sharpness.data(), block_extent,
+                           block_extent.width},
+         .search_options = search_options,
+         .adaptive_options = adaptive_options},
+        &prepared.strategies, output.adaptive_quantization);
+  } else {
+    status = adaptive_quantization.Find(
+        original_linear_rgb, pipeline_opsin, prepared.strategies,
+        initial_quant,
+        {prepared.epf_sharpness.data(), block_extent, block_extent.width},
+        adaptive_options, prepared.butteraugli_reference.get(),
+        output.adaptive_quantization);
+  }
   if (!status.ok()) {
     return status;
   }
