@@ -98,7 +98,9 @@ public:
   }
 
   bool CanDefer(AcStrategySearchOptions options) const noexcept {
-    return resident_ && prepared_ && !profiling_session_ &&
+    return resident_ && prepared_ &&
+           (!profiling_session_ ||
+            gpu_profile_internal::SupportsProfiledAcStrategySelection(gpu_)) &&
            CanDeferAcStrategySearch(gpu_, options);
   }
   Status PrepareDeferred(
@@ -179,7 +181,7 @@ public:
       AcStrategySearchOptions options) const noexcept override {
     const auto *gpu_search =
         dynamic_cast<const GpuAcStrategySearchProvider *>(&search);
-    return gpu_search && gpu_search->CanDefer(options) && !profiling_session_ &&
+    return gpu_search && gpu_search->CanDefer(options) &&
            mode_ != GpuAdaptiveQuantizationMode::kExactCoefficients &&
            prepared_ && prepared_->evaluation &&
            prepared_->evaluation->SupportsResidentStrategySearch();
@@ -203,7 +205,7 @@ public:
               gpu_, input.original_linear_rgb, input.opsin,
               input.initial_quant_field, input.epf_sharpness,
               input.adaptive_options, mode_, prepared_, deferred, selected,
-              output, materialization_);
+              output, materialization_, profiling_session_);
     gpu_search->FinishDeferred(status.ok());
     return status;
   }
@@ -295,7 +297,9 @@ Status PrepareResidentFrontend(
     .dc_prediction = options.adaptive_quantization.dc_prediction,
   };
   const bool resident_strategy_metadata =
-      !options.fixed_dct8 && !profiling_session &&
+      !options.fixed_dct8 &&
+      (!profiling_session ||
+       gpu_profile_internal::SupportsProfiledAcStrategySelection(gpu)) &&
       evaluation_options.metric == AqEvaluationMetric::kButteraugli &&
       CanDeferAcStrategySearch(
           gpu, {.dense_dct32_search = options.dense_dct32_search});

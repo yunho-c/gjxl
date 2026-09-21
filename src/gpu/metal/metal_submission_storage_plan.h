@@ -45,6 +45,7 @@ struct AcSubmissionStorageOptions {
   size_t nonempty_batches = 0; // Use batches as the preflight upper bound.
   bool profiling = false;
   size_t maximum_submission_id_length = sizeof(kAcStrategyProfileGroupId) - 1;
+  bool device_selection = false;
 };
 
 struct AcSubmissionStoragePlan {
@@ -75,6 +76,9 @@ struct ResidentAqProfileInputOptions {
   size_t epf_iterations = 0;
   bool deferred_dc = false;
   bool adaptive_dc_smoothing = false;
+  bool resident_strategy_metadata = false;
+  bool device_strategy_dispatch = false;
+  bool adjust_initial_field = false;
 };
 
 struct ResidentAqProfileInputStoragePlan {
@@ -91,5 +95,8 @@ struct ResidentAqProfileInputStoragePlan {
 [[nodiscard]] Status ComputeResidentAqProfileInputStoragePlan(
     const ResidentAqProfileInputOptions &options,
     ResidentAqProfileInputStoragePlan *out);
+
+[[nodiscard]] Status ComputeMetalIndirectProfileStorageBound(
+    size_t dispatches, resource_budget_internal::HostStorageBound* out);
 
 } // namespace gjxl::metal_internal

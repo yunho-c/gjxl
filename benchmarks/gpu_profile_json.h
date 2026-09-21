@@ -32,6 +32,7 @@ namespace gjxl::benchmark {
 
 struct GpuProfileJsonOptions {
   std::string_view scope;
+  std::string_view execution_path;
   gpu_profile_internal::GpuProfilingMode gpu_profiling_mode =
     gpu_profile_internal::GpuProfilingMode::kDisabled;
   std::string_view gpu_aq;
@@ -202,6 +203,10 @@ inline void WriteGpuProfileSamples(
          << "  \"sample_count\": " << options.samples << ",\n"
          << "  \"effort\": " << options.effort << ",\n"
          << "  \"cpu_threads\": " << options.cpu_thread_count << ",\n";
+  if (!options.execution_path.empty()) {
+    output << "  \"execution_path\": \""
+           << JsonEscape(options.execution_path) << "\",\n";
+  }
   if (!options.timestamp_origin.empty()) {
     output << "  \"timestamp_origin\": \""
            << JsonEscape(options.timestamp_origin) << "\",\n";
@@ -279,6 +284,7 @@ inline void WriteGpuProfileSamples(
                  << ", \"begin_timestamp\": " << stage.begin_timestamp
                  << ", \"end_timestamp\": " << stage.end_timestamp
                  << ", \"gpu_nanoseconds\": " << stage.gpu_nanoseconds
+                 << ", \"timestamp_valid\": " << (stage.timestamp_valid ? "true" : "false")
                  << ", \"dispatches\": [";
           for (size_t dispatch_index = 0;
                dispatch_index < stage.dispatches.size(); ++dispatch_index) {
@@ -289,7 +295,9 @@ inline void WriteGpuProfileSamples(
                    << "\", \"kind\": \""
                    << (dispatch.kind ==
                          gjxl::gpu_profile_internal::GpuDispatchKind::kThreads
-                         ? "threads" : "threadgroups")
+                         ? "threads" : dispatch.kind ==
+                           gjxl::gpu_profile_internal::GpuDispatchKind::kIndirectThreadgroups
+                           ? "indirect_threadgroups" : "threadgroups")
                    << "\", \"invocation\": " << dispatch.invocation
                    << ", \"grid\": [" << dispatch.grid.width << ", "
                    << dispatch.grid.height << ", " << dispatch.grid.depth
@@ -301,7 +309,8 @@ inline void WriteGpuProfileSamples(
                    << dispatch.begin_timestamp
                    << ", \"end_timestamp\": " << dispatch.end_timestamp
                    << ", \"gpu_nanoseconds\": "
-                   << dispatch.gpu_nanoseconds << '}';
+                   << dispatch.gpu_nanoseconds
+                   << ", \"timestamp_valid\": " << (dispatch.timestamp_valid ? "true" : "false") << '}';
           }
           output << "]}";
           if (stage_index + 1 != submission.stages.size()) output << ',';

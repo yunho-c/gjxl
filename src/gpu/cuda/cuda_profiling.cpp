@@ -183,6 +183,7 @@ Status CudaSubmission::ResolveProfile(
     stage.begin_timestamp = 0;
     stage.end_timestamp = resolved.command_buffer_gpu_nanoseconds;
     stage.gpu_nanoseconds = resolved.command_buffer_gpu_nanoseconds;
+    stage.timestamp_valid = true;
     if (mode == GpuProfilingMode::kDispatch) {
       if (kernel_events_.size() != stage.dispatches.size())
         return Status::Internal("CUDA dispatch event count differs from metadata");
@@ -200,6 +201,7 @@ Status CudaSubmission::ResolveProfile(
         dispatch.begin_timestamp = static_cast<uint64_t>(static_cast<double>(start) * 1000000.0);
         dispatch.end_timestamp = static_cast<uint64_t>(static_cast<double>(end) * 1000000.0);
         dispatch.gpu_nanoseconds = dispatch.end_timestamp - dispatch.begin_timestamp;
+        dispatch.timestamp_valid = true;
       }
     }
     *profile = std::move(candidate);

@@ -1,0 +1,32 @@
+[
+  {
+    "label": "kodak",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/01.pfm",
+    "effort": 4
+  },
+  {
+    "label": "kodak",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/01.pfm",
+    "effort": 7
+  },
+  {
+    "label": "kodak",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/01.pfm",
+    "effort": 9
+  },
+  {
+    "label": "12mp",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/campus_interior/12mp.pfm",
+    "effort": 4
+  },
+  {
+    "label": "12mp",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/campus_interior/12mp.pfm",
+    "effort": 7
+  },
+  {
+    "label": "12mp",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/campus_interior/12mp.pfm",
+    "effort": 9
+  }
+]

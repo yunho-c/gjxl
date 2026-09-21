@@ -117,10 +117,7 @@ void MetalPreparedAqEvaluation::BindStrategyParameters(
 void MetalPreparedAqEvaluation::DispatchStrategy(
     MTL::ComputeCommandEncoder *encoder, size_t batch,
     gjxl_aq_dispatch::Dispatch dispatch, MTL::Size threads) const {
-  // Enabled only for unprofiled resident policy: current profile records
-  // require host-known dimensions and cannot truthfully represent indirect
-  // grids.
-  encoder->dispatchThreadgroups(
+  DispatchMetalIndirectThreadgroups(encoder,
       MetalBackend::AsMetalBuffer(*strategy_dispatch_.buffer)->handle(),
       strategy_dispatch_.offset_bytes + batch * sizeof(Record) +
           offsetof(Record, groups) + size_t(dispatch) * 3 * sizeof(uint32_t),
@@ -292,6 +289,11 @@ void MetalPreparedAqEvaluation::EncodeResidentStrategyMetadata(
         &resident_search_selection_};
     MetalBackend::EncodeAcStrategySubmission(backend, encoder, &context);
   }
+  EncodeResidentStrategyMetadataOnly(backend, encoder);
+}
+
+void MetalPreparedAqEvaluation::EncodeResidentStrategyMetadataOnly(
+    MetalBackend &backend, MTL::ComputeCommandEncoder *encoder) {
   // Reset before importing the metadata error; all subsequent policy resets
   // preserve it while resident_strategy_pending_ is true.
   EncodeReconstructionReset(backend, encoder);

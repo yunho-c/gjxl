@@ -386,6 +386,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
         self.assertEqual(document["schema_version"], 4)
+        self.assertEqual(document["execution_path"], "production-aligned-resident-v1")
         self.assertEqual(document["mode"], "stage")
         self.assertEqual(document["ac_residual_inverse"], "fused-tuned")
         self.assertFalse(document["collect_final_score"])
@@ -400,8 +401,6 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
             [
                 "frontend.prepare_aq.reference",
                 "frontend.initial_quantization",
-                "frontend.ac_strategy",
-                "frontend.quant_adjustment",
                 "resident.aq",
             ],
         )
@@ -430,7 +429,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         self.assertIn(
             ("frontend.initial_quantization", "operation"), wall_stages
         )
-        self.assertIn(("frontend.ac_strategy.wait", "wait"), wall_stages)
+        self.assertNotIn(("frontend.ac_strategy.wait", "wait"), wall_stages)
         self.assertIn(("frontend.reconfigure_aq", "preparation"), wall_stages)
         self.assertNotIn(("frontend.prepare_aq", "preparation"), wall_stages)
         self.assertIn(("frontend.fixed_cfl", "host"), wall_stages)
@@ -498,12 +497,22 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                 stage["end_timestamp"] - stage["begin_timestamp"],
             )
             self.assertTrue(stage["dispatches"])
-        ac_submission = next(
-            item
-            for item in sample["submissions"]
-            if item["submission_id"] == "frontend.ac_strategy"
-        )
-        ac_stages = ac_submission["stages"]
+            if not stage["timestamp_valid"]:
+                self.assertEqual(stage["gpu_nanoseconds"], 0)
+                self.assertTrue(all(dispatch["kind"] == "indirect_threadgroups"
+                                    and 0 in dispatch["grid"]
+                                    for dispatch in stage["dispatches"]))
+            self.assertTrue(all(not dispatch["timestamp_valid"]
+                                for dispatch in stage["dispatches"]))
+        stage_ids = {stage["stage_id"] for stage in stages}
+        self.assertTrue({"frontend.ac_strategy.select", "frontend.ac_strategy.metadata",
+                         "frontend.quant_adjustment", "aq.policy_bounds",
+                         "aq.strategy_dispatch"} <= stage_ids)
+        self.assertTrue(any(dispatch["kind"] == "indirect_threadgroups"
+                            and all(dispatch["grid"])
+                            for stage in stages for dispatch in stage["dispatches"]))
+        ac_stages = [stage for stage in stages
+                     if stage["stage_id"].startswith("frontend.ac_strategy.dct")]
         self.assertEqual(
             {stage["stage_id"] for stage in ac_stages},
             {
@@ -622,9 +631,11 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                 submission = next(
                     item
                     for item in sample["submissions"]
-                    if item["submission_id"] == "frontend.ac_strategy"
+                    if item["submission_id"] == "resident.aq"
                 )
                 for stage in submission["stages"]:
+                    if not stage["stage_id"].startswith("frontend.ac_strategy.dct"):
+                        continue
                     inverse_suffix = "_inverse_simdgroup_2d_matmul"
                     if mode == "fused-wide":
                         inverse_suffix = "_residual_inverse_fused"

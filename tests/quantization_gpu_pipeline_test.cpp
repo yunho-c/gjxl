@@ -2003,7 +2003,7 @@ bool CheckWorkflowBackendSelection() {
   return true;
 }
 
-bool CheckCombinedResidentSearch() {
+bool CheckCombinedResidentSearch(bool profile_failures) {
   using namespace gjxl;
   using namespace quantization_pipeline_internal;
   ImageStorage original(kOriginalExtent), padded(kPaddedExtent),
@@ -2034,9 +2034,10 @@ bool CheckCombinedResidentSearch() {
     ? profiler->QueryGpuProfilingCapabilities()
     : gpu_profile_internal::GpuProfilingCapabilities{};
   const bool timestamps = capabilities.timestamp_counter && capabilities.stage_boundary;
-  // Timestamp-capable devices use the established profiled CPU-selector path.
-  // Hosted Paravirtual uses the same GPU scoring with an explicit CPU selector
-  // instead, so absence of timing hardware does not skip combined-search tests.
+  if (profile_failures && !timestamps) return true;
+  // Physical devices compare production-aligned profiling against ordinary
+  // execution. Hosted devices still exercise combined search against an
+  // explicit CPU-selector reference without requiring timestamp hardware.
   size_t failure_case = 0;
   for (size_t iterations :
        {size_t{0}, size_t{1}, size_t{2}, size_t{3}, size_t{4}}) {
@@ -2057,26 +2058,30 @@ bool CheckCombinedResidentSearch() {
       VarDctEncoderFrame expected, actual;
       std::vector<double> expected_scores, actual_scores;
       gpu_profile_internal::GpuExecutionProfile profile;
+      const auto profile_before = gpu->stats().committed_submissions;
       AcStrategyGpuSearchStats reference_stats;
       Status status;
-      {
+      const GpuEncodingQuantizationPipelineOutput reference_output{
+        .frame = &expected,
+        .score_history = &expected_scores,
+        .collect_final_butteraugli_score = final_score};
+      if (timestamps) {
+        status = RunPreparedGpuQuantizationPipelineForEncodingProfiled(
+          *gpu, original.ConstView(), reference, options,
+          GpuAdaptiveQuantizationMode::kFullyResident, reference_output,
+          &ref_aq, gpu_profile_internal::GpuProfilingMode::kStage, &profile);
+      } else {
         ac_strategy_search_internal::ScopedCpuSelectionForTesting cpu_selector;
-        const GpuEncodingQuantizationPipelineOutput reference_output{
-          .frame = &expected,
-          .score_history = &expected_scores,
-          .collect_final_butteraugli_score = final_score};
-        status = timestamps
-          ? RunPreparedGpuQuantizationPipelineForEncodingProfiled(
-              *gpu, original.ConstView(), reference, options,
-              GpuAdaptiveQuantizationMode::kFullyResident, reference_output,
-              &ref_aq, gpu_profile_internal::GpuProfilingMode::kStage, &profile)
-          : RunPreparedGpuQuantizationPipelineForEncoding(
-              *gpu, original.ConstView(), reference, options,
-              GpuAdaptiveQuantizationMode::kFullyResident, reference_output,
-              &reference_stats, &ref_aq);
+        status = RunPreparedGpuQuantizationPipelineForEncoding(
+          *gpu, original.ConstView(), reference, options,
+          GpuAdaptiveQuantizationMode::kFullyResident, reference_output,
+          &reference_stats, &ref_aq);
       }
-      if (!status.ok() || (!timestamps &&
-          (reference_stats.device_selection || reference_stats.combined_aq_submission))) {
+      if (!status.ok() ||
+          (timestamps && gpu->stats().committed_submissions - profile_before !=
+            (iterations == 0 && !final_score ? 2u : 3u)) ||
+          (!timestamps && (reference_stats.device_selection ||
+                           reference_stats.combined_aq_submission))) {
         std::cerr << "Combined reference failed: " << status.message() << '\n';
         return false;
       }
@@ -2105,6 +2110,36 @@ bool CheckCombinedResidentSearch() {
                   << " combined=" << stats.combined_aq_submission
                   << " submissions=" << submissions << '\n';
         return false;
+      }
+      if (timestamps) {
+        metal_internal::MetalAqReadbackStatsForTesting profiled_readback, ordinary_readback;
+        if (!metal_internal::GetMetalAqReadbackStatsForTesting(
+                *ref_aq.evaluation, &profiled_readback).ok() ||
+            !metal_internal::GetMetalAqReadbackStatsForTesting(
+                *combined_aq.evaluation, &ordinary_readback).ok() ||
+            profiled_readback.total_bytes() != ordinary_readback.total_bytes() ||
+            profiled_readback.quant_field_bytes != 0 ||
+            profiled_readback.block_distance_map_bytes != 0 ||
+            profiled_readback.reconstructed_rgb_bytes != 0) {
+          std::cerr << "Profiling changed resident readback materialization\n";
+          return false;
+        }
+        const auto profile_reuse_before = gpu->stats().committed_submissions;
+        status = RunPreparedGpuQuantizationPipelineForEncodingProfiled(
+            *gpu, original.ConstView(), reference, options,
+            GpuAdaptiveQuantizationMode::kFullyResident,
+            {.frame = &expected,
+             .score_history = &expected_scores,
+             .collect_final_butteraugli_score = final_score},
+            &ref_aq, gpu_profile_internal::GpuProfilingMode::kStage, &profile);
+        std::vector<uint8_t> reused_profile_bytes;
+        if (!status.ok() ||
+            gpu->stats().committed_submissions != profile_reuse_before + 2 ||
+            !EncodeVarDctCodestream(expected, &reused_profile_bytes).ok() ||
+            reused_profile_bytes != expected_bytes || expected_scores != actual_scores) {
+          std::cerr << "Profiled combined search reuse failed: " << status.message() << '\n';
+          return false;
+        }
       }
       // Last-use release must permit another search on the same preparation.
       const auto reused_before = gpu->stats().committed_submissions;
@@ -2195,6 +2230,8 @@ bool CheckCombinedResidentSearch() {
                  .ok())
           return false;
         const auto before_failure = gpu->stats().committed_submissions;
+        gpu_profile_internal::GpuProfilingSession failure_profile(
+            gpu_profile_internal::GpuProfilingMode::kStage, profile.capabilities);
         status = adaptive_quantization_gpu_internal::
             RunPreparedGpuAdaptiveQuantizationWithSearch(
                 *gpu, original.ConstView(), combined.coding_opsin, quant,
@@ -2205,7 +2242,8 @@ bool CheckCombinedResidentSearch() {
                 {.quant_field = false,
                  .block_distance_map = false,
                  .reconstructed_linear_rgb = false,
-                 .final_perceptual_evaluation = final_score});
+                 .final_perceptual_evaluation = final_score},
+                profile_failures ? &failure_profile : nullptr);
         combined_aq.ac_strategy_search
             .Reset(); // Consumer must already be drained.
         actual_bytes.clear();
@@ -2245,7 +2283,7 @@ bool CheckCombinedResidentSearch() {
     }
   }
   std::cout
-      << "26 combined ACS/AQ attempts match CPU-selection encodes; 6 failures "
+      << "26 combined ACS/AQ attempts match profiled encodes; 6 failures "
          "preserve outputs and recover; no separate ACS submission\n";
   return true;
 }
@@ -2259,7 +2297,8 @@ int main(int argc, char **argv) {
     std::cerr << "Usage: pipeline-test [--metallib path]\n";
     return EXIT_FAILURE;
   }
-  if (!CheckCombinedResidentSearch() || !CheckGpuGaborish() ||
+  if (!CheckCombinedResidentSearch(false) || !CheckCombinedResidentSearch(true) ||
+      !CheckGpuGaborish() ||
       !CheckGpuPipelineParity() || !CheckMaximumThroughputFrontendParity() ||
       !CheckDefaultUpdatePipelineParity() || !CheckPreparedGpuAttemptReuse() ||
       !CheckWorkflowBackendSelection()) {

@@ -25,9 +25,7 @@
 #include "gpu/metal/metal_backend.h"
 #endif
 #include "gpu/ops/ac_strategy_search.h"
-#ifdef GJXL_TEST_CUDA
 #include "gpu/ops/ac_strategy_search_profile_internal.h"
-#endif
 
 #if !defined(GJXL_TEST_CUDA) && !defined(GJXL_METALLIB_PATH)
 #error "GJXL_METALLIB_PATH must point to the test metallib"
@@ -523,6 +521,32 @@ bool CheckPreparedResidentReuse(gjxl::GpuBackend& gpu,
         !GridsEqual(expected, omitted)) {
       std::cerr << "Prepared AC policy transition changed placement\n";
       return false;
+    }
+    using namespace gjxl::gpu_profile_internal;
+    const auto caps = dynamic_cast<GpuSubmissionProfiler&>(gpu)
+                          .QueryGpuProfilingCapabilities();
+    if (caps.timestamp_counter && caps.stage_boundary) {
+      GpuProfilingSession session(GpuProfilingMode::kStage, caps);
+      gjxl::AcStrategyGpuSearchStats profiled_stats;
+      const auto before = gpu.stats().committed_submissions;
+      const auto status = FindAcStrategyGridGpuResidentProfiled(
+          gpu, {}, fixture.QuantField(), {}, color_map, resident,
+          options, &omitted, &prepared, &session, &profiled_stats);
+      const auto profile = std::move(session).Finish();
+      bool selection = false;
+      for (const auto& submission : profile.submissions)
+        for (const auto& stage : submission.stages)
+          selection |= stage.stage_id == "frontend.ac_strategy.select";
+      const bool expected_device_selection =
+          !dense && SupportsProfiledAcStrategySelection(gpu);
+      if (!status.ok() || !GridsEqual(expected, omitted) ||
+          profiled_stats.device_selection != expected_device_selection ||
+          selection != expected_device_selection ||
+          gpu.stats().committed_submissions != before + 1) {
+        std::cerr << "Profiled AC policy transition changed selection: "
+                  << status.message() << '\n';
+        return false;
+      }
     }
   }
   prepared.Reset();

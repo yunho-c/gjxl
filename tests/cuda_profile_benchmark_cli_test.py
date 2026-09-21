@@ -38,6 +38,7 @@ def validate(document, mode, samples):
                 for stage in submission["stages"]:
                     assert stage["stage_id"] and stage["begin_timestamp"] == 0
                     assert stage["end_timestamp"] == stage["gpu_nanoseconds"] > 0
+                    assert stage["timestamp_valid"] is True
                     assert stage["dispatches"]
                     previous_end = 0
                     for dispatch in stage["dispatches"]:
@@ -49,8 +50,10 @@ def validate(document, mode, samples):
                         assert all(n > 0 for n in dispatch["grid"] + dispatch["threads_per_threadgroup"])
                         begin, end = dispatch["begin_timestamp"], dispatch["end_timestamp"]
                         if mode == "stage":
+                            assert dispatch["timestamp_valid"] is False
                             assert begin == end == dispatch["gpu_nanoseconds"] == 0
                         else:
+                            assert dispatch["timestamp_valid"] is True
                             assert previous_end <= begin <= end <= stage["end_timestamp"]
                             assert dispatch["gpu_nanoseconds"] == end - begin
                             previous_end = end

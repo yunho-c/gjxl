@@ -404,11 +404,11 @@ Status RunGpuAdaptiveQuantizationImpl(
                                     ? deferred_search->selection.block_extent
                                     : strategies.extent();
   if (deferred_search &&
-      (profiling || !reusable || !selected_output ||
+      (!reusable || !selected_output ||
        mode == GpuAdaptiveQuantizationMode::kExactCoefficients ||
        options.control_mode != AdaptiveQuantizationControlMode::kButteraugli))
     return Status::InvalidArgument(
-        "Deferred AQ search requires an unprofiled resident policy");
+        "Deferred AQ search requires a resident policy");
 
   Status status = ValidateMode(mode);
   const bool resident_opsin_only = !opsin.valid() && reusable != nullptr &&
@@ -652,7 +652,7 @@ Status RunGpuAdaptiveQuantizationImpl(
     aqi::ButteraugliPolicySetup resident_policy_setup;
     bool resident_policy_prepared = false;
     const bool fused_policy_initialization =
-        resident_quantization && !resident_initial && !profiling &&
+        resident_quantization && !resident_initial &&
         options.control_mode == AdaptiveQuantizationControlMode::kButteraugli &&
         prepared->SupportsResidentPolicyInitialization();
     const float adjustment_target =
@@ -1498,11 +1498,12 @@ Status adaptive_quantization_gpu_internal::
         PreparedAdaptiveQuantization *prepared,
         const DeferredAcStrategySearch &search, AcStrategyGrid *selected,
         AdaptiveQuantizationOutput output,
-        AdaptiveQuantizationMaterialization materialization) {
+        AdaptiveQuantizationMaterialization materialization,
+        gpu_profile_internal::GpuProfilingSession *profiling_session) {
   const AcStrategyGrid empty;
   const Status status = RunGpuAdaptiveQuantizationImpl(
       gpu, original, opsin, empty, quant, sharpness, options, mode, prepared,
-      nullptr, &output, materialization, nullptr, &search, selected);
+      nullptr, &output, materialization, profiling_session, &search, selected);
   // A failure before submission may leave a bound, unconsumed prefix. Drop
   // the borrower before its search owner can be reset or reused.
   if (!status.ok() && prepared)

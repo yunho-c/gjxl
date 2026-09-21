@@ -1,0 +1,102 @@
+[
+  {
+    "label": "tiny",
+    "input": "synthetic128",
+    "effort": 2
+  },
+  {
+    "label": "tiny",
+    "input": "synthetic128",
+    "effort": 4
+  },
+  {
+    "label": "tiny",
+    "input": "synthetic128",
+    "effort": 7
+  },
+  {
+    "label": "tiny",
+    "input": "synthetic128",
+    "effort": 9
+  },
+  {
+    "label": "tiny",
+    "input": "synthetic128",
+    "effort": 10
+  },
+  {
+    "label": "kodak",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/01.pfm",
+    "effort": 2
+  },
+  {
+    "label": "kodak",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/01.pfm",
+    "effort": 4
+  },
+  {
+    "label": "kodak",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/01.pfm",
+    "effort": 7
+  },
+  {
+    "label": "kodak",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/01.pfm",
+    "effort": 9
+  },
+  {
+    "label": "kodak",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/01.pfm",
+    "effort": 10
+  },
+  {
+    "label": "clic",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777.pfm",
+    "effort": 2
+  },
+  {
+    "label": "clic",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777.pfm",
+    "effort": 4
+  },
+  {
+    "label": "clic",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777.pfm",
+    "effort": 7
+  },
+  {
+    "label": "clic",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777.pfm",
+    "effort": 9
+  },
+  {
+    "label": "clic",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777.pfm",
+    "effort": 10
+  },
+  {
+    "label": "12mp",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/campus_interior/12mp.pfm",
+    "effort": 2
+  },
+  {
+    "label": "12mp",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/campus_interior/12mp.pfm",
+    "effort": 4
+  },
+  {
+    "label": "12mp",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/campus_interior/12mp.pfm",
+    "effort": 7
+  },
+  {
+    "label": "12mp",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/campus_interior/12mp.pfm",
+    "effort": 9
+  },
+  {
+    "label": "12mp",
+    "input": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/campus_interior/12mp.pfm",
+    "effort": 10
+  }
+]

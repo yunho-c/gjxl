@@ -2046,9 +2046,6 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       profiling_mode, &candidate_profile);
     if (!profile_status.ok()) return profile_status;
   }
-  if (profiling && DeviceStrategyDispatch())
-    return Status::Unavailable(
-        "Device strategy dispatch profiling is not enabled");
   if (!resident_quantization_ ||
       options_.metric != AqEvaluationMetric::kButteraugli) {
     return Status::Unavailable(
@@ -2063,7 +2060,7 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       !std::isfinite(input.butteraugli_target) ||
       input.butteraugli_target <= 0.0f ||
       (input.adjust_initial_field &&
-       (profiling || !SupportsResidentPolicyInitialization())) ||
+       !SupportsResidentPolicyInitialization()) ||
       (!input.adjust_initial_field &&
        (!std::isfinite(input.lower_bound) || input.lower_bound <= 0.0f ||
         !std::isfinite(input.upper_bound) ||
@@ -2291,7 +2288,10 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
        .gaborish = options_.profile.loop_filter.gaborish,
        .epf_iterations = epf_iterations,
        .deferred_dc = DeferredDc(),
-       .adaptive_dc_smoothing = options_.profile.adaptive_dc_smoothing}, &storage);
+       .adaptive_dc_smoothing = options_.profile.adaptive_dc_smoothing,
+       .resident_strategy_metadata = resident_strategy_pending_,
+       .device_strategy_dispatch = DeviceStrategyDispatch(),
+       .adjust_initial_field = resident_policy_adjust_initial_field_}, &storage);
     if (!status.ok()) {
       Invalidate();
       return status;
@@ -2320,12 +2320,14 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
                                       kDistortedPsychoMain,
                                   MetalButteraugliPsychoStage psycho_stage =
                                     MetalButteraugliPsychoStage::kAll,
-                                  const char* group_id = nullptr) {
+                                  const char* group_id = nullptr,
+                                  size_t batch_index = 0) {
       AppendMetalProfileStage(contexts, stages, ResidentProfileStageContext{
         .self = this,
         .stage = stage,
         .iteration = iteration,
         .epf_pass = epf_pass,
+        .reconstruction_batch_index = batch_index,
         .butteraugli_stage = butter_stage,
         .psycho_stage = psycho_stage,
       }, {
@@ -2365,6 +2367,30 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
     };
     try {
       const uint32_t first_epf_pass = epf_iterations == 3 ? 0 : 1;
+      if (resident_strategy_pending_) {
+        for (size_t batch = 0; batch < resident_search_batch_count_; ++batch) {
+          append_stage(AcStrategyProfileStageId(resident_search_batches_[batch].strategy),
+                       ResidentProfileStage::kStrategyCandidate, 0, 0,
+                       MetalButteraugliProfileStage::kDistortedPsychoMain,
+                       MetalButteraugliPsychoStage::kAll,
+                       kAcStrategyProfileGroupId, batch);
+        }
+        if (resident_search_batch_count_) {
+          append_stage("frontend.ac_strategy.select",
+                       ResidentProfileStage::kStrategySelection, 0);
+        }
+        append_stage("frontend.ac_strategy.metadata",
+                     ResidentProfileStage::kStrategyMetadata, 0);
+      }
+      if (DeviceStrategyDispatch()) {
+        append_stage("aq.strategy_dispatch",
+                     ResidentProfileStage::kStrategyDispatch, 0);
+      }
+      if (resident_policy_adjust_initial_field_) {
+        append_stage("frontend.quant_adjustment",
+                     ResidentProfileStage::kQuantFieldAdjustment, 0);
+        append_stage("aq.policy_bounds", ResidentProfileStage::kPolicyBounds, 0);
+      }
       for (uint32_t iteration = 0;
            iteration < score_count; ++iteration) {
         append_reconstruction_stage(
@@ -2381,7 +2407,8 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
         if (iteration == 0 && profile_forward_coefficients) {
           for (size_t batch_index = 0; batch_index < batches_.size();
                ++batch_index) {
-            if (batches_[batch_index].anchor_count == 0) continue;
+            if (!DeviceStrategyDispatch() &&
+                batches_[batch_index].anchor_count == 0) continue;
             append_reconstruction_stage(
               AqForwardCoefficientProfileStageId(
                 batches_[batch_index].strategy),
@@ -2396,7 +2423,8 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
         }
         if (DeferredLlf()) {
           for (size_t batch_index = 0; batch_index < batches_.size(); ++batch_index) {
-            if (batches_[batch_index].anchor_count == 0) continue;
+            if (!DeviceStrategyDispatch() &&
+                batches_[batch_index].anchor_count == 0) continue;
             append_reconstruction_stage(
               AqReconstructionCoefficientProfileStageId(batches_[batch_index].strategy),
               ReconstructionProfileStage::kCoefficientBatch, iteration, batch_index);
@@ -2408,7 +2436,8 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
         }
         for (size_t batch_index = 0; batch_index < batches_.size();
              ++batch_index) {
-          if (batches_[batch_index].anchor_count == 0) continue;
+          if (!DeviceStrategyDispatch() &&
+                batches_[batch_index].anchor_count == 0) continue;
           if (!DeferredLlf()) append_reconstruction_stage(
             AqReconstructionCoefficientProfileStageId(
               batches_[batch_index].strategy),
@@ -2519,7 +2548,8 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
         if (score_count == 0 && profile_forward_coefficients) {
           for (size_t batch_index = 0; batch_index < batches_.size();
                ++batch_index) {
-            if (batches_[batch_index].anchor_count == 0) continue;
+            if (!DeviceStrategyDispatch() &&
+                batches_[batch_index].anchor_count == 0) continue;
             append_reconstruction_stage(
               AqForwardCoefficientProfileStageId(batches_[batch_index].strategy),
               ReconstructionProfileStage::kForwardBatch, 0, batch_index,
@@ -2534,7 +2564,8 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
         }
         for (size_t batch_index = 0; batch_index < batches_.size();
              ++batch_index) {
-          if (batches_[batch_index].anchor_count == 0) continue;
+          if (!DeviceStrategyDispatch() &&
+                batches_[batch_index].anchor_count == 0) continue;
           append_reconstruction_stage(
             AqFinalFrameProfileStageId(batches_[batch_index].strategy),
             ReconstructionProfileStage::kCoefficientBatch,
@@ -5106,8 +5137,32 @@ void MetalPreparedAqEvaluation::EncodeResidentProfileStage(
     self.completed_coefficients_.buffer != nullptr &&
     stage.iteration == self.resident_policy_iterations_;
   switch (stage.stage) {
+    case ResidentProfileStage::kStrategyCandidate:
+      backend.EncodeAcStrategyCandidateBatch(
+          encoder, self.resident_search_batches_[stage.reconstruction_batch_index]);
+      break;
+    case ResidentProfileStage::kStrategySelection: {
+      const MetalBackend::AcStrategyEncodeContext selection{
+          {}, &self.resident_search_selection_};
+      MetalBackend::EncodeAcStrategySubmission(backend, encoder, &selection);
+      break;
+    }
+    case ResidentProfileStage::kStrategyMetadata:
+      self.EncodeResidentStrategyMetadataOnly(backend, encoder);
+      break;
+    case ResidentProfileStage::kStrategyDispatch:
+      self.EncodeStrategyDispatch(backend, encoder);
+      break;
+    case ResidentProfileStage::kQuantFieldAdjustment:
+      EncodeQuantFieldAdjustmentSubmission(backend, encoder, &self);
+      break;
+    case ResidentProfileStage::kPolicyBounds:
+      self.EncodeResidentPolicyBounds(backend, encoder);
+      break;
     case ResidentProfileStage::kReconstruction:
-      self.reset_params_.preserve_error = stage.iteration == 0 ? 0u : 1u;
+      self.reset_params_.preserve_error =
+          stage.iteration == 0 && !self.resident_policy_adjust_initial_field_ &&
+                  !self.resident_strategy_pending_ ? 0u : 1u;
       self.reset_params_.preserve_forward_coefficients =
         stage.iteration == 0 &&
             !self.resident_forward_coefficients_ready_

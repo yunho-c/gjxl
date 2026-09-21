@@ -1825,7 +1825,7 @@ private:
         const size_t offset = view.offset_bytes + f * sizeof(Record);
         Bind(encoder, Handle(metal_, view),
              offset + offsetof(Record, butteraugli), 26);
-        encoder->dispatchThreadgroups(
+        DispatchMetalIndirectThreadgroups(encoder,
             Handle(metal_, view),
             offset + offsetof(Record, groups) +
                 gjxl_aq_dispatch::kTransforms * 3 * sizeof(uint32_t),

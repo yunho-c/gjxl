@@ -22,6 +22,7 @@ int main(int argc, char** argv) {
     std::locale::global(std::locale(std::locale::classic(), new CommaDecimal));
     GpuProfileJsonOptions options;
     options.scope = "fixture\n\"\\\b\f\r\t\x01";
+    options.execution_path = "fixture-path\n";
     options.gpu_profiling_mode = GpuProfilingMode::kDispatch;
     options.gpu_aq = "fully-resident";
     options.ac_residual_inverse = "fused";
@@ -37,12 +38,18 @@ int main(int argc, char** argv) {
     stage.begin_timestamp = 12345;
     stage.end_timestamp = 23456;
     stage.gpu_nanoseconds = 11111;
+    stage.timestamp_valid = true;
     stage.dispatches.push_back({"kernel\t", GpuDispatchKind::kThreadgroups,
-                               {1, 2, 3}, {32, 4, 1}, 0, 12345, 23456, 11111});
+                               {1, 2, 3}, {32, 4, 1}, 0, 12345, 23456, 11111, true});
     GpuSubmissionProfile submission;
     submission.submission_id = "submission\r";
     submission.command_buffer_gpu_nanoseconds = 11111;
     submission.stages.push_back(std::move(stage));
+    GpuStageProfile empty_stage;
+    empty_stage.stage_id = "empty-indirect";
+    empty_stage.dispatches.push_back({"empty", GpuDispatchKind::kIndirectThreadgroups,
+                                     {0, 1, 1}, {32, 1, 1}});
+    submission.stages.push_back(std::move(empty_stage));
     profile.submissions.push_back(std::move(submission));
     RawGpuProfileWorkload workload{"workload\n", {1234, 9}, {}};
     workload.samples.push_back({0, std::move(profile)});

@@ -93,6 +93,19 @@ void RegisterMetalComputePipeline(
 
 void RecordMetalComputePipelineState(MTL::ComputePipelineState* pipeline);
 
+void DispatchMetalIndirectThreadgroups(
+    MTL::ComputeCommandEncoder* encoder, MTL::Buffer* arguments,
+    NS::UInteger offset, MTL::Size threads_per_threadgroup);
+
+// Retain shared arguments until profile resolution, after command completion.
+// This never inserts a transfer or a synchronization into device execution.
+struct MetalIndirectDispatchRecord {
+  NS::SharedPtr<MTL::Buffer> arguments;
+  size_t offset = 0;
+  size_t stage = 0;
+  size_t dispatch = 0;
+};
+
 enum class TransformDirection {
   kForward,
   kInverse,
@@ -402,6 +415,14 @@ public:
 
   Status EvaluateAcStrategyCandidateBatchesProfiled(
     std::span<const AcStrategyCandidateBatch> batches,
+    gpu_profile_internal::GpuProfilingMode mode,
+    std::unique_ptr<GpuSubmission>* submission) override;
+
+  bool SupportsDeviceSelectionProfiling() const noexcept override { return true; }
+
+  Status EvaluateAndSelectAcStrategyCandidateBatchesProfiled(
+    std::span<const AcStrategyCandidateBatch> batches,
+    AcStrategyDeviceSelection selection,
     gpu_profile_internal::GpuProfilingMode mode,
     std::unique_ptr<GpuSubmission>* submission) override;
 

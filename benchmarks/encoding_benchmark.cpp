@@ -1262,6 +1262,7 @@ void WriteGpuProfileSamples(
     const std::vector<RawGpuProfileWorkload>& workloads) {
   gjxl::benchmark::GpuProfileJsonOptions metadata;
   metadata.scope = "metal-public-workflow";
+  metadata.execution_path = "production-aligned-resident-v1";
   metadata.gpu_profiling_mode = options.gpu_profiling_mode;
   metadata.gpu_aq = GpuAqModeName(options.gpu_aq_mode);
   metadata.ac_residual_inverse = options.ac_residual_inverse;

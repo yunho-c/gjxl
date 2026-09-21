@@ -1,0 +1,21 @@
+{
+  "background-activity.json": {
+    "time": 1790003690.562782,
+    "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded\n",
+    "original_sha256": "cd274236b5b2c92a265a20ac7a7168fb9bc5253aee64e4fef1010b33bb9f8afc",
+    "process_inventory": "Retained only in original local build artifacts; omitted from this evidence bundle."
+  },
+  "followup-environment-start.json": {
+    "utc": "2026-09-21T15:23:41.894444+00:00",
+    "note": "User offered to leave the Mac idle before follow-up. System services and display compositor remain active.",
+    "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded\n",
+    "original_sha256": "42d293a7c815682e021f4843ccd26670f9bd9b5bb2121d77d4f4f9c09f1d4ed1",
+    "process_inventory": "Retained only in original local build artifacts; omitted from this evidence bundle."
+  },
+  "followup-environment-end.json": {
+    "utc": "2026-09-21T15:30:15.973709+00:00",
+    "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded\n",
+    "original_sha256": "a1d338647c7914c8fb4638c801b531fb4bf93aab871b65dee085da121dce2b9f",
+    "process_inventory": "Retained only in original local build artifacts; omitted from this evidence bundle."
+  }
+}

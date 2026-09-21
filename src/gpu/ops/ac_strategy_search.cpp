@@ -421,7 +421,8 @@ static Status FindAcStrategyGridGpuImpl(
     const size_t input_capacity = storage_plan.input_arena_bytes;
 
     auto *device_selector = resident != nullptr &&
-                                    profiling_session == nullptr &&
+                                    (profiling_session == nullptr ||
+                                     strategy_profiler->SupportsDeviceSelectionProfiling()) &&
                                     CanDeferAcStrategySearch(gpu, options)
                                 ? dynamic_cast<GpuAcStrategySelection *>(&gpu)
                                 : nullptr;
@@ -595,7 +596,11 @@ static Status FindAcStrategyGridGpuImpl(
       return Status::Ok();
     }
     std::unique_ptr<GpuSubmission> submission;
-    if (device_selector != nullptr) {
+    if (device_selector != nullptr && profiling_session != nullptr) {
+      status = strategy_profiler->EvaluateAndSelectAcStrategyCandidateBatchesProfiled(
+        batches, {block_extent, state.rate_scratch.buffer, state.rate_scratch.offset_bytes},
+        profiling_session->mode(), &submission);
+    } else if (device_selector != nullptr) {
       status = device_selector->EvaluateAndSelectAcStrategyCandidateBatches(
         batches, {block_extent, state.rate_scratch.buffer, state.rate_scratch.offset_bytes}, &submission);
     } else if (profiling_session == nullptr) {
@@ -689,6 +694,12 @@ static Status FindAcStrategyGridGpuImpl(
                 static_cast<uint8_t>(cell.is_anchor)))
             return Status::Internal("Device AC selection produced inconsistent cells");
         }
+      }
+      if (profiling_session != nullptr) {
+        status = profiling_session->EndWallStage(
+          "frontend.ac_strategy.readback",
+          gpu_profile_internal::GpuWallStageKind::kReadback, readback_begin);
+        if (!status.ok()) return status;
       }
       *out = std::move(result);
       result_stats.device_selection = true;

@@ -18,6 +18,7 @@ with tempfile.TemporaryDirectory(prefix="gjxl-profile-json-") as directory:
         assert document["scope"] == 'fixture\n"\\\b\f\r\t\x01'
         assert document["distance"] == 1.25
         assert document["schema_version"] == 4
+        assert document["execution_path"] == "fixture-path\n"
         assert len(document["workloads"]) == 3
         workload = document["workloads"][0]
         assert workload["name"] == "workload\n" and workload["source_width"] == 1234
@@ -29,6 +30,13 @@ with tempfile.TemporaryDirectory(prefix="gjxl-profile-json-") as directory:
         assert stage["stage_id"] == 'stage"' and stage["group_id"] == "group\\"
         assert stage["dispatches"][0]["kernel_id"] == "kernel\t"
         assert stage["dispatches"][0]["gpu_nanoseconds"] == 11111
+        assert stage["timestamp_valid"] is True
+        assert stage["dispatches"][0]["timestamp_valid"] is True
+        empty = submission["stages"][1]
+        assert empty["timestamp_valid"] is False and empty["gpu_nanoseconds"] == 0
+        assert empty["dispatches"][0]["kind"] == "indirect_threadgroups"
+        assert empty["dispatches"][0]["grid"] == [0, 1, 1]
+        assert empty["dispatches"][0]["timestamp_valid"] is False
         assert document["workloads"][1]["samples"][0]["submissions"] == []
         assert document["workloads"][2]["samples"] == []
         assert not list(root.rglob("*.tmp-*"))

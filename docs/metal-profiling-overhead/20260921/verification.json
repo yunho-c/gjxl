@@ -1,0 +1,190 @@
+{
+  "verified_utc": "2026-09-21T15:30:24.652861+00:00",
+  "cases": [
+    {
+      "collection": "ablation",
+      "case": "000-tiny-e2",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "6400d49cd66b7ff9d41bd28c1c69d62bccdb4f47a398f8eea5bad3c1190bd7e0"
+    },
+    {
+      "collection": "ablation",
+      "case": "001-tiny-e4",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "5611d9361781380d9b3896e6261f84461bc4bbe2a393b432d65da389c8c8038e"
+    },
+    {
+      "collection": "ablation",
+      "case": "002-tiny-e7",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "9e181d0ffaec975c02365fcf8ab42276a0e62b2621143c227c7f02a5ca7f8c7e"
+    },
+    {
+      "collection": "ablation",
+      "case": "003-tiny-e9",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "5e56b347e15603eb9f693e570b82fdfc7b6745b6771b7d5350227bf358664a7a"
+    },
+    {
+      "collection": "ablation",
+      "case": "004-tiny-e10",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "5e56b347e15603eb9f693e570b82fdfc7b6745b6771b7d5350227bf358664a7a"
+    },
+    {
+      "collection": "ablation",
+      "case": "005-kodak-e2",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "700263f84204337e8219404224e811c04bd12547b831255f19201665f702377b"
+    },
+    {
+      "collection": "ablation",
+      "case": "006-kodak-e4",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "c6542416a24a36fca07e40bcee298fb93048df4effc4dddf40cb3929241bf798"
+    },
+    {
+      "collection": "ablation",
+      "case": "007-kodak-e7",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "cb68246b4705fee4801ff92be47db565e7d0ea5884378229a892ee573147588b"
+    },
+    {
+      "collection": "ablation",
+      "case": "008-kodak-e9",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "185252b562d3f6c2ba1db36c55504665f71265750f95f81303788327f349d673"
+    },
+    {
+      "collection": "ablation",
+      "case": "009-kodak-e10",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "aea97769de82354ceba97bf12e25ff4296f5ae78128735cfc141319d96692872"
+    },
+    {
+      "collection": "ablation",
+      "case": "010-clic-e2",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "643169a2cd8473c82e228bd6b0d71b8a49e938828f828bd67e0435cf6d9870b2"
+    },
+    {
+      "collection": "ablation",
+      "case": "011-clic-e4",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "14c506425998eebf7bc485495ffd6a9c27d0bc7cf9f97d6981d2843103464db2"
+    },
+    {
+      "collection": "ablation",
+      "case": "012-clic-e7",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "ba7d9de2a72177d97d6d923917728c4417ac32ebd29e35878bb416eba768c003"
+    },
+    {
+      "collection": "ablation",
+      "case": "013-clic-e9",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "3dfbea3cc1b031b76f61796d28cebb3d89cf2eb08857ba681eecf762eda38595"
+    },
+    {
+      "collection": "ablation",
+      "case": "014-clic-e10",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "9ce8c2ab50a241014dc1592159d94daead6e1453e1ca6efab06f797b5f1aa1bd"
+    },
+    {
+      "collection": "ablation",
+      "case": "015-12mp-e2",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "61b025e5aa4d6cd57b4bf7093054d2305266dd599cc8f8a07eccd39673bcc663"
+    },
+    {
+      "collection": "ablation",
+      "case": "016-12mp-e4",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "923148851e409cedf3e12a6bc6def64f90e0af105dba1cdfc8ca8b0504da8f34"
+    },
+    {
+      "collection": "ablation",
+      "case": "017-12mp-e7",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "86d907febbd2995097bcef697437149950b07cd5df716002ddf29f2f78981102"
+    },
+    {
+      "collection": "ablation",
+      "case": "018-12mp-e9",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "2ec2e1cb28ed51d7121b079f84a467cf0c193fc9d54e74069c84b7ab26ac7e72"
+    },
+    {
+      "collection": "ablation",
+      "case": "019-12mp-e10",
+      "rows": 180,
+      "measured": 108,
+      "output_sha256": "f4e397f74aba71dfb868acdd425dc99c7ee43c8127824d42e8f283123ef5aaf6"
+    },
+    {
+      "collection": "followup",
+      "case": "000-kodak-e4",
+      "rows": 228,
+      "measured": 216,
+      "output_sha256": "c6542416a24a36fca07e40bcee298fb93048df4effc4dddf40cb3929241bf798"
+    },
+    {
+      "collection": "followup",
+      "case": "001-kodak-e7",
+      "rows": 228,
+      "measured": 216,
+      "output_sha256": "cb68246b4705fee4801ff92be47db565e7d0ea5884378229a892ee573147588b"
+    },
+    {
+      "collection": "followup",
+      "case": "002-kodak-e9",
+      "rows": 228,
+      "measured": 216,
+      "output_sha256": "185252b562d3f6c2ba1db36c55504665f71265750f95f81303788327f349d673"
+    },
+    {
+      "collection": "followup",
+      "case": "003-12mp-e4",
+      "rows": 228,
+      "measured": 216,
+      "output_sha256": "923148851e409cedf3e12a6bc6def64f90e0af105dba1cdfc8ca8b0504da8f34"
+    },
+    {
+      "collection": "followup",
+      "case": "004-12mp-e7",
+      "rows": 228,
+      "measured": 216,
+      "output_sha256": "86d907febbd2995097bcef697437149950b07cd5df716002ddf29f2f78981102"
+    },
+    {
+      "collection": "followup",
+      "case": "005-12mp-e9",
+      "rows": 228,
+      "measured": 216,
+      "output_sha256": "2ec2e1cb28ed51d7121b079f84a467cf0c193fc9d54e74069c84b7ab26ac7e72"
+    }
+  ],
+  "measured_calls": 3456,
+  "all_logged_calls": 4968,
+  "cross_build_output_hashes_match": true
+}
