@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include "gpu/ablation_internal.h"
+
 #include "gpu/ops/ac_strategy_search.h"
 
 #include "core/managed_allocator.h"
@@ -257,7 +259,7 @@ void PreparedAcStrategySearch::Reset() noexcept { impl_.reset(); }
 
 bool CanDeferAcStrategySearch(GpuBackend &gpu,
                               AcStrategySearchOptions options) {
-  if (options.dense_dct32_search ||
+  if (ablation_internal::Get().host_selector || options.dense_dct32_search ||
       dynamic_cast<GpuAcStrategySelection *>(&gpu) == nullptr)
     return false;
 #ifdef GJXL_FRONTIER_EXPERIMENT
@@ -372,6 +374,8 @@ static Status FindAcStrategyGridGpuImpl(
                                     CanDeferAcStrategySearch(gpu, options)
                                 ? dynamic_cast<GpuAcStrategySelection *>(&gpu)
                                 : nullptr;
+    ablation_internal::Count(device_selector ? "gpu_selector" : "cpu_selector");
+    ablation_internal::Count(deferred ? "deferred_search" : "immediate_search");
     if (deferred && (!device_selector || !prepared))
       return Status::Unavailable(
           "Deferred AC strategy selection is unavailable");

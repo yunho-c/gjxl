@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include "gpu/ablation_internal.h"
+
 #include "gpu/metal/kernels/aq_strategy_dispatch.h"
 #include "gpu/metal/metal_aq_profile_storage_plan.h"
 #include "gpu/metal/metal_backend_internal.h"
@@ -1379,7 +1381,8 @@ private:
         capture_stage_ == response_stage ? 1u : 0u;
       MTL::ComputePipelineState* fused_pipeline =
         metal_.butteraugli_pipelines_.malta_fused.get();
-      if (fused_pipeline->maxTotalThreadsPerThreadgroup() >=
+      if (!ablation_internal::Get().split_malta &&
+          fused_pipeline->maxTotalThreadsPerThreadgroup() >=
           kMaltaTileWidth * kMaltaTileHeight) {
         const MaltaFusedParams params{
           static_cast<uint32_t>(scale_extent.width),
@@ -1825,6 +1828,8 @@ private:
         const size_t offset = view.offset_bytes + f * sizeof(Record);
         Bind(encoder, Handle(metal_, view),
              offset + offsetof(Record, butteraugli), 26);
+        ablation_internal::Count("indirect_dispatches");
+        ablation_internal::Dispatch();
         encoder->dispatchThreadgroups(
             Handle(metal_, view),
             offset + offsetof(Record, groups) +

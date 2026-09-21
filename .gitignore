@@ -210,3 +210,8 @@ poetry.toml
 pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/c++,python
+
+# Isolated paper ablation builds and retained run artifacts
+build-ablation/
+build-ablation-reference/
+ablation-runs/

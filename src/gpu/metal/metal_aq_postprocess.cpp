@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include "gpu/ablation_internal.h"
+
 #include "gpu/metal/metal_aq_evaluation_internal.h"
 
 #include <algorithm>
@@ -133,7 +135,7 @@ bool MetalPreparedAqEvaluation::IsFinalEpfPass(uint32_t pass) const noexcept {
 
 bool MetalPreparedAqEvaluation::CanFuseFinalEpf() const noexcept {
   const uint32_t iterations = options_.profile.loop_filter.epf_options.iterations;
-  return iterations != 0 &&
+  return !ablation_internal::Get().split_epf && iterations != 0 &&
     epf_dispatch_[iterations == 1 ? 1 : 2].linear_pipeline != nullptr;
 }
 

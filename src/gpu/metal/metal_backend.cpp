@@ -1,3 +1,5 @@
+#include "gpu/ablation_internal.h"
+
 #include "gpu/metal/metal_backend.h"
 
 #include <Foundation/Foundation.hpp>
@@ -1216,6 +1218,7 @@ Status MetalBackend::CopyDeviceToHost(
   if (source.empty()) {
     return Status::Ok();
   }
+  ablation_internal::Count("readback_copy_bytes", source.size());
   std::memcpy(dst, source.data(), source.size());
   return Status::Ok();
 }
@@ -1249,6 +1252,7 @@ Status MetalBackend::BorrowCompletedReadOnly(
   const auto* source =
     static_cast<const std::byte*>(metal_src->contents()) + src_offset_bytes;
   *out = {source, size_bytes};
+  ablation_internal::Count("mapped_read_bytes", size_bytes);
   return Status::Ok();
 }
 
@@ -1716,12 +1720,14 @@ Status CreateMetalBackendImpl(
         spec->transforms_per_threadgroup, false,
         std::string(function_name) + "_image", direction, out);
     };
-    if (resident_shape && selection.forward == MetalDctImplementation::kSimdgroupMatmul) {
+    if (!ablation_internal::Get().packed_dct && resident_shape &&
+        selection.forward == MetalDctImplementation::kSimdgroupMatmul) {
       status = create_image_pipeline(forward_spec, forward_spec->forward_function_name,
                                      "forward image", &pipelines.forward_image);
       if (!status.ok()) return status;
     }
-    if (resident_shape && selection.inverse == MetalDctImplementation::kSimdgroupMatmul) {
+    if (!ablation_internal::Get().packed_dct && resident_shape &&
+        selection.inverse == MetalDctImplementation::kSimdgroupMatmul) {
       status = create_image_pipeline(inverse_spec, inverse_spec->inverse_function_name,
                                      "inverse image", &pipelines.inverse_image);
       if (!status.ok()) return status;
@@ -1733,8 +1739,10 @@ Status CreateMetalBackendImpl(
   std::array<bool, kAcStrategyCount> fused_ac_inverse_enabled{};
   for (const DctSelection& selection : dct_selections) {
     fused_ac_forward_enabled[static_cast<size_t>(selection.strategy)] =
+      !ablation_internal::Get().split_ac &&
       selection.forward == MetalDctImplementation::kSimdgroupMatmul;
     fused_ac_inverse_enabled[static_cast<size_t>(selection.strategy)] =
+      !ablation_internal::Get().split_ac &&
       selection.inverse == MetalDctImplementation::kSimdgroupMatmul;
   }
   status = CreateAcStrategyPipelines(

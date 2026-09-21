@@ -28,6 +28,7 @@
 #include "core/status.h"
 #include "core/quantizer.h"
 #include "gpu/backend.h"
+#include "gpu/ablation_internal.h"
 #include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_aq_evaluation_profile.h"
 #include "gpu/ops/gpu_execution_profile_internal.h"
@@ -1468,7 +1469,8 @@ bool CheckResidentButteraugliPolicy(
           .score_history = &actual_scores,
         }), "fused resident policy") ||
       gpu.stats().committed_submissions !=
-        before.committed_submissions + 1 ||
+        before.committed_submissions +
+          (gjxl::ablation_internal::Get().sync_aq ? kIterations + 3 : 1) ||
       actual_scores.size() != expected_scores.size()) {
     return false;
   }
@@ -1879,7 +1881,9 @@ bool CheckResidentPolicyInitialization(gjxl::GpuBackend &gpu) {
     }
     if (expected != actual || expected_scores != actual_scores ||
         !QuantizedCoefficientsEqual(expected_frame, actual_frame) ||
-        gpu.stats().committed_submissions != before.committed_submissions + 1) {
+        gpu.stats().committed_submissions != before.committed_submissions +
+          (gjxl::ablation_internal::Get().sync_aq
+             ? iterations + static_cast<size_t>(evaluate_final) + 2 : 1)) {
       std::cerr << "Fused initialization changed the policy on trial " << trial
                 << '\n';
       return false;

@@ -10,6 +10,7 @@ project(
 )
 
 option(GJXL_BUILD_FRONTIER_EXPERIMENT "Build the isolated frontier-DP experiment and capture hook" OFF)
+option(GJXL_BUILD_ABLATION_EXPERIMENT "Build private paper ablation controls and driver" OFF)
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
@@ -213,6 +214,13 @@ add_library(
 )
 
 add_library(gjxl::core ALIAS gjxl_core)
+if(GJXL_BUILD_ABLATION_EXPERIMENT)
+  target_compile_definitions(gjxl_core INTERFACE
+    "$<BUILD_INTERFACE:GJXL_ABLATION_EXPERIMENT=1>")
+  if(NOT GJXL_BUILD_BENCHMARKS)
+    message(FATAL_ERROR "Ablation experiment requires GJXL_BUILD_BENCHMARKS=ON")
+  endif()
+endif()
 
 set_target_properties(
   gjxl_core
@@ -1112,6 +1120,12 @@ if(GJXL_BUILD_TESTS)
     COMPONENTS Interpreter
     REQUIRED
   )
+
+  if(Python3_VERSION VERSION_GREATER_EQUAL 3.11)
+    add_test(NAME ablation_runner
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/ablation_runner_test.py")
+    set_tests_properties(ablation_runner PROPERTIES TIMEOUT 30 LABELS "experiment;cli")
+  endif()
 
   if(Python3_VERSION VERSION_GREATER_EQUAL 3.12)
     add_test(NAME resident_qualification_controller
@@ -2573,6 +2587,11 @@ if(GJXL_BUILD_TESTS)
     NAME metal_aq_evaluation
     COMMAND gjxl_metal_aq_evaluation_test
   )
+  if(GJXL_BUILD_ABLATION_EXPERIMENT)
+    add_test(NAME metal_aq_evaluation_ablation_sync COMMAND gjxl_metal_aq_evaluation_test)
+    set_tests_properties(metal_aq_evaluation_ablation_sync PROPERTIES
+      ENVIRONMENT "GJXL_ABLATION_VARIANT=aq-sync" TIMEOUT 60 LABELS "experiment;metal")
+  endif()
 
   add_executable(
     gjxl_adaptive_quantization_gpu_policy_test
@@ -2979,6 +2998,14 @@ if(GJXL_BUILD_BENCHMARKS)
   target_compile_definitions(gjxl_quality_benchmark PRIVATE
     GJXL_QUALITY_REVISION="${GJXL_QUALITY_REVISION}")
   add_dependencies(gjxl_quality_benchmark gjxl_embedded_metal_shaders)
+  if(GJXL_BUILD_ABLATION_EXPERIMENT)
+    add_executable(gjxl_ablation_benchmark benchmarks/quality_benchmark.cpp)
+    target_link_libraries(gjxl_ablation_benchmark PRIVATE
+      gjxl_codestream gjxl_metal gjxl_pfm_io)
+    target_compile_definitions(gjxl_ablation_benchmark PRIVATE
+      GJXL_ABLATION_DRIVER=1 GJXL_QUALITY_REVISION="${GJXL_QUALITY_REVISION}")
+    add_dependencies(gjxl_ablation_benchmark gjxl_embedded_metal_shaders)
+  endif()
   add_executable(gjxl_dc_prediction_benchmark benchmarks/dc_prediction_benchmark.cpp)
   target_link_libraries(gjxl_dc_prediction_benchmark PRIVATE
     gjxl_codestream gjxl_metal gjxl_pfm_io)

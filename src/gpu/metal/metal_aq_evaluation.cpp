@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include "gpu/ablation_internal.h"
+
 #include "gpu/metal/metal_aq_evaluation_internal.h"
 
 #include <algorithm>
@@ -2540,6 +2542,22 @@ Status MetalPreparedAqEvaluation::EvaluateResidentButteraugliPolicyImpl(
       profiling_mode, &submission);
     reset_params_.preserve_error = 0u;
     reset_params_.preserve_forward_coefficients = 0u;
+  } else if (ablation_internal::Get().sync_aq) {
+    // All arithmetic and storage remain resident. Only the command-buffer
+    // boundaries and host completion waits change. Earlier parts are fully
+    // drained before reuse, error return, or ownership transfer below.
+    const size_t evaluations = resident_policy_iterations_ +
+      static_cast<size_t>(resident_evaluate_final_field_);
+    for (size_t index = 0; index < evaluations + 2; ++index) {
+      const PolicyPart part{this, static_cast<int>(index)};
+      status = backend_->SubmitCompute("gjxl ablation AQ boundary",
+        &MetalPreparedAqEvaluation::EncodeAblationPolicyPart, &part, &submission);
+      if (!status.ok() || !submission) break;
+      if (index + 1 < evaluations + 2) {
+        status = submission->Wait();
+        if (!status.ok()) break;
+      }
+    }
   } else {
     status = backend_->SubmitCompute(
       "gjxl prepared resident Butteraugli policy",
@@ -4873,20 +4891,31 @@ void MetalPreparedAqEvaluation::EncodeEvaluationSubmission(
 void MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission(
     MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
     const void* context) {
-  auto& self = *static_cast<MetalPreparedAqEvaluation*>(
-    const_cast<void*>(context));
-  if (self.resident_strategy_pending_)
-    self.EncodeResidentStrategyMetadata(backend, encoder);
-  if (self.DeviceStrategyDispatch())
-    self.EncodeStrategyDispatch(backend, encoder);
-  if (self.resident_policy_adjust_initial_field_) {
-    EncodeQuantFieldAdjustmentSubmission(backend, encoder, context);
-    self.EncodeResidentPolicyBounds(backend, encoder);
-  }
-  const size_t evaluation_count =
-    self.resident_policy_iterations_ +
+  auto& self = *static_cast<MetalPreparedAqEvaluation*>(const_cast<void*>(context));
+  const PolicyPart part{&self, -1};
+  EncodeAblationPolicyPart(backend, encoder, &part);
+}
+
+void MetalPreparedAqEvaluation::EncodeAblationPolicyPart(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
+    const void* context) {
+  const auto& part = *static_cast<const PolicyPart*>(context);
+  auto& self = *part.self;
+  const size_t evaluation_count = self.resident_policy_iterations_ +
     static_cast<size_t>(self.resident_evaluate_final_field_);
+  if (part.index < 0 || part.index == 0) {
+    if (self.resident_strategy_pending_)
+      self.EncodeResidentStrategyMetadata(backend, encoder);
+    if (self.DeviceStrategyDispatch())
+      self.EncodeStrategyDispatch(backend, encoder);
+    if (self.resident_policy_adjust_initial_field_) {
+      EncodeQuantFieldAdjustmentSubmission(backend, encoder, &self);
+      self.EncodeResidentPolicyBounds(backend, encoder);
+    }
+  }
   for (size_t iteration = 0; iteration < evaluation_count; ++iteration) {
+    if (part.index >= 0 && part.index != static_cast<int>(iteration + 1)) continue;
+    ablation_internal::Count("aq_evaluations");
     self.EncodeResidentReconstruction(
       backend, encoder, static_cast<uint32_t>(iteration));
 
@@ -4935,11 +4964,13 @@ void MetalPreparedAqEvaluation::EncodeResidentButteraugliPolicySubmission(
     self.EncodeResidentPolicyUpdate(
       backend, encoder, static_cast<uint32_t>(iteration));
   }
-  if (!self.resident_evaluate_final_field_) {
-    self.EncodeResidentFrame(backend, encoder);
+  if (part.index < 0 || part.index == static_cast<int>(evaluation_count + 1)) {
+    if (!self.resident_evaluate_final_field_) {
+      self.EncodeResidentFrame(backend, encoder);
+    }
+    self.reset_params_.preserve_error = 0u;
+    self.reset_params_.preserve_forward_coefficients = 0u;
   }
-  self.reset_params_.preserve_error = 0u;
-  self.reset_params_.preserve_forward_coefficients = 0u;
 }
 
 void MetalPreparedAqEvaluation::EncodeResidentReconstruction(

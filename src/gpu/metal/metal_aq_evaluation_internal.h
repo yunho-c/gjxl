@@ -582,6 +582,9 @@ private:
   static void EncodeEvaluationSubmission(MetalBackend &backend,
                                          MTL::ComputeCommandEncoder *encoder,
                                          const void *context);
+  struct PolicyPart { MetalPreparedAqEvaluation* self; int index; };
+  static void EncodeAblationPolicyPart(
+      MetalBackend&, MTL::ComputeCommandEncoder*, const void*);
   static void EncodeResidentButteraugliPolicySubmission(
       MetalBackend& backend, MTL::ComputeCommandEncoder* encoder,
       const void* context);

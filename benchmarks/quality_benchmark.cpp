@@ -16,6 +16,9 @@
 #include <vector>
 
 #include "codestream/workflow.h"
+#ifdef GJXL_ABLATION_DRIVER
+#include "gpu/ablation_internal.h"
+#endif
 #include "io/pfm.h"
 
 #ifndef GJXL_QUALITY_REVISION
@@ -134,6 +137,20 @@ void Write(const fs::path &destination, const char *data, size_t size) {
 
 int main(int argc, char **argv) {
   try {
+#ifdef GJXL_ABLATION_DRIVER
+    const auto& ablation = gjxl::ablation_internal::Get();
+    if (argc == 2 && std::string(argv[1]) == "--variants") {
+      std::cout << "[";
+      bool first = true;
+      for (const auto& config : gjxl::ablation_internal::kConfigs) {
+        if (!first) std::cout << ',';
+        first = false;
+        std::cout << '"' << config.name << '"';
+      }
+      std::cout << "]\n";
+      return 0;
+    }
+#endif
     if (argc == 2 && std::string(argv[1]) == "--version") {
       std::cout << "{\"encoder\":\"gjxl\",\"schema_version\":1,\"revision\":\""
                 << GJXL_QUALITY_REVISION
@@ -196,6 +213,16 @@ int main(int argc, char **argv) {
       Check(encode());
       check_output();
     }
+#ifdef GJXL_ABLATION_DRIVER
+    // Audit after preparation/warmup, with the same cache state as timed calls.
+    gjxl::ablation_internal::Audit audit;
+    gjxl::ablation_internal::active_audit = &audit;
+    const auto audit_status = encode();
+    gjxl::ablation_internal::active_audit = nullptr;
+    Check(audit_status);
+    if (audit.overflow) throw std::runtime_error("Ablation audit overflow");
+    check_output();
+#endif
     std::vector<uint64_t> times;
     times.reserve(options.samples);
     for (size_t i = 0; i < options.samples; ++i) {
@@ -234,7 +261,11 @@ int main(int argc, char **argv) {
            << ",\"input_height\":" << image.extent().height
            << ",\"requested_distance\":" << options.distance
            << ",\"effort\":" << options.effort
+#ifdef GJXL_ABLATION_DRIVER
+           << ",\"validation_encodes\":2,\"warmups\":" << options.warmups
+#else
            << ",\"validation_encodes\":1,\"warmups\":" << options.warmups
+#endif
            << ",\"sample_count\":" << times.size() << ",\"samples\":[";
     for (size_t i = 0; i < times.size(); ++i) {
       if (i)
@@ -243,7 +274,18 @@ int main(int argc, char **argv) {
              << ",\"elapsed_nanoseconds\":" << times[i]
              << ",\"encoded_bytes\":" << bytes.size() << '}';
     }
-    report << "]}\n";
+    report << "]";
+#ifdef GJXL_ABLATION_DRIVER
+    report << ",\"ablation\":{\"variant\":\"" << ablation.name
+           << "\",\"audit_scope\":\"untimed-warm-validation-call\",\"counters\":{";
+    for (size_t i = 0; i < audit.size; ++i) {
+      if (i) report << ',';
+      report << '"' << audit.entries[i].name.data() << "\":"
+             << audit.entries[i].count;
+    }
+    report << "}}";
+#endif
+    report << "}\n";
     Write(options.output, reinterpret_cast<const char *>(bytes.data()),
           bytes.size());
     const auto text = report.str();

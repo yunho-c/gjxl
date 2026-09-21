@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include "gpu/ablation_internal.h"
+
 #include "codestream/workflow.h"
 
 #include <algorithm>
@@ -344,8 +346,9 @@ Status ValidateWorkflowOptions(Extent2D source, const VarDctEncodingOptions &opt
 }
 
 MetalBackendOptions ProductionMetalBackendOptions() {
-  constexpr auto implementation =
-    MetalDctImplementation::kSimdgroupMatmul;
+  const auto implementation = ablation_internal::Get().scalar_dct
+    ? MetalDctImplementation::kScalarMatmul
+    : MetalDctImplementation::kSimdgroupMatmul;
   return {
     .forward_dct8 = implementation,
     .inverse_dct8 = implementation,

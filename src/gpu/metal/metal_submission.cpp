@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include "gpu/ablation_internal.h"
+
 #include "gpu/metal/metal_backend_internal.h"
 
 #include <algorithm>
@@ -79,6 +81,7 @@ size_t g_next_pipeline_registry_victim = 0;
 void EncodeProfiledDispatch(
     MTL::ComputeCommandEncoder* encoder, GpuDispatchKind kind,
     MTL::Size grid, MTL::Size threads_per_threadgroup) {
+  ablation_internal::Dispatch();
   ActiveDispatchProfile* active = g_active_dispatch_profile;
   if (active == nullptr || active->stage == nullptr) {
     if (kind == GpuDispatchKind::kThreads) {
@@ -174,6 +177,7 @@ public:
     std::call_once(wait_once_, [this] {
       auto pool = NS::TransferPtr(
         NS::AutoreleasePool::alloc()->init());
+      ablation_internal::Count("completion_waits");
       command_buffer_->waitUntilCompleted();
       if (test_fail_completion_) {
         completion_status_ = Status::DeviceError(
@@ -360,15 +364,22 @@ void RegisterMetalComputePipeline(
 
 void RecordMetalComputePipelineState(MTL::ComputePipelineState* pipeline) {
   ActiveDispatchProfile* active = g_active_dispatch_profile;
-  if (active == nullptr) return;
+  if (active == nullptr && !ablation_internal::Auditing()) return;
   std::lock_guard lock(g_pipeline_registry_mutex);
-  active->current_kernel_id_size = 0;
+#ifdef GJXL_ABLATION_EXPERIMENT
+  ablation_internal::Kernel("unknown_kernel");
+#endif
+  if (active) active->current_kernel_id_size = 0;
   for (const PipelineRegistryEntry& entry : g_pipeline_registry) {
     if (entry.pipeline != pipeline) continue;
-    active->current_kernel_id_size = entry.kernel_id_size;
-    std::copy_n(
-      entry.kernel_id.data(), entry.kernel_id_size,
-      active->current_kernel_id.data());
+#ifdef GJXL_ABLATION_EXPERIMENT
+    ablation_internal::Kernel(std::string_view(entry.kernel_id.data(), entry.kernel_id_size));
+#endif
+    if (active) {
+      active->current_kernel_id_size = entry.kernel_id_size;
+      std::copy_n(entry.kernel_id.data(), entry.kernel_id_size,
+                  active->current_kernel_id.data());
+    }
     break;
   }
 }
@@ -506,6 +517,7 @@ Status MetalBackend::SubmitCompute(
       fail_completion));
   raw_command_buffer->commit();
   RecordCommittedSubmission();
+  ablation_internal::Count("submissions");
   *submission = std::move(pending);
   return Status::Ok();
 }
@@ -695,6 +707,7 @@ Status MetalBackend::SubmitComputeProfiled(
     sample_buffer, std::move(profile), mode, resolved_sample_count));
   raw_command_buffer->commit();
   RecordCommittedSubmission();
+  ablation_internal::Count("submissions");
   *submission = std::move(pending);
   return Status::Ok();
 }

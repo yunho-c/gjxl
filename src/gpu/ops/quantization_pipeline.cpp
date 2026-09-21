@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include "gpu/ablation_internal.h"
+
 #include "gpu/ops/quantization_pipeline.h"
 
 #include <cmath>
@@ -98,7 +100,8 @@ public:
   }
 
   bool CanDefer(AcStrategySearchOptions options) const noexcept {
-    return resident_ && prepared_ && !profiling_session_ &&
+    return !ablation_internal::Get().ac_handoff &&
+           resident_ && prepared_ && !profiling_session_ &&
            CanDeferAcStrategySearch(gpu_, options);
   }
   Status PrepareDeferred(

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
+#include "gpu/ablation_internal.h"
+
 #include "codec/coefficient_order_population_internal.h"
 #include "gpu/metal/metal_aq_evaluation_internal.h"
 #include <cstring>
@@ -120,6 +122,8 @@ void MetalPreparedAqEvaluation::DispatchStrategy(
   // Enabled only for unprofiled resident policy: current profile records
   // require host-known dimensions and cannot truthfully represent indirect
   // grids.
+  ablation_internal::Count("indirect_dispatches");
+  ablation_internal::Dispatch();
   encoder->dispatchThreadgroups(
       MetalBackend::AsMetalBuffer(*strategy_dispatch_.buffer)->handle(),
       strategy_dispatch_.offset_bytes + batch * sizeof(Record) +
