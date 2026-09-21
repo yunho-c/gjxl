@@ -43,7 +43,11 @@ The profiler still creates one compute encoder per stage inside the command
 buffer. It allocates timestamp buffers and records stage/kernel metadata, then
 resolves counters and shared indirect arguments after completion. Dispatch mode
 also inserts counter-sampling barriers and requires device support. This change
-does not optimize or quantify those costs.
+does not optimize those costs. A subsequent
+[overhead study](metal-profiling-overhead/20260921/README.md) records controlled
+measurements, raw samples, and the exact diagnostic harness. Its outcome supports
+proceeding with stage-data collection before further profiler optimization;
+large-image overhead remains uncertain and no universal correction is established.
 
 Measure them before redesigning the profiler. First compare alternating ordinary
 and stage-profiled complete encodes using the same build, device, image, effort,
@@ -56,8 +60,8 @@ single encoder; identical kernels split at the profiling boundaries with no
 counter collection; then full profiling. The second-minus-first comparison
 estimates splitting cost. Full-minus-split includes counters and recording;
 separate host timers around recording and post-wait resolution can then identify
-which part merits optimization. These variants are a proposed follow-up, not
-new production modes implemented here.
+which part merits optimization. The overhead study retains these variants as
+experimental harness controls, not new production modes implemented here.
 
 Historical profiles predating this alignment retain their original execution
 path. Recollect data before using GPU stage proportions to discuss production

@@ -1,0 +1,178 @@
+--- a/src/gpu/metal/metal_submission.cpp
++++ b/src/gpu/metal/metal_submission.cpp
+@@ -2,6 +2,8 @@
+ // Copyright (c) 2026 Yunho Cho
+ 
+ #include "gpu/metal/metal_backend_internal.h"
++#include "gpu/metal/overhead_control.h"
++#include <chrono>
+ 
+ #include <algorithm>
+ #include <array>
+@@ -21,6 +23,26 @@
+ #include "core/cpu_execution.h"
+ 
+ namespace gjxl::metal_internal {
++namespace {
++enum class OverheadControl { Full, Graph, Split, Record };
++thread_local OverheadControl g_control = OverheadControl::Full;
++thread_local OverheadStats g_overhead;
++struct OverheadTimer {
++  uint64_t& target;
++  std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
++  ~OverheadTimer() {
++    target += std::chrono::duration_cast<std::chrono::nanoseconds>(
++        std::chrono::steady_clock::now()-begin).count();
++  }
++};
++}
++void SetOverheadControl(std::string_view mode) {
++  g_control = mode == "graph" ? OverheadControl::Graph :
++              mode == "split" ? OverheadControl::Split :
++              mode == "record" ? OverheadControl::Record : OverheadControl::Full;
++}
++void ResetOverheadStats() { g_overhead = {}; }
++OverheadStats GetOverheadStats() { return g_overhead; }
+ namespace {
+ 
+ using gpu_profile_internal::GpuProfilingCapabilities;
+@@ -185,6 +207,8 @@
+       auto pool = NS::TransferPtr(
+         NS::AutoreleasePool::alloc()->init());
+       command_buffer_->waitUntilCompleted();
++      uint64_t measured_gpu_ns = 0;
++      if (GpuDuration(&measured_gpu_ns).ok()) g_overhead.gpu_ns += measured_gpu_ns;
+       if (test_fail_completion_) {
+         completion_status_ = Status::DeviceError(
+           "Injected Metal command-buffer completion failure");
+@@ -221,6 +245,7 @@
+   }
+ 
+   Status GpuProfile(GpuSubmissionProfile* profile) {
++    OverheadTimer resolution_timer{g_overhead.resolve_ns};
+     if (profile == nullptr) {
+       return Status::InvalidArgument(
+         "Metal GPU profile output pointer is null");
+@@ -230,19 +255,29 @@
+       return Status::FailedPrecondition(
+         "Metal GPU profile requires successful completion");
+     }
+-    if (counter_sample_buffer_.get() == nullptr || profile_.stages.empty()) {
++    if (g_control == OverheadControl::Graph || g_control == OverheadControl::Split) {
++      GpuSubmissionProfile dummy;
++      dummy.stages.push_back({.stage_id="overhead.control"});
++      Status status = GpuDuration(&dummy.command_buffer_gpu_nanoseconds);
++      if (!status.ok()) return status;
++      *profile = std::move(dummy);
++      return Status::Ok();
++    }
++    if ((g_control != OverheadControl::Record && counter_sample_buffer_.get() == nullptr) || profile_.stages.empty()) {
+       return Status::FailedPrecondition(
+         "Metal submission does not contain stage timestamps");
+     }
+ 
+     auto pool = NS::TransferPtr(NS::AutoreleasePool::alloc()->init());
+     const size_t sample_count = resolved_sample_count_;
+-    NS::Data* resolved = counter_sample_buffer_->resolveCounterRange(
+-      NS::Range::Make(0, static_cast<NS::UInteger>(sample_count)));
++    NS::Data* resolved = g_control == OverheadControl::Record ? nullptr :
++      counter_sample_buffer_->resolveCounterRange(
++        NS::Range::Make(0, static_cast<NS::UInteger>(sample_count)));
+     const size_t required_bytes =
+       sample_count * sizeof(MTL::CounterResultTimestamp);
+-    if (resolved == nullptr || resolved->bytes() == nullptr ||
+-        resolved->length() < required_bytes) {
++    if (g_control != OverheadControl::Record &&
++        (resolved == nullptr || resolved->bytes() == nullptr ||
++         resolved->length() < required_bytes)) {
+       return Status::DeviceError(
+         "Metal timestamp counter resolution returned incomplete data");
+     }
+@@ -258,6 +293,12 @@
+         std::memcpy(grid.data(), contents + record.offset, sizeof(grid));
+         candidate.stages[record.stage].dispatches[record.dispatch].grid =
+             {grid[0], grid[1], grid[2]};
++      }
++      if (g_control == OverheadControl::Record) {
++        Status status = GpuDuration(&candidate.command_buffer_gpu_nanoseconds);
++        if (!status.ok()) return status;
++        *profile = std::move(candidate);
++        return Status::Ok();
+       }
+       const auto empty_dispatch = [](const GpuDispatchProfile& dispatch) {
+         return dispatch.kind == GpuDispatchKind::kIndirectThreadgroups &&
+@@ -508,6 +549,8 @@
+   const void* context,
+   std::unique_ptr<GpuSubmission>* submission) {
+ 
++  OverheadTimer encoding_timer{g_overhead.encode_ns};
++  ++g_overhead.encoders;
+   if (submission == nullptr) {
+     return Status::InvalidArgument(
+       "GPU submission output pointer is null");
+@@ -563,6 +606,7 @@
+   GpuProfilingMode mode,
+   std::unique_ptr<GpuSubmission>* submission) {
+ 
++  OverheadTimer encoding_timer{g_overhead.encode_ns};
+   if (submission == nullptr) {
+     return Status::InvalidArgument(
+       "GPU submission output pointer is null");
+@@ -610,6 +654,28 @@
+       "Injected Metal submission failure");
+   }
+ 
++  if (g_control == OverheadControl::Graph || g_control == OverheadControl::Split) {
++    auto pool = NS::TransferPtr(NS::AutoreleasePool::alloc()->init());
++    auto* raw = command_queue_->commandBuffer();
++    if (!raw) return Status::SubmissionFailed("Overhead control command buffer failed");
++    auto command = NS::RetainPtr(raw);
++    raw->setLabel(NS::String::string(label, NS::UTF8StringEncoding));
++    MTL::ComputeCommandEncoder* encoder = nullptr;
++    for (const auto& stage : stages) {
++      if (!encoder) {
++        encoder = raw->computeCommandEncoder(); ++g_overhead.encoders;
++        if (!encoder) return Status::SubmissionFailed("Overhead control encoder failed");
++      }
++      encoder->setLabel(NS::String::string(stage.stage_id, NS::UTF8StringEncoding));
++      stage.encode(*this, encoder, stage.context);
++      if (g_control == OverheadControl::Split) { encoder->endEncoding(); encoder=nullptr; }
++    }
++    if (encoder) encoder->endEncoding();
++    std::unique_ptr<GpuSubmission> pending(new MetalSubmission(
++        command, command_queue_, device_, fail_completion));
++    raw->commit(); RecordCommittedSubmission(); *submission=std::move(pending);
++    return Status::Ok();
++  }
+   auto pool = NS::TransferPtr(NS::AutoreleasePool::alloc()->init());
+   MTL::CounterSet* timestamp_set = FindTimestampCounterSet(device_.get());
+   if (timestamp_set == nullptr) {
+@@ -628,9 +694,9 @@
+     static_cast<NS::UInteger>(allocated_sample_count));
+   sample_descriptor->setStorageMode(MTL::StorageModeShared);
+   NS::Error* sample_error = nullptr;
+-  MTL::CounterSampleBuffer* raw_sample_buffer =
++  MTL::CounterSampleBuffer* raw_sample_buffer = g_control == OverheadControl::Record ? nullptr :
+     device_->newCounterSampleBuffer(sample_descriptor.get(), &sample_error);
+-  if (raw_sample_buffer == nullptr) {
++  if (g_control != OverheadControl::Record && raw_sample_buffer == nullptr) {
+     return metal::ErrorToDeviceStatus(
+       sample_error, "Metal timestamp sample-buffer allocation");
+   }
+@@ -667,7 +733,7 @@
+   for (size_t index = 0; index < stages.size(); ++index) {
+     const MetalProfiledComputeStage& stage = stages[index];
+     MTL::ComputeCommandEncoder* encoder = nullptr;
+-    if (mode == GpuProfilingMode::kStage) {
++    if (mode == GpuProfilingMode::kStage && g_control != OverheadControl::Record) {
+       MTL::ComputePassDescriptor* pass =
+         MTL::ComputePassDescriptor::computePassDescriptor();
+       MTL::ComputePassSampleBufferAttachmentDescriptor* attachment =
+@@ -689,6 +755,7 @@
+       return Status::SubmissionFailed(
+         "Failed to create profiled Metal compute encoder");
+     }
++    ++g_overhead.encoders;
+     const ScopedComputeEncoding encoding_scope(encoder);
+     try {
+       profile.stages.push_back({

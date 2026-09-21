@@ -1,0 +1,8 @@
+ProductName:		macOS
+ProductVersion:		15.6
+BuildVersion:		24G84
+51539607552
+Mac16,7
+Note: No thermal warning level has been recorded
+Note: No performance warning level has been recorded
+Note: No CPU power status has been recorded
