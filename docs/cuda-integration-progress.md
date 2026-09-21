@@ -502,6 +502,16 @@ an intermediate build appear complete.
   Linux shared-code regressions also pass. Hosted macOS compilation exposed
   the new selector's old buffer-validation signature; its reconciled path now
   validates and binds per-buffer offsets and rejects resident-CfL aliases.
+- Linux additionally passes all 12 focused CUDA/package checks (178.77 s),
+  including exact arithmetic, AC search, AQ, profiling, sparse output, finite
+  admission, resident inputs and both C++ consumer modes. Hosted Metal at
+  `4a0589a` passes 149/151 tests; the failures are the corrected package header
+  and the incoming combined-search test requiring unavailable stage timestamps
+  on Apple Paravirtual. That test now uses a scoped CPU-selector oracle with
+  identical GPU scoring when timestamps are unavailable, and retains the
+  profiled oracle on physical timestamp-capable GPUs. Combined-search byte,
+  score, reuse, submission-count and failure-atomicity assertions still run.
+  The physical qualification script continues requiring real timestamps.
 
 ## Outstanding integration risks
 

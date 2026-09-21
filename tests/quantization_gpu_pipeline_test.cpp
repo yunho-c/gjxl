@@ -31,6 +31,7 @@
 #include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/ops/adaptive_quantization.h"
+#include "gpu/ops/ac_strategy_search_test.h"
 #include "gpu/ops/gaborish.h"
 #include "gpu/ops/quantization_pipeline.h"
 #include "gpu/ops/quantization_pipeline_profile_internal.h"
@@ -2028,8 +2029,14 @@ bool CheckCombinedResidentSearch() {
   std::unique_ptr<GpuBackend> gpu;
   if (!CreateMetalBackend(kMetalLibraryPath, backend_options, &gpu).ok())
     return false;
-  // The existing profiled path retains CPU selection and provides an oracle
-  // using identical scoring/reconstruction kernels on the same backend.
+  auto* profiler = dynamic_cast<gpu_profile_internal::GpuSubmissionProfiler*>(gpu.get());
+  const auto capabilities = profiler
+    ? profiler->QueryGpuProfilingCapabilities()
+    : gpu_profile_internal::GpuProfilingCapabilities{};
+  const bool timestamps = capabilities.timestamp_counter && capabilities.stage_boundary;
+  // Timestamp-capable devices use the established profiled CPU-selector path.
+  // Hosted Paravirtual uses the same GPU scoring with an explicit CPU selector
+  // instead, so absence of timing hardware does not skip combined-search tests.
   size_t failure_case = 0;
   for (size_t iterations :
        {size_t{0}, size_t{1}, size_t{2}, size_t{3}, size_t{4}}) {
@@ -2050,14 +2057,26 @@ bool CheckCombinedResidentSearch() {
       VarDctEncoderFrame expected, actual;
       std::vector<double> expected_scores, actual_scores;
       gpu_profile_internal::GpuExecutionProfile profile;
-      auto status = RunPreparedGpuQuantizationPipelineForEncodingProfiled(
-          *gpu, original.ConstView(), reference, options,
-          GpuAdaptiveQuantizationMode::kFullyResident,
-          {.frame = &expected,
-           .score_history = &expected_scores,
-           .collect_final_butteraugli_score = final_score},
-          &ref_aq, gpu_profile_internal::GpuProfilingMode::kStage, &profile);
-      if (!status.ok()) {
+      AcStrategyGpuSearchStats reference_stats;
+      Status status;
+      {
+        ac_strategy_search_internal::ScopedCpuSelectionForTesting cpu_selector;
+        const GpuEncodingQuantizationPipelineOutput reference_output{
+          .frame = &expected,
+          .score_history = &expected_scores,
+          .collect_final_butteraugli_score = final_score};
+        status = timestamps
+          ? RunPreparedGpuQuantizationPipelineForEncodingProfiled(
+              *gpu, original.ConstView(), reference, options,
+              GpuAdaptiveQuantizationMode::kFullyResident, reference_output,
+              &ref_aq, gpu_profile_internal::GpuProfilingMode::kStage, &profile)
+          : RunPreparedGpuQuantizationPipelineForEncoding(
+              *gpu, original.ConstView(), reference, options,
+              GpuAdaptiveQuantizationMode::kFullyResident, reference_output,
+              &reference_stats, &ref_aq);
+      }
+      if (!status.ok() || (!timestamps &&
+          (reference_stats.device_selection || reference_stats.combined_aq_submission))) {
         std::cerr << "Combined reference failed: " << status.message() << '\n';
         return false;
       }

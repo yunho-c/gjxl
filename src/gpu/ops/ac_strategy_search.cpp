@@ -23,6 +23,7 @@
 #include "gpu/buffer.h"
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/ac_strategy_selection.h"
+#include "gpu/ops/ac_strategy_search_test.h"
 #include "gpu/ops/ac_strategy_search_profile_internal.h"
 #include "gpu/scratch.h"
 #include "gpu/ops/ac_strategy_storage_plan.h"
@@ -34,6 +35,8 @@
 namespace gjxl {
 using resource_budget_internal::ManagedVector;
 namespace {
+
+thread_local bool cpu_selection_for_testing = false;
 
 constexpr size_t kColorTileBlockDimension =
   kColorTileDimension / kJxlBlockDimension;
@@ -267,6 +270,15 @@ struct StrategyResources {
 
 namespace ac_strategy_search_internal {
 
+ScopedCpuSelectionForTesting::ScopedCpuSelectionForTesting() noexcept
+    : previous_(cpu_selection_for_testing) {
+  cpu_selection_for_testing = true;
+}
+
+ScopedCpuSelectionForTesting::~ScopedCpuSelectionForTesting() {
+  cpu_selection_for_testing = previous_;
+}
+
 struct Prepared {
   GpuBackend* backend = nullptr;
   std::array<StrategyResources,
@@ -289,7 +301,7 @@ void PreparedAcStrategySearch::Reset() noexcept { impl_.reset(); }
 
 bool CanDeferAcStrategySearch(GpuBackend &gpu,
                               AcStrategySearchOptions options) {
-  if (options.dense_dct32_search ||
+  if (cpu_selection_for_testing || options.dense_dct32_search ||
       dynamic_cast<GpuAcStrategySelection *>(&gpu) == nullptr)
     return false;
 #ifdef GJXL_FRONTIER_EXPERIMENT
