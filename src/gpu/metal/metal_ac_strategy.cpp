@@ -402,7 +402,7 @@ Status MetalBackend::ValidateAcStrategySelection(
   };
   AcStrategyEncodeContext::Selection result;
   Status status = RequireMetalBuffer(selection.output,
-    selection.offset_bytes + block_count + tile_count,
+    block_count + tile_count, selection.offset_bytes,
     "AC selection output", &result.output);
   if (!status.ok()) return status;
   for (size_t i = 0; i < batches.size(); ++i) {
@@ -422,17 +422,20 @@ Status MetalBackend::ValidateAcStrategySelection(
       batch.matrices, batch.candidates, batch.costs, batch.scratch_a, batch.scratch_b,
       batch.resident_opsin.plane[0].buffer, batch.resident_opsin.plane[1].buffer,
       batch.resident_opsin.plane[2].buffer, batch.resident_pixel_mask.buffer,
-      batch.resident_quant_field.buffer};
+      batch.resident_quant_field.buffer, batch.resident_y_to_x.buffer,
+      batch.resident_y_to_b.buffer};
     for (const auto* buffer : forbidden) {
       if (buffer != nullptr && selection.output == buffer)
         return Status::InvalidArgument("AC selection output aliases an input or cost buffer");
     }
     if (count != 0) {
       status = RequireMetalBuffer(batch.costs, count * sizeof(float),
-        "AC selection costs", &result.costs[i]);
+        batch.costs_offset_bytes, "AC selection costs", &result.costs[i]);
       if (!status.ok()) return status;
+      result.cost_offsets[i] = batch.costs_offset_bytes;
     } else {
       result.costs[i] = result.costs[0];  // Never indexed by an empty family.
+      result.cost_offsets[i] = result.cost_offsets[0];
     }
   }
   const float target = batches[0].butteraugli_target;
@@ -929,7 +932,7 @@ void MetalBackend::EncodeAcStrategySubmission(
     const auto& selection = *ac.selection;
     encoder->setComputePipelineState(backend.ac_strategy_pipelines_.select_greedy.get());
     for (size_t i = 0; i < selection.costs.size(); ++i)
-      encoder->setBuffer(selection.costs[i]->handle(), 0, i);
+      encoder->setBuffer(selection.costs[i]->handle(), selection.cost_offsets[i], i);
     encoder->setBuffer(selection.output->handle(), selection.offset_bytes, 7);
     encoder->setBytes(&selection.params, sizeof(selection.params), 8);
     DispatchMetalThreads(encoder,

@@ -573,6 +573,7 @@ private:
     std::span<const ValidatedAcStrategyBatch> batches;
     struct Selection {
       std::array<const MetalBuffer*, 7> costs{};
+      std::array<size_t, 7> cost_offsets{};
       MetalBuffer* output = nullptr;
       size_t offset_bytes = 0;
       struct Params {
