@@ -10,6 +10,12 @@ MODULE = Path(__file__).resolve().parents[1] / "tools/ablation/run.py"
 SPEC = importlib.util.spec_from_file_location("ablation_run", MODULE)
 run = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(run)
+STORAGE_SPEC = importlib.util.spec_from_file_location("ablation_storage", MODULE.with_name("storage.py"))
+storage = importlib.util.module_from_spec(STORAGE_SPEC)
+try:
+    STORAGE_SPEC.loader.exec_module(storage)
+except ImportError:
+    storage = None
 
 
 class AblationRunnerTest(unittest.TestCase):
@@ -113,6 +119,64 @@ class AblationRunnerTest(unittest.TestCase):
                     run.main()
             self.assertEqual(error.exception.code, 2)
             self.assertFalse(destination.exists())
+
+
+@unittest.skipIf(storage is None, "Compact corpus collection requires NumPy")
+class CompactStoreTest(unittest.TestCase):
+    def test_numpy_error_matches_reference(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = run.make_trial_inputs(Path(tmp))[0]
+            altered = Path(tmp) / "altered.pfm"
+            data = bytearray(source.read_bytes())
+            import struct
+            data[-4:] = struct.pack("<f", .42)
+            altered.write_bytes(data)
+            expected = run.pixel_delta(source, altered)
+            actual = storage.pixel_delta(source, altered)
+            self.assertAlmostEqual(expected["rmse"], actual["rmse"], places=14)
+            self.assertEqual(expected["max_abs"], actual["max_abs"])
+
+    def test_nonfinite_pixels_are_rejected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = run.make_trial_inputs(Path(tmp))[0]
+            import struct
+            data = source.read_bytes()
+            source.write_bytes(data[:-4] + struct.pack("<f", float("nan")))
+            with self.assertRaisesRegex(ValueError, "Non-finite"):
+                storage.pixel_delta(source, source)
+
+    def test_identical_codestreams_share_validation_and_storage(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = run.make_trial_inputs(root)[0]
+            decoder, metric = root / "decoder", root / "metric"
+            decoder.write_bytes(b"decoder identity")
+            metric.write_bytes(b"metric identity")
+            calls = []
+            def command(args, **kwargs):
+                calls.append(args)
+                if args[0] == decoder:
+                    Path(args[2]).write_bytes(source.read_bytes())
+                    return ""
+                return "100"
+            store = storage.CompactStore(root, decoder, metric, command)
+            results, paths = [], []
+            for name in ("first", "second"):
+                directory = root / name
+                directory.mkdir()
+                (directory / "output.jxl").write_bytes(b"same codestream")
+                results.append(store.validate(source, run.sha(source), directory))
+                paths.append(directory / "output.jxl")
+            self.assertEqual(len(calls), 2)  # one decode and one quality score
+            self.assertEqual(results[0], results[1])
+            self.assertEqual(paths[0].stat().st_ino, paths[1].stat().st_ino)
+            self.assertEqual(list((root / "scratch").iterdir()), [])
+            cache = root / results[0]["validation_cache"]
+            cached = json.loads(cache.read_text())
+            cached["identity"]["tools"]["decoder"] = "changed"
+            cache.write_text(json.dumps(cached))
+            with self.assertRaisesRegex(ValueError, "cache identity"):
+                store.validate(source, run.sha(source), root / "first")
 
 
 if __name__ == "__main__":

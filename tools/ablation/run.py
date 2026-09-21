@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Frozen, resumable conditional ablations; a small trial is the default.
 
-No third-party Python packages required. See docs/paper-ablation.md for scope.
+Full/compact collection uses NumPy. See docs/paper-ablation.md for scope.
 """
 from __future__ import annotations
 
@@ -187,6 +187,15 @@ def verify_record(directory, record):
     for name, digest in record["artifacts"].items():
         if not (directory / name).is_file() or sha(directory / name) != digest:
             raise ValueError(f"Retained artifact changed: {directory / name}")
+    if "validation_cache" in record:
+        cached = directory.parent / record["validation_cache"]
+        if sha(cached) != record["validation_sha256"]:
+            raise ValueError("Retained validation cache changed")
+        validation = json.loads(cached.read_text())
+        if (record["decoded_sha256"] != validation["decoded_sha256"] or
+            record["quality"] != validation["quality"] or
+            record["input_pixel_error"] != validation["input_pixel_error"]):
+            raise ValueError("Retained record disagrees with validation cache")
     raw = json.loads((directory / "raw.json").read_text())
     if (record["times_ns"] != [s["elapsed_nanoseconds"] for s in raw["samples"]] or
         record["counters"] != raw["ablation"]["counters"] or
@@ -203,14 +212,15 @@ def validate_output_directory(out, resume):
         raise ValueError("New runs require an empty output directory")
 
 
-def compare_records(records, out):
+def compare_records(records, out, store=None):
     comparisons = []
     for key in sorted({r["case"] for r in records.values()}):
         arms = {r["variant"]: r for r in records.values() if r["case"] == key}
         for name, baseline, disabled, contract in PAIRS:
             a, b = arms[baseline], arms[disabled]
             same = a["artifacts"]["output.jxl"] == b["artifacts"]["output.jxl"]
-            delta = pixel_delta(out / a["id"] / "decoded.pfm", out / b["id"] / "decoded.pfm")
+            delta = (store.pair_delta(a, b) if store else
+                     pixel_delta(out / a["id"] / "decoded.pfm", out / b["id"] / "decoded.pfm"))
             ca, cb = a["counters"], b["counters"]
             if name == "aq-boundaries":
                 expected = ca["aq_evaluations"] + 1
@@ -238,6 +248,8 @@ def main():
     parser.add_argument("--input", type=Path, action="append", default=[])
     parser.add_argument("--full", action="store_true", help="Explicitly enable corpus measurement; requires AC power")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--compact-artifacts", action="store_true",
+                        help="Use bounded decoded scratch and shared codestream/validation objects (always used for --full)")
     parser.add_argument("--efforts", default="5,8")
     parser.add_argument("--distances", default="1")
     args = parser.parse_args()
@@ -280,9 +292,14 @@ def run(args, efforts, distances):
     if tuple(json.loads(command([binary, "--variants"]))) != VARIANTS:
         raise ValueError("Driver and runner disagree on variants")
     inputs = [p.resolve() for p in args.input] if args.full else make_trial_inputs(out / "inputs")
+    compact = args.full or args.compact_artifacts
+    if compact:
+        import storage
     protocol = {"mode": "full" if args.full else "trial", "efforts": efforts, "distances": distances,
                 "rounds": 3 if args.full else 1, "warmups": 3 if args.full else 0,
-                "samples": 7 if args.full else 1, "threads": 8 if args.full else 2}
+                "samples": 7 if args.full else 1, "threads": 8 if args.full else 2,
+                "artifact_policy": "content-addressed-with-decoded-hashes" if compact else "retained-decoded-pfm",
+                "numpy": storage.np.__version__ if compact else None}
     fingerprint = {"protocol": protocol, "variants": VARIANTS, "pairs": PAIRS,
         "revision": command(["git", "rev-parse", "HEAD"]), "sources": sources,
         "submodules": command(["git", "submodule", "status"]),
@@ -291,6 +308,9 @@ def run(args, efforts, distances):
         "metric": {"path": str(args.ssimulacra2), "sha256": sha(args.ssimulacra2)},
         "inputs": [{"path": str(p), "sha256": sha(p)} for p in inputs],
         "driver_version": json.loads(command([binary, "--version"])),
+        "python": sys.version,
+        "execution_environment": {name: os.environ.get(name) for name in
+                                  ("VECLIB_MAXIMUM_THREADS", "OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS")},
         "system": platform.platform(), "hardware": command(["sysctl", "-n", "machdep.cpu.brand_string"])}
     fingerprint = json.loads(json.dumps(fingerprint))
     if args.resume:
@@ -315,12 +335,19 @@ def run(args, efforts, distances):
         if sha(out / "encoder") != fingerprint["binary_sha256"]:
             raise ValueError("Binary changed while freezing the run")
         atomic_json(manifest_path, manifest)
+    store = storage.CompactStore(out, args.decoder, args.ssimulacra2, command) if compact else None
     records = {}
+    planned_jobs = len(inputs) * len(efforts) * len(distances) * len(VARIANTS) * protocol["rounds"]
+    started = time.time()
     case_index = 0
     for round_index in range(protocol["rounds"]):
         for input_index, image in enumerate(inputs):
             for effort in efforts:
                 for distance in distances:
+                    if sha(image) != fingerprint["inputs"][input_index]["sha256"]:
+                        raise ValueError("Input changed during collection")
+                    if sha(args.decoder) != fingerprint["decoder"]["sha256"] or sha(args.ssimulacra2) != fingerprint["metric"]["sha256"]:
+                        raise ValueError("Decoder or metric changed during collection")
                     case = f"r{round_index}-i{input_index}-e{effort}-d{distance}"
                     shift = (case_index + round_index) % len(VARIANTS)
                     order = VARIANTS[shift:] + VARIANTS[:shift]
@@ -337,6 +364,11 @@ def run(args, efforts, distances):
                             verify_record(directory, record)
                             records[job_id] = record
                             continue
+                        if shutil.disk_usage(out).free < 8 * 1024**3:
+                            raise RuntimeError("Less than 8 GiB free; collection stopped before next job")
+                        atomic_json(out / "progress.json", {"status": "running", "pid": os.getpid(),
+                            "job": job_id, "completed_jobs": len(records), "planned_jobs": planned_jobs,
+                            "updated": time.time(), "started": started})
                         print(job_id, flush=True)
                         env = clean_env() | {"GJXL_ABLATION_VARIANT": variant}
                         power_before = battery()
@@ -346,26 +378,37 @@ def run(args, efforts, distances):
                                  "--samples", protocol["samples"]], env=env, timeout=600)
                         report = json.loads((directory / "raw.json").read_text())
                         counters = validate_audit(report, variant, effort)
-                        command([args.decoder, directory / "output.jxl", directory / "decoded.pfm", "--num_threads=2",
-                                 "--color_space=RGB_D65_SRG_Rel_Lin"])
-                        distortion = pixel_delta(image, directory / "decoded.pfm")
-                        metric_text = command([args.ssimulacra2, image, directory / "decoded.pfm"])
-                        quality = float(metric_text)
-                        if not math.isfinite(quality):
-                            raise ValueError("Non-finite quality score")
-                        (directory / "metric.txt").write_text(metric_text + "\n")
+                        validation_fields = {}
+                        artifact_names = ["output.jxl", "raw.json", "metric.txt"]
+                        if store:
+                            validation = store.validate(image, fingerprint["inputs"][input_index]["sha256"], directory)
+                            quality, distortion = validation["quality"], validation["input_pixel_error"]
+                            validation_fields = {k: validation[k] for k in
+                                                 ("decoded_sha256", "validation_cache", "validation_sha256")}
+                        else:
+                            command([args.decoder, directory / "output.jxl", directory / "decoded.pfm", "--num_threads=2",
+                                     "--color_space=RGB_D65_SRG_Rel_Lin"])
+                            distortion = pixel_delta(image, directory / "decoded.pfm")
+                            metric_text = command([args.ssimulacra2, image, directory / "decoded.pfm"])
+                            quality = float(metric_text)
+                            if not math.isfinite(quality):
+                                raise ValueError("Non-finite quality score")
+                            (directory / "metric.txt").write_text(metric_text + "\n")
+                            artifact_names.append("decoded.pfm")
                         record = {"id": job_id, "case": case, "variant": variant, "quality": quality,
                                   "input_pixel_error": distortion, "counters": counters,
                                   "bytes": (directory / "output.jxl").stat().st_size,
                                   "times_ns": [s["elapsed_nanoseconds"] for s in report["samples"]],
                                   "power_before": power_before, "power_after": battery(),
-                                  "artifacts": {name: sha(directory / name) for name in
-                                                ("output.jxl", "raw.json", "decoded.pfm", "metric.txt")}}
+                                  **validation_fields,
+                                  "artifacts": {name: sha(directory / name) for name in artifact_names}}
                         atomic_json(record_path, record)
                         records[job_id] = record
                         with (out / "ledger.jsonl").open("a") as ledger:
                             ledger.write(json.dumps(record) + "\n")
-    comparisons = compare_records(records, out)
+    atomic_json(out / "progress.json", {"status": "comparing", "pid": os.getpid(),
+        "completed_jobs": len(records), "planned_jobs": planned_jobs, "updated": time.time()})
+    comparisons = compare_records(records, out, store)
     failed = [c for c in comparisons if c["status"] == "failed-exactness"]
     review = [c for c in comparisons if c["status"] == "requires-quality-review"]
     summary = {"mode": protocol["mode"], "jobs": len(records), "comparisons": comparisons,
@@ -373,6 +416,8 @@ def run(args, efforts, distances):
                "status": "failed-exactness" if failed else "complete-with-numerical-review" if review else "complete",
                "performance_qualified": False if not args.full or failed or review else None}
     atomic_json(out / "summary.json", summary)
+    atomic_json(out / "progress.json", {"status": summary["status"], "pid": os.getpid(),
+        "completed_jobs": len(records), "planned_jobs": planned_jobs, "updated": time.time()})
     lines = ["# GJXL ablation " + protocol["mode"], "", f"Status: {summary['status']}; {len(records)} jobs.",
              "", "Trial timings are plumbing checks on battery, not performance evidence." if not args.full else
              "Review cohort coverage, numerical cases and power records before qualifying results.", "",
