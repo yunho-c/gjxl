@@ -1,0 +1,172 @@
+{
+  "files": {
+    "short_horizontal_screen": "6253984cd3cb4c983749bdf359fd3d17d92dbbc9d7d942ffd27704d80ad876b8",
+    "short_horizontal_screen.cpp": "5c96fecc72cc01bc91a08958a6e8d1e689e64dee7c3e4694f0683af5e6ec6fe8",
+    "baseline/gjxl.metallib": "3a1f0d488e799bc7d074800fcf5d8630c7422497c3ea48db8c8c8c89e733dc16",
+    "filter-short-horizontal.metallib": "4dc71b4d9c70f4e9ac4413550d45eba95633307f1201ae67603fbaa163c6906a",
+    "filter-short-horizontal.metal": "04efb056c86162a3c4c59cfa20bb97fcabbdaea4ca77974677142d0d7c4a5e0d",
+    "run_short_horizontal_screen.py": "c3ced5e8e62d1733d76dc1725e8d710c07b6e88ab393ef871efef6788e49d87b"
+  },
+  "variants": [
+    {
+      "name": "baseline_control",
+      "width": 0,
+      "height": 0,
+      "threads_y": 0,
+      "radius": 6
+    },
+    {
+      "name": "gjxl_ba_short_horizontal_r3_w16_h64_p4_q2",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 3,
+      "horizontal_outputs": 2
+    },
+    {
+      "name": "gjxl_ba_short_horizontal_r3_w16_h64_p4_q4",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 3,
+      "horizontal_outputs": 4
+    },
+    {
+      "name": "gjxl_ba_short_horizontal_r3_w16_h64_p4_q8",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 3,
+      "horizontal_outputs": 8
+    },
+    {
+      "name": "gjxl_ba_short_horizontal_r3_w32_h32_p4_q2",
+      "width": 32,
+      "height": 32,
+      "threads_y": 8,
+      "radius": 3,
+      "horizontal_outputs": 2
+    },
+    {
+      "name": "gjxl_ba_short_horizontal_r3_w32_h32_p4_q4",
+      "width": 32,
+      "height": 32,
+      "threads_y": 8,
+      "radius": 3,
+      "horizontal_outputs": 4
+    },
+    {
+      "name": "gjxl_ba_short_horizontal_r3_w32_h32_p4_q8",
+      "width": 32,
+      "height": 32,
+      "threads_y": 8,
+      "radius": 3,
+      "horizontal_outputs": 8
+    },
+    {
+      "name": "gjxl_ba_short_horizontal_r6_w16_h64_p4_q2",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 6,
+      "horizontal_outputs": 2
+    },
+    {
+      "name": "gjxl_ba_short_horizontal_r6_w16_h64_p4_q4",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 6,
+      "horizontal_outputs": 4
+    },
+    {
+      "name": "gjxl_ba_short_horizontal_r6_w16_h64_p4_q8",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 6,
+      "horizontal_outputs": 8
+    },
+    {
+      "name": "gjxl_ba_short_horizontal_r6_w16_h64_p8_q2",
+      "width": 16,
+      "height": 64,
+      "threads_y": 8,
+      "radius": 6,
+      "horizontal_outputs": 2
+    },
+    {
+      "name": "gjxl_ba_short_horizontal_r6_w16_h64_p8_q4",
+      "width": 16,
+      "height": 64,
+      "threads_y": 8,
+      "radius": 6,
+      "horizontal_outputs": 4
+    },
+    {
+      "name": "gjxl_ba_short_horizontal_r6_w16_h64_p8_q8",
+      "width": 16,
+      "height": 64,
+      "threads_y": 8,
+      "radius": 6,
+      "horizontal_outputs": 8
+    },
+    {
+      "name": "gjxl_ba_short_horizontal_r7_w16_h64_p4_q2",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 7,
+      "horizontal_outputs": 2
+    },
+    {
+      "name": "gjxl_ba_short_horizontal_r7_w16_h64_p4_q4",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 7,
+      "horizontal_outputs": 4
+    },
+    {
+      "name": "gjxl_ba_short_horizontal_r7_w16_h64_p4_q8",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 7,
+      "horizontal_outputs": 8
+    },
+    {
+      "name": "gjxl_ba_short_horizontal_r7_w16_h64_p8_q2",
+      "width": 16,
+      "height": 64,
+      "threads_y": 8,
+      "radius": 7,
+      "horizontal_outputs": 2
+    },
+    {
+      "name": "gjxl_ba_short_horizontal_r7_w16_h64_p8_q4",
+      "width": 16,
+      "height": 64,
+      "threads_y": 8,
+      "radius": 7,
+      "horizontal_outputs": 4
+    },
+    {
+      "name": "gjxl_ba_short_horizontal_r7_w16_h64_p8_q8",
+      "width": 16,
+      "height": 64,
+      "threads_y": 8,
+      "radius": 7,
+      "horizontal_outputs": 8
+    }
+  ],
+  "extents": [
+    null
+  ],
+  "timing": false,
+  "pairs": 5,
+  "warmups": 3,
+  "samples": 5,
+  "repeats_per_submission": 3,
+  "boundary": "GPU command buffer duration per repeated kernel dispatch; not full-encode latency"
+}

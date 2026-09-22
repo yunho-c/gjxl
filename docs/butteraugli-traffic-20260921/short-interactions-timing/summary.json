@@ -1,0 +1,1938 @@
+[
+  {
+    "variant": {
+      "name": "baseline_control",
+      "width": 0,
+      "height": 0,
+      "threads_y": 0,
+      "radius": 6
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "gjxl_butteraugli_convolve_transpose_f32",
+      "0",
+      "0",
+      "0",
+      "1",
+      "6",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:18:39.289108+00:00",
+    "finished_at": "2026-09-22T01:18:39.869135+00:00",
+    "returncode": 0,
+    "log_sha256": "e364105ab43030a5d62cf4139ca9e4ba40938ce8252d4b2fd64568688ec4ea5f",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.86825,
+    "candidate_ms": 0.869333,
+    "paired_changes_percent": [
+      -0.06409835177313417,
+      -0.19648691965076237,
+      0.11505824823816457,
+      0.33327680663368664,
+      0.12473365966023664
+    ],
+    "median_change_percent": 0.11505824823816457,
+    "wins": 2
+  },
+  {
+    "variant": {
+      "name": "baseline_control",
+      "width": 0,
+      "height": 0,
+      "threads_y": 0,
+      "radius": 6
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "gjxl_butteraugli_convolve_transpose_f32",
+      "0",
+      "0",
+      "0",
+      "1",
+      "6",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:18:39.869928+00:00",
+    "finished_at": "2026-09-22T01:18:41.036134+00:00",
+    "returncode": 0,
+    "log_sha256": "0894bd761a4386bfdd970092961aedb46e915ed8d34877ace502d60589962843",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.73878,
+    "candidate_ms": 2.72503,
+    "paired_changes_percent": [
+      -1.7338304683040318,
+      0.38089063576320914,
+      -1.0375021727794143,
+      -0.1267264649542743,
+      -1.5685816312372647
+    ],
+    "median_change_percent": -1.0375021727794143,
+    "wins": 4
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r3_w16_h64_p4",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 3
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r3_w16_h64_p4",
+      "16",
+      "64",
+      "16",
+      "1",
+      "3",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:18:41.037068+00:00",
+    "finished_at": "2026-09-22T01:18:41.602401+00:00",
+    "returncode": 0,
+    "log_sha256": "c9313d7130f8c4b0a7a789f845651feb022a066913fa193155eba363ad077996",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.811611,
+    "candidate_ms": 0.360542,
+    "paired_changes_percent": [
+      -58.133427251290406,
+      -55.648950051194475,
+      -55.3233872600082,
+      -55.495449070643886,
+      -56.095392806084796
+    ],
+    "median_change_percent": -55.648950051194475,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r3_w16_h64_p4",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 3
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r3_w16_h64_p4",
+      "16",
+      "64",
+      "16",
+      "1",
+      "3",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:18:41.603161+00:00",
+    "finished_at": "2026-09-22T01:18:42.713851+00:00",
+    "returncode": 0,
+    "log_sha256": "b3ab0312d660f9684ce03c9ea7daaff798d3431cb175c5d23bba9e38cdfc967e",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.67082,
+    "candidate_ms": 1.1364,
+    "paired_changes_percent": [
+      -58.8412932040806,
+      -57.66867483438243,
+      -57.983707021007035,
+      -57.39136295220195,
+      -57.14140244615332
+    ],
+    "median_change_percent": -57.66867483438243,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r3_w8_h64_p4",
+      "width": 8,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 3
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r3_w8_h64_p4",
+      "8",
+      "64",
+      "16",
+      "1",
+      "3",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:18:42.714861+00:00",
+    "finished_at": "2026-09-22T01:18:43.310669+00:00",
+    "returncode": 0,
+    "log_sha256": "6bf2d99e07aee269a66ca43ffd99f4808ad1fc294c173b3906831c1891daf149",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.809875,
+    "candidate_ms": 0.391153,
+    "paired_changes_percent": [
+      -51.60746363937785,
+      -51.767248032103716,
+      -52.163783371472164,
+      -51.924787318700425,
+      -51.24673879443586
+    ],
+    "median_change_percent": -51.767248032103716,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r3_w8_h64_p4",
+      "width": 8,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 3
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r3_w8_h64_p4",
+      "8",
+      "64",
+      "16",
+      "1",
+      "3",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:18:43.311439+00:00",
+    "finished_at": "2026-09-22T01:18:44.432998+00:00",
+    "returncode": 0,
+    "log_sha256": "f7a60e148223045a75dd204b690b5606e0c121e92e7b5b2f6c4a9e8b83c4c9d6",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.70854,
+    "candidate_ms": 1.28042,
+    "paired_changes_percent": [
+      -52.215209951370255,
+      -52.80434277880352,
+      -51.84896660193314,
+      -54.836866424464745,
+      -52.57492894828623
+    ],
+    "median_change_percent": -52.57492894828623,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r3_w32_h64_p4",
+      "width": 32,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 3
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r3_w32_h64_p4",
+      "32",
+      "64",
+      "16",
+      "1",
+      "3",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:18:44.433672+00:00",
+    "finished_at": "2026-09-22T01:18:44.998711+00:00",
+    "returncode": 0,
+    "log_sha256": "6b38b39ee9feb8c82597e24ed1de67c6c93b807566341352ce6ed098975df667",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.811681,
+    "candidate_ms": 0.345736,
+    "paired_changes_percent": [
+      -57.83080186595602,
+      -57.30262702905639,
+      -57.48539142840598,
+      -57.50327239207251,
+      -57.247029702970295
+    ],
+    "median_change_percent": -57.48539142840598,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r3_w32_h64_p4",
+      "width": 32,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 3
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r3_w32_h64_p4",
+      "32",
+      "64",
+      "16",
+      "1",
+      "3",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:18:44.999509+00:00",
+    "finished_at": "2026-09-22T01:18:46.104883+00:00",
+    "returncode": 0,
+    "log_sha256": "ecdc991f276018f1519121c666d72a37193c3f1a5d3ad5272d34c4cac58ca88f",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.67675,
+    "candidate_ms": 1.05154,
+    "paired_changes_percent": [
+      -60.75427290557579,
+      -61.43751885952323,
+      -61.17328646489113,
+      -60.31384241040584,
+      -60.28116270063579
+    ],
+    "median_change_percent": -60.75427290557579,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r3_w16_h32_p4",
+      "width": 16,
+      "height": 32,
+      "threads_y": 8,
+      "radius": 3
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r3_w16_h32_p4",
+      "16",
+      "32",
+      "8",
+      "1",
+      "3",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:18:46.105569+00:00",
+    "finished_at": "2026-09-22T01:18:46.698947+00:00",
+    "returncode": 0,
+    "log_sha256": "1767e455e105b81316fef3288038b309e4634a2e177c49f949f8d5d3782afeb4",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.807333,
+    "candidate_ms": 0.362083,
+    "paired_changes_percent": [
+      -57.965251611918234,
+      -54.78441235832945,
+      -55.3797198308646,
+      -55.150724669993664,
+      -55.374845105328376
+    ],
+    "median_change_percent": -55.374845105328376,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r3_w16_h32_p4",
+      "width": 16,
+      "height": 32,
+      "threads_y": 8,
+      "radius": 3
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r3_w16_h32_p4",
+      "16",
+      "32",
+      "8",
+      "1",
+      "3",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:18:46.699749+00:00",
+    "finished_at": "2026-09-22T01:18:47.811956+00:00",
+    "returncode": 0,
+    "log_sha256": "eab98ff89d3847560cb80456c8d63f065e4fb7f76148a3646127efad478f2c58",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.71176,
+    "candidate_ms": 1.14153,
+    "paired_changes_percent": [
+      -57.53033978293427,
+      -58.10691211611647,
+      -57.79270718558889,
+      -57.88408884040934,
+      -57.68485012250919
+    ],
+    "median_change_percent": -57.79270718558889,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r3_w32_h32_p4",
+      "width": 32,
+      "height": 32,
+      "threads_y": 8,
+      "radius": 3
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r3_w32_h32_p4",
+      "32",
+      "32",
+      "8",
+      "1",
+      "3",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:18:47.812753+00:00",
+    "finished_at": "2026-09-22T01:18:48.362337+00:00",
+    "returncode": 0,
+    "log_sha256": "32a5aba51d55ffcaa8707376345d1e5767693d7c853cba46c66c71749814e5d2",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.810625,
+    "candidate_ms": 0.342125,
+    "paired_changes_percent": [
+      -58.47451449233102,
+      -57.85340314136126,
+      -57.47762077842279,
+      -57.67673091750193,
+      -57.71771251931994
+    ],
+    "median_change_percent": -57.71771251931994,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r3_w32_h32_p4",
+      "width": 32,
+      "height": 32,
+      "threads_y": 8,
+      "radius": 3
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r3_w32_h32_p4",
+      "32",
+      "32",
+      "8",
+      "1",
+      "3",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:18:48.363021+00:00",
+    "finished_at": "2026-09-22T01:18:49.511006+00:00",
+    "returncode": 0,
+    "log_sha256": "053264b70099067d684f2279e441c6904b9fbb35c394d6d8c2300c1c5242ea51",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.68312,
+    "candidate_ms": 1.04242,
+    "paired_changes_percent": [
+      -61.3163034079728,
+      -61.31516366862228,
+      -62.2664321033237,
+      -60.90442983773203,
+      -60.57339854808209
+    ],
+    "median_change_percent": -61.31516366862228,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r3_w16_h64_p8",
+      "width": 16,
+      "height": 64,
+      "threads_y": 8,
+      "radius": 3
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r3_w16_h64_p8",
+      "16",
+      "64",
+      "8",
+      "1",
+      "3",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:18:49.511755+00:00",
+    "finished_at": "2026-09-22T01:18:50.055274+00:00",
+    "returncode": 0,
+    "log_sha256": "34294c7455d013d4264161ecc61ab0a4246b758b2b771306120c0cc2ca15737f",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.810875,
+    "candidate_ms": 0.361958,
+    "paired_changes_percent": [
+      -59.59489768801488,
+      -54.497970742551026,
+      -55.345170969069926,
+      -55.44763372899646,
+      -55.37811572709441
+    ],
+    "median_change_percent": -55.37811572709441,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r3_w16_h64_p8",
+      "width": 16,
+      "height": 64,
+      "threads_y": 8,
+      "radius": 3
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r3_w16_h64_p8",
+      "16",
+      "64",
+      "8",
+      "1",
+      "3",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:18:50.056026+00:00",
+    "finished_at": "2026-09-22T01:18:51.201500+00:00",
+    "returncode": 0,
+    "log_sha256": "e6e83a0214ee83c54e23233303663861fc2acdbf3b8f8a93baafb0fd7fdac7d7",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.69588,
+    "candidate_ms": 1.13404,
+    "paired_changes_percent": [
+      -57.97221223654806,
+      -57.97797619709488,
+      -54.64362770765329,
+      -57.74737747970977,
+      -57.95258148083449
+    ],
+    "median_change_percent": -57.95258148083449,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r3_w16_h128_p8",
+      "width": 16,
+      "height": 128,
+      "threads_y": 16,
+      "radius": 3
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r3_w16_h128_p8",
+      "16",
+      "128",
+      "16",
+      "1",
+      "3",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:18:51.202279+00:00",
+    "finished_at": "2026-09-22T01:18:51.750241+00:00",
+    "returncode": 0,
+    "log_sha256": "09f1dddc81aeccef72acb3d9852b0a54d8fbb9a55f845ce880a68db8f3cbec91",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.811333,
+    "candidate_ms": 0.366333,
+    "paired_changes_percent": [
+      -56.28580003480012,
+      -54.762538541735985,
+      -54.80545147914613,
+      -55.17421205709954,
+      -55.44197018979876
+    ],
+    "median_change_percent": -55.17421205709954,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r3_w16_h128_p8",
+      "width": 16,
+      "height": 128,
+      "threads_y": 16,
+      "radius": 3
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r3_w16_h128_p8",
+      "16",
+      "128",
+      "16",
+      "1",
+      "3",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:18:51.750951+00:00",
+    "finished_at": "2026-09-22T01:18:52.903069+00:00",
+    "returncode": 0,
+    "log_sha256": "5643e42ee4e63dad5f578207081548bd8c8e45bc1b52668b26808d9b207073c9",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.69829,
+    "candidate_ms": 1.14246,
+    "paired_changes_percent": [
+      -56.964586719926125,
+      -58.22809931934787,
+      -57.17102312946347,
+      -57.28370966113672,
+      -57.79822283384755
+    ],
+    "median_change_percent": -57.28370966113672,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r6_w16_h64_p4",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 6
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r6_w16_h64_p4",
+      "16",
+      "64",
+      "16",
+      "1",
+      "6",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:18:52.903853+00:00",
+    "finished_at": "2026-09-22T01:18:53.460625+00:00",
+    "returncode": 0,
+    "log_sha256": "fa6d0536d015f96774d19d8edceba9a5e44a0df0533b20892a38245b5801d738",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.867583,
+    "candidate_ms": 0.429903,
+    "paired_changes_percent": [
+      -59.25864632376368,
+      -50.60536970567122,
+      -50.45937967894714,
+      -50.38500496054089,
+      -50.44025896772587
+    ],
+    "median_change_percent": -50.45937967894714,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r6_w16_h64_p4",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 6
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r6_w16_h64_p4",
+      "16",
+      "64",
+      "16",
+      "1",
+      "6",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:18:53.461334+00:00",
+    "finished_at": "2026-09-22T01:18:54.626693+00:00",
+    "returncode": 0,
+    "log_sha256": "0a53cef1b8624b06ed13eedbc6446a3e941d7f72521d30f24663f9ae979652a0",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.77037,
+    "candidate_ms": 1.23647,
+    "paired_changes_percent": [
+      -54.9697805807384,
+      -55.36805553048871,
+      -55.050545309612666,
+      -55.58615178609996,
+      -55.41502973508741
+    ],
+    "median_change_percent": -55.36805553048871,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r6_w8_h64_p4",
+      "width": 8,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 6
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r6_w8_h64_p4",
+      "8",
+      "64",
+      "16",
+      "1",
+      "6",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:18:54.627533+00:00",
+    "finished_at": "2026-09-22T01:18:55.227152+00:00",
+    "returncode": 0,
+    "log_sha256": "0e400ed0253d1f7bc4b915476453895b71a3a7ab6ef3b4667db150ca9b188900",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.869125,
+    "candidate_ms": 0.459125,
+    "paired_changes_percent": [
+      -47.18966996418804,
+      -47.20842394151038,
+      -47.29431725692822,
+      -47.02403992369156,
+      -47.240960736372784
+    ],
+    "median_change_percent": -47.20842394151038,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r6_w8_h64_p4",
+      "width": 8,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 6
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r6_w8_h64_p4",
+      "8",
+      "64",
+      "16",
+      "1",
+      "6",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:18:55.228004+00:00",
+    "finished_at": "2026-09-22T01:18:56.337209+00:00",
+    "returncode": 0,
+    "log_sha256": "a0c7f839b29e9b688dcfa4fbc155553b210787609cfb64ec1e7b61e336319584",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.71712,
+    "candidate_ms": 1.33771,
+    "paired_changes_percent": [
+      -50.97272111647627,
+      -50.843160095689214,
+      -50.90034304001403,
+      -49.85154735472583,
+      -50.71389214515251
+    ],
+    "median_change_percent": -50.843160095689214,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r6_w32_h64_p4",
+      "width": 32,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 6
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r6_w32_h64_p4",
+      "32",
+      "64",
+      "16",
+      "1",
+      "6",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:18:56.337930+00:00",
+    "finished_at": "2026-09-22T01:18:56.935638+00:00",
+    "returncode": 0,
+    "log_sha256": "7aaa2957da722f5d98c0dd6b2ea8b6f95d21336d25d43cc9ce06d450ddcc36c5",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.870542,
+    "candidate_ms": 0.447472,
+    "paired_changes_percent": [
+      -48.74834750684215,
+      -48.478763804618275,
+      -48.47511336184363,
+      -48.83161626321348,
+      -48.482145323621765
+    ],
+    "median_change_percent": -48.482145323621765,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r6_w32_h64_p4",
+      "width": 32,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 6
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r6_w32_h64_p4",
+      "32",
+      "64",
+      "16",
+      "1",
+      "6",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:18:56.936491+00:00",
+    "finished_at": "2026-09-22T01:18:58.044303+00:00",
+    "returncode": 0,
+    "log_sha256": "ff1d90134e36ed92fa9bf20d54ea0c39eb5d0028c294474cae50c7e164fb9d87",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.71842,
+    "candidate_ms": 1.26994,
+    "paired_changes_percent": [
+      -53.68501696399256,
+      -53.18519882179675,
+      -53.814299673438846,
+      -52.90483360157832,
+      -53.34569345428595
+    ],
+    "median_change_percent": -53.34569345428595,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r6_w16_h32_p4",
+      "width": 16,
+      "height": 32,
+      "threads_y": 8,
+      "radius": 6
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r6_w16_h32_p4",
+      "16",
+      "32",
+      "8",
+      "1",
+      "6",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:18:58.045033+00:00",
+    "finished_at": "2026-09-22T01:18:58.589613+00:00",
+    "returncode": 0,
+    "log_sha256": "9e1bde93674550005b810bcc9ccc4b9b4a7e59bb72694f0b6fa5efc3125ca2f6",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.870833,
+    "candidate_ms": 0.46225,
+    "paired_changes_percent": [
+      -53.52781444503314,
+      -47.001320458386054,
+      -46.73514374309343,
+      -46.90589355249514,
+      -46.878752398944975
+    ],
+    "median_change_percent": -46.90589355249514,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r6_w16_h32_p4",
+      "width": 16,
+      "height": 32,
+      "threads_y": 8,
+      "radius": 6
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r6_w16_h32_p4",
+      "16",
+      "32",
+      "8",
+      "1",
+      "6",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:18:58.590411+00:00",
+    "finished_at": "2026-09-22T01:18:59.751193+00:00",
+    "returncode": 0,
+    "log_sha256": "f49472764aaa6ab13c8742837487dc47aa36afd68866eea372bb76c946432c2a",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.72962,
+    "candidate_ms": 1.30667,
+    "paired_changes_percent": [
+      -52.12996680856676,
+      -52.22784235645478,
+      -51.66563792472566,
+      -52.51231946528732,
+      -51.62914790728698
+    ],
+    "median_change_percent": -52.12996680856676,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r6_w32_h32_p4",
+      "width": 32,
+      "height": 32,
+      "threads_y": 8,
+      "radius": 6
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r6_w32_h32_p4",
+      "32",
+      "32",
+      "8",
+      "1",
+      "6",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:18:59.751968+00:00",
+    "finished_at": "2026-09-22T01:19:00.309331+00:00",
+    "returncode": 0,
+    "log_sha256": "3800fd124bdc8977a8e1675727f12bc83251fd995c57d615950460f01dd0ea97",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.870694,
+    "candidate_ms": 0.473264,
+    "paired_changes_percent": [
+      -50.14046704370332,
+      -45.70538209822432,
+      -45.64519796851707,
+      -45.38348707509936,
+      -45.57431098453147
+    ],
+    "median_change_percent": -45.64519796851707,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r6_w32_h32_p4",
+      "width": 32,
+      "height": 32,
+      "threads_y": 8,
+      "radius": 6
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r6_w32_h32_p4",
+      "32",
+      "32",
+      "8",
+      "1",
+      "6",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:19:00.310044+00:00",
+    "finished_at": "2026-09-22T01:19:01.470031+00:00",
+    "returncode": 0,
+    "log_sha256": "d43a4e817a049c3c231c1ba491e794409878f2dd69913009dc2e9f255312b0f7",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.7125,
+    "candidate_ms": 1.33488,
+    "paired_changes_percent": [
+      -51.66564863975943,
+      -50.54913305503184,
+      -51.61988293496185,
+      -50.81253456221197,
+      -50.58990823649654
+    ],
+    "median_change_percent": -50.81253456221197,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r6_w16_h64_p8",
+      "width": 16,
+      "height": 64,
+      "threads_y": 8,
+      "radius": 6
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r6_w16_h64_p8",
+      "16",
+      "64",
+      "8",
+      "1",
+      "6",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:19:01.470904+00:00",
+    "finished_at": "2026-09-22T01:19:02.050370+00:00",
+    "returncode": 0,
+    "log_sha256": "d742a4b830f991d58deb003284092be8a5130306dd3259011750eb5a35d62545",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.87325,
+    "candidate_ms": 0.415958,
+    "paired_changes_percent": [
+      -52.22471337696552,
+      -54.242381136690184,
+      -52.34755224735185,
+      -52.49815283663768,
+      -52.221792712446266
+    ],
+    "median_change_percent": -52.34755224735185,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r6_w16_h64_p8",
+      "width": 16,
+      "height": 64,
+      "threads_y": 8,
+      "radius": 6
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r6_w16_h64_p8",
+      "16",
+      "64",
+      "8",
+      "1",
+      "6",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:19:02.051141+00:00",
+    "finished_at": "2026-09-22T01:19:03.172764+00:00",
+    "returncode": 0,
+    "log_sha256": "4a6e710540adbec50a0d38130c80a0cc264c17d8dd30a53d1c0d14469e679253",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.74282,
+    "candidate_ms": 1.1829,
+    "paired_changes_percent": [
+      -56.74634135670586,
+      -57.82361435473232,
+      -57.38333075725824,
+      -56.83278888070071,
+      -56.87055164211874
+    ],
+    "median_change_percent": -56.87055164211874,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r6_w16_h128_p8",
+      "width": 16,
+      "height": 128,
+      "threads_y": 16,
+      "radius": 6
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r6_w16_h128_p8",
+      "16",
+      "128",
+      "16",
+      "1",
+      "6",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:19:03.173511+00:00",
+    "finished_at": "2026-09-22T01:19:03.755955+00:00",
+    "returncode": 0,
+    "log_sha256": "9e4b6a862ddffae8b67b47b18af95f8376f42f78400747dbc909c09930984eee",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.869278,
+    "candidate_ms": 0.409472,
+    "paired_changes_percent": [
+      -52.85472908857315,
+      -52.89516127176807,
+      -52.90253456221199,
+      -53.099553892646426,
+      -53.78532131622536
+    ],
+    "median_change_percent": -52.90253456221199,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r6_w16_h128_p8",
+      "width": 16,
+      "height": 128,
+      "threads_y": 16,
+      "radius": 6
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r6_w16_h128_p8",
+      "16",
+      "128",
+      "16",
+      "1",
+      "6",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:19:03.756801+00:00",
+    "finished_at": "2026-09-22T01:19:04.863502+00:00",
+    "returncode": 0,
+    "log_sha256": "9fbc7a18a27b4042e5c937b266faa91f723aa72ec7816d3f8e0f9d57838dac92",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.72421,
+    "candidate_ms": 1.19438,
+    "paired_changes_percent": [
+      -56.46613569148781,
+      -55.31254932622669,
+      -56.66836644280253,
+      -56.00745499012877,
+      -55.69748249044595
+    ],
+    "median_change_percent": -56.00745499012877,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r7_w16_h64_p4",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 7
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r7_w16_h64_p4",
+      "16",
+      "64",
+      "16",
+      "1",
+      "7",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:19:04.864225+00:00",
+    "finished_at": "2026-09-22T01:19:05.453910+00:00",
+    "returncode": 0,
+    "log_sha256": "c55108e4bbc151c2dfd9b72773c2182eb5707e5e4f5e3818314e8e3163ed886e",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.95425,
+    "candidate_ms": 0.474486,
+    "paired_changes_percent": [
+      -52.046379746835434,
+      -50.26857856171857,
+      -50.22495749288753,
+      -50.223731551432095,
+      -50.34058160859314
+    ],
+    "median_change_percent": -50.26857856171857,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r7_w16_h64_p4",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 7
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r7_w16_h64_p4",
+      "16",
+      "64",
+      "16",
+      "1",
+      "7",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:19:05.454692+00:00",
+    "finished_at": "2026-09-22T01:19:06.567617+00:00",
+    "returncode": 0,
+    "log_sha256": "9208354315f2c9c6892b0318a884dd1819ff3858d4ebd81ead0c3a81aa4f90fc",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.87971,
+    "candidate_ms": 1.34965,
+    "paired_changes_percent": [
+      -54.11915626286652,
+      -52.515254618564235,
+      -52.16983654604109,
+      -53.0692008915687,
+      -53.56285055572761
+    ],
+    "median_change_percent": -53.0692008915687,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r7_w8_h64_p4",
+      "width": 8,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 7
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r7_w8_h64_p4",
+      "8",
+      "64",
+      "16",
+      "1",
+      "7",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:19:06.568340+00:00",
+    "finished_at": "2026-09-22T01:19:07.110888+00:00",
+    "returncode": 0,
+    "log_sha256": "d2b01edc2e855ae6a32d37333081e33b51a6b8a044868767c88d3ec3c4418784",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.95475,
+    "candidate_ms": 0.497097,
+    "paired_changes_percent": [
+      -55.69242021513816,
+      -47.919106664950164,
+      -47.97507200837916,
+      -47.86167633679279,
+      -47.877442571520845
+    ],
+    "median_change_percent": -47.919106664950164,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r7_w8_h64_p4",
+      "width": 8,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 7
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r7_w8_h64_p4",
+      "8",
+      "64",
+      "16",
+      "1",
+      "7",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:19:07.111609+00:00",
+    "finished_at": "2026-09-22T01:19:08.277208+00:00",
+    "returncode": 0,
+    "log_sha256": "db78f92c0802fff611039aaf4884e81ccfe8959ab5f21f57c50d7df3aed792b7",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.90183,
+    "candidate_ms": 1.41567,
+    "paired_changes_percent": [
+      -51.45208081684063,
+      -49.85031915706417,
+      -51.72612060899889,
+      -51.17672214596597,
+      -51.23353194363557
+    ],
+    "median_change_percent": -51.23353194363557,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r7_w32_h64_p4",
+      "width": 32,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 7
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r7_w32_h64_p4",
+      "32",
+      "64",
+      "16",
+      "1",
+      "7",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:19:08.278027+00:00",
+    "finished_at": "2026-09-22T01:19:08.837760+00:00",
+    "returncode": 0,
+    "log_sha256": "49790bf815032fd2a5b6aa7922995574fa1c4c1b9916819f6eaa20aa91970496",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.955208,
+    "candidate_ms": 0.48475,
+    "paired_changes_percent": [
+      -49.37942204950813,
+      -49.29468453514654,
+      -49.235100231323244,
+      -49.1091075537937,
+      -49.214097871877115
+    ],
+    "median_change_percent": -49.235100231323244,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r7_w32_h64_p4",
+      "width": 32,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 7
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r7_w32_h64_p4",
+      "32",
+      "64",
+      "16",
+      "1",
+      "7",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:19:08.838547+00:00",
+    "finished_at": "2026-09-22T01:19:09.970267+00:00",
+    "returncode": 0,
+    "log_sha256": "8b37fc754c81105809a6f82791d6a2225ba4d3b63079ef27dde0d37ac01b63bc",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.91224,
+    "candidate_ms": 1.3815,
+    "paired_changes_percent": [
+      -51.807199956047576,
+      -53.49600668022465,
+      -53.53631835441548,
+      -52.33033439435473,
+      -51.936965600214194
+    ],
+    "median_change_percent": -52.33033439435473,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r7_w16_h32_p4",
+      "width": 16,
+      "height": 32,
+      "threads_y": 8,
+      "radius": 7
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r7_w16_h32_p4",
+      "16",
+      "32",
+      "8",
+      "1",
+      "7",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:19:09.971051+00:00",
+    "finished_at": "2026-09-22T01:19:10.555447+00:00",
+    "returncode": 0,
+    "log_sha256": "0efc0ef043edcc2ebbbcc05873b65f391471693b9cdbe97f36cff08f3aefa514",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.954972,
+    "candidate_ms": 0.519792,
+    "paired_changes_percent": [
+      -45.51446540880503,
+      -45.65620944151787,
+      -45.56281230088198,
+      -45.55683307992277,
+      -46.93336271233469
+    ],
+    "median_change_percent": -45.56281230088198,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r7_w16_h32_p4",
+      "width": 16,
+      "height": 32,
+      "threads_y": 8,
+      "radius": 7
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r7_w16_h32_p4",
+      "16",
+      "32",
+      "8",
+      "1",
+      "7",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:19:10.556352+00:00",
+    "finished_at": "2026-09-22T01:19:11.662042+00:00",
+    "returncode": 0,
+    "log_sha256": "547c299c661d78186ea177d5bfa76c1f914d7004ad4b2030d7aa1af85df68ea8",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.88511,
+    "candidate_ms": 1.47508,
+    "paired_changes_percent": [
+      -48.813600485731634,
+      -48.85575589459085,
+      -49.13622476776342,
+      -49.04233714559578,
+      -48.91737230122941
+    ],
+    "median_change_percent": -48.91737230122941,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r7_w32_h32_p4",
+      "width": 32,
+      "height": 32,
+      "threads_y": 8,
+      "radius": 7
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r7_w32_h32_p4",
+      "32",
+      "32",
+      "8",
+      "1",
+      "7",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:19:11.662778+00:00",
+    "finished_at": "2026-09-22T01:19:12.255922+00:00",
+    "returncode": 0,
+    "log_sha256": "29c6fea9980ac20e03ec17376abb280e90cabe915e4ba31a348a1d449ed43a05",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.954611,
+    "candidate_ms": 0.521931,
+    "paired_changes_percent": [
+      -45.343590269872905,
+      -45.35475425094043,
+      -45.21999152830259,
+      -45.26566318636597,
+      -45.45728485482605
+    ],
+    "median_change_percent": -45.343590269872905,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r7_w32_h32_p4",
+      "width": 32,
+      "height": 32,
+      "threads_y": 8,
+      "radius": 7
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r7_w32_h32_p4",
+      "32",
+      "32",
+      "8",
+      "1",
+      "7",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:19:12.256728+00:00",
+    "finished_at": "2026-09-22T01:19:13.358311+00:00",
+    "returncode": 0,
+    "log_sha256": "4548cad9a651632ab9903230694de790ba6defb3bb6b7fdcfbd88584dda0c8a6",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.8925,
+    "candidate_ms": 1.47624,
+    "paired_changes_percent": [
+      -48.8,
+      -49.86432285387282,
+      -49.02633169299836,
+      -48.910630942091615,
+      -48.705246409638214
+    ],
+    "median_change_percent": -48.910630942091615,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r7_w16_h64_p8",
+      "width": 16,
+      "height": 64,
+      "threads_y": 8,
+      "radius": 7
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r7_w16_h64_p8",
+      "16",
+      "64",
+      "8",
+      "1",
+      "7",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:19:13.359069+00:00",
+    "finished_at": "2026-09-22T01:19:13.954662+00:00",
+    "returncode": 0,
+    "log_sha256": "c9726b733e6956ce11db05da951dbb48f3a5bfc96ce0a0d1d4412a7dc98a3919",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.981292,
+    "candidate_ms": 0.456333,
+    "paired_changes_percent": [
+      -54.13280380008511,
+      -53.45091192055735,
+      -52.271581699346406,
+      -52.559769240298,
+      -53.49671657366003
+    ],
+    "median_change_percent": -53.45091192055735,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r7_w16_h64_p8",
+      "width": 16,
+      "height": 64,
+      "threads_y": 8,
+      "radius": 7
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r7_w16_h64_p8",
+      "16",
+      "64",
+      "8",
+      "1",
+      "7",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:19:13.955473+00:00",
+    "finished_at": "2026-09-22T01:19:15.054498+00:00",
+    "returncode": 0,
+    "log_sha256": "42ae78944233c1468ace16250b81d4e49067a30f29091b038031a8cdc34ac760",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.88879,
+    "candidate_ms": 1.28871,
+    "paired_changes_percent": [
+      -55.32489814914507,
+      -54.07990165949601,
+      -55.608717667848175,
+      -55.65269543164605,
+      -55.52601608285822
+    ],
+    "median_change_percent": -55.52601608285822,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r7_w16_h128_p8",
+      "width": 16,
+      "height": 128,
+      "threads_y": 16,
+      "radius": 7
+    },
+    "extent": "3839x2159",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r7_w16_h128_p8",
+      "16",
+      "128",
+      "16",
+      "1",
+      "7",
+      "3839",
+      "2159"
+    ],
+    "started_at": "2026-09-22T01:19:15.055205+00:00",
+    "finished_at": "2026-09-22T01:19:15.642770+00:00",
+    "returncode": 0,
+    "log_sha256": "f0b3a81635c3f0a848775d9919d3f658def0e678a6172338c739c69318684243",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 0.954708,
+    "candidate_ms": 0.443222,
+    "paired_changes_percent": [
+      -53.75039363570833,
+      -53.569045331835994,
+      -53.65897268330937,
+      -53.435395953527156,
+      -53.456615821287556
+    ],
+    "median_change_percent": -53.569045331835994,
+    "wins": 5
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_short_interaction_r7_w16_h128_p8",
+      "width": 16,
+      "height": 128,
+      "threads_y": 16,
+      "radius": 7
+    },
+    "extent": "6000x4000",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short_interactions_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions.metallib",
+      "gjxl_ba_short_interaction_r7_w16_h128_p8",
+      "16",
+      "128",
+      "16",
+      "1",
+      "7",
+      "6000",
+      "4000"
+    ],
+    "started_at": "2026-09-22T01:19:15.643561+00:00",
+    "finished_at": "2026-09-22T01:19:16.748169+00:00",
+    "returncode": 0,
+    "log_sha256": "eea14b25b3c02571f49ab1f6005b7afc44f1c0c9347bb2bdbbb9653ecc387dac",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 1,
+      "guards": true
+    },
+    "baseline_ms": 2.8856,
+    "candidate_ms": 1.27222,
+    "paired_changes_percent": [
+      -55.367316762090304,
+      -55.416411244417205,
+      -55.97138635002925,
+      -56.02023842528416,
+      -56.06861298227302
+    ],
+    "median_change_percent": -55.97138635002925,
+    "wins": 5
+  }
+]

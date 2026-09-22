@@ -1,0 +1,4 @@
+# Preserve recorded evidence bytes, including original line endings.
+* -text
+# Blank diff-context lines contain a meaningful leading space.
+*.patch whitespace=-blank-at-eol

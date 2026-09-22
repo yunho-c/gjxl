@@ -1,0 +1,91 @@
+{
+  "files": {
+    "rolling_screen": "0a2111c21ede81226422b2be55a2435690e33188c3fd86eb633c4c02ec1b0fdb",
+    "rolling_screen.cpp": "3add3caa19d83545e154bf9fb423d55f648353f2f54b7e2053138fe6f9944992",
+    "baseline/gjxl.metallib": "3a1f0d488e799bc7d074800fcf5d8630c7422497c3ea48db8c8c8c89e733dc16",
+    "filter-rolling.metallib": "7c3bd67621dd084e9b84c46f39a854f5585a01c8da787db9fedb73be9a6bf5a3",
+    "filter-rolling.metal": "6a97a2135048dddb8ec821918530e6f8f835c315fe52b9fe562f0ad459c3b5b0",
+    "run_rolling_screen.py": "8596e56c6024e0ceabf7ce3186573691ab1065047e9d455b0f5b70fd4f5249f7"
+  },
+  "variants": [
+    {
+      "name": "baseline_control",
+      "width": 16,
+      "height": 64,
+      "threads_y": 64
+    },
+    {
+      "name": "gjxl_ba_rolling_s1_p1",
+      "width": 16,
+      "height": 64,
+      "threads_y": 64,
+      "scratch_bytes": 18432,
+      "horizontal_halo_factor": 1.5
+    },
+    {
+      "name": "gjxl_ba_rolling_s1_p2",
+      "width": 16,
+      "height": 64,
+      "threads_y": 32,
+      "scratch_bytes": 18432,
+      "horizontal_halo_factor": 1.5
+    },
+    {
+      "name": "gjxl_ba_rolling_s2_p1",
+      "width": 16,
+      "height": 128,
+      "threads_y": 64,
+      "scratch_bytes": 18432,
+      "horizontal_halo_factor": 1.25
+    },
+    {
+      "name": "gjxl_ba_rolling_s2_p2",
+      "width": 16,
+      "height": 128,
+      "threads_y": 32,
+      "scratch_bytes": 18432,
+      "horizontal_halo_factor": 1.25
+    },
+    {
+      "name": "gjxl_ba_rolling_s4_p1",
+      "width": 16,
+      "height": 256,
+      "threads_y": 64,
+      "scratch_bytes": 18432,
+      "horizontal_halo_factor": 1.125
+    },
+    {
+      "name": "gjxl_ba_rolling_s4_p2",
+      "width": 16,
+      "height": 256,
+      "threads_y": 32,
+      "scratch_bytes": 18432,
+      "horizontal_halo_factor": 1.125
+    },
+    {
+      "name": "gjxl_ba_rolling_s8_p1",
+      "width": 16,
+      "height": 512,
+      "threads_y": 64,
+      "scratch_bytes": 18432,
+      "horizontal_halo_factor": 1.0625
+    },
+    {
+      "name": "gjxl_ba_rolling_s8_p2",
+      "width": 16,
+      "height": 512,
+      "threads_y": 32,
+      "scratch_bytes": 18432,
+      "horizontal_halo_factor": 1.0625
+    }
+  ],
+  "extents": [
+    null
+  ],
+  "timing": false,
+  "pairs": 5,
+  "warmups": 3,
+  "samples": 5,
+  "repeats_per_submission": 3,
+  "boundary": "GPU command buffer duration per repeated kernel dispatch; not full-encode latency"
+}

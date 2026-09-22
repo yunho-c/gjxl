@@ -1,0 +1,14 @@
+{
+  "files": {
+    "mask_filter_screen": "efa77c928867f5c5e62d936b9f59dafef8d50736e2a4a37f763932d011b85a46",
+    "mask_reduction_screen": "7a73f1a37e7a693d048efeae7e8b6640ac52a0014ebbfdf6a70153d38893ffae",
+    "mask_filter_screen.cpp": "8001fb44093ef1844f70483c3ec400ac2fb9b9ed964ed0c7537ca6de86bc0437",
+    "mask_reduction_screen.cpp": "e1b0c89d9c4dd59e6dd537e0eaaed94fb0bad7c5702cda18a82237b8f3a7ddf8",
+    "mask-cache.metallib": "80a41057b349c9390535ec5fc71238766c459892f18973cef21d560b26677d59",
+    "mask-cache.metal": "e34280107f9483faab27a3a26b76db78fbdfa1f4d0b25d9eb9bb14a9b0f1473d",
+    "integrated/ac-fusion/gjxl.metallib": "c2eea63570fe7cb798a9ebf480e4c81225f264f8b2a2358ef5429d6a1611911d"
+  },
+  "protocol": "af2f8629417d2883dcd3ce2bcc58d2b58f38b906b4e56230c414075a95658b2e",
+  "timing": false,
+  "boundary": "Optimistic isolated consumer GPU time, excludes cache preparation, extra storage, and lifecycle; not an encode speedup"
+}

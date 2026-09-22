@@ -1,0 +1,99 @@
+{
+  "files": {
+    "interior_screen": "7762f1e50c9785ff1cb34ba1c815efcdf39dba1eb142b2484931c4ece3d47961",
+    "interior_screen.cpp": "3add3caa19d83545e154bf9fb423d55f648353f2f54b7e2053138fe6f9944992",
+    "baseline/gjxl.metallib": "3a1f0d488e799bc7d074800fcf5d8630c7422497c3ea48db8c8c8c89e733dc16",
+    "filter-interior.metallib": "ffb13a63313d5b8f1731664880f4f7776d839447e4dac4a0d5770622dea2000d",
+    "filter-interior.metal": "743b9fe896eaea8941b5807afd9a0400e0c5ac4daeeb2cdb082c6c132382bc57",
+    "run_interior_screen.py": "d287e7d2865b4d9b47aaa5a044b7e700bc3449297b30c1639a1139cc289933c0"
+  },
+  "variants": [
+    {
+      "name": "baseline_control",
+      "width": 16,
+      "height": 64,
+      "threads_y": 64
+    },
+    {
+      "name": "gjxl_ba_interior_o2_s1_p1",
+      "width": 16,
+      "height": 64,
+      "threads_y": 64,
+      "scratch_bytes": 18432,
+      "horizontal_halo_factor": 1.5,
+      "horizontal_source_loads_per_output": 17.0
+    },
+    {
+      "name": "gjxl_ba_interior_o2_s1_p2",
+      "width": 16,
+      "height": 64,
+      "threads_y": 32,
+      "scratch_bytes": 18432,
+      "horizontal_halo_factor": 1.5,
+      "horizontal_source_loads_per_output": 17.0
+    },
+    {
+      "name": "gjxl_ba_interior_o2_s8_p1",
+      "width": 16,
+      "height": 512,
+      "threads_y": 64,
+      "scratch_bytes": 18432,
+      "horizontal_halo_factor": 1.0625,
+      "horizontal_source_loads_per_output": 17.0
+    },
+    {
+      "name": "gjxl_ba_interior_o2_s8_p2",
+      "width": 16,
+      "height": 512,
+      "threads_y": 32,
+      "scratch_bytes": 18432,
+      "horizontal_halo_factor": 1.0625,
+      "horizontal_source_loads_per_output": 17.0
+    },
+    {
+      "name": "gjxl_ba_interior_o4_s1_p1",
+      "width": 16,
+      "height": 64,
+      "threads_y": 64,
+      "scratch_bytes": 18432,
+      "horizontal_halo_factor": 1.5,
+      "horizontal_source_loads_per_output": 9.0
+    },
+    {
+      "name": "gjxl_ba_interior_o4_s1_p2",
+      "width": 16,
+      "height": 64,
+      "threads_y": 32,
+      "scratch_bytes": 18432,
+      "horizontal_halo_factor": 1.5,
+      "horizontal_source_loads_per_output": 9.0
+    },
+    {
+      "name": "gjxl_ba_interior_o4_s8_p1",
+      "width": 16,
+      "height": 512,
+      "threads_y": 64,
+      "scratch_bytes": 18432,
+      "horizontal_halo_factor": 1.0625,
+      "horizontal_source_loads_per_output": 9.0
+    },
+    {
+      "name": "gjxl_ba_interior_o4_s8_p2",
+      "width": 16,
+      "height": 512,
+      "threads_y": 32,
+      "scratch_bytes": 18432,
+      "horizontal_halo_factor": 1.0625,
+      "horizontal_source_loads_per_output": 9.0
+    }
+  ],
+  "extents": [
+    null
+  ],
+  "timing": false,
+  "pairs": 5,
+  "warmups": 3,
+  "samples": 5,
+  "repeats_per_submission": 3,
+  "boundary": "GPU command buffer duration per repeated kernel dispatch; not full-encode latency"
+}

@@ -1,0 +1,196 @@
+{
+  "files": {
+    "short_screen": "4dab43e47184cda001d716e34f4ee5f6dd301c8a9c08c1a31afb5b134f9c60a5",
+    "short_screen.cpp": "5c96fecc72cc01bc91a08958a6e8d1e689e64dee7c3e4694f0683af5e6ec6fe8",
+    "baseline/gjxl.metallib": "3a1f0d488e799bc7d074800fcf5d8630c7422497c3ea48db8c8c8c89e733dc16",
+    "filter-short.metallib": "6034aedacbcdad61fd017dc518c873e014c8dbf93e05fe65c2e16e0a98643234",
+    "filter-short.metal": "1e2aeb45338e6a3b3040ba765425d96f0ab98cd81dfca8c35721636899b0f8c6",
+    "run_short_screen.py": "e05b3bc7468ccb41c469c5c10fd16283e091ddfb4d699986515f04e00523a5b8"
+  },
+  "variants": [
+    {
+      "name": "baseline_control",
+      "width": 0,
+      "height": 0,
+      "threads_y": 0,
+      "radius": 6
+    },
+    {
+      "name": "gjxl_ba_short_r3_w16_h32_p1",
+      "width": 16,
+      "height": 32,
+      "threads_y": 32,
+      "radius": 3
+    },
+    {
+      "name": "gjxl_ba_short_r3_w16_h32_p2",
+      "width": 16,
+      "height": 32,
+      "threads_y": 16,
+      "radius": 3
+    },
+    {
+      "name": "gjxl_ba_short_r3_w16_h64_p1",
+      "width": 16,
+      "height": 64,
+      "threads_y": 64,
+      "radius": 3
+    },
+    {
+      "name": "gjxl_ba_short_r3_w16_h64_p2",
+      "width": 16,
+      "height": 64,
+      "threads_y": 32,
+      "radius": 3
+    },
+    {
+      "name": "gjxl_ba_short_r3_w32_h32_p1",
+      "width": 32,
+      "height": 32,
+      "threads_y": 32,
+      "radius": 3
+    },
+    {
+      "name": "gjxl_ba_short_r3_w32_h32_p2",
+      "width": 32,
+      "height": 32,
+      "threads_y": 16,
+      "radius": 3
+    },
+    {
+      "name": "gjxl_ba_short_r3_w16_h128_p2",
+      "width": 16,
+      "height": 128,
+      "threads_y": 64,
+      "radius": 3
+    },
+    {
+      "name": "gjxl_ba_short_r3_w32_h64_p2",
+      "width": 32,
+      "height": 64,
+      "threads_y": 32,
+      "radius": 3
+    },
+    {
+      "name": "gjxl_ba_short_r6_w16_h32_p1",
+      "width": 16,
+      "height": 32,
+      "threads_y": 32,
+      "radius": 6
+    },
+    {
+      "name": "gjxl_ba_short_r6_w16_h32_p2",
+      "width": 16,
+      "height": 32,
+      "threads_y": 16,
+      "radius": 6
+    },
+    {
+      "name": "gjxl_ba_short_r6_w16_h64_p1",
+      "width": 16,
+      "height": 64,
+      "threads_y": 64,
+      "radius": 6
+    },
+    {
+      "name": "gjxl_ba_short_r6_w16_h64_p2",
+      "width": 16,
+      "height": 64,
+      "threads_y": 32,
+      "radius": 6
+    },
+    {
+      "name": "gjxl_ba_short_r6_w32_h32_p1",
+      "width": 32,
+      "height": 32,
+      "threads_y": 32,
+      "radius": 6
+    },
+    {
+      "name": "gjxl_ba_short_r6_w32_h32_p2",
+      "width": 32,
+      "height": 32,
+      "threads_y": 16,
+      "radius": 6
+    },
+    {
+      "name": "gjxl_ba_short_r6_w16_h128_p2",
+      "width": 16,
+      "height": 128,
+      "threads_y": 64,
+      "radius": 6
+    },
+    {
+      "name": "gjxl_ba_short_r6_w32_h64_p2",
+      "width": 32,
+      "height": 64,
+      "threads_y": 32,
+      "radius": 6
+    },
+    {
+      "name": "gjxl_ba_short_r7_w16_h32_p1",
+      "width": 16,
+      "height": 32,
+      "threads_y": 32,
+      "radius": 7
+    },
+    {
+      "name": "gjxl_ba_short_r7_w16_h32_p2",
+      "width": 16,
+      "height": 32,
+      "threads_y": 16,
+      "radius": 7
+    },
+    {
+      "name": "gjxl_ba_short_r7_w16_h64_p1",
+      "width": 16,
+      "height": 64,
+      "threads_y": 64,
+      "radius": 7
+    },
+    {
+      "name": "gjxl_ba_short_r7_w16_h64_p2",
+      "width": 16,
+      "height": 64,
+      "threads_y": 32,
+      "radius": 7
+    },
+    {
+      "name": "gjxl_ba_short_r7_w32_h32_p1",
+      "width": 32,
+      "height": 32,
+      "threads_y": 32,
+      "radius": 7
+    },
+    {
+      "name": "gjxl_ba_short_r7_w32_h32_p2",
+      "width": 32,
+      "height": 32,
+      "threads_y": 16,
+      "radius": 7
+    },
+    {
+      "name": "gjxl_ba_short_r7_w16_h128_p2",
+      "width": 16,
+      "height": 128,
+      "threads_y": 64,
+      "radius": 7
+    },
+    {
+      "name": "gjxl_ba_short_r7_w32_h64_p2",
+      "width": 32,
+      "height": 64,
+      "threads_y": 32,
+      "radius": 7
+    }
+  ],
+  "extents": [
+    null
+  ],
+  "timing": false,
+  "pairs": 5,
+  "warmups": 3,
+  "samples": 5,
+  "repeats_per_submission": 3,
+  "boundary": "GPU command buffer duration per repeated kernel dispatch; not full-encode latency"
+}

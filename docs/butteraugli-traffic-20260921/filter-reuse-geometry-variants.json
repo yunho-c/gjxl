@@ -1,0 +1,140 @@
+[
+  {
+    "name": "gjxl_ba_reuse_w8_h128_p2",
+    "width": 8,
+    "height": 128,
+    "threads_y": 64
+  },
+  {
+    "name": "gjxl_ba_reuse_w8_h128_p4",
+    "width": 8,
+    "height": 128,
+    "threads_y": 32
+  },
+  {
+    "name": "gjxl_ba_reuse_w8_h128_p8",
+    "width": 8,
+    "height": 128,
+    "threads_y": 16
+  },
+  {
+    "name": "gjxl_ba_reuse_w8_h256_p2",
+    "width": 8,
+    "height": 256,
+    "threads_y": 128
+  },
+  {
+    "name": "gjxl_ba_reuse_w8_h256_p4",
+    "width": 8,
+    "height": 256,
+    "threads_y": 64
+  },
+  {
+    "name": "gjxl_ba_reuse_w8_h256_p8",
+    "width": 8,
+    "height": 256,
+    "threads_y": 32
+  },
+  {
+    "name": "gjxl_ba_reuse_w16_h64_p2",
+    "width": 16,
+    "height": 64,
+    "threads_y": 32
+  },
+  {
+    "name": "gjxl_ba_reuse_w16_h64_p4",
+    "width": 16,
+    "height": 64,
+    "threads_y": 16
+  },
+  {
+    "name": "gjxl_ba_reuse_w16_h64_p8",
+    "width": 16,
+    "height": 64,
+    "threads_y": 8
+  },
+  {
+    "name": "gjxl_ba_reuse_w16_h96_p2",
+    "width": 16,
+    "height": 96,
+    "threads_y": 48
+  },
+  {
+    "name": "gjxl_ba_reuse_w16_h96_p4",
+    "width": 16,
+    "height": 96,
+    "threads_y": 24
+  },
+  {
+    "name": "gjxl_ba_reuse_w16_h96_p8",
+    "width": 16,
+    "height": 96,
+    "threads_y": 12
+  },
+  {
+    "name": "gjxl_ba_reuse_w16_h128_p2",
+    "width": 16,
+    "height": 128,
+    "threads_y": 64
+  },
+  {
+    "name": "gjxl_ba_reuse_w16_h128_p4",
+    "width": 16,
+    "height": 128,
+    "threads_y": 32
+  },
+  {
+    "name": "gjxl_ba_reuse_w16_h128_p8",
+    "width": 16,
+    "height": 128,
+    "threads_y": 16
+  },
+  {
+    "name": "gjxl_ba_reuse_w16_h136_p4",
+    "width": 16,
+    "height": 136,
+    "threads_y": 34
+  },
+  {
+    "name": "gjxl_ba_reuse_w16_h136_p8",
+    "width": 16,
+    "height": 136,
+    "threads_y": 17
+  },
+  {
+    "name": "gjxl_ba_reuse_w32_h32_p2",
+    "width": 32,
+    "height": 32,
+    "threads_y": 16
+  },
+  {
+    "name": "gjxl_ba_reuse_w32_h32_p4",
+    "width": 32,
+    "height": 32,
+    "threads_y": 8
+  },
+  {
+    "name": "gjxl_ba_reuse_w32_h32_p8",
+    "width": 32,
+    "height": 32,
+    "threads_y": 4
+  },
+  {
+    "name": "gjxl_ba_reuse_w32_h48_p2",
+    "width": 32,
+    "height": 48,
+    "threads_y": 24
+  },
+  {
+    "name": "gjxl_ba_reuse_w32_h48_p4",
+    "width": 32,
+    "height": 48,
+    "threads_y": 12
+  },
+  {
+    "name": "gjxl_ba_reuse_w32_h48_p8",
+    "width": 32,
+    "height": 48,
+    "threads_y": 6
+  }
+]

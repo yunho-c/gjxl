@@ -1,0 +1,124 @@
+{
+  "files": {
+    "norm_screen": "157132bf130952bb5cd2becde09e14422ddb6b234088789fd339cab61aff24fc",
+    "norm_screen.cpp": "3add3caa19d83545e154bf9fb423d55f648353f2f54b7e2053138fe6f9944992",
+    "baseline/gjxl.metallib": "3a1f0d488e799bc7d074800fcf5d8630c7422497c3ea48db8c8c8c89e733dc16",
+    "filter-norm.metallib": "ff619972ad015d0b2189d0d4509af1f6cee2e7daf8f96aedbe9de8a904c83c24",
+    "filter-norm.metal": "996431ceed467e1723308cf11fbab7c63ffaa3df89ed37378e7b810e20699b7a",
+    "run_norm_screen.py": "ae58c03424cf1f980d92d2fb4fe27de2b03b0f0d874b700d70c63589e12c075f"
+  },
+  "variants": [
+    {
+      "name": "baseline_control",
+      "width": 16,
+      "height": 64,
+      "threads_y": 64
+    },
+    {
+      "name": "gjxl_ba_norm_x_s1_p1",
+      "width": 16,
+      "height": 64,
+      "threads_y": 64,
+      "scratch_bytes": 18432,
+      "static_norm_bytes": 320
+    },
+    {
+      "name": "gjxl_ba_norm_x_s1_p2",
+      "width": 16,
+      "height": 64,
+      "threads_y": 32,
+      "scratch_bytes": 18432,
+      "static_norm_bytes": 320
+    },
+    {
+      "name": "gjxl_ba_norm_x_s8_p1",
+      "width": 16,
+      "height": 512,
+      "threads_y": 64,
+      "scratch_bytes": 18432,
+      "static_norm_bytes": 320
+    },
+    {
+      "name": "gjxl_ba_norm_x_s8_p2",
+      "width": 16,
+      "height": 512,
+      "threads_y": 32,
+      "scratch_bytes": 18432,
+      "static_norm_bytes": 320
+    },
+    {
+      "name": "gjxl_ba_norm_y_s1_p1",
+      "width": 16,
+      "height": 64,
+      "threads_y": 64,
+      "scratch_bytes": 18432,
+      "static_norm_bytes": 320
+    },
+    {
+      "name": "gjxl_ba_norm_y_s1_p2",
+      "width": 16,
+      "height": 64,
+      "threads_y": 32,
+      "scratch_bytes": 18432,
+      "static_norm_bytes": 320
+    },
+    {
+      "name": "gjxl_ba_norm_y_s8_p1",
+      "width": 16,
+      "height": 512,
+      "threads_y": 64,
+      "scratch_bytes": 18432,
+      "static_norm_bytes": 320
+    },
+    {
+      "name": "gjxl_ba_norm_y_s8_p2",
+      "width": 16,
+      "height": 512,
+      "threads_y": 32,
+      "scratch_bytes": 18432,
+      "static_norm_bytes": 320
+    },
+    {
+      "name": "gjxl_ba_norm_xy_s1_p1",
+      "width": 16,
+      "height": 64,
+      "threads_y": 64,
+      "scratch_bytes": 18432,
+      "static_norm_bytes": 320
+    },
+    {
+      "name": "gjxl_ba_norm_xy_s1_p2",
+      "width": 16,
+      "height": 64,
+      "threads_y": 32,
+      "scratch_bytes": 18432,
+      "static_norm_bytes": 320
+    },
+    {
+      "name": "gjxl_ba_norm_xy_s8_p1",
+      "width": 16,
+      "height": 512,
+      "threads_y": 64,
+      "scratch_bytes": 18432,
+      "static_norm_bytes": 320
+    },
+    {
+      "name": "gjxl_ba_norm_xy_s8_p2",
+      "width": 16,
+      "height": 512,
+      "threads_y": 32,
+      "scratch_bytes": 18432,
+      "static_norm_bytes": 320
+    }
+  ],
+  "extents": [
+    "3839x2159",
+    "6000x4000"
+  ],
+  "timing": true,
+  "pairs": 5,
+  "warmups": 3,
+  "samples": 5,
+  "repeats_per_submission": 3,
+  "boundary": "GPU command buffer duration per repeated kernel dispatch; not full-encode latency"
+}

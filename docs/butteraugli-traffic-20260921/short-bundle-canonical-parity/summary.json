@@ -1,0 +1,2618 @@
+{
+  "cases": 56,
+  "decodes": [
+    {
+      "name": "imazen26-1029-planter-4k",
+      "outputs": [
+        {
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/tools/djxl",
+            "--quiet",
+            "--num_threads=0",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1029-planter-4k-baseline.jxl",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1029-planter-4k-baseline.decoded.pfm"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1029-planter-4k-baseline.decoded.pfm",
+          "label": "baseline",
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sha256": "5c6e042a68b670f428a1fda9d44df940d4b818a7ec4833b8248051e197129c66"
+        },
+        {
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/tools/djxl",
+            "--quiet",
+            "--num_threads=0",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1029-planter-4k-candidate.jxl",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1029-planter-4k-candidate.decoded.pfm"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1029-planter-4k-candidate.decoded.pfm",
+          "label": "candidate",
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sha256": "5c6e042a68b670f428a1fda9d44df940d4b818a7ec4833b8248051e197129c66"
+        }
+      ]
+    },
+    {
+      "name": "kodak-kodim17",
+      "outputs": [
+        {
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/tools/djxl",
+            "--quiet",
+            "--num_threads=0",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim17-baseline.jxl",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim17-baseline.decoded.pfm"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim17-baseline.decoded.pfm",
+          "label": "baseline",
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sha256": "1c13fa707611003114a97bed54afc88aa2e6271de9112254fa635368eed5c4bc"
+        },
+        {
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/tools/djxl",
+            "--quiet",
+            "--num_threads=0",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim17-candidate.jxl",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim17-candidate.decoded.pfm"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim17-candidate.decoded.pfm",
+          "label": "candidate",
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sha256": "1c13fa707611003114a97bed54afc88aa2e6271de9112254fa635368eed5c4bc"
+        }
+      ]
+    },
+    {
+      "name": "padded-stress-4k",
+      "outputs": [
+        {
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/tools/djxl",
+            "--quiet",
+            "--num_threads=0",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/padded-stress-4k-baseline.jxl",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/padded-stress-4k-baseline.decoded.pfm"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/padded-stress-4k-baseline.decoded.pfm",
+          "label": "baseline",
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sha256": "49394c37a26622129336cff6e6a66f1b223b1e9f0482bb15580de21d80db326b"
+        },
+        {
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/tools/djxl",
+            "--quiet",
+            "--num_threads=0",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/padded-stress-4k-candidate.jxl",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/padded-stress-4k-candidate.decoded.pfm"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/padded-stress-4k-candidate.decoded.pfm",
+          "label": "candidate",
+          "log_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "sha256": "49394c37a26622129336cff6e6a66f1b223b1e9f0482bb15580de21d80db326b"
+        }
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "name": "imazen26-1029-planter-4k",
+      "outputs": {
+        "baseline": {
+          "bytes": 2016588,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1029-planter-4k.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1029-planter-4k-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1029-planter-4k-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1029-planter-4k-baseline.log",
+          "log_sha256": "934e21a77d972c9a330ea0f7068c8fad95300766d46e9a1c7874157a4ccd11f1",
+          "sha256": "27e44890a95f77e70e89b5379ac1073f60c6b7049c4306524be90187af558206"
+        },
+        "candidate": {
+          "bytes": 2016588,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1029-planter-4k.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1029-planter-4k-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1029-planter-4k-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1029-planter-4k-candidate.log",
+          "log_sha256": "5a97afc502c2f6f2bb27f0c805f5460dd6ae6869c080c64b4cea51d929fc8f2e",
+          "sha256": "27e44890a95f77e70e89b5379ac1073f60c6b7049c4306524be90187af558206"
+        }
+      }
+    },
+    {
+      "name": "imazen26-1029-planter-1080p",
+      "outputs": {
+        "baseline": {
+          "bytes": 779755,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1029-planter-1080p.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1029-planter-1080p-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1029-planter-1080p-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1029-planter-1080p-baseline.log",
+          "log_sha256": "a88f4b627c8f722e4f0943f79239b967489e47004d431829ca8a53ae2f4c7531",
+          "sha256": "db37977cffc7ebad221df9c2e865e8f7ce610fad30d9f53d58f4021903e50115"
+        },
+        "candidate": {
+          "bytes": 779755,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1029-planter-1080p.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1029-planter-1080p-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1029-planter-1080p-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1029-planter-1080p-candidate.log",
+          "log_sha256": "4dfbccf2316a42114f3237d4ece58d1a58662cd82e7bcf600face8b003fa888a",
+          "sha256": "db37977cffc7ebad221df9c2e865e8f7ce610fad30d9f53d58f4021903e50115"
+        }
+      }
+    },
+    {
+      "name": "imazen26-1039-sun-forest-4k",
+      "outputs": {
+        "baseline": {
+          "bytes": 1062352,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1039-sun-forest-4k.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1039-sun-forest-4k-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1039-sun-forest-4k-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1039-sun-forest-4k-baseline.log",
+          "log_sha256": "e02bc64f2aad21e791f426e135bd71032569d3b529d61da29b348a670156a15c",
+          "sha256": "a9e86e713c2ffad550107bfc562cdc9a50df512563fa067e081eb135d5c1d5d7"
+        },
+        "candidate": {
+          "bytes": 1062352,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1039-sun-forest-4k.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1039-sun-forest-4k-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1039-sun-forest-4k-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1039-sun-forest-4k-candidate.log",
+          "log_sha256": "2a47796d0dcea8b2bd27ae9f1ad635ed3fa413ccf5a37f62469f2d927608b144",
+          "sha256": "a9e86e713c2ffad550107bfc562cdc9a50df512563fa067e081eb135d5c1d5d7"
+        }
+      }
+    },
+    {
+      "name": "imazen26-1039-sun-forest-1080p",
+      "outputs": {
+        "baseline": {
+          "bytes": 394239,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1039-sun-forest-1080p.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1039-sun-forest-1080p-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1039-sun-forest-1080p-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1039-sun-forest-1080p-baseline.log",
+          "log_sha256": "c754b3f20ad06fe5103e788b98325bc5da4ca0188023a0035d2f0795da46b17c",
+          "sha256": "df817f3cc10dd08592e1c97813020c4783e78a9b661164010dacfc8fe16fb2ff"
+        },
+        "candidate": {
+          "bytes": 394239,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1039-sun-forest-1080p.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1039-sun-forest-1080p-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1039-sun-forest-1080p-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1039-sun-forest-1080p-candidate.log",
+          "log_sha256": "103c47ae0a86d40456250dcb07497770eeac34bce1310bea4cbb90140401ae8a",
+          "sha256": "df817f3cc10dd08592e1c97813020c4783e78a9b661164010dacfc8fe16fb2ff"
+        }
+      }
+    },
+    {
+      "name": "imazen26-1049-river-city-4k",
+      "outputs": {
+        "baseline": {
+          "bytes": 1147378,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1049-river-city-4k.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1049-river-city-4k-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1049-river-city-4k-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1049-river-city-4k-baseline.log",
+          "log_sha256": "faf4162e0ab7b163052f51a7744557b80f9c69a51f2afb9f1358d4716f1a4c36",
+          "sha256": "8dd9779f849542655b6914e99f6faad799b8ba3cc3249ad758e6771157a6473f"
+        },
+        "candidate": {
+          "bytes": 1147378,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1049-river-city-4k.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1049-river-city-4k-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1049-river-city-4k-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1049-river-city-4k-candidate.log",
+          "log_sha256": "8126aeb9225a66a237a958f2d3b1f0ff2d8fa88458d525769ef859113e66fbaa",
+          "sha256": "8dd9779f849542655b6914e99f6faad799b8ba3cc3249ad758e6771157a6473f"
+        }
+      }
+    },
+    {
+      "name": "imazen26-1049-river-city-1080p",
+      "outputs": {
+        "baseline": {
+          "bytes": 473689,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1049-river-city-1080p.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1049-river-city-1080p-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1049-river-city-1080p-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1049-river-city-1080p-baseline.log",
+          "log_sha256": "3b73aa9b8057862cbad2fc239770f15eb8f3c499de1a3c2c58193b52fd084c46",
+          "sha256": "010dc166902396ba17f7c5103dbe5e5190e302c63eb7946b7b0a6d352c7f846d"
+        },
+        "candidate": {
+          "bytes": 473689,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1049-river-city-1080p.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1049-river-city-1080p-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1049-river-city-1080p-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1049-river-city-1080p-candidate.log",
+          "log_sha256": "56948df144eb06a7cb2314f8053d7f22eed5e1915e7492ea91a5acc20326e0f0",
+          "sha256": "010dc166902396ba17f7c5103dbe5e5190e302c63eb7946b7b0a6d352c7f846d"
+        }
+      }
+    },
+    {
+      "name": "imazen26-1207-bedroom-noise-4k",
+      "outputs": {
+        "baseline": {
+          "bytes": 1073923,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1207-bedroom-noise-4k.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1207-bedroom-noise-4k-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1207-bedroom-noise-4k-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1207-bedroom-noise-4k-baseline.log",
+          "log_sha256": "afb4d30f70eb09987d0f620ff45865705aa48d45606799dc6865216cc279f20c",
+          "sha256": "fd16838f4fd12b5ea4fa7a7ba91b703ffdf1b2a6c54e0cf620dfac2f0b1d5533"
+        },
+        "candidate": {
+          "bytes": 1073923,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1207-bedroom-noise-4k.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1207-bedroom-noise-4k-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1207-bedroom-noise-4k-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1207-bedroom-noise-4k-candidate.log",
+          "log_sha256": "43a2833ba14504a4f9e8747721bb1a0cc9a59bae496deb17edd3a552543f3fa5",
+          "sha256": "fd16838f4fd12b5ea4fa7a7ba91b703ffdf1b2a6c54e0cf620dfac2f0b1d5533"
+        }
+      }
+    },
+    {
+      "name": "imazen26-1207-bedroom-noise-1080p",
+      "outputs": {
+        "baseline": {
+          "bytes": 330103,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1207-bedroom-noise-1080p.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1207-bedroom-noise-1080p-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1207-bedroom-noise-1080p-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1207-bedroom-noise-1080p-baseline.log",
+          "log_sha256": "4048856e173e7194e50c1e67f07d4c7999a1397701a0efe3fe9e2bc2c646690a",
+          "sha256": "b609aab49148ca89fa29f6efca51036a9b0081a885871b63e078f14a35f761d4"
+        },
+        "candidate": {
+          "bytes": 330103,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1207-bedroom-noise-1080p.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1207-bedroom-noise-1080p-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1207-bedroom-noise-1080p-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1207-bedroom-noise-1080p-candidate.log",
+          "log_sha256": "453ff527911cd98dd8aa5e23698b3f6890a6725f8f20d7f7e222d0bb69d79b30",
+          "sha256": "b609aab49148ca89fa29f6efca51036a9b0081a885871b63e078f14a35f761d4"
+        }
+      }
+    },
+    {
+      "name": "imazen26-1409-rainbow-4k",
+      "outputs": {
+        "baseline": {
+          "bytes": 1196103,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1409-rainbow-4k.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1409-rainbow-4k-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1409-rainbow-4k-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1409-rainbow-4k-baseline.log",
+          "log_sha256": "0609cd0e72ce8648d39b7751c22bdf8e06811c3fb2ffc23e2528cd98972f1395",
+          "sha256": "c8ab9855670291798865e1ad31f63fb1c10eb36af942f7c8079a25e379814fde"
+        },
+        "candidate": {
+          "bytes": 1196103,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1409-rainbow-4k.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1409-rainbow-4k-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1409-rainbow-4k-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1409-rainbow-4k-candidate.log",
+          "log_sha256": "6cb8af29c64bd3ad449b64fa68a445cf324660766ee0bdeda918430f35efd341",
+          "sha256": "c8ab9855670291798865e1ad31f63fb1c10eb36af942f7c8079a25e379814fde"
+        }
+      }
+    },
+    {
+      "name": "imazen26-1409-rainbow-1080p",
+      "outputs": {
+        "baseline": {
+          "bytes": 365667,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1409-rainbow-1080p.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1409-rainbow-1080p-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1409-rainbow-1080p-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1409-rainbow-1080p-baseline.log",
+          "log_sha256": "8ba4bdb586ece18dd0a55cca40e893fc2a4d39a5921f3f445ea5bfee8ed210ab",
+          "sha256": "f3acbc619cfa97c93f27c641161d0a349314fb025ea95eb86cf5e92896c733ba"
+        },
+        "candidate": {
+          "bytes": 365667,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1409-rainbow-1080p.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1409-rainbow-1080p-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1409-rainbow-1080p-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1409-rainbow-1080p-candidate.log",
+          "log_sha256": "95a1ecddc985b9d0fff0c8ba13d4f6a9aff4a255d0ed2ad157f290a7c3b2ed3d",
+          "sha256": "f3acbc619cfa97c93f27c641161d0a349314fb025ea95eb86cf5e92896c733ba"
+        }
+      }
+    },
+    {
+      "name": "imazen26-1609-food-detail-4k",
+      "outputs": {
+        "baseline": {
+          "bytes": 718213,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1609-food-detail-4k.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1609-food-detail-4k-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1609-food-detail-4k-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1609-food-detail-4k-baseline.log",
+          "log_sha256": "b6c11e608ec6bef9c0cee46470761a423d141eafd6b6db6810f2e537f02e0402",
+          "sha256": "b33463c2062353efe666fad8e3b25a307604d0a7503463f0dc1010798d143ebc"
+        },
+        "candidate": {
+          "bytes": 718213,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1609-food-detail-4k.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1609-food-detail-4k-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1609-food-detail-4k-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1609-food-detail-4k-candidate.log",
+          "log_sha256": "47c47fee9d017a5894cc5cc7ebd6d43ba270c9c8187eb8dbf98615115360a521",
+          "sha256": "b33463c2062353efe666fad8e3b25a307604d0a7503463f0dc1010798d143ebc"
+        }
+      }
+    },
+    {
+      "name": "imazen26-1609-food-detail-1080p",
+      "outputs": {
+        "baseline": {
+          "bytes": 328719,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1609-food-detail-1080p.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1609-food-detail-1080p-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1609-food-detail-1080p-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1609-food-detail-1080p-baseline.log",
+          "log_sha256": "b54c80be749cfc31e70220df46a79aa2012932ed71f5d490d60d28e3fab7561f",
+          "sha256": "e4e8d4e887bb28512b6dc9cb2b7f6b35546bdd47bff57e0d264c104bf023ca7d"
+        },
+        "candidate": {
+          "bytes": 328719,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/imazen26-1609-food-detail-1080p.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1609-food-detail-1080p-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1609-food-detail-1080p-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/imazen26-1609-food-detail-1080p-candidate.log",
+          "log_sha256": "0fe8c3658d9c95e4ecd7887b8cb5e88ac83ef057a2c20a49f65f082177f1eb05",
+          "sha256": "e4e8d4e887bb28512b6dc9cb2b7f6b35546bdd47bff57e0d264c104bf023ca7d"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim01",
+      "outputs": {
+        "baseline": {
+          "bytes": 107092,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim01.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim01-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim01-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim01-baseline.log",
+          "log_sha256": "e1f067fcf0fe5fd81f60512eef6ca789abb0aec6f1ece316cf6d5579b947f4a9",
+          "sha256": "cb68246b4705fee4801ff92be47db565e7d0ea5884378229a892ee573147588b"
+        },
+        "candidate": {
+          "bytes": 107092,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim01.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim01-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim01-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim01-candidate.log",
+          "log_sha256": "2a87619e7ee5173d8f0fd37dbc09d55e9c300009ca028050c178fa23c65af097",
+          "sha256": "cb68246b4705fee4801ff92be47db565e7d0ea5884378229a892ee573147588b"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim02",
+      "outputs": {
+        "baseline": {
+          "bytes": 76506,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim02.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim02-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim02-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim02-baseline.log",
+          "log_sha256": "899e052d56eb586ccd28acb42048f6a691f8a5296829cdb7df15cf6f7c392c67",
+          "sha256": "fe49b67801e73a536f5412f6f64892f721477e48c42f3427d47cf1cb35d1d403"
+        },
+        "candidate": {
+          "bytes": 76506,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim02.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim02-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim02-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim02-candidate.log",
+          "log_sha256": "a3a8e144bf5587107abb7f2bc5161fa8e3c24accd301b73b174e68ee58ca6156",
+          "sha256": "fe49b67801e73a536f5412f6f64892f721477e48c42f3427d47cf1cb35d1d403"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim03",
+      "outputs": {
+        "baseline": {
+          "bytes": 52645,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim03.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim03-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim03-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim03-baseline.log",
+          "log_sha256": "3efa946ff0169449c561ccf668470b0f76e4ec4798f2326cfe68c93e16b38dbd",
+          "sha256": "1bf7d5c6bc04a30b7f7269b1019b70636935d50be4accc776f06386231bea3cb"
+        },
+        "candidate": {
+          "bytes": 52645,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim03.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim03-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim03-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim03-candidate.log",
+          "log_sha256": "459662068168d1ff8b6fef3fb7ff51ebb1313ecf63a90cf14e870021bac1c450",
+          "sha256": "1bf7d5c6bc04a30b7f7269b1019b70636935d50be4accc776f06386231bea3cb"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim04",
+      "outputs": {
+        "baseline": {
+          "bytes": 71740,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim04.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim04-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim04-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim04-baseline.log",
+          "log_sha256": "3b2970025fcaba0e8a8a595157460b7ec3cf24883de6966f2c92f443b714ff79",
+          "sha256": "dbafe86c6f9a10bd199e3719c0ed6a6a4646cf779453a1d3d8be8ddcab6c5ce2"
+        },
+        "candidate": {
+          "bytes": 71740,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim04.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim04-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim04-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim04-candidate.log",
+          "log_sha256": "a175468dca27ba06b3d70b6eaf5aa0175a3d3297a6bcbb7cba245fbd3881c9cf",
+          "sha256": "dbafe86c6f9a10bd199e3719c0ed6a6a4646cf779453a1d3d8be8ddcab6c5ce2"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim05",
+      "outputs": {
+        "baseline": {
+          "bytes": 111342,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim05.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim05-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim05-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim05-baseline.log",
+          "log_sha256": "79e329828e9fec93f2e947b7bc1d19ac36d36209a52364cb8fe56549fb388a2b",
+          "sha256": "52d6ab28a02faa151b51269607a7bd7ce6a9a604f06bcf136ded80aaeb0dbddb"
+        },
+        "candidate": {
+          "bytes": 111342,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim05.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim05-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim05-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim05-candidate.log",
+          "log_sha256": "d86342003e177e521622ccf104542a8912fe2098344d186ce3f69d57eb6fbcb7",
+          "sha256": "52d6ab28a02faa151b51269607a7bd7ce6a9a604f06bcf136ded80aaeb0dbddb"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim06",
+      "outputs": {
+        "baseline": {
+          "bytes": 81877,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim06.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim06-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim06-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim06-baseline.log",
+          "log_sha256": "7b84d25860af4e7a18dcd6982f7eeb19336840dccf2bb6477b97ee7d7812bc4d",
+          "sha256": "31b3c75e7acb0f4ec13585d4fadb6499e3057dfd1e18d7bebd79cd651f2cc229"
+        },
+        "candidate": {
+          "bytes": 81877,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim06.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim06-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim06-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim06-candidate.log",
+          "log_sha256": "34f58020ff9dce14eec82bba522038fd6c3b12a628afae35a9a66425af72a361",
+          "sha256": "31b3c75e7acb0f4ec13585d4fadb6499e3057dfd1e18d7bebd79cd651f2cc229"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim07",
+      "outputs": {
+        "baseline": {
+          "bytes": 61732,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim07.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim07-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim07-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim07-baseline.log",
+          "log_sha256": "a79993f19cdd85b1855fe3a0ac06d380e952b61f6bbe5f8d2d55ad1dad37188b",
+          "sha256": "925fd891c95c9936b558a25a21ac98a007c2000ecf5382ca06c774c6091ccaeb"
+        },
+        "candidate": {
+          "bytes": 61732,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim07.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim07-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim07-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim07-candidate.log",
+          "log_sha256": "0e9790fa0828311efd170e27b748d8abd80877f0cd15aef598727040420238b4",
+          "sha256": "925fd891c95c9936b558a25a21ac98a007c2000ecf5382ca06c774c6091ccaeb"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim08",
+      "outputs": {
+        "baseline": {
+          "bytes": 112007,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim08.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim08-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim08-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim08-baseline.log",
+          "log_sha256": "6ce81b2d15bfb4f48462017242789287773d1fae9da96a877e356b87415e0b32",
+          "sha256": "4f0ec0e86b9bb2633f4da354072ee28efe38641ad4fa02deadd00c08da02568b"
+        },
+        "candidate": {
+          "bytes": 112007,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim08.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim08-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim08-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim08-candidate.log",
+          "log_sha256": "dd3ca0460dbe1e868a134688ab315933ad29462bfd50f4b06fbf394b6fa873e8",
+          "sha256": "4f0ec0e86b9bb2633f4da354072ee28efe38641ad4fa02deadd00c08da02568b"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim09",
+      "outputs": {
+        "baseline": {
+          "bytes": 58240,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim09.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim09-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim09-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim09-baseline.log",
+          "log_sha256": "e613969bd0648332525b66e8bb8252644eb6368977227b58396f682098e6289a",
+          "sha256": "31cd2880c6057a58ddd15f28022a2c5bafcdd750952648c88e08aa9277d856ff"
+        },
+        "candidate": {
+          "bytes": 58240,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim09.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim09-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim09-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim09-candidate.log",
+          "log_sha256": "382e5cf382cbd91c11c480f5bce9f63d7e98cc059aba353c704c1b7bfad5757b",
+          "sha256": "31cd2880c6057a58ddd15f28022a2c5bafcdd750952648c88e08aa9277d856ff"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim10",
+      "outputs": {
+        "baseline": {
+          "bytes": 65097,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim10.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim10-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim10-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim10-baseline.log",
+          "log_sha256": "63e8c5ab9c1ecba7e5459f393b68c9a61d6f57aa1057a39cd40fb9921bf419c5",
+          "sha256": "134250d966d0cd30381b60c1768d6a99f461a14b408a5ae0db5d077471a95cc0"
+        },
+        "candidate": {
+          "bytes": 65097,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim10.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim10-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim10-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim10-candidate.log",
+          "log_sha256": "a636f2d1f2f57f3f8b2a7db9718c17a6fc85107869bda3c257bbc78f534e7fae",
+          "sha256": "134250d966d0cd30381b60c1768d6a99f461a14b408a5ae0db5d077471a95cc0"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim11",
+      "outputs": {
+        "baseline": {
+          "bytes": 83258,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim11.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim11-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim11-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim11-baseline.log",
+          "log_sha256": "c82816d2153eea2e1d9a00df6ad6a0871fbd6d2fc3e1ee0edecd8b1d0a2feaca",
+          "sha256": "d1fb4685b7b84ff7008543fe35eabcf705671a123caa45102d53e87540ecbd90"
+        },
+        "candidate": {
+          "bytes": 83258,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim11.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim11-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim11-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim11-candidate.log",
+          "log_sha256": "71842508e0f1be7921238af9b08931c1458fc29a6ca2de71854689fdd8383994",
+          "sha256": "d1fb4685b7b84ff7008543fe35eabcf705671a123caa45102d53e87540ecbd90"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim12",
+      "outputs": {
+        "baseline": {
+          "bytes": 59047,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim12.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim12-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim12-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim12-baseline.log",
+          "log_sha256": "b781bc193f6b43bbd5f0526f145f9ee093400b9f6d98685a8f48ff926149ed55",
+          "sha256": "7c4cb515b51d8046842f8bb583a581a3ade8e940a58b8fe8c1a91c41db8ed119"
+        },
+        "candidate": {
+          "bytes": 59047,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim12.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim12-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim12-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim12-candidate.log",
+          "log_sha256": "1a9635e4520818cd9f89f891b4069f63d5a27d10cd1014e49e1521484c98667a",
+          "sha256": "7c4cb515b51d8046842f8bb583a581a3ade8e940a58b8fe8c1a91c41db8ed119"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim13",
+      "outputs": {
+        "baseline": {
+          "bytes": 126601,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim13.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim13-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim13-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim13-baseline.log",
+          "log_sha256": "1126a2f339661559d1f61432746ff844e480dee7f73796839d6dec26c949c19c",
+          "sha256": "3e7531f6945e95909bbb680460d4f391a4f6ba8959083fe7f4fba611a8f04cbb"
+        },
+        "candidate": {
+          "bytes": 126601,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim13.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim13-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim13-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim13-candidate.log",
+          "log_sha256": "81250cb6b63db054041f36b5dd15feea54e9f0bd00ecf21356b29095fbcf48f1",
+          "sha256": "3e7531f6945e95909bbb680460d4f391a4f6ba8959083fe7f4fba611a8f04cbb"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim14",
+      "outputs": {
+        "baseline": {
+          "bytes": 99453,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim14.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim14-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim14-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim14-baseline.log",
+          "log_sha256": "5d2215e582980e1797c084c669037b5e39af1e820cb37e52798a1d752c0cbdca",
+          "sha256": "6aa81c7d62c15c014f4433202af9c04e982cdc320eecce383f215a03c9dd56ba"
+        },
+        "candidate": {
+          "bytes": 99453,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim14.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim14-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim14-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim14-candidate.log",
+          "log_sha256": "f3f36fd904afb554d17e2e1bf3ccc6207c181b63d4d8c0e2ce5770a6c6385f7b",
+          "sha256": "6aa81c7d62c15c014f4433202af9c04e982cdc320eecce383f215a03c9dd56ba"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim15",
+      "outputs": {
+        "baseline": {
+          "bytes": 60862,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim15.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim15-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim15-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim15-baseline.log",
+          "log_sha256": "abb84a12c940e1c6a35969a3fb2b4d4bba8d0218b5a092a04a3d9bdf306e7463",
+          "sha256": "9ca5c2cda2416f0abdeb22d716e99d4997259c1fb2804211a2d6772d8006b35c"
+        },
+        "candidate": {
+          "bytes": 60862,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim15.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim15-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim15-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim15-candidate.log",
+          "log_sha256": "ed9baa1e71acdaa40d1fb4f46eb8e0d9734a254b4976f85397486a466841d79e",
+          "sha256": "9ca5c2cda2416f0abdeb22d716e99d4997259c1fb2804211a2d6772d8006b35c"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim16",
+      "outputs": {
+        "baseline": {
+          "bytes": 65625,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim16.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim16-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim16-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim16-baseline.log",
+          "log_sha256": "65dbf449c23699caeb6abeb1276d5f1a99ba94667168620a66da1cd4d7da4b73",
+          "sha256": "3dfd0d372c75a63e5c26ab7a84bf4db73aaa31fc99fb608f4ec2861aaeeafc7f"
+        },
+        "candidate": {
+          "bytes": 65625,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim16.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim16-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim16-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim16-candidate.log",
+          "log_sha256": "f153e54ccd3bc5ddf191e5a2bef80eac6c6abb44b87efbe5be1fdd699a45c0f8",
+          "sha256": "3dfd0d372c75a63e5c26ab7a84bf4db73aaa31fc99fb608f4ec2861aaeeafc7f"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim17",
+      "outputs": {
+        "baseline": {
+          "bytes": 65688,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim17-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim17-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim17-baseline.log",
+          "log_sha256": "602ccc2ec3f4f59795ab4f97720a42656800c5f6d1f04bf054490309c586c0ff",
+          "sha256": "e789aa7155645159b71ead6cff8d7d5f83b43654fb961309444de5a69bd6e089"
+        },
+        "candidate": {
+          "bytes": 65688,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim17-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim17-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim17-candidate.log",
+          "log_sha256": "348133519ad5a79cbd08399931ee7581ed0e468f21936b5346c632d2fbbf5cfe",
+          "sha256": "e789aa7155645159b71ead6cff8d7d5f83b43654fb961309444de5a69bd6e089"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim18",
+      "outputs": {
+        "baseline": {
+          "bytes": 95612,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim18.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim18-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim18-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim18-baseline.log",
+          "log_sha256": "ad0ffd23ba69088f7611210bea51f90a6170e4fb57e4d62977ff54c80086dce1",
+          "sha256": "337de4709dfe52954b857609914875931eb41cac68e6a8d5bc0a6be24f0e2d55"
+        },
+        "candidate": {
+          "bytes": 95612,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim18.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim18-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim18-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim18-candidate.log",
+          "log_sha256": "be373c0c65d80b5a57cd23f227f841f1f2657b59f471894e1fbada52e6c21f6a",
+          "sha256": "337de4709dfe52954b857609914875931eb41cac68e6a8d5bc0a6be24f0e2d55"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim19",
+      "outputs": {
+        "baseline": {
+          "bytes": 73722,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim19.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim19-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim19-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim19-baseline.log",
+          "log_sha256": "978a7881265f55f0b83c942c5842a2812e55f9e457267e7e6ae3f923a36b1baa",
+          "sha256": "53d7c7ce8c8773eb297bda97f34aa351ae12bb27a143ccd6132b56619c696712"
+        },
+        "candidate": {
+          "bytes": 73722,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim19.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim19-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim19-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim19-candidate.log",
+          "log_sha256": "6884a49e00ec8a1e14348e7cdc37061230152521a80dc9d35f631bcc14db94a1",
+          "sha256": "53d7c7ce8c8773eb297bda97f34aa351ae12bb27a143ccd6132b56619c696712"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim20",
+      "outputs": {
+        "baseline": {
+          "bytes": 52707,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim20.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim20-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim20-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim20-baseline.log",
+          "log_sha256": "467b08866cf10f273ba35d5600db6042913dc46c813c210fb9118f84de1c5128",
+          "sha256": "739792a03916eec6e5e66c26c96f033f9b51c199a8e6c54665ed8539978d6e7f"
+        },
+        "candidate": {
+          "bytes": 52707,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim20.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim20-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim20-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim20-candidate.log",
+          "log_sha256": "ae0244fa3e9086995ae0f53f09ed9515a39bdf50c36a0165a82b0932fb55831b",
+          "sha256": "739792a03916eec6e5e66c26c96f033f9b51c199a8e6c54665ed8539978d6e7f"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim21",
+      "outputs": {
+        "baseline": {
+          "bytes": 75463,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim21.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim21-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim21-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim21-baseline.log",
+          "log_sha256": "8331212b53c485453b1986d7fb29e61e03c8ae3f6e6f3b303c5c0c62b539cfdc",
+          "sha256": "f906f71886ec6dd8734e821d8de197df6a7644a16e81c21c331a181baf77674d"
+        },
+        "candidate": {
+          "bytes": 75463,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim21.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim21-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim21-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim21-candidate.log",
+          "log_sha256": "d07c50fc0ec7be26469da32251cb38ed78ac015e4d4dbe9d61e237e2be3a79a0",
+          "sha256": "f906f71886ec6dd8734e821d8de197df6a7644a16e81c21c331a181baf77674d"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim22",
+      "outputs": {
+        "baseline": {
+          "bytes": 85452,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim22.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim22-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim22-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim22-baseline.log",
+          "log_sha256": "f48608ae2ab7cfa2901110a00349f344580de26f2b92a244f6e86382e0b958cb",
+          "sha256": "c700b8c7ba41852efb62e33598b74d8a7a2cba0f7eca9093e73c0f651833a5fe"
+        },
+        "candidate": {
+          "bytes": 85452,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim22.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim22-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim22-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim22-candidate.log",
+          "log_sha256": "cb7cf41cda8695a033806844f4254ad2ea65e94a29a5849d9787a458bc421695",
+          "sha256": "c700b8c7ba41852efb62e33598b74d8a7a2cba0f7eca9093e73c0f651833a5fe"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim23",
+      "outputs": {
+        "baseline": {
+          "bytes": 47071,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim23.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim23-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim23-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim23-baseline.log",
+          "log_sha256": "76f18cc33f06f6e552e2d5eb5d4105e02c71e55ab0bde9b6b5c163cbe320111d",
+          "sha256": "e00c48d1643b8097375ef5de19a0c4f379c83998f67f94bc12f39e5ed76bca28"
+        },
+        "candidate": {
+          "bytes": 47071,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim23.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim23-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim23-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim23-candidate.log",
+          "log_sha256": "729dd3f25337325b95de0fdc9c64f39f8a98a6e7fca0a723a54123c9f631ef6e",
+          "sha256": "e00c48d1643b8097375ef5de19a0c4f379c83998f67f94bc12f39e5ed76bca28"
+        }
+      }
+    },
+    {
+      "name": "kodak-kodim24",
+      "outputs": {
+        "baseline": {
+          "bytes": 97490,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim24.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim24-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim24-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim24-baseline.log",
+          "log_sha256": "9b22fff589b9d8c20adb26c4fdc99424c6c79e3fe232a76c7ce43fbc80f04891",
+          "sha256": "9887a21f66dfcce2532c544e6e570ebd98b2dcf516423470fee5468ad0044acb"
+        },
+        "candidate": {
+          "bytes": 97490,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim24.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim24-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim24-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/kodak-kodim24-candidate.log",
+          "log_sha256": "98b698ff91611162a234ca4f9129f121efdc921d3dfaef49ff2a8ae709de137e",
+          "sha256": "9887a21f66dfcce2532c544e6e570ebd98b2dcf516423470fee5468ad0044acb"
+        }
+      }
+    },
+    {
+      "name": "padded-stress-1080p",
+      "outputs": {
+        "baseline": {
+          "bytes": 404231,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/padded-stress-1080p.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/padded-stress-1080p-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/padded-stress-1080p-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/padded-stress-1080p-baseline.log",
+          "log_sha256": "6b6c2cf94589b94e59d81b0f31c61ec944486bd4a35bccd699f727512e80086b",
+          "sha256": "e933014b5a01eeb6bb3844594c34eb99d4935e3f928101d32eb71f02fb53f5ee"
+        },
+        "candidate": {
+          "bytes": 404231,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/padded-stress-1080p.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/padded-stress-1080p-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/padded-stress-1080p-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/padded-stress-1080p-candidate.log",
+          "log_sha256": "e278a8e499cb52252d5ddf64a71816b3a431eef35dd90f73040abdbfc661502a",
+          "sha256": "e933014b5a01eeb6bb3844594c34eb99d4935e3f928101d32eb71f02fb53f5ee"
+        }
+      }
+    },
+    {
+      "name": "padded-stress-4k",
+      "outputs": {
+        "baseline": {
+          "bytes": 1586302,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/padded-stress-4k.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/padded-stress-4k-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/padded-stress-4k-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/padded-stress-4k-baseline.log",
+          "log_sha256": "5521122e038e1c48157246208f8c540ab4716b9f1426d7362da3ca53bcae1281",
+          "sha256": "90dbc51b335272b90963682823d9a6fc07f02d180bc5039e2133023d8493e207"
+        },
+        "candidate": {
+          "bytes": 1586302,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/padded-stress-4k.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/padded-stress-4k-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/padded-stress-4k-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/padded-stress-4k-candidate.log",
+          "log_sha256": "94782bee46a48a13bc327880a7455e0f79353c115a5b80aa7212344e57f69240",
+          "sha256": "90dbc51b335272b90963682823d9a6fc07f02d180bc5039e2133023d8493e207"
+        }
+      }
+    },
+    {
+      "name": "effort-1",
+      "outputs": {
+        "baseline": {
+          "bytes": 73222,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "1",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-1-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-1-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-1-baseline.log",
+          "log_sha256": "809d27ba5de7dca4381e44e5681220c523508df21610426d1b6b177e9b1dc763",
+          "sha256": "15a12f048fac751185a5d0e47a950df016fa575a51abb35c1f24a883296a10d5"
+        },
+        "candidate": {
+          "bytes": 73222,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "1",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-1-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-1-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-1-candidate.log",
+          "log_sha256": "a1d2944cdaba3b59584989e0d1e6075365292bff5b8289cd265e260c6eec568d",
+          "sha256": "15a12f048fac751185a5d0e47a950df016fa575a51abb35c1f24a883296a10d5"
+        }
+      }
+    },
+    {
+      "name": "effort-2",
+      "outputs": {
+        "baseline": {
+          "bytes": 73222,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "2",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-2-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-2-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-2-baseline.log",
+          "log_sha256": "960b76ab6784aa5233ca76926c4cc03aef81489bd955baa901ee83335fa0acb3",
+          "sha256": "15a12f048fac751185a5d0e47a950df016fa575a51abb35c1f24a883296a10d5"
+        },
+        "candidate": {
+          "bytes": 73222,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "2",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-2-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-2-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-2-candidate.log",
+          "log_sha256": "fc3b5992a1a5e2480f28db4ffd4c03ff2b82ea77681121c31fa423c6270c6ee7",
+          "sha256": "15a12f048fac751185a5d0e47a950df016fa575a51abb35c1f24a883296a10d5"
+        }
+      }
+    },
+    {
+      "name": "effort-3",
+      "outputs": {
+        "baseline": {
+          "bytes": 73222,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "3",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-3-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-3-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-3-baseline.log",
+          "log_sha256": "de12c04fad47eb9b1fa224fd59e5f6fee3981ff7b8f23f8aa318ec863a8a3059",
+          "sha256": "15a12f048fac751185a5d0e47a950df016fa575a51abb35c1f24a883296a10d5"
+        },
+        "candidate": {
+          "bytes": 73222,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "3",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-3-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-3-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-3-candidate.log",
+          "log_sha256": "5750fe88c24c1453c04e94f0e2374ad3db1ab5d3c1b1706ee63c713ec5a58b1f",
+          "sha256": "15a12f048fac751185a5d0e47a950df016fa575a51abb35c1f24a883296a10d5"
+        }
+      }
+    },
+    {
+      "name": "effort-4",
+      "outputs": {
+        "baseline": {
+          "bytes": 74211,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "4",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-4-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-4-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-4-baseline.log",
+          "log_sha256": "415c324a679c854645886fc766b85f3f64891326f9a3f8b22410f856ad87f8fc",
+          "sha256": "c5c2eae369e482d0c918354b76244b8ad5e33a818b6a3f5574dc6aec25c344c8"
+        },
+        "candidate": {
+          "bytes": 74211,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "4",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-4-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-4-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-4-candidate.log",
+          "log_sha256": "7ea538066cf7672395b7ab69cd587cfdfb3d4b3997e676e43d9fd6e6b1db7427",
+          "sha256": "c5c2eae369e482d0c918354b76244b8ad5e33a818b6a3f5574dc6aec25c344c8"
+        }
+      }
+    },
+    {
+      "name": "effort-5",
+      "outputs": {
+        "baseline": {
+          "bytes": 66141,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "5",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-5-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-5-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-5-baseline.log",
+          "log_sha256": "ffb6bc59a856f976be3eac4a5b0790c204e9273f2d74d06842532faa310a2b1c",
+          "sha256": "3f1cf0450373dc096bc96db8ded192174057745ccc9b668470e45ab6442f3264"
+        },
+        "candidate": {
+          "bytes": 66141,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "5",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-5-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-5-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-5-candidate.log",
+          "log_sha256": "84502b8e96dfa7d8924f7dd474fee0f222fe6a1d46ea590891a649729b2d27d5",
+          "sha256": "3f1cf0450373dc096bc96db8ded192174057745ccc9b668470e45ab6442f3264"
+        }
+      }
+    },
+    {
+      "name": "effort-6",
+      "outputs": {
+        "baseline": {
+          "bytes": 66141,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "6",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-6-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-6-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-6-baseline.log",
+          "log_sha256": "6cd8072c1afad92f4c2c35f38d58ab799faf5ecde57a31fc0498b1e8ab334f06",
+          "sha256": "3f1cf0450373dc096bc96db8ded192174057745ccc9b668470e45ab6442f3264"
+        },
+        "candidate": {
+          "bytes": 66141,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "6",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-6-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-6-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-6-candidate.log",
+          "log_sha256": "8093cecaab267deaf98bbecfb33bc1438f56c8744bf536135a5bf84498e190dc",
+          "sha256": "3f1cf0450373dc096bc96db8ded192174057745ccc9b668470e45ab6442f3264"
+        }
+      }
+    },
+    {
+      "name": "effort-7",
+      "outputs": {
+        "baseline": {
+          "bytes": 65688,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-7-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-7-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-7-baseline.log",
+          "log_sha256": "8af72775e49d3bb6d584ccc88b91c09dfb0f0874520d5d08774ab6968d8b8768",
+          "sha256": "e789aa7155645159b71ead6cff8d7d5f83b43654fb961309444de5a69bd6e089"
+        },
+        "candidate": {
+          "bytes": 65688,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-7-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-7-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-7-candidate.log",
+          "log_sha256": "8dcdb37dfdb93fee803bb136a63e5cdcbcc2bbb762655e048080c1cc158678e1",
+          "sha256": "e789aa7155645159b71ead6cff8d7d5f83b43654fb961309444de5a69bd6e089"
+        }
+      }
+    },
+    {
+      "name": "effort-8",
+      "outputs": {
+        "baseline": {
+          "bytes": 65288,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "8",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-8-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-8-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-8-baseline.log",
+          "log_sha256": "7a6bc9934694e246b5796fcd134436c5ef80d75f076c3e283a3ff1a3f3811af8",
+          "sha256": "0c9f7dddc34fbb645a80825b29a5832349b258f03ef7472dc08175e487331b34"
+        },
+        "candidate": {
+          "bytes": 65288,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "8",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-8-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-8-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-8-candidate.log",
+          "log_sha256": "ad0b886e21ca2881fb130ef258a0d6e55ce798c5100ad62bb561b5a4413a3d88",
+          "sha256": "0c9f7dddc34fbb645a80825b29a5832349b258f03ef7472dc08175e487331b34"
+        }
+      }
+    },
+    {
+      "name": "effort-9",
+      "outputs": {
+        "baseline": {
+          "bytes": 65321,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "9",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-9-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-9-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-9-baseline.log",
+          "log_sha256": "2ce00b3a2b07895c35b598e7d74a4d5c0f676b1067456fc987ebc8bf1570a09f",
+          "sha256": "64c3cdf2d45fdfcceaaa08924cba6d291eca4e7e33429281df342beae775ceb9"
+        },
+        "candidate": {
+          "bytes": 65321,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "9",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-9-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-9-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-9-candidate.log",
+          "log_sha256": "9bb3edc1cbf004bdd5ae7fa793d0f1db89a854c7ab0b0e007f925050a18fc99d",
+          "sha256": "64c3cdf2d45fdfcceaaa08924cba6d291eca4e7e33429281df342beae775ceb9"
+        }
+      }
+    },
+    {
+      "name": "effort-10",
+      "outputs": {
+        "baseline": {
+          "bytes": 65251,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "10",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-10-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-10-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-10-baseline.log",
+          "log_sha256": "7d02629f28f63ed4932492b9eb66dafbc28e8a8f68bafa86f0615ac298a663cd",
+          "sha256": "67fac367ac60b6bd4d80848efa6905476bf48e90665f757a25a50df3adbba44f"
+        },
+        "candidate": {
+          "bytes": 65251,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "10",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-10-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-10-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/effort-10-candidate.log",
+          "log_sha256": "d85d2c9fa1ec18db65cdfd4ca1168436d7b23794b5a967ea5dd8a7642b1d233c",
+          "sha256": "67fac367ac60b6bd4d80848efa6905476bf48e90665f757a25a50df3adbba44f"
+        }
+      }
+    },
+    {
+      "name": "high-density",
+      "outputs": {
+        "baseline": {
+          "bytes": 65812,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--high-density",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/high-density-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/high-density-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/high-density-baseline.log",
+          "log_sha256": "fc69418dee7631d95167ac4c07d058663401e05e606fa9d484d6042abc395237",
+          "sha256": "c89296d9ee3c55a018dfe7afac344aabe82f3002050d86d138f3515d1574c562"
+        },
+        "candidate": {
+          "bytes": 65812,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--high-density",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/high-density-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/high-density-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/high-density-candidate.log",
+          "log_sha256": "8d9aba393a4f8d44954c15cc01c34f7380a3bee52e81e03839daa17de8958eab",
+          "sha256": "c89296d9ee3c55a018dfe7afac344aabe82f3002050d86d138f3515d1574c562"
+        }
+      }
+    },
+    {
+      "name": "maximum-compression",
+      "outputs": {
+        "baseline": {
+          "bytes": 66923,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "--maximum-compression",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/maximum-compression-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/maximum-compression-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/maximum-compression-baseline.log",
+          "log_sha256": "fc2f8f585eb2932aeb1a016393f4c6e69ba99b2a88dabd57554d4e16045f885f",
+          "sha256": "e8aefcd709931cb5c03d41f20f8fe8a6320943469880c0191c3266b08a0e349c"
+        },
+        "candidate": {
+          "bytes": 66923,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "--maximum-compression",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/maximum-compression-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/maximum-compression-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/maximum-compression-candidate.log",
+          "log_sha256": "b0563cfc7c063cd6e45ddcbd8563b595fc31d893e4e59646200c0faa88ae51d3",
+          "sha256": "e8aefcd709931cb5c03d41f20f8fe8a6320943469880c0191c3266b08a0e349c"
+        }
+      }
+    },
+    {
+      "name": "final-score",
+      "outputs": {
+        "baseline": {
+          "bytes": 65688,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "--collect-final-score",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/final-score-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/final-score-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/final-score-baseline.log",
+          "log_sha256": "3b6591e320fdd92243c5d55786cf39d4998ade197c419a61fb26a109c93d15e4",
+          "sha256": "e789aa7155645159b71ead6cff8d7d5f83b43654fb961309444de5a69bd6e089"
+        },
+        "candidate": {
+          "bytes": 65688,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "fully-resident",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "--collect-final-score",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/final-score-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/final-score-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/final-score-candidate.log",
+          "log_sha256": "cc3dd8974a48e77222373d83d7e11d0859c19bed8a8ed2166b8cdaa9482484dd",
+          "sha256": "e789aa7155645159b71ead6cff8d7d5f83b43654fb961309444de5a69bd6e089"
+        }
+      }
+    },
+    {
+      "name": "exact-coefficients",
+      "outputs": {
+        "baseline": {
+          "bytes": 65717,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "exact-coefficients",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/exact-coefficients-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/exact-coefficients-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/exact-coefficients-baseline.log",
+          "log_sha256": "539f3f0490cdf476e25a7c71b41371f6604c7b8bd90cb2e2f7e2221efe0ef9aa",
+          "sha256": "9c6e54ac5755c8a3df9ac43db48ee1b7230445ab97719d9587bddc8ba8f60a55"
+        },
+        "candidate": {
+          "bytes": 65717,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "exact-coefficients",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/exact-coefficients-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/exact-coefficients-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/exact-coefficients-candidate.log",
+          "log_sha256": "120ab3195ebeed437743ac6f826ffc9fe7a3d8bda7b545f4b6d1e0b9a621190f",
+          "sha256": "9c6e54ac5755c8a3df9ac43db48ee1b7230445ab97719d9587bddc8ba8f60a55"
+        }
+      }
+    },
+    {
+      "name": "throughput",
+      "outputs": {
+        "baseline": {
+          "bytes": 65688,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "throughput",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/throughput-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/throughput-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/throughput-baseline.log",
+          "log_sha256": "7fa17dd36a3cf201eeb8877fc37cb8906cbfee88c27b1378afc9eac2e3250c97",
+          "sha256": "e789aa7155645159b71ead6cff8d7d5f83b43654fb961309444de5a69bd6e089"
+        },
+        "candidate": {
+          "bytes": 65688,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "throughput",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/throughput-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/throughput-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/throughput-candidate.log",
+          "log_sha256": "c817709952b7908f743ef0d5d942ea7ee1f5c250ce2bcd591b08959bde6dd24b",
+          "sha256": "e789aa7155645159b71ead6cff8d7d5f83b43654fb961309444de5a69bd6e089"
+        }
+      }
+    },
+    {
+      "name": "maximum-throughput",
+      "outputs": {
+        "baseline": {
+          "bytes": 70147,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "maximum-throughput",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/maximum-throughput-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/maximum-throughput-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/maximum-throughput-baseline.log",
+          "log_sha256": "2aa9b29f20aeb359778022c3e03b7a3527471822a81ec2efaa0e010ed0bb12bd",
+          "sha256": "ffa204cbb400d51ac77bbdd2fc6988fffa206fd05f3a204dc8c7f18dd2335ff2"
+        },
+        "candidate": {
+          "bytes": 70147,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--metal-aq",
+            "maximum-throughput",
+            "--distance",
+            "1.2",
+            "--effort",
+            "7",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/maximum-throughput-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/maximum-throughput-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/maximum-throughput-candidate.log",
+          "log_sha256": "913515d3df2cf7ab025011efd9618b430a454cf7208b9cb56fbaebce39e6cbc0",
+          "sha256": "ffa204cbb400d51ac77bbdd2fc6988fffa206fd05f3a204dc8c7f18dd2335ff2"
+        }
+      }
+    },
+    {
+      "name": "target",
+      "outputs": {
+        "baseline": {
+          "bytes": 170,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "metal",
+            "--target-bytes",
+            "280",
+            "--size-tolerance",
+            "0.1",
+            "--max-attempts",
+            "8",
+            "/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/testdata/codestream_sample.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/target-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/target-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/target-baseline.log",
+          "log_sha256": "24805f4487a4f5d345b3e0acd108bd677359ce3bfe7aaacca174779e62a01fd7",
+          "sha256": "279bb099f0fc3d9f8eb1b6f4502d471ad3bc60436bd39ab02e4b6725cf221441"
+        },
+        "candidate": {
+          "bytes": 170,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "metal",
+            "--target-bytes",
+            "280",
+            "--size-tolerance",
+            "0.1",
+            "--max-attempts",
+            "8",
+            "/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/testdata/codestream_sample.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/target-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/target-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/target-candidate.log",
+          "log_sha256": "da9fc02500dee1bc3cbee5556694c560b26e25e629b76f91338910811639b782",
+          "sha256": "279bb099f0fc3d9f8eb1b6f4502d471ad3bc60436bd39ab02e4b6725cf221441"
+        }
+      }
+    },
+    {
+      "name": "maximum-error",
+      "outputs": {
+        "baseline": {
+          "bytes": 157228,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli/gjxl_encode",
+            "--backend",
+            "cpu",
+            "--maximum-error",
+            "0.05",
+            "0.05",
+            "0.05",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/maximum-error-baseline.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/maximum-error-baseline.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/maximum-error-baseline.log",
+          "log_sha256": "cd64f5fbbb03be33a3b90676a16a32075897601e00fe0dbbb38f577cd6419791",
+          "sha256": "9d81ab1f4b9958fe78d2a8a4ff5d3ac3da27454d5e651c594d43d808bbe255a9"
+        },
+        "candidate": {
+          "bytes": 157228,
+          "command": [
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/gjxl_encode",
+            "--backend",
+            "cpu",
+            "--maximum-error",
+            "0.05",
+            "0.05",
+            "0.05",
+            "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical/kodak-kodim17.pfm",
+            "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/maximum-error-candidate.jxl"
+          ],
+          "file": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/maximum-error-candidate.jxl",
+          "log": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/maximum-error-candidate.log",
+          "log_sha256": "2b373f1b37f8c0048cb33392bc6e52d492edbc7f320101c6807ac58cc4890144",
+          "sha256": "9d81ab1f4b9958fe78d2a8a4ff5d3ac3da27454d5e651c594d43d808bbe255a9"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "candidate": "short-final",
+  "at": "2026-09-22T02:19:22.218422+00:00",
+  "metallib_sha256": "7dbba90dc0af1f3bf1f94ef6a33645243ad13db1180c0004d572e887503abe1b",
+  "frozen_shader_byte_equal": true,
+  "source_sha256": {
+    "butteraugli.metal": "f8b112c681668da4594e0f06991f3fa478b76c6bafcc6ea8a589db2acc1a9929",
+    "metal_butteraugli.cpp": "adc574a05c76e0911d3270673a4be595feaf13252e12f6e854053a1522d22494",
+    "metal_backend_internal.h": "a4568836714dbc3c03b027920feec2ce6ca25358b5c3a81f1bbc1497ecea8728"
+  }
+}

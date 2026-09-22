@@ -1,0 +1,16 @@
+[
+  "python3",
+  "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/run_integrated_phase12.py",
+  "--baseline",
+  "baseline-v2",
+  "--candidate",
+  "baseline-v2",
+  "--output",
+  "control-wall-short-final",
+  "--pairs",
+  "7",
+  "--warmups",
+  "3",
+  "--samples",
+  "7"
+]

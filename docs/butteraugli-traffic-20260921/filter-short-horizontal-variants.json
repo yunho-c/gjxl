@@ -1,0 +1,146 @@
+[
+  {
+    "name": "gjxl_ba_short_horizontal_r3_w16_h64_p4_q2",
+    "width": 16,
+    "height": 64,
+    "threads_y": 16,
+    "radius": 3,
+    "horizontal_outputs": 2
+  },
+  {
+    "name": "gjxl_ba_short_horizontal_r3_w16_h64_p4_q4",
+    "width": 16,
+    "height": 64,
+    "threads_y": 16,
+    "radius": 3,
+    "horizontal_outputs": 4
+  },
+  {
+    "name": "gjxl_ba_short_horizontal_r3_w16_h64_p4_q8",
+    "width": 16,
+    "height": 64,
+    "threads_y": 16,
+    "radius": 3,
+    "horizontal_outputs": 8
+  },
+  {
+    "name": "gjxl_ba_short_horizontal_r3_w32_h32_p4_q2",
+    "width": 32,
+    "height": 32,
+    "threads_y": 8,
+    "radius": 3,
+    "horizontal_outputs": 2
+  },
+  {
+    "name": "gjxl_ba_short_horizontal_r3_w32_h32_p4_q4",
+    "width": 32,
+    "height": 32,
+    "threads_y": 8,
+    "radius": 3,
+    "horizontal_outputs": 4
+  },
+  {
+    "name": "gjxl_ba_short_horizontal_r3_w32_h32_p4_q8",
+    "width": 32,
+    "height": 32,
+    "threads_y": 8,
+    "radius": 3,
+    "horizontal_outputs": 8
+  },
+  {
+    "name": "gjxl_ba_short_horizontal_r6_w16_h64_p4_q2",
+    "width": 16,
+    "height": 64,
+    "threads_y": 16,
+    "radius": 6,
+    "horizontal_outputs": 2
+  },
+  {
+    "name": "gjxl_ba_short_horizontal_r6_w16_h64_p4_q4",
+    "width": 16,
+    "height": 64,
+    "threads_y": 16,
+    "radius": 6,
+    "horizontal_outputs": 4
+  },
+  {
+    "name": "gjxl_ba_short_horizontal_r6_w16_h64_p4_q8",
+    "width": 16,
+    "height": 64,
+    "threads_y": 16,
+    "radius": 6,
+    "horizontal_outputs": 8
+  },
+  {
+    "name": "gjxl_ba_short_horizontal_r6_w16_h64_p8_q2",
+    "width": 16,
+    "height": 64,
+    "threads_y": 8,
+    "radius": 6,
+    "horizontal_outputs": 2
+  },
+  {
+    "name": "gjxl_ba_short_horizontal_r6_w16_h64_p8_q4",
+    "width": 16,
+    "height": 64,
+    "threads_y": 8,
+    "radius": 6,
+    "horizontal_outputs": 4
+  },
+  {
+    "name": "gjxl_ba_short_horizontal_r6_w16_h64_p8_q8",
+    "width": 16,
+    "height": 64,
+    "threads_y": 8,
+    "radius": 6,
+    "horizontal_outputs": 8
+  },
+  {
+    "name": "gjxl_ba_short_horizontal_r7_w16_h64_p4_q2",
+    "width": 16,
+    "height": 64,
+    "threads_y": 16,
+    "radius": 7,
+    "horizontal_outputs": 2
+  },
+  {
+    "name": "gjxl_ba_short_horizontal_r7_w16_h64_p4_q4",
+    "width": 16,
+    "height": 64,
+    "threads_y": 16,
+    "radius": 7,
+    "horizontal_outputs": 4
+  },
+  {
+    "name": "gjxl_ba_short_horizontal_r7_w16_h64_p4_q8",
+    "width": 16,
+    "height": 64,
+    "threads_y": 16,
+    "radius": 7,
+    "horizontal_outputs": 8
+  },
+  {
+    "name": "gjxl_ba_short_horizontal_r7_w16_h64_p8_q2",
+    "width": 16,
+    "height": 64,
+    "threads_y": 8,
+    "radius": 7,
+    "horizontal_outputs": 2
+  },
+  {
+    "name": "gjxl_ba_short_horizontal_r7_w16_h64_p8_q4",
+    "width": 16,
+    "height": 64,
+    "threads_y": 8,
+    "radius": 7,
+    "horizontal_outputs": 4
+  },
+  {
+    "name": "gjxl_ba_short_horizontal_r7_w16_h64_p8_q8",
+    "width": 16,
+    "height": 64,
+    "threads_y": 8,
+    "radius": 7,
+    "horizontal_outputs": 8
+  }
+]

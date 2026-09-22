@@ -1,0 +1,75 @@
+{
+  "files": {
+    "reuse_closure_screen": "6289a4ff6788aff7338521cce43ddb272ad9da1081b277a30de16f233fba9111",
+    "reuse_closure_screen.cpp": "6adf205b82767e61ef914ab76cfa0345bde2913c78ce27ea26f985da1207ab25",
+    "baseline/gjxl.metallib": "3a1f0d488e799bc7d074800fcf5d8630c7422497c3ea48db8c8c8c89e733dc16",
+    "filter-reuse-closure.metallib": "8571412f512a4f46ff7d72db67bd119675a40c3336daa360bfbabc1c498f1ffc",
+    "filter-reuse-closure.metal": "f29558409f308280d857afd35ab1df2543337086f4db6722405be5b4f9f2cdc3",
+    "run_reuse_closure_screen.py": "6a1241d7045a9f75075c06e6b598c938c92f53f89425dc57416ca73f013ccf02"
+  },
+  "variants": [
+    {
+      "name": "baseline_control",
+      "width": 16,
+      "height": 64,
+      "threads_y": 64
+    },
+    {
+      "name": "gjxl_ba_reuse_close_h64_s1_b0",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16
+    },
+    {
+      "name": "gjxl_ba_reuse_close_h96_s1_b0",
+      "width": 16,
+      "height": 96,
+      "threads_y": 24
+    },
+    {
+      "name": "gjxl_ba_reuse_close_h64_s2_b0",
+      "width": 16,
+      "height": 128,
+      "threads_y": 16
+    },
+    {
+      "name": "gjxl_ba_reuse_close_h64_s4_b0",
+      "width": 16,
+      "height": 256,
+      "threads_y": 16
+    },
+    {
+      "name": "gjxl_ba_reuse_close_h96_s2_b0",
+      "width": 16,
+      "height": 192,
+      "threads_y": 24
+    },
+    {
+      "name": "gjxl_ba_reuse_close_h96_s4_b0",
+      "width": 16,
+      "height": 384,
+      "threads_y": 24
+    },
+    {
+      "name": "gjxl_ba_reuse_close_h64_s1_b256",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16
+    },
+    {
+      "name": "gjxl_ba_reuse_close_h96_s1_b384",
+      "width": 16,
+      "height": 96,
+      "threads_y": 24
+    }
+  ],
+  "extents": [
+    null
+  ],
+  "timing": false,
+  "pairs": 5,
+  "warmups": 3,
+  "samples": 5,
+  "repeats_per_submission": 3,
+  "boundary": "GPU command buffer duration per repeated kernel dispatch; not full-encode latency"
+}

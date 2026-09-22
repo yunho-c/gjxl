@@ -1,0 +1,42 @@
+{
+  "created_at": "2026-09-21T22:20:37.692618+00:00",
+  "study": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921",
+  "worktree": "/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921",
+  "base_revision": "4f3e4147c8bde16b0b49523adbf10ddd8043585f",
+  "main_revision": "b1a7373beff4c0370494c2f9584bcb1510491357",
+  "scope": "Butteraugli filtering and reduction traffic on large high-effort images",
+  "correctness": "Existing numerical tolerances and encoder quality contracts remain in force. Output-equivalent transformations first; any numerical changes require independent decoded quality/rate validation.",
+  "status": "complete",
+  "stopping_rule": "A conclusion of empirical exhaustion requires a source-grounded opportunity inventory, measured candidate families or explicit evidence-based exclusions, fixed representative large-image high-effort qualification, baseline controls, correctness gates, and a final audit of remaining hypotheses. No universal mathematical optimality claim.",
+  "completed_at": "2026-09-22T02:27:29.344422+00:00",
+  "closure": {
+    "stopping_preference": "User explicitly selected: Use a practical stopping point (Recommended).",
+    "conclusion": "Empirical practical plateau for tested exact-output Butteraugli filtering and reduction on this M4 Pro; no universal theoretical hardware optimum claimed.",
+    "confirmed_original_baseline_candidate": "short-bundle",
+    "confirmed_original_baseline_change_percent": {
+      "alpine24-e7": -12.696810537706327,
+      "forest48-e10": -10.714739680766227
+    },
+    "preserved_final_prototype": "short-final",
+    "final_incremental_parent": "short-bundle",
+    "final_incremental_change_percent": {
+      "alpine24-e7": -1.2195485596095068,
+      "forest48-e10": -0.2962147263822046
+    },
+    "qualification": "Both candidates independently pass seven focused/extended tests, 56 exact-byte comparisons and three identical finite decoded pairs. Final prototype restoration re-passes seven tests and matches frozen shader.",
+    "artifact_audit": {
+      "path": "short-artifact-audit.json",
+      "cohorts": 23,
+      "pairs": 256,
+      "files_hashed": 3356
+    },
+    "pending_measurement": false,
+    "remaining_limits": [
+      "Small and workload-specific gains remain possible.",
+      "Final incremental cohorts are not combined into a synthetic original-baseline total.",
+      "Focused M4 Pro qualification only; full-suite inherited issues remain.",
+      "No production integration, commit or remote change."
+    ],
+    "report": "REPORT.md"
+  }
+}

@@ -1,0 +1,19 @@
+Test project /Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/build/traffic
+    Start  85: resident_workflow_legacy_dc_tree
+1/7 Test  #85: resident_workflow_legacy_dc_tree .......   Passed   11.85 sec
+    Start 112: metal_butteraugli_operation_contract
+2/7 Test #112: metal_butteraugli_operation_contract ...   Passed    0.67 sec
+    Start 113: metal_butteraugli
+3/7 Test #113: metal_butteraugli ......................   Passed    2.00 sec
+    Start 114: metal_aq_evaluation
+4/7 Test #114: metal_aq_evaluation ....................   Passed    6.39 sec
+    Start 115: adaptive_quantization_gpu_policy
+5/7 Test #115: adaptive_quantization_gpu_policy .......   Passed    0.65 sec
+    Start 132: resident_workflow_storage_plan
+6/7 Test #132: resident_workflow_storage_plan .........   Passed   12.10 sec
+    Start 135: metal_cache_admission
+7/7 Test #135: metal_cache_admission ..................   Passed    1.43 sec
+
+100% tests passed, 0 tests failed out of 7
+
+Total Test time (real) =  35.08 sec

@@ -1,0 +1,50 @@
+[
+  {
+    "name": "gjxl_ba_reuse_close_h64_s1_b0",
+    "width": 16,
+    "height": 64,
+    "threads_y": 16
+  },
+  {
+    "name": "gjxl_ba_reuse_close_h96_s1_b0",
+    "width": 16,
+    "height": 96,
+    "threads_y": 24
+  },
+  {
+    "name": "gjxl_ba_reuse_close_h64_s2_b0",
+    "width": 16,
+    "height": 128,
+    "threads_y": 16
+  },
+  {
+    "name": "gjxl_ba_reuse_close_h64_s4_b0",
+    "width": 16,
+    "height": 256,
+    "threads_y": 16
+  },
+  {
+    "name": "gjxl_ba_reuse_close_h96_s2_b0",
+    "width": 16,
+    "height": 192,
+    "threads_y": 24
+  },
+  {
+    "name": "gjxl_ba_reuse_close_h96_s4_b0",
+    "width": 16,
+    "height": 384,
+    "threads_y": 24
+  },
+  {
+    "name": "gjxl_ba_reuse_close_h64_s1_b256",
+    "width": 16,
+    "height": 64,
+    "threads_y": 16
+  },
+  {
+    "name": "gjxl_ba_reuse_close_h96_s1_b384",
+    "width": 16,
+    "height": 96,
+    "threads_y": 24
+  }
+]

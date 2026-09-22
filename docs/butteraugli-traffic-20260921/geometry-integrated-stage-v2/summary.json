@@ -1,0 +1,76 @@
+{
+  "alpine24-e7": {
+    "complete_call_ms": {
+      "median_change_percent": 0.19208020551630955,
+      "wins": 0,
+      "pairs": 3,
+      "baseline_ms": 459.768875,
+      "candidate_ms": 460.652
+    },
+    "gpu_total_ms": {
+      "median_change_percent": -1.3157961549403407,
+      "wins": 2,
+      "pairs": 3,
+      "baseline_ms": 336.172209,
+      "candidate_ms": 341.315031
+    },
+    "low_medium_ms": {
+      "median_change_percent": -9.689686952585674,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 39.628917,
+      "candidate_ms": 36.379376
+    },
+    "other_gpu_ms": {
+      "median_change_percent": -0.22374675735372662,
+      "wins": 2,
+      "pairs": 3,
+      "baseline_ms": 296.543292,
+      "candidate_ms": 303.80349
+    },
+    "resident_reduction_ms": {
+      "median_change_percent": -0.23645341910069062,
+      "wins": 2,
+      "pairs": 3,
+      "baseline_ms": 18.149875,
+      "candidate_ms": 18.331708
+    }
+  },
+  "forest48-e10": {
+    "complete_call_ms": {
+      "median_change_percent": -3.917711530446355,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 1932.118292,
+      "candidate_ms": 1868.599833
+    },
+    "gpu_total_ms": {
+      "median_change_percent": -4.049050519937514,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 1302.222804,
+      "candidate_ms": 1255.326913
+    },
+    "low_medium_ms": {
+      "median_change_percent": -11.188583259766405,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 137.771375,
+      "candidate_ms": 122.487626
+    },
+    "other_gpu_ms": {
+      "median_change_percent": -3.1234923352042143,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 1166.208698,
+      "candidate_ms": 1132.839287
+    },
+    "resident_reduction_ms": {
+      "median_change_percent": -6.633612247282383,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 94.371042,
+      "candidate_ms": 89.103208
+    }
+  }
+}

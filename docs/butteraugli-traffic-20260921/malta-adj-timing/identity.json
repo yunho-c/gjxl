@@ -1,0 +1,76 @@
+{
+  "files": {
+    "malta_adj_screen": "b57b3107ff757803a97e55be18b281ecc0673cf472d0ee993bdb174753b11e96",
+    "malta_adj_screen.cpp": "bad90eda28f2fb7efad95dd6ccc5b0ce6451034166568d5939873fcc4e8e1040",
+    "baseline/gjxl.metallib": "3a1f0d488e799bc7d074800fcf5d8630c7422497c3ea48db8c8c8c89e733dc16",
+    "filter-malta-adj.metallib": "151581d372d731e14da760ba9190586866be913354b8041118ec3c53d81cf951",
+    "filter-malta-adj.metal": "0a3cfd4e7496f9a9ad98f9731b862b90c7176dea5d33987f4fa15cbb0754826f",
+    "run_malta_adj_screen.py": "c1545935d4b55d4a1ef0c8ca20a5c3e275a020c03477fa57166a0f1c49f8091f"
+  },
+  "variants": [
+    {
+      "name": "baseline_control",
+      "width": 32,
+      "height": 8,
+      "threads_y": 8
+    },
+    {
+      "name": "gjxl_ba_malta_adj_w16_h32_p2",
+      "width": 16,
+      "height": 32,
+      "threads_y": 16
+    },
+    {
+      "name": "gjxl_ba_malta_adj_w16_h64_p4",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16
+    },
+    {
+      "name": "gjxl_ba_malta_adj_w32_h16_p2",
+      "width": 32,
+      "height": 16,
+      "threads_y": 8
+    },
+    {
+      "name": "gjxl_ba_malta_adj_w32_h32_p2",
+      "width": 32,
+      "height": 32,
+      "threads_y": 16
+    },
+    {
+      "name": "gjxl_ba_malta_adj_w32_h32_p4",
+      "width": 32,
+      "height": 32,
+      "threads_y": 8
+    },
+    {
+      "name": "gjxl_ba_malta_adj_w32_h64_p4",
+      "width": 32,
+      "height": 64,
+      "threads_y": 16
+    },
+    {
+      "name": "gjxl_ba_malta_adj_w64_h16_p2",
+      "width": 64,
+      "height": 16,
+      "threads_y": 8
+    },
+    {
+      "name": "gjxl_ba_malta_adj_w64_h32_p4",
+      "width": 64,
+      "height": 32,
+      "threads_y": 8
+    }
+  ],
+  "extents": [
+    "3839x2159",
+    "6000x4000"
+  ],
+  "timing": true,
+  "pairs": 5,
+  "warmups": 3,
+  "samples": 5,
+  "repeats_per_submission": 3,
+  "boundary": "GPU command buffer duration per repeated kernel dispatch; not full-encode latency"
+}

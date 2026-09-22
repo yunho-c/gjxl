@@ -1,0 +1,98 @@
+{
+  "files": {
+    "short_reuse_screen": "038d16d32443d27012b6d5cd3c4cfe5d12c30e0e6724f55f3bed8739c290d53a",
+    "short_reuse_screen.cpp": "5c96fecc72cc01bc91a08958a6e8d1e689e64dee7c3e4694f0683af5e6ec6fe8",
+    "baseline/gjxl.metallib": "3a1f0d488e799bc7d074800fcf5d8630c7422497c3ea48db8c8c8c89e733dc16",
+    "filter-short-reuse.metallib": "caa3821566046a459c70105a446bd78c197fc29ffd8a6b85ea6bea9b21695ef5",
+    "filter-short-reuse.metal": "8dbecd9939965418150098bb352673462a568ee20fb6b7c6150d6880c9edf4c7",
+    "run_short_reuse_screen.py": "e222a697f902363bb12d53501a4fa28a3b431792b13c7ab48dee474fa98f4a5c"
+  },
+  "variants": [
+    {
+      "name": "baseline_control",
+      "width": 0,
+      "height": 0,
+      "threads_y": 0,
+      "radius": 6
+    },
+    {
+      "name": "gjxl_ba_short_reuse_r3_w16_h64_p2",
+      "width": 16,
+      "height": 64,
+      "threads_y": 32,
+      "radius": 3
+    },
+    {
+      "name": "gjxl_ba_short_reuse_r3_w16_h64_p4",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 3
+    },
+    {
+      "name": "gjxl_ba_short_reuse_r6_w16_h64_p2",
+      "width": 16,
+      "height": 64,
+      "threads_y": 32,
+      "radius": 6
+    },
+    {
+      "name": "gjxl_ba_short_reuse_r6_w16_h64_p4",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 6
+    },
+    {
+      "name": "gjxl_ba_short_reuse_r6_w16_h128_p2",
+      "width": 16,
+      "height": 128,
+      "threads_y": 64,
+      "radius": 6
+    },
+    {
+      "name": "gjxl_ba_short_reuse_r6_w16_h128_p4",
+      "width": 16,
+      "height": 128,
+      "threads_y": 32,
+      "radius": 6
+    },
+    {
+      "name": "gjxl_ba_short_reuse_r7_w16_h64_p2",
+      "width": 16,
+      "height": 64,
+      "threads_y": 32,
+      "radius": 7
+    },
+    {
+      "name": "gjxl_ba_short_reuse_r7_w16_h64_p4",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16,
+      "radius": 7
+    },
+    {
+      "name": "gjxl_ba_short_reuse_r7_w16_h128_p2",
+      "width": 16,
+      "height": 128,
+      "threads_y": 64,
+      "radius": 7
+    },
+    {
+      "name": "gjxl_ba_short_reuse_r7_w16_h128_p4",
+      "width": 16,
+      "height": 128,
+      "threads_y": 32,
+      "radius": 7
+    }
+  ],
+  "extents": [
+    null
+  ],
+  "timing": false,
+  "pairs": 5,
+  "warmups": 3,
+  "samples": 5,
+  "repeats_per_submission": 3,
+  "boundary": "GPU command buffer duration per repeated kernel dispatch; not full-encode latency"
+}

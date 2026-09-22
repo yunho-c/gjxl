@@ -1,0 +1,24 @@
+{
+  "source_base": "4f3e4147c8bde16b0b49523adbf10ddd8043585f",
+  "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-source",
+  "scope": "M4 Pro experiment",
+  "created_at": "2026-09-22T01:19:35.664470+00:00",
+  "files": {
+    "build-probe-command.json": "0b3d391e8114de6a59926ffdc715037c6180d029326e439b6a7fafe06fbbd756",
+    "source.patch": "4a5df322f6d4227cb2535cdc31a447bc4912ac055a5231db719287ab3c4c2f7a",
+    "build-command.json": "f4e1008a19d6bc8a16d24e7be818c16f961cbf798b0a605a2a73a40379707e4b",
+    "gjxl.metallib": "d8b462b17d7b9e470c2944760b64020928f5f37a92a8e234dbc05dd9317b4c63",
+    "build-protocol.py": "f36a45bda4d64623b8a0035924b5f4e458b1797f5d04643163739347899bb647",
+    "metal_butteraugli.cpp": "a38ff5850c3e7f46f25dfcb564633542499f9c0ca4974df501533ca7e0d66216",
+    "butteraugli.metal": "9a6986d5629606f6c1feeeee68637909c7034ee07d764eae3894a62deff3c6fa",
+    "gjxl_encode": "de4499b26167bec04414f7dedf3bb284f7ba880c6c5e7ebaaf4fdf5f304ba1fc",
+    "tests.log": "ec5fd4f23c3a7283d393d5cf80030cf27b6db73daf57fee09a6ea41940936f7b",
+    "metal_backend_internal.h": "a4568836714dbc3c03b027920feec2ce6ca25358b5c3a81f1bbc1497ecea8728",
+    "encode_probe.cpp": "2ef7d22048819fabbee39880a283f61616f49b6ece3c7e4f04c278020974bcdf",
+    "encode_probe": "7de7975de837ba7a4c45ed68bc8200ac8b6379627b3cbbae9f0fa795989322f5",
+    "build-probe.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "test-command.json": "cd3f68a7490a0366c8ae534c594e9bf6ac1bcac68e0b3e1ae042f90b5223f5fc",
+    "build.log": "19177d1836b0dacbd60dd6adbd9c92ea4295b69dcd7cebb1de4778f108194f33"
+  },
+  "test_returncode": 0
+}

@@ -1,0 +1,32 @@
+{
+  "protocol_sha256": "2f204a49a42801d1406e28ddbb94c31c1a0afe2a096649a626cd37ac9e435f17",
+  "binary_sha256": {
+    "baseline": "6e554da27ceec224207f72b628641e7bb71450f77ab957cb1ab3522ff0478693",
+    "candidate": "dac091040537765a15de66cfdd805612cd48d5e9424f2d2f9e98f27e696cd908"
+  },
+  "binaries": {
+    "baseline": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/encode_probe",
+    "candidate": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/gjxl_ba_geometry_w16_h128_t64/encode_probe"
+  },
+  "jobs": {
+    "alpine24-e7": [
+      "unsplash/alpine_lake/24mp.pfm",
+      7,
+      1.9
+    ],
+    "forest48-e10": [
+      "unsplash/forest_stream/48mp.pfm",
+      10,
+      1.9
+    ]
+  },
+  "input_sha256": {
+    "alpine24-e7": "1d15d26a54e295f964bedd297556d72a1dd8db67d98c0514f8e5ad10981d19d4",
+    "forest48-e10": "c7d6f149977ae44390eb34de6f531926bfa6537fa12fa82d20d1fdccbdb500d8"
+  },
+  "pairs": 3,
+  "warmups": 2,
+  "samples": 3,
+  "profile": false,
+  "cpu_threads": 8
+}

@@ -1,0 +1,68 @@
+{
+  "protocol_sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c",
+  "binary_sha256": {
+    "baseline": "7de7975de837ba7a4c45ed68bc8200ac8b6379627b3cbbae9f0fa795989322f5",
+    "candidate": "2d27f0dbf2888baa39d4d67f3b34816d90c86a1ad6ae399c0854d896f419bd63"
+  },
+  "binaries": {
+    "baseline": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/encode_probe",
+    "candidate": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-final/encode_probe"
+  },
+  "jobs": {
+    "alpine24-e7": [
+      "unsplash/alpine_lake/24mp.pfm",
+      7,
+      1.9
+    ],
+    "forest48-e10": [
+      "unsplash/forest_stream/48mp.pfm",
+      10,
+      1.9
+    ],
+    "campus12-e7": [
+      "unsplash/campus_interior/12mp.pfm",
+      7,
+      1.9
+    ],
+    "alpine12-e10-d08": [
+      "unsplash/alpine_lake/12mp.pfm",
+      10,
+      0.8
+    ],
+    "forest24-e7-d08": [
+      "unsplash/forest_stream/24mp.pfm",
+      7,
+      0.8
+    ],
+    "campus48-e10-d08": [
+      "unsplash/campus_interior/48mp.pfm",
+      10,
+      0.8
+    ],
+    "kodak01-e7": [
+      "kodak/01.pfm",
+      7,
+      1.9
+    ],
+    "kodak17-e10-d08": [
+      "kodak/17.pfm",
+      10,
+      0.8
+    ]
+  },
+  "input_sha256": {
+    "alpine24-e7": "1d15d26a54e295f964bedd297556d72a1dd8db67d98c0514f8e5ad10981d19d4",
+    "forest48-e10": "c7d6f149977ae44390eb34de6f531926bfa6537fa12fa82d20d1fdccbdb500d8",
+    "campus12-e7": "d64dc822ae9900fd3a0c8249ac62b1555b2c3da3389e62444bf7e8a3ec53e4e0",
+    "alpine12-e10-d08": "ae6bcc2219027ccced998fe41cdbd9bb0401eedcb36674eb93be886ff91b1404",
+    "forest24-e7-d08": "413ddef64b8f4e83737614f9ac78c40fde34ff225bbbd26a47ad76bc588138e1",
+    "campus48-e10-d08": "bef0043c18741282181da45cdba327eded1ac649e74877a507331b3aba18ea46",
+    "kodak01-e7": "85de56c3dbb999e135db21f4944a7d1e9ba0307d0499946721aa021fc0bfeb96",
+    "kodak17-e10-d08": "82aee270c7082db68f4dd7672562d3b75078d06c13b1bcddaeaa1d74b1e2d821"
+  },
+  "pairs": 3,
+  "warmups": 2,
+  "samples": 3,
+  "profile": false,
+  "cpu_threads": 8
+}

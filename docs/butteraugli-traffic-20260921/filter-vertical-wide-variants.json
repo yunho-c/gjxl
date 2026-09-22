@@ -1,0 +1,26 @@
+[
+  {
+    "name": "gjxl_ba_vertical_wide_o2_p4",
+    "width": 16,
+    "height": 64,
+    "threads_y": 16
+  },
+  {
+    "name": "gjxl_ba_vertical_wide_o2_p8",
+    "width": 16,
+    "height": 64,
+    "threads_y": 8
+  },
+  {
+    "name": "gjxl_ba_vertical_wide_o4_p4",
+    "width": 16,
+    "height": 64,
+    "threads_y": 16
+  },
+  {
+    "name": "gjxl_ba_vertical_wide_o4_p8",
+    "width": 16,
+    "height": 64,
+    "threads_y": 8
+  }
+]

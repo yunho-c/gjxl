@@ -1,0 +1,6 @@
+# Preserve recorded capture/export bytes, including CSV line endings.
+* -text
+# Preserve the unmodified generated SVG for its recorded hash.
+performance-budget.svg whitespace=-blank-at-eol
+# CSV exports use CRLF; preserve and recognize that line terminator.
+*.csv whitespace=cr-at-eol

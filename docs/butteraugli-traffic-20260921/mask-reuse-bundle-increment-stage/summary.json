@@ -1,0 +1,258 @@
+{
+  "alpine24-e7": {
+    "complete_call_ms": {
+      "median_change_percent": -1.2887812003881671,
+      "wins": 2,
+      "pairs": 3,
+      "baseline_ms": 424.939625,
+      "candidate_ms": 420.423542
+    },
+    "gpu_total_ms": {
+      "median_change_percent": -1.0176804247952087,
+      "wins": 2,
+      "pairs": 3,
+      "baseline_ms": 306.529626,
+      "candidate_ms": 303.949836
+    },
+    "low_medium_ms": {
+      "median_change_percent": 3.2818938141353726,
+      "wins": 0,
+      "pairs": 3,
+      "baseline_ms": 28.57725,
+      "candidate_ms": 29.606543
+    },
+    "other_gpu_ms": {
+      "median_change_percent": -1.4597345985630228,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 277.952376,
+      "candidate_ms": 274.272587
+    },
+    "resident_reduction_ms": {
+      "median_change_percent": -1.2979207452558539,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 7.222292,
+      "candidate_ms": 7.142041
+    },
+    "mask_main_ms": {
+      "median_change_percent": -51.03835997740666,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 4.972125,
+      "candidate_ms": 2.432333
+    },
+    "mask_main_and_reduction_ms": {
+      "median_change_percent": -21.644280291791574,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 12.191876,
+      "candidate_ms": 9.573208
+    },
+    "affected_filter_reduction_ms": {
+      "median_change_percent": 2.3463284136707507,
+      "wins": 0,
+      "pairs": 3,
+      "baseline_ms": 35.79175,
+      "candidate_ms": 36.726168
+    },
+    "mask_final_sub_ms": {
+      "median_change_percent": -19.721443560523166,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 3.258083,
+      "candidate_ms": 2.615542
+    },
+    "filter_reduction_subfinal_ms": {
+      "median_change_percent": 0.5224962779142306,
+      "wins": 1,
+      "pairs": 3,
+      "baseline_ms": 39.059417,
+      "candidate_ms": 39.331752
+    },
+    "malta_ms": {
+      "median_change_percent": -0.30402477862493393,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 35.742833,
+      "candidate_ms": 35.621626
+    },
+    "ultra_ms": {
+      "median_change_percent": 0.8499087639568526,
+      "wins": 1,
+      "pairs": 3,
+      "baseline_ms": 18.124416,
+      "candidate_ms": 18.3335
+    },
+    "opsin_ms": {
+      "median_change_percent": 0.7189706363413428,
+      "wins": 0,
+      "pairs": 3,
+      "baseline_ms": 21.129792,
+      "candidate_ms": 21.189625
+    },
+    "high_ms": {
+      "median_change_percent": 2.145866640343641,
+      "wins": 0,
+      "pairs": 3,
+      "baseline_ms": 24.799584,
+      "candidate_ms": 25.343831
+    },
+    "medium_b_ms": {
+      "median_change_percent": 2.6406354109488994,
+      "wins": 0,
+      "pairs": 3,
+      "baseline_ms": 10.477251,
+      "candidate_ms": 10.753917
+    },
+    "mask_all_ms": {
+      "median_change_percent": -35.70924319278704,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 12.897459,
+      "candidate_ms": 8.301627
+    },
+    "filter_reduction_subfinal_malta_ms": {
+      "median_change_percent": 0.11824941887195184,
+      "wins": 1,
+      "pairs": 3,
+      "baseline_ms": 74.735251,
+      "candidate_ms": 74.971165
+    },
+    "butteraugli_all_ms": {
+      "median_change_percent": -1.532060648943523,
+      "wins": 2,
+      "pairs": 3,
+      "baseline_ms": 163.148959,
+      "candidate_ms": 160.905335
+    }
+  },
+  "forest48-e10": {
+    "complete_call_ms": {
+      "median_change_percent": -0.5503141401350664,
+      "wins": 2,
+      "pairs": 3,
+      "baseline_ms": 1721.303125,
+      "candidate_ms": 1712.585125
+    },
+    "gpu_total_ms": {
+      "median_change_percent": -1.4246664096902784,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 1122.796754,
+      "candidate_ms": 1106.524672
+    },
+    "low_medium_ms": {
+      "median_change_percent": 0.20865507495970714,
+      "wins": 0,
+      "pairs": 3,
+      "baseline_ms": 90.175,
+      "candidate_ms": 90.307582
+    },
+    "other_gpu_ms": {
+      "median_change_percent": -1.5611327538521236,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 1032.682295,
+      "candidate_ms": 1016.138965
+    },
+    "resident_reduction_ms": {
+      "median_change_percent": 0.36525233666877543,
+      "wins": 0,
+      "pairs": 3,
+      "baseline_ms": 34.159207,
+      "candidate_ms": 34.336375
+    },
+    "mask_main_ms": {
+      "median_change_percent": -53.544990608027106,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 21.727667,
+      "candidate_ms": 10.079041
+    },
+    "mask_main_and_reduction_ms": {
+      "median_change_percent": -20.5910695010048,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 55.889998,
+      "candidate_ms": 44.419458
+    },
+    "affected_filter_reduction_ms": {
+      "median_change_percent": 0.22615998352060185,
+      "wins": 0,
+      "pairs": 3,
+      "baseline_ms": 124.369501,
+      "candidate_ms": 124.665166
+    },
+    "mask_final_sub_ms": {
+      "median_change_percent": -19.17216992309384,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 14.833793,
+      "candidate_ms": 11.989833
+    },
+    "filter_reduction_subfinal_ms": {
+      "median_change_percent": -1.8597493593893066,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 139.272961,
+      "candidate_ms": 136.682833
+    },
+    "malta_ms": {
+      "median_change_percent": -0.18326912749047075,
+      "wins": 2,
+      "pairs": 3,
+      "baseline_ms": 145.800334,
+      "candidate_ms": 145.533127
+    },
+    "ultra_ms": {
+      "median_change_percent": 0.2731399535835566,
+      "wins": 1,
+      "pairs": 3,
+      "baseline_ms": 74.927375,
+      "candidate_ms": 74.919747
+    },
+    "opsin_ms": {
+      "median_change_percent": 2.0607640907346125,
+      "wins": 0,
+      "pairs": 3,
+      "baseline_ms": 81.676792,
+      "candidate_ms": 82.852
+    },
+    "high_ms": {
+      "median_change_percent": 0.27746214359842813,
+      "wins": 0,
+      "pairs": 3,
+      "baseline_ms": 86.398293,
+      "candidate_ms": 86.418499
+    },
+    "medium_b_ms": {
+      "median_change_percent": 0.1938741165341762,
+      "wins": 0,
+      "pairs": 3,
+      "baseline_ms": 36.016792,
+      "candidate_ms": 36.087376
+    },
+    "mask_all_ms": {
+      "median_change_percent": -38.54713643937879,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 46.884375,
+      "candidate_ms": 28.796416
+    },
+    "filter_reduction_subfinal_malta_ms": {
+      "median_change_percent": -0.974618825660245,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 285.073295,
+      "candidate_ms": 282.294917
+    },
+    "butteraugli_all_ms": {
+      "median_change_percent": -2.5891496686913373,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 609.611332,
+      "candidate_ms": 594.352168
+    }
+  }
+}

@@ -1,0 +1,3 @@
+# Hardware headroom evidence snapshot
+
+See [REPORT.md](REPORT.md). This is the original September 21 investigation on its recorded baseline, preserved alongside the subsequent [Butteraugli study](../butteraugli-traffic-20260921/README.md). Figures, aggregate tables, capture commands and hashes are included. Raw Instruments traces, the corpus and external batch ledgers remain at the absolute paths recorded by the report and `ARTIFACTS.sha256`; those are external artifact references, not checkout-relative dependencies. Apple reference pages were consulted during the original study; their copied text is not included.

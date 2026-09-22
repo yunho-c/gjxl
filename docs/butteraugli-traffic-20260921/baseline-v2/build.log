@@ -1,0 +1,7 @@
+[1/7] Compiling strict-math Metal Butteraugli shaders
+[2/7] Linking gjxl.metallib
+[3/7] Embedding gjxl.metallib
+[4/7] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_butteraugli.cpp.o
+[5/7] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_embedded_library.cpp.o
+[6/7] Linking CXX static library libgjxl_metal.a
+[7/7] Linking CXX executable gjxl_encoding_benchmark

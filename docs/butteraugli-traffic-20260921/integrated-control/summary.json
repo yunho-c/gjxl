@@ -1,0 +1,11 @@
+{
+  "alpine24-e7": {
+    "complete_call_ms": {
+      "median_change_percent": 0.08642949006587575,
+      "wins": 1,
+      "pairs": 3,
+      "baseline_ms": 468.17725,
+      "candidate_ms": 467.258042
+    }
+  }
+}

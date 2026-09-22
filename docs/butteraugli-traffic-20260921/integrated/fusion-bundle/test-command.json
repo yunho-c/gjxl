@@ -1,0 +1,8 @@
+[
+  "ctest",
+  "--test-dir",
+  "/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/build/traffic",
+  "-R",
+  "^(metal_butteraugli|metal_aq_evaluation|adaptive_quantization_gpu_policy)$",
+  "--output-on-failure"
+]

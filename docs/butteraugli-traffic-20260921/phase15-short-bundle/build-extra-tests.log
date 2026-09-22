@@ -1,0 +1,5 @@
+[1/4] Linking CXX executable gjxl_butteraugli_device_operation_test
+ld: warning: ignoring duplicate libraries: 'libgjxl_codec.a'
+[2/4] Linking CXX executable gjxl_resident_workflow_storage_plan_test
+[3/4] Building CXX object CMakeFiles/gjxl_metal_cache_admission_test.dir/tests/metal_cache_admission_test.cpp.o
+[4/4] Linking CXX executable gjxl_metal_cache_admission_test

@@ -1,0 +1,20 @@
+{
+  "alpine24-e7": {
+    "complete_call_ms": {
+      "median_change_percent": -0.024696069430596435,
+      "wins": 2,
+      "pairs": 3,
+      "baseline_ms": 430.570542,
+      "candidate_ms": 429.3315
+    }
+  },
+  "forest48-e10": {
+    "complete_call_ms": {
+      "median_change_percent": -0.26461317828918585,
+      "wins": 2,
+      "pairs": 3,
+      "baseline_ms": 1731.05125,
+      "candidate_ms": 1725.505584
+    }
+  }
+}

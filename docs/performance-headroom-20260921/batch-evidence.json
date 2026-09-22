@@ -1,0 +1,77 @@
+{
+  "source": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/batch-gjxl-full-max24mp-20260916",
+  "files": {
+    "metadata.json": "b357247b14a61e58914ce05d151d48f756bb0d55080d775205db8d5f7344f93f",
+    "report/encoding-batch-throughput.csv": "adb7d3e7995b0b3495cd87f1ff06d97307eae498455e32d7470e4115ccabda4b",
+    "report/encoding-batch-throughput-methodology.json": "c7c3a875597de22fa042dbd03f78efba6fe59f0e316612ea6880396a1a107339",
+    "summary/coverage.json": "840a743e4eea87dbad7688f015e3ea5fc8a595f98c0f6cb734d09640409ae3a3"
+  },
+  "coverage": {
+    "expected_pairs": 11400,
+    "completed_pairs": 11400,
+    "complete": true,
+    "pilot": false
+  },
+  "report": [
+    {
+      "effort": "1",
+      "gjxl_b1_mp_s": "151.05816675546833",
+      "gjxl_b4_mp_s": "273.0863342780486",
+      "gjxl_batch_gain": "1.807822378250614"
+    },
+    {
+      "effort": "2",
+      "gjxl_b1_mp_s": "149.38248732990138",
+      "gjxl_b4_mp_s": "270.4231864816737",
+      "gjxl_batch_gain": "1.8102736894751386"
+    },
+    {
+      "effort": "3",
+      "gjxl_b1_mp_s": "150.5320538850574",
+      "gjxl_b4_mp_s": "271.1874068655366",
+      "gjxl_batch_gain": "1.8015259864361428"
+    },
+    {
+      "effort": "4",
+      "gjxl_b1_mp_s": "137.544643513736",
+      "gjxl_b4_mp_s": "251.97845510098927",
+      "gjxl_batch_gain": "1.8319757764745326"
+    },
+    {
+      "effort": "5",
+      "gjxl_b1_mp_s": "56.06131093103072",
+      "gjxl_b4_mp_s": "72.24915956248594",
+      "gjxl_batch_gain": "1.2887525882398698"
+    },
+    {
+      "effort": "6",
+      "gjxl_b1_mp_s": "56.00345146996029",
+      "gjxl_b4_mp_s": "72.28805846326235",
+      "gjxl_batch_gain": "1.2907786317783818"
+    },
+    {
+      "effort": "7",
+      "gjxl_b1_mp_s": "44.64608091224777",
+      "gjxl_b4_mp_s": "56.09942912767334",
+      "gjxl_batch_gain": "1.2565364749021806"
+    },
+    {
+      "effort": "8",
+      "gjxl_b1_mp_s": "29.610428662815274",
+      "gjxl_b4_mp_s": "40.08730644861513",
+      "gjxl_batch_gain": "1.353823914712748"
+    },
+    {
+      "effort": "9",
+      "gjxl_b1_mp_s": "31.868493675048335",
+      "gjxl_b4_mp_s": "43.30369872119056",
+      "gjxl_batch_gain": "1.3588247741717236"
+    },
+    {
+      "effort": "10",
+      "gjxl_b1_mp_s": "27.71123465975194",
+      "gjxl_b4_mp_s": "36.66422709716037",
+      "gjxl_batch_gain": "1.3230816868081248"
+    }
+  ]
+}

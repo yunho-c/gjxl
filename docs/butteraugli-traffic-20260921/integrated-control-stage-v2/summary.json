@@ -1,0 +1,39 @@
+{
+  "alpine24-e7": {
+    "complete_call_ms": {
+      "median_change_percent": 1.582607040749684,
+      "wins": 1,
+      "pairs": 3,
+      "baseline_ms": 471.389916,
+      "candidate_ms": 478.850166
+    },
+    "gpu_total_ms": {
+      "median_change_percent": 0.01924007818792095,
+      "wins": 1,
+      "pairs": 3,
+      "baseline_ms": 357.511583,
+      "candidate_ms": 357.09512
+    },
+    "low_medium_ms": {
+      "median_change_percent": -0.15404139136263595,
+      "wins": 2,
+      "pairs": 3,
+      "baseline_ms": 41.662126,
+      "candidate_ms": 41.637875
+    },
+    "other_gpu_ms": {
+      "median_change_percent": 0.36130565926528746,
+      "wins": 1,
+      "pairs": 3,
+      "baseline_ms": 315.118784,
+      "candidate_ms": 316.257326
+    },
+    "resident_reduction_ms": {
+      "median_change_percent": 1.368428120947196,
+      "wins": 1,
+      "pairs": 3,
+      "baseline_ms": 19.60075,
+      "candidate_ms": 19.247457
+    }
+  }
+}

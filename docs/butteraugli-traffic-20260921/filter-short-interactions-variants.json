@@ -1,0 +1,149 @@
+[
+  {
+    "name": "gjxl_ba_short_interaction_r3_w16_h64_p4",
+    "width": 16,
+    "height": 64,
+    "threads_y": 16,
+    "radius": 3
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r3_w8_h64_p4",
+    "width": 8,
+    "height": 64,
+    "threads_y": 16,
+    "radius": 3
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r3_w32_h64_p4",
+    "width": 32,
+    "height": 64,
+    "threads_y": 16,
+    "radius": 3
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r3_w16_h32_p4",
+    "width": 16,
+    "height": 32,
+    "threads_y": 8,
+    "radius": 3
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r3_w32_h32_p4",
+    "width": 32,
+    "height": 32,
+    "threads_y": 8,
+    "radius": 3
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r3_w16_h64_p8",
+    "width": 16,
+    "height": 64,
+    "threads_y": 8,
+    "radius": 3
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r3_w16_h128_p8",
+    "width": 16,
+    "height": 128,
+    "threads_y": 16,
+    "radius": 3
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r6_w16_h64_p4",
+    "width": 16,
+    "height": 64,
+    "threads_y": 16,
+    "radius": 6
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r6_w8_h64_p4",
+    "width": 8,
+    "height": 64,
+    "threads_y": 16,
+    "radius": 6
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r6_w32_h64_p4",
+    "width": 32,
+    "height": 64,
+    "threads_y": 16,
+    "radius": 6
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r6_w16_h32_p4",
+    "width": 16,
+    "height": 32,
+    "threads_y": 8,
+    "radius": 6
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r6_w32_h32_p4",
+    "width": 32,
+    "height": 32,
+    "threads_y": 8,
+    "radius": 6
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r6_w16_h64_p8",
+    "width": 16,
+    "height": 64,
+    "threads_y": 8,
+    "radius": 6
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r6_w16_h128_p8",
+    "width": 16,
+    "height": 128,
+    "threads_y": 16,
+    "radius": 6
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r7_w16_h64_p4",
+    "width": 16,
+    "height": 64,
+    "threads_y": 16,
+    "radius": 7
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r7_w8_h64_p4",
+    "width": 8,
+    "height": 64,
+    "threads_y": 16,
+    "radius": 7
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r7_w32_h64_p4",
+    "width": 32,
+    "height": 64,
+    "threads_y": 16,
+    "radius": 7
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r7_w16_h32_p4",
+    "width": 16,
+    "height": 32,
+    "threads_y": 8,
+    "radius": 7
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r7_w32_h32_p4",
+    "width": 32,
+    "height": 32,
+    "threads_y": 8,
+    "radius": 7
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r7_w16_h64_p8",
+    "width": 16,
+    "height": 64,
+    "threads_y": 8,
+    "radius": 7
+  },
+  {
+    "name": "gjxl_ba_short_interaction_r7_w16_h128_p8",
+    "width": 16,
+    "height": 128,
+    "threads_y": 16,
+    "radius": 7
+  }
+]

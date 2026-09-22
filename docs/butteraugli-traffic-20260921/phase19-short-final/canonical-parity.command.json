@@ -1,0 +1,14 @@
+[
+  "python3",
+  "/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/tools/metal_dataflow/parity.py",
+  "--baseline-build",
+  "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/baseline-cli",
+  "--candidate-build",
+  "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-final",
+  "--corpus",
+  "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical",
+  "--decoder",
+  "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/tools/djxl",
+  "--output",
+  "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-canonical-parity"
+]

@@ -1,0 +1,50 @@
+[
+  {
+    "name": "gjxl_ba_malta_adj_w16_h32_p2",
+    "width": 16,
+    "height": 32,
+    "threads_y": 16
+  },
+  {
+    "name": "gjxl_ba_malta_adj_w16_h64_p4",
+    "width": 16,
+    "height": 64,
+    "threads_y": 16
+  },
+  {
+    "name": "gjxl_ba_malta_adj_w32_h16_p2",
+    "width": 32,
+    "height": 16,
+    "threads_y": 8
+  },
+  {
+    "name": "gjxl_ba_malta_adj_w32_h32_p2",
+    "width": 32,
+    "height": 32,
+    "threads_y": 16
+  },
+  {
+    "name": "gjxl_ba_malta_adj_w32_h32_p4",
+    "width": 32,
+    "height": 32,
+    "threads_y": 8
+  },
+  {
+    "name": "gjxl_ba_malta_adj_w32_h64_p4",
+    "width": 32,
+    "height": 64,
+    "threads_y": 16
+  },
+  {
+    "name": "gjxl_ba_malta_adj_w64_h16_p2",
+    "width": 64,
+    "height": 16,
+    "threads_y": 8
+  },
+  {
+    "name": "gjxl_ba_malta_adj_w64_h32_p4",
+    "width": 64,
+    "height": 32,
+    "threads_y": 8
+  }
+]

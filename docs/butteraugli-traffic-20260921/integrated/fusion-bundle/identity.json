@@ -1,0 +1,24 @@
+{
+  "source_base": "4f3e4147c8bde16b0b49523adbf10ddd8043585f",
+  "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/fusion-bundle-source",
+  "scope": "M4 Pro experiment",
+  "created_at": "2026-09-22T00:05:01.354160+00:00",
+  "files": {
+    "build-probe-command.json": "c11512b09217899f41de401e51e0fc274269b5bd75f09e3f2905edeccff8772f",
+    "source.patch": "95dc837799d4c00bf590b72ab833619d418d465d0af775208bd8d9a1c6930d73",
+    "build-command.json": "f4e1008a19d6bc8a16d24e7be818c16f961cbf798b0a605a2a73a40379707e4b",
+    "gjxl.metallib": "b9c42cb7c664d2b5d60dc683458ef157e024c2f1f026da57ec4605d735bdd6d0",
+    "build-protocol.py": "f36a45bda4d64623b8a0035924b5f4e458b1797f5d04643163739347899bb647",
+    "metal_butteraugli.cpp": "0df46e9563f094e3a972df58d26dc905e508b8f078e1c7d51d73bf76878f5856",
+    "butteraugli.metal": "611c3c6abb92fe8915b27c47f9b33bb129f547dadb487617289c993416f42c87",
+    "gjxl_encode": "9594869bae3025b8463cd8d9bd9d53aa0810e43b64be28d66045349716640fbc",
+    "tests.log": "c23c5c638e9280c67588c0d213a896ae53db3e161caeef961d61ea54e5647b94",
+    "metal_backend_internal.h": "df38033b0e1a20b19618a134c3406712bc296100251f088c68d7b58ec91d0284",
+    "encode_probe.cpp": "2ef7d22048819fabbee39880a283f61616f49b6ece3c7e4f04c278020974bcdf",
+    "encode_probe": "0832b1e2246d52a7be6d69f92bb6c885cb6a5a122c329c4e261216181ab1a787",
+    "build-probe.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "test-command.json": "cd3f68a7490a0366c8ae534c594e9bf6ac1bcac68e0b3e1ae042f90b5223f5fc",
+    "build.log": "2186f0cb0f5e871b1e7124650a15cc1e8a0d6fc0b00dee60945ebb71be1a0ea7"
+  },
+  "test_returncode": 0
+}

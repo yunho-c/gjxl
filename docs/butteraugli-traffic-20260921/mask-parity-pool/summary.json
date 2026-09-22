@@ -1,0 +1,40 @@
+[
+  {
+    "kind": "filter",
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask_filter_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/ac-fusion/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-cache.metallib",
+      "gjxl_ba_low_medium_packed_dc",
+      "16",
+      "64",
+      "64",
+      "0"
+    ],
+    "log_sha256": "85b8d82d8b9988755960c9e27f41f36d46158f5f1d06afd7dc07b21bcf5ec57b",
+    "stderr_sha256": "4ee62fd583d6f8fce33729164247457971ff92b16a216e19861cca8159f3ba0c",
+    "at": "2026-09-21T23:43:57.600319+00:00",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 48,
+      "guards": true
+    }
+  },
+  {
+    "kind": "reduction",
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask_reduction_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/ac-fusion/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-cache.metallib"
+    ],
+    "log_sha256": "ea57666e733baf0e9278ffed9451489a43e21f33c214863ef525a2d355cf8b7f",
+    "stderr_sha256": "6aa00e0bf5b665aa899ac19d05e8f1613649d5e4982a6865b98abd8fe21edc45",
+    "at": "2026-09-21T23:43:59.284730+00:00",
+    "validation": {
+      "bitwise_cases": 315,
+      "guards": true
+    }
+  }
+]

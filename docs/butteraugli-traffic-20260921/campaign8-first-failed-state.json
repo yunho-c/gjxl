@@ -1,0 +1,6 @@
+{
+  "status": "failed",
+  "pid": 40854,
+  "at": "2026-09-22T00:26:32.842226+00:00",
+  "error": "Command '['xcrun', '-sdk', 'macosx', 'metal', '-c', '-fmetal-math-mode=safe', '-fmetal-math-fp32-functions=precise', '-ffp-contract=off', '-I', '/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/src/gpu/metal/kernels', '/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-reuse-closure.metal', '-o', '/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-reuse-closure.air']' returned non-zero exit status 1."
+}

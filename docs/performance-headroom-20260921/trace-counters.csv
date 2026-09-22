@@ -1,0 +1,811 @@
+window,counter_id,counter,covered_ms,mean
+all ordinary GPU active,3,Kernel Occupancy,662.110066,64.46830620981292
+gjxl_aq_resident_input_transform,3,Kernel Occupancy,6.374792,37.89875900589792
+gjxl_aq_resident_input_statistics,3,Kernel Occupancy,1.925875,33.83845939300987
+gjxl_butteraugli_low_medium_p1_device,3,Kernel Occupancy,15.729545,69.6574021097707
+gjxl_butteraugli_convolve_transpose_f32,3,Kernel Occupancy,9.670374,68.68775003882143
+gjxl_butteraugli_subsample2x_f32,3,Kernel Occupancy,2.510083,81.68804050230926
+gjxl_butteraugli_frequency_high_convolve_f32,3,Kernel Occupancy,9.845999,91.4662675777396
+gjxl_butteraugli_frequency_suppress_x_f32,3,Kernel Occupancy,4.082791,72.27598468693584
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,3,Kernel Occupancy,12.272249,68.57110889791666
+gjxl_butteraugli_fuzzy_erosion_f32,3,Kernel Occupancy,1.030249,74.1036129562334
+gjxl_convolve_symmetric5_f32,3,Kernel Occupancy,2.9835,98.7347969624561
+gjxl_aq_initial_cfl,3,Kernel Occupancy,4.532375,37.525946030418474
+gjxl_aq_initial_quant_gradient,3,Kernel Occupancy,1.95925,42.6487889299703
+gjxl_aq_initial_quant_modulation,3,Kernel Occupancy,1.103041,27.093305687578145
+gjxl_aq_validate_initial_mask,3,Kernel Occupancy,1.881417,11.466209101423761
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,3,Kernel Occupancy,3.520834,67.88403404680983
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,3,Kernel Occupancy,3.679291,34.207618567494606
+gjxl_ac_strategy_dct32x16_candidate_loss_local,3,Kernel Occupancy,8.398917,49.4374279406821
+gjxl_ac_strategy_dct32_candidate_loss_local,3,Kernel Occupancy,31.607784,24.82230693785799
+gjxl_dct32_forward_simdgroup_2d_matmul_image,3,Kernel Occupancy,3.889417,74.86132199187553
+gjxl_aq_final_cfl,3,Kernel Occupancy,2.502625,35.575856306219045
+gjxl_aq_dc_quantize_simd_wave,3,Kernel Occupancy,2.990876,2.5000145624319097
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,3,Kernel Occupancy,7.533458,68.17088123495297
+gjxl_aq_gaborish_f32,3,Kernel Occupancy,13.45346,98.90680728807457
+gjxl_aq_epf_pass1_tile32x4_p2,3,Kernel Occupancy,4.482374,61.49023268745474
+gjxl_aq_epf_pass2_linear_tile32x4_p2,3,Kernel Occupancy,11.198084,60.94492911657565
+gjxl_butteraugli_malta_fixed_f32,3,Kernel Occupancy,2.549708,98.59991404918237
+gjxl_butteraugli_final_l2_masked_ac_f32,3,Kernel Occupancy,9.075249,94.88675257233267
+gjxl_butteraugli_resident_l2_reduce_w64_simd,3,Kernel Occupancy,4.076207,94.84465424953005
+gjxl_ac_strategy_dct16_candidate_loss_parallel,3,Kernel Occupancy,7.254378,37.0275159290918
+all ordinary GPU active,4,Total Occupancy,662.110066,64.54881552230302
+gjxl_aq_resident_input_transform,4,Total Occupancy,6.374792,37.89875900588715
+gjxl_aq_resident_input_statistics,4,Total Occupancy,1.925875,33.838459392974215
+gjxl_butteraugli_low_medium_p1_device,4,Total Occupancy,15.729545,69.66738024241683
+gjxl_butteraugli_convolve_transpose_f32,4,Total Occupancy,9.670374,68.68775003882143
+gjxl_butteraugli_subsample2x_f32,4,Total Occupancy,2.510083,81.68804050230926
+gjxl_butteraugli_frequency_high_convolve_f32,4,Total Occupancy,9.845999,91.4662675777396
+gjxl_butteraugli_frequency_suppress_x_f32,4,Total Occupancy,4.082791,72.27598468693584
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,4,Total Occupancy,12.272249,68.57110889791666
+gjxl_butteraugli_fuzzy_erosion_f32,4,Total Occupancy,1.030249,74.1036129562334
+gjxl_convolve_symmetric5_f32,4,Total Occupancy,2.9835,98.7347969624561
+gjxl_aq_initial_cfl,4,Total Occupancy,4.532375,37.526382629975274
+gjxl_aq_initial_quant_gradient,4,Total Occupancy,1.95925,42.6487889299703
+gjxl_aq_initial_quant_modulation,4,Total Occupancy,1.103041,27.093305687578145
+gjxl_aq_validate_initial_mask,4,Total Occupancy,1.881417,11.466209101423761
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,4,Total Occupancy,3.520834,67.88403404680983
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,4,Total Occupancy,3.679291,34.20761896891127
+gjxl_ac_strategy_dct32x16_candidate_loss_local,4,Total Occupancy,8.398917,49.49721787420412
+gjxl_ac_strategy_dct32_candidate_loss_local,4,Total Occupancy,31.607784,24.86164923888796
+gjxl_dct32_forward_simdgroup_2d_matmul_image,4,Total Occupancy,3.889417,74.86132199187553
+gjxl_aq_final_cfl,4,Total Occupancy,2.502625,35.57586314888166
+gjxl_aq_dc_quantize_simd_wave,4,Total Occupancy,2.990876,2.702706670903129
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,4,Total Occupancy,7.533458,68.17088123495297
+gjxl_aq_gaborish_f32,4,Total Occupancy,13.45346,98.91364253336779
+gjxl_aq_epf_pass1_tile32x4_p2,4,Total Occupancy,4.482374,61.49028033191105
+gjxl_aq_epf_pass2_linear_tile32x4_p2,4,Total Occupancy,11.198084,60.94492911657565
+gjxl_butteraugli_malta_fixed_f32,4,Total Occupancy,2.549708,98.59993976764493
+gjxl_butteraugli_final_l2_masked_ac_f32,4,Total Occupancy,9.075249,94.88675257233267
+gjxl_butteraugli_resident_l2_reduce_w64_simd,4,Total Occupancy,4.076207,94.84465424953005
+gjxl_ac_strategy_dct16_candidate_loss_parallel,4,Total Occupancy,7.254378,37.06576004475564
+all ordinary GPU active,5,Occupancy Manager Target,662.110066,89.82690748982267
+gjxl_aq_resident_input_transform,5,Occupancy Manager Target,6.374792,38.080914532589134
+gjxl_aq_resident_input_statistics,5,Occupancy Manager Target,1.925875,33.9338125495824
+gjxl_butteraugli_low_medium_p1_device,5,Occupancy Manager Target,15.729545,69.70610701282138
+gjxl_butteraugli_convolve_transpose_f32,5,Occupancy Manager Target,9.670374,98.66209733689011
+gjxl_butteraugli_subsample2x_f32,5,Occupancy Manager Target,2.510083,96.5819266090496
+gjxl_butteraugli_frequency_high_convolve_f32,5,Occupancy Manager Target,9.845999,99.46054471497514
+gjxl_butteraugli_frequency_suppress_x_f32,5,Occupancy Manager Target,4.082791,95.62192936814353
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,5,Occupancy Manager Target,12.272249,78.32410715731184
+gjxl_butteraugli_fuzzy_erosion_f32,5,Occupancy Manager Target,1.030249,100.0
+gjxl_convolve_symmetric5_f32,5,Occupancy Manager Target,2.9835,100.0
+gjxl_aq_initial_cfl,5,Occupancy Manager Target,4.532375,99.79174904649211
+gjxl_aq_initial_quant_gradient,5,Occupancy Manager Target,1.95925,42.66413903699561
+gjxl_aq_initial_quant_modulation,5,Occupancy Manager Target,1.103041,27.09565600268611
+gjxl_aq_validate_initial_mask,5,Occupancy Manager Target,1.881417,69.83525694122119
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,5,Occupancy Manager Target,3.520834,100.0
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,5,Occupancy Manager Target,3.679291,100.0
+gjxl_ac_strategy_dct32x16_candidate_loss_local,5,Occupancy Manager Target,8.398917,100.0
+gjxl_ac_strategy_dct32_candidate_loss_local,5,Occupancy Manager Target,31.607784,100.0
+gjxl_dct32_forward_simdgroup_2d_matmul_image,5,Occupancy Manager Target,3.889417,94.79159012397105
+gjxl_aq_final_cfl,5,Occupancy Manager Target,2.502625,35.57574769933952
+gjxl_aq_dc_quantize_simd_wave,5,Occupancy Manager Target,2.990876,99.9397738090269
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,5,Occupancy Manager Target,7.533458,70.61253063913384
+gjxl_aq_gaborish_f32,5,Occupancy Manager Target,13.45346,99.98217958749514
+gjxl_aq_epf_pass1_tile32x4_p2,5,Occupancy Manager Target,4.482374,100.0
+gjxl_aq_epf_pass2_linear_tile32x4_p2,5,Occupancy Manager Target,11.198084,72.65120293777964
+gjxl_butteraugli_malta_fixed_f32,5,Occupancy Manager Target,2.549708,100.0
+gjxl_butteraugli_final_l2_masked_ac_f32,5,Occupancy Manager Target,9.075249,99.93332457186037
+gjxl_butteraugli_resident_l2_reduce_w64_simd,5,Occupancy Manager Target,4.076207,99.99289599989918
+gjxl_ac_strategy_dct16_candidate_loss_parallel,5,Occupancy Manager Target,7.254378,100.0
+all ordinary GPU active,6,L1 Eviction Rate,662.110066,8.073325055176486
+gjxl_aq_resident_input_transform,6,L1 Eviction Rate,6.374792,0.0
+gjxl_aq_resident_input_statistics,6,L1 Eviction Rate,1.925875,0.0
+gjxl_butteraugli_low_medium_p1_device,6,L1 Eviction Rate,15.729545,7.899223422721102
+gjxl_butteraugli_convolve_transpose_f32,6,L1 Eviction Rate,9.670374,0.0
+gjxl_butteraugli_subsample2x_f32,6,L1 Eviction Rate,2.510083,0.00479397777065228
+gjxl_butteraugli_frequency_high_convolve_f32,6,L1 Eviction Rate,9.845999,0.0
+gjxl_butteraugli_frequency_suppress_x_f32,6,L1 Eviction Rate,4.082791,0.0
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,6,L1 Eviction Rate,12.272249,0.0
+gjxl_butteraugli_fuzzy_erosion_f32,6,L1 Eviction Rate,1.030249,0.006616839741662508
+gjxl_convolve_symmetric5_f32,6,L1 Eviction Rate,2.9835,0.23605469301842916
+gjxl_aq_initial_cfl,6,L1 Eviction Rate,4.532375,7.628182547673508e-07
+gjxl_aq_initial_quant_gradient,6,L1 Eviction Rate,1.95925,3.0043108432444137
+gjxl_aq_initial_quant_modulation,6,L1 Eviction Rate,1.103041,0.04344049551860728
+gjxl_aq_validate_initial_mask,6,L1 Eviction Rate,1.881417,0.0
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,6,L1 Eviction Rate,3.520834,3.095123662004028
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,6,L1 Eviction Rate,3.679291,3.4895824297789892
+gjxl_ac_strategy_dct32x16_candidate_loss_local,6,L1 Eviction Rate,8.398917,0.5486751834299858
+gjxl_ac_strategy_dct32_candidate_loss_local,6,L1 Eviction Rate,31.607784,0.08614857287916243
+gjxl_dct32_forward_simdgroup_2d_matmul_image,6,L1 Eviction Rate,3.889417,39.24469128021996
+gjxl_aq_final_cfl,6,L1 Eviction Rate,2.502625,0.0
+gjxl_aq_dc_quantize_simd_wave,6,L1 Eviction Rate,2.990876,0.5038831723822416
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,6,L1 Eviction Rate,7.533458,44.19040748195607
+gjxl_aq_gaborish_f32,6,L1 Eviction Rate,13.45346,0.6157275357188208
+gjxl_aq_epf_pass1_tile32x4_p2,6,L1 Eviction Rate,4.482374,30.48966294560992
+gjxl_aq_epf_pass2_linear_tile32x4_p2,6,L1 Eviction Rate,11.198084,42.30928258824428
+gjxl_butteraugli_malta_fixed_f32,6,L1 Eviction Rate,2.549708,15.205020094093568
+gjxl_butteraugli_final_l2_masked_ac_f32,6,L1 Eviction Rate,9.075249,1.1164250131126632e-05
+gjxl_butteraugli_resident_l2_reduce_w64_simd,6,L1 Eviction Rate,4.076207,0.22717649234423326
+gjxl_ac_strategy_dct16_candidate_loss_parallel,6,L1 Eviction Rate,7.254378,1.4525498344333063
+all ordinary GPU active,7,Instruction Throughput Limiter,662.110066,63.36609211813308
+gjxl_aq_resident_input_transform,7,Instruction Throughput Limiter,6.374792,23.58919586962514
+gjxl_aq_resident_input_statistics,7,Instruction Throughput Limiter,1.925875,50.21266757152827
+gjxl_butteraugli_low_medium_p1_device,7,Instruction Throughput Limiter,15.729545,77.34395123704319
+gjxl_butteraugli_convolve_transpose_f32,7,Instruction Throughput Limiter,9.670374,59.751162298848314
+gjxl_butteraugli_subsample2x_f32,7,Instruction Throughput Limiter,2.510083,10.154214708207851
+gjxl_butteraugli_frequency_high_convolve_f32,7,Instruction Throughput Limiter,9.845999,63.779717576355765
+gjxl_butteraugli_frequency_suppress_x_f32,7,Instruction Throughput Limiter,4.082791,33.13404331543622
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,7,Instruction Throughput Limiter,12.272249,32.96638880427668
+gjxl_butteraugli_fuzzy_erosion_f32,7,Instruction Throughput Limiter,1.030249,65.86415965208519
+gjxl_convolve_symmetric5_f32,7,Instruction Throughput Limiter,2.9835,87.82501713474299
+gjxl_aq_initial_cfl,7,Instruction Throughput Limiter,4.532375,11.641306157726977
+gjxl_aq_initial_quant_gradient,7,Instruction Throughput Limiter,1.95925,69.2371557901686
+gjxl_aq_initial_quant_modulation,7,Instruction Throughput Limiter,1.103041,91.09601039155882
+gjxl_aq_validate_initial_mask,7,Instruction Throughput Limiter,1.881417,4.568329999338974
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,7,Instruction Throughput Limiter,3.520834,75.06701067351432
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,7,Instruction Throughput Limiter,3.679291,59.875849814056856
+gjxl_ac_strategy_dct32x16_candidate_loss_local,7,Instruction Throughput Limiter,8.398917,71.94611713631849
+gjxl_ac_strategy_dct32_candidate_loss_local,7,Instruction Throughput Limiter,31.607784,52.09637828539977
+gjxl_dct32_forward_simdgroup_2d_matmul_image,7,Instruction Throughput Limiter,3.889417,84.34229682652841
+gjxl_aq_final_cfl,7,Instruction Throughput Limiter,2.502625,82.13527126898836
+gjxl_aq_dc_quantize_simd_wave,7,Instruction Throughput Limiter,2.990876,5.561774566394241
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,7,Instruction Throughput Limiter,7.533458,85.21945893969819
+gjxl_aq_gaborish_f32,7,Instruction Throughput Limiter,13.45346,78.30929846714196
+gjxl_aq_epf_pass1_tile32x4_p2,7,Instruction Throughput Limiter,4.482374,85.81660620175775
+gjxl_aq_epf_pass2_linear_tile32x4_p2,7,Instruction Throughput Limiter,11.198084,60.97741987976154
+gjxl_butteraugli_malta_fixed_f32,7,Instruction Throughput Limiter,2.549708,83.7771572901516
+gjxl_butteraugli_final_l2_masked_ac_f32,7,Instruction Throughput Limiter,9.075249,83.35930392112526
+gjxl_butteraugli_resident_l2_reduce_w64_simd,7,Instruction Throughput Limiter,4.076207,75.45883334647019
+gjxl_ac_strategy_dct16_candidate_loss_parallel,7,Instruction Throughput Limiter,7.254378,66.27293231224482
+all ordinary GPU active,8,Instruction Throughput Utilization,662.110066,17.621020406083147
+gjxl_aq_resident_input_transform,8,Instruction Throughput Utilization,6.374792,5.148535422954091
+gjxl_aq_resident_input_statistics,8,Instruction Throughput Utilization,1.925875,6.443686871126346
+gjxl_butteraugli_low_medium_p1_device,8,Instruction Throughput Utilization,15.729545,24.98207468035824
+gjxl_butteraugli_convolve_transpose_f32,8,Instruction Throughput Utilization,9.670374,21.062759728152905
+gjxl_butteraugli_subsample2x_f32,8,Instruction Throughput Utilization,2.510083,2.912362610012411
+gjxl_butteraugli_frequency_high_convolve_f32,8,Instruction Throughput Utilization,9.845999,17.784343744087337
+gjxl_butteraugli_frequency_suppress_x_f32,8,Instruction Throughput Utilization,4.082791,5.033173918847947
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,8,Instruction Throughput Utilization,12.272249,8.243687665833143
+gjxl_butteraugli_fuzzy_erosion_f32,8,Instruction Throughput Utilization,1.030249,21.36459628457235
+gjxl_convolve_symmetric5_f32,8,Instruction Throughput Utilization,2.9835,13.322766174590026
+gjxl_aq_initial_cfl,8,Instruction Throughput Utilization,4.532375,1.9608011265348628
+gjxl_aq_initial_quant_gradient,8,Instruction Throughput Utilization,1.95925,16.29367841976468
+gjxl_aq_initial_quant_modulation,8,Instruction Throughput Utilization,1.103041,11.201575421865805
+gjxl_aq_validate_initial_mask,8,Instruction Throughput Utilization,1.881417,1.5642278858466783
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,8,Instruction Throughput Utilization,3.520834,25.10216939208111
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,8,Instruction Throughput Utilization,3.679291,21.134631685490184
+gjxl_ac_strategy_dct32x16_candidate_loss_local,8,Instruction Throughput Utilization,8.398917,23.194101219462482
+gjxl_ac_strategy_dct32_candidate_loss_local,8,Instruction Throughput Utilization,31.607784,18.573335824545353
+gjxl_dct32_forward_simdgroup_2d_matmul_image,8,Instruction Throughput Utilization,3.889417,15.950200167791797
+gjxl_aq_final_cfl,8,Instruction Throughput Utilization,2.502625,27.52270326073242
+gjxl_aq_dc_quantize_simd_wave,8,Instruction Throughput Utilization,2.990876,2.711148172954513
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,8,Instruction Throughput Utilization,7.533458,16.016508167750533
+gjxl_aq_gaborish_f32,8,Instruction Throughput Utilization,13.45346,5.598583699921677
+gjxl_aq_epf_pass1_tile32x4_p2,8,Instruction Throughput Utilization,4.482374,24.987431013258618
+gjxl_aq_epf_pass2_linear_tile32x4_p2,8,Instruction Throughput Utilization,11.198084,17.87222905693471
+gjxl_butteraugli_malta_fixed_f32,8,Instruction Throughput Utilization,2.549708,23.918201498082396
+gjxl_butteraugli_final_l2_masked_ac_f32,8,Instruction Throughput Utilization,9.075249,2.7033071137881657
+gjxl_butteraugli_resident_l2_reduce_w64_simd,8,Instruction Throughput Utilization,4.076207,6.459999533880319
+gjxl_ac_strategy_dct16_candidate_loss_parallel,8,Instruction Throughput Utilization,7.254378,22.536604625755448
+all ordinary GPU active,11,Compute Shader Launch Limiter,662.110066,82.74760920559025
+gjxl_aq_resident_input_transform,11,Compute Shader Launch Limiter,6.374792,99.93004106049315
+gjxl_aq_resident_input_statistics,11,Compute Shader Launch Limiter,1.925875,100.0
+gjxl_butteraugli_low_medium_p1_device,11,Compute Shader Launch Limiter,15.729545,99.86302023566753
+gjxl_butteraugli_convolve_transpose_f32,11,Compute Shader Launch Limiter,9.670374,26.617117329174654
+gjxl_butteraugli_subsample2x_f32,11,Compute Shader Launch Limiter,2.510083,80.12296316735211
+gjxl_butteraugli_frequency_high_convolve_f32,11,Compute Shader Launch Limiter,9.845999,95.85274101865636
+gjxl_butteraugli_frequency_suppress_x_f32,11,Compute Shader Launch Limiter,4.082791,62.74687586690953
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,11,Compute Shader Launch Limiter,12.272249,96.43658462974946
+gjxl_butteraugli_fuzzy_erosion_f32,11,Compute Shader Launch Limiter,1.030249,15.389455816358268
+gjxl_convolve_symmetric5_f32,11,Compute Shader Launch Limiter,2.9835,51.94424430644894
+gjxl_aq_initial_cfl,11,Compute Shader Launch Limiter,4.532375,0.0
+gjxl_aq_initial_quant_gradient,11,Compute Shader Launch Limiter,1.95925,50.16438168185041
+gjxl_aq_initial_quant_modulation,11,Compute Shader Launch Limiter,1.103041,46.69347363113855
+gjxl_aq_validate_initial_mask,11,Compute Shader Launch Limiter,1.881417,6.688553226743759
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,11,Compute Shader Launch Limiter,3.520834,100.0
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,11,Compute Shader Launch Limiter,3.679291,100.0
+gjxl_ac_strategy_dct32x16_candidate_loss_local,11,Compute Shader Launch Limiter,8.398917,99.38726919007756
+gjxl_ac_strategy_dct32_candidate_loss_local,11,Compute Shader Launch Limiter,31.607784,99.52720728628402
+gjxl_dct32_forward_simdgroup_2d_matmul_image,11,Compute Shader Launch Limiter,3.889417,100.0
+gjxl_aq_final_cfl,11,Compute Shader Launch Limiter,2.502625,99.99499578423003
+gjxl_aq_dc_quantize_simd_wave,11,Compute Shader Launch Limiter,2.990876,0.0
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,11,Compute Shader Launch Limiter,7.533458,100.0
+gjxl_aq_gaborish_f32,11,Compute Shader Launch Limiter,13.45346,99.9228704494199
+gjxl_aq_epf_pass1_tile32x4_p2,11,Compute Shader Launch Limiter,4.482374,100.0
+gjxl_aq_epf_pass2_linear_tile32x4_p2,11,Compute Shader Launch Limiter,11.198084,100.0
+gjxl_butteraugli_malta_fixed_f32,11,Compute Shader Launch Limiter,2.549708,100.0
+gjxl_butteraugli_final_l2_masked_ac_f32,11,Compute Shader Launch Limiter,9.075249,100.0
+gjxl_butteraugli_resident_l2_reduce_w64_simd,11,Compute Shader Launch Limiter,4.076207,97.11293561651605
+gjxl_ac_strategy_dct16_candidate_loss_parallel,11,Compute Shader Launch Limiter,7.254378,99.03518891273765
+all ordinary GPU active,12,ALU Utilization,662.110066,26.88725699237541
+gjxl_aq_resident_input_transform,12,ALU Utilization,6.374792,8.813580453772314
+gjxl_aq_resident_input_statistics,12,ALU Utilization,1.925875,8.684991226195299
+gjxl_butteraugli_low_medium_p1_device,12,ALU Utilization,15.729545,34.7966726147509
+gjxl_butteraugli_convolve_transpose_f32,12,ALU Utilization,9.670374,29.079544015418943
+gjxl_butteraugli_subsample2x_f32,12,ALU Utilization,2.510083,3.8039174746573012
+gjxl_butteraugli_frequency_high_convolve_f32,12,ALU Utilization,9.845999,24.42569319480135
+gjxl_butteraugli_frequency_suppress_x_f32,12,ALU Utilization,4.082791,8.276571159201367
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,12,ALU Utilization,12.272249,12.860439058921411
+gjxl_butteraugli_fuzzy_erosion_f32,12,ALU Utilization,1.030249,32.56777781229793
+gjxl_convolve_symmetric5_f32,12,ALU Utilization,2.9835,18.286174661433375
+gjxl_aq_initial_cfl,12,ALU Utilization,4.532375,2.765448911412848
+gjxl_aq_initial_quant_gradient,12,ALU Utilization,1.95925,28.579712825327817
+gjxl_aq_initial_quant_modulation,12,ALU Utilization,1.103041,21.368087844479213
+gjxl_aq_validate_initial_mask,12,ALU Utilization,1.881417,1.3035242383711267
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,12,ALU Utilization,3.520834,37.7859035177884
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,12,ALU Utilization,3.679291,32.564474990101324
+gjxl_ac_strategy_dct32x16_candidate_loss_local,12,ALU Utilization,8.398917,37.440440097368054
+gjxl_ac_strategy_dct32_candidate_loss_local,12,ALU Utilization,31.607784,30.855211800401914
+gjxl_dct32_forward_simdgroup_2d_matmul_image,12,ALU Utilization,3.889417,27.922344745400796
+gjxl_aq_final_cfl,12,ALU Utilization,2.502625,43.63501107485821
+gjxl_aq_dc_quantize_simd_wave,12,ALU Utilization,2.990876,4.979805055198086
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,12,ALU Utilization,7.533458,27.84271166456549
+gjxl_aq_gaborish_f32,12,ALU Utilization,13.45346,7.727823617541058
+gjxl_aq_epf_pass1_tile32x4_p2,12,ALU Utilization,4.482374,39.079070319168615
+gjxl_aq_epf_pass2_linear_tile32x4_p2,12,ALU Utilization,11.198084,29.704566652910366
+gjxl_butteraugli_malta_fixed_f32,12,ALU Utilization,2.549708,38.26115344709254
+gjxl_butteraugli_final_l2_masked_ac_f32,12,ALU Utilization,9.075249,4.63012325556368
+gjxl_butteraugli_resident_l2_reduce_w64_simd,12,ALU Utilization,4.076207,10.351964641457121
+gjxl_ac_strategy_dct16_candidate_loss_parallel,12,ALU Utilization,7.254378,35.023660151611445
+all ordinary GPU active,13,F32 Limiter,662.110066,32.71530395894649
+gjxl_aq_resident_input_transform,13,F32 Limiter,6.374792,12.69163845262898
+gjxl_aq_resident_input_statistics,13,F32 Limiter,1.925875,3.83345541809086
+gjxl_butteraugli_low_medium_p1_device,13,F32 Limiter,15.729545,63.267774447199784
+gjxl_butteraugli_convolve_transpose_f32,13,F32 Limiter,9.670374,29.585610186961816
+gjxl_butteraugli_subsample2x_f32,13,F32 Limiter,2.510083,2.4358048936791317
+gjxl_butteraugli_frequency_high_convolve_f32,13,F32 Limiter,9.845999,25.90138956064052
+gjxl_butteraugli_frequency_suppress_x_f32,13,F32 Limiter,4.082791,6.572242996972831
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,13,F32 Limiter,12.272249,14.393003236454604
+gjxl_butteraugli_fuzzy_erosion_f32,13,F32 Limiter,1.030249,3.3268457325193586
+gjxl_convolve_symmetric5_f32,13,F32 Limiter,2.9835,11.066541471189483
+gjxl_aq_initial_cfl,13,F32 Limiter,4.532375,2.276993261383098
+gjxl_aq_initial_quant_gradient,13,F32 Limiter,1.95925,27.112523408325867
+gjxl_aq_initial_quant_modulation,13,F32 Limiter,1.103041,22.164740315009016
+gjxl_aq_validate_initial_mask,13,F32 Limiter,1.881417,0.0
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,13,F32 Limiter,3.520834,34.05661575889634
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,13,F32 Limiter,3.679291,33.52351896025223
+gjxl_ac_strategy_dct32x16_candidate_loss_local,13,F32 Limiter,8.398917,49.40820088619795
+gjxl_ac_strategy_dct32_candidate_loss_local,13,F32 Limiter,31.607784,44.36550923733645
+gjxl_dct32_forward_simdgroup_2d_matmul_image,13,F32 Limiter,3.889417,47.75921185802452
+gjxl_aq_final_cfl,13,F32 Limiter,2.502625,53.18584064208167
+gjxl_aq_dc_quantize_simd_wave,13,F32 Limiter,2.990876,0.20668065637399624
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,13,F32 Limiter,7.533458,48.5549342567497
+gjxl_aq_gaborish_f32,13,F32 Limiter,13.45346,5.68679868050432
+gjxl_aq_epf_pass1_tile32x4_p2,13,F32 Limiter,4.482374,43.570675815943005
+gjxl_aq_epf_pass2_linear_tile32x4_p2,13,F32 Limiter,11.198084,29.446256646594502
+gjxl_butteraugli_malta_fixed_f32,13,F32 Limiter,2.549708,52.111148936955864
+gjxl_butteraugli_final_l2_masked_ac_f32,13,F32 Limiter,9.075249,6.139389517773794
+gjxl_butteraugli_resident_l2_reduce_w64_simd,13,F32 Limiter,4.076207,11.045958236725282
+gjxl_ac_strategy_dct16_candidate_loss_parallel,13,F32 Limiter,7.254378,40.98640544561017
+all ordinary GPU active,14,F32 Utilization,662.110066,23.973890147762898
+gjxl_aq_resident_input_transform,14,F32 Utilization,6.374792,12.042285215608267
+gjxl_aq_resident_input_statistics,14,F32 Utilization,1.925875,3.6421183933731704
+gjxl_butteraugli_low_medium_p1_device,14,F32 Utilization,15.729545,36.79551035197232
+gjxl_butteraugli_convolve_transpose_f32,14,F32 Utilization,9.670374,19.93373954119376
+gjxl_butteraugli_subsample2x_f32,14,F32 Utilization,2.510083,2.3771284598484614
+gjxl_butteraugli_frequency_high_convolve_f32,14,F32 Utilization,9.845999,17.706851890908776
+gjxl_butteraugli_frequency_suppress_x_f32,14,F32 Utilization,4.082791,6.263069608011405
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,14,F32 Utilization,12.272249,12.69641675799823
+gjxl_butteraugli_fuzzy_erosion_f32,14,F32 Utilization,1.030249,3.1264843966315854
+gjxl_convolve_symmetric5_f32,14,F32 Utilization,2.9835,8.70770237574538
+gjxl_aq_initial_cfl,14,F32 Utilization,4.532375,2.153517273049376
+gjxl_aq_initial_quant_gradient,14,F32 Utilization,1.95925,21.91079867504062
+gjxl_aq_initial_quant_modulation,14,F32 Utilization,1.103041,18.47833129666016
+gjxl_aq_validate_initial_mask,14,F32 Utilization,1.881417,0.0
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,14,F32 Utilization,3.520834,26.565331664469664
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,14,F32 Utilization,3.679291,26.98748516333648
+gjxl_ac_strategy_dct32x16_candidate_loss_local,14,F32 Utilization,8.398917,39.18586641675156
+gjxl_ac_strategy_dct32_candidate_loss_local,14,F32 Utilization,31.607784,36.72797764723068
+gjxl_dct32_forward_simdgroup_2d_matmul_image,14,F32 Utilization,3.889417,39.932336621680314
+gjxl_aq_final_cfl,14,F32 Utilization,2.502625,39.07965320501303
+gjxl_aq_dc_quantize_simd_wave,14,F32 Utilization,2.990876,0.19791306901141886
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,14,F32 Utilization,7.533458,41.273925677602676
+gjxl_aq_gaborish_f32,14,F32 Utilization,13.45346,5.2042365762774505
+gjxl_aq_epf_pass1_tile32x4_p2,14,F32 Utilization,4.482374,31.004781671226223
+gjxl_aq_epf_pass2_linear_tile32x4_p2,14,F32 Utilization,11.198084,22.82290132555893
+gjxl_butteraugli_malta_fixed_f32,14,F32 Utilization,2.549708,41.595811377593854
+gjxl_butteraugli_final_l2_masked_ac_f32,14,F32 Utilization,9.075249,5.694189627905471
+gjxl_butteraugli_resident_l2_reduce_w64_simd,14,F32 Utilization,4.076207,9.687835661158825
+gjxl_ac_strategy_dct16_candidate_loss_parallel,14,F32 Utilization,7.254378,32.53660396452733
+all ordinary GPU active,17,Integer and Conditional Limiter,662.110066,32.985124863253276
+gjxl_aq_resident_input_transform,17,Integer and Conditional Limiter,6.374792,4.296809838523122
+gjxl_aq_resident_input_statistics,17,Integer and Conditional Limiter,1.925875,14.28358177245967
+gjxl_butteraugli_low_medium_p1_device,17,Integer and Conditional Limiter,15.729545,49.850008340889374
+gjxl_butteraugli_convolve_transpose_f32,17,Integer and Conditional Limiter,9.670374,46.86028792718098
+gjxl_butteraugli_subsample2x_f32,17,Integer and Conditional Limiter,2.510083,4.63393803367568
+gjxl_butteraugli_frequency_high_convolve_f32,17,Integer and Conditional Limiter,9.845999,38.42337439242367
+gjxl_butteraugli_frequency_suppress_x_f32,17,Integer and Conditional Limiter,4.082791,9.0623888848349
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,17,Integer and Conditional Limiter,12.272249,13.258352581527365
+gjxl_butteraugli_fuzzy_erosion_f32,17,Integer and Conditional Limiter,1.030249,71.52088581828924
+gjxl_convolve_symmetric5_f32,17,Integer and Conditional Limiter,2.9835,25.70998620044164
+gjxl_aq_initial_cfl,17,Integer and Conditional Limiter,4.532375,3.4779226995696595
+gjxl_aq_initial_quant_gradient,17,Integer and Conditional Limiter,1.95925,36.55995956149095
+gjxl_aq_initial_quant_modulation,17,Integer and Conditional Limiter,1.103041,26.19507135023549
+gjxl_aq_validate_initial_mask,17,Integer and Conditional Limiter,1.881417,2.6128390480071717
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,17,Integer and Conditional Limiter,3.520834,48.60706080083517
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,17,Integer and Conditional Limiter,3.679291,34.81930230418382
+gjxl_ac_strategy_dct32x16_candidate_loss_local,17,Integer and Conditional Limiter,8.398917,34.4637777621478
+gjxl_ac_strategy_dct32_candidate_loss_local,17,Integer and Conditional Limiter,31.607784,22.848539880943726
+gjxl_dct32_forward_simdgroup_2d_matmul_image,17,Integer and Conditional Limiter,3.889417,9.936232328560871
+gjxl_aq_final_cfl,17,Integer and Conditional Limiter,2.502625,45.84713524647082
+gjxl_aq_dc_quantize_simd_wave,17,Integer and Conditional Limiter,2.990876,8.303195588693962
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,17,Integer and Conditional Limiter,7.533458,14.362373687064443
+gjxl_aq_gaborish_f32,17,Integer and Conditional Limiter,13.45346,10.71879696722828
+gjxl_aq_epf_pass1_tile32x4_p2,17,Integer and Conditional Limiter,4.482374,53.16913940302446
+gjxl_aq_epf_pass2_linear_tile32x4_p2,17,Integer and Conditional Limiter,11.198084,36.77549149252909
+gjxl_butteraugli_malta_fixed_f32,17,Integer and Conditional Limiter,2.549708,38.784705692440255
+gjxl_butteraugli_final_l2_masked_ac_f32,17,Integer and Conditional Limiter,9.075249,3.032354899376465
+gjxl_butteraugli_resident_l2_reduce_w64_simd,17,Integer and Conditional Limiter,4.076207,10.442557304473482
+gjxl_ac_strategy_dct16_candidate_loss_parallel,17,Integer and Conditional Limiter,7.254378,34.81145091088255
+all ordinary GPU active,18,Integer and Conditional Utilization,662.110066,25.6018245651858
+gjxl_aq_resident_input_transform,18,Integer and Conditional Utilization,6.374792,4.1886630451296
+gjxl_aq_resident_input_statistics,18,Integer and Conditional Utilization,1.925875,13.447706100359877
+gjxl_butteraugli_low_medium_p1_device,18,Integer and Conditional Utilization,15.729545,31.550191219968575
+gjxl_butteraugli_convolve_transpose_f32,18,Integer and Conditional Utilization,9.670374,36.283968065543824
+gjxl_butteraugli_subsample2x_f32,18,Integer and Conditional Utilization,2.510083,4.517475700204483
+gjxl_butteraugli_frequency_high_convolve_f32,18,Integer and Conditional Utilization,9.845999,29.61721556558958
+gjxl_butteraugli_frequency_suppress_x_f32,18,Integer and Conditional Utilization,4.082791,8.500384081785262
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,18,Integer and Conditional Utilization,12.272249,11.870276470589973
+gjxl_butteraugli_fuzzy_erosion_f32,18,Integer and Conditional Utilization,1.030249,56.79980964453775
+gjxl_convolve_symmetric5_f32,18,Integer and Conditional Utilization,2.9835,22.291722107200822
+gjxl_aq_initial_cfl,18,Integer and Conditional Utilization,4.532375,3.321814053609764
+gjxl_aq_initial_quant_gradient,18,Integer and Conditional Utilization,1.95925,30.14233914637642
+gjxl_aq_initial_quant_modulation,18,Integer and Conditional Utilization,1.103041,22.25648338540319
+gjxl_aq_validate_initial_mask,18,Integer and Conditional Utilization,1.881417,2.6070484772450895
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,18,Integer and Conditional Utilization,3.520834,38.99896227133561
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,18,Integer and Conditional Utilization,3.679291,29.360915146202338
+gjxl_ac_strategy_dct32x16_candidate_loss_local,18,Integer and Conditional Utilization,8.398917,28.010471927718534
+gjxl_ac_strategy_dct32_candidate_loss_local,18,Integer and Conditional Utilization,31.607784,19.65026783842564
+gjxl_dct32_forward_simdgroup_2d_matmul_image,18,Integer and Conditional Utilization,3.889417,8.031907565782
+gjxl_aq_final_cfl,18,Integer and Conditional Utilization,2.502625,35.993625199421345
+gjxl_aq_dc_quantize_simd_wave,18,Integer and Conditional Utilization,2.990876,7.702578588026463
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,18,Integer and Conditional Utilization,7.533458,11.435154750599752
+gjxl_aq_gaborish_f32,18,Integer and Conditional Utilization,13.45346,9.620466576540856
+gjxl_aq_epf_pass1_tile32x4_p2,18,Integer and Conditional Utilization,4.482374,39.77427055629083
+gjxl_aq_epf_pass2_linear_tile32x4_p2,18,Integer and Conditional Utilization,11.198084,29.432249887285195
+gjxl_butteraugli_malta_fixed_f32,18,Integer and Conditional Utilization,2.549708,31.1551803342218
+gjxl_butteraugli_final_l2_masked_ac_f32,18,Integer and Conditional Utilization,9.075249,2.933364345190773
+gjxl_butteraugli_resident_l2_reduce_w64_simd,18,Integer and Conditional Utilization,4.076207,9.309050446967857
+gjxl_ac_strategy_dct16_candidate_loss_parallel,18,Integer and Conditional Utilization,7.254378,28.973515485186674
+all ordinary GPU active,21,Integer and Complex Limiter,662.110066,9.987686593697113
+gjxl_aq_resident_input_transform,21,Integer and Complex Limiter,6.374792,2.843468454360038
+gjxl_aq_resident_input_statistics,21,Integer and Complex Limiter,1.925875,0.5815556883535573
+gjxl_butteraugli_low_medium_p1_device,21,Integer and Complex Limiter,15.729545,2.8641030354993675
+gjxl_butteraugli_convolve_transpose_f32,21,Integer and Complex Limiter,9.670374,4.356815991217237
+gjxl_butteraugli_subsample2x_f32,21,Integer and Complex Limiter,2.510083,1.4492726839741972
+gjxl_butteraugli_frequency_high_convolve_f32,21,Integer and Complex Limiter,9.845999,3.3014541931248846
+gjxl_butteraugli_frequency_suppress_x_f32,21,Integer and Complex Limiter,4.082791,3.6537838735532584
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,21,Integer and Complex Limiter,12.272249,2.389993284582004
+gjxl_butteraugli_fuzzy_erosion_f32,21,Integer and Complex Limiter,1.030249,12.68875265838533
+gjxl_convolve_symmetric5_f32,21,Integer and Complex Limiter,2.9835,13.117518614217108
+gjxl_aq_initial_cfl,21,Integer and Complex Limiter,4.532375,0.11283436353269956
+gjxl_aq_initial_quant_gradient,21,Integer and Complex Limiter,1.95925,10.997340747666295
+gjxl_aq_initial_quant_modulation,21,Integer and Complex Limiter,1.103041,4.200355116706494
+gjxl_aq_validate_initial_mask,21,Integer and Complex Limiter,1.881417,0.0
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,21,Integer and Complex Limiter,3.520834,24.019522058793044
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,21,Integer and Complex Limiter,3.679291,20.144303542351448
+gjxl_ac_strategy_dct32x16_candidate_loss_local,21,Integer and Complex Limiter,8.398917,19.219508606541442
+gjxl_ac_strategy_dct32_candidate_loss_local,21,Integer and Complex Limiter,31.607784,13.513462296847848
+gjxl_dct32_forward_simdgroup_2d_matmul_image,21,Integer and Complex Limiter,3.889417,18.29480034618746
+gjxl_aq_final_cfl,21,Integer and Complex Limiter,2.502625,28.579127993954128
+gjxl_aq_dc_quantize_simd_wave,21,Integer and Complex Limiter,2.990876,4.7758372491142085
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,21,Integer and Complex Limiter,7.533458,6.498697156970378
+gjxl_aq_gaborish_f32,21,Integer and Complex Limiter,13.45346,1.3119160234303529
+gjxl_aq_epf_pass1_tile32x4_p2,21,Integer and Complex Limiter,4.482374,17.522268203271086
+gjxl_aq_epf_pass2_linear_tile32x4_p2,21,Integer and Complex Limiter,11.198084,16.812223349474436
+gjxl_butteraugli_malta_fixed_f32,21,Integer and Complex Limiter,2.549708,8.441735564329425
+gjxl_butteraugli_final_l2_masked_ac_f32,21,Integer and Complex Limiter,9.075249,1.3020415611950702
+gjxl_butteraugli_resident_l2_reduce_w64_simd,21,Integer and Complex Limiter,4.076207,3.599050126868383
+gjxl_ac_strategy_dct16_candidate_loss_parallel,21,Integer and Complex Limiter,7.254378,21.033901115009332
+all ordinary GPU active,22,Integer and Complex Utilization,662.110066,8.390385255572973
+gjxl_aq_resident_input_transform,22,Integer and Complex Utilization,6.374792,2.7924252929190754
+gjxl_aq_resident_input_statistics,22,Integer and Complex Utilization,1.925875,0.5603159166158905
+gjxl_butteraugli_low_medium_p1_device,22,Integer and Complex Utilization,15.729545,2.494258518973898
+gjxl_butteraugli_convolve_transpose_f32,22,Integer and Complex Utilization,9.670374,3.8827608477126327
+gjxl_butteraugli_subsample2x_f32,22,Integer and Complex Utilization,2.510083,1.4264615779921637
+gjxl_butteraugli_frequency_high_convolve_f32,22,Integer and Complex Utilization,9.845999,3.054637865803815
+gjxl_butteraugli_frequency_suppress_x_f32,22,Integer and Complex Utilization,4.082791,3.579377256726751
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,22,Integer and Complex Utilization,12.272249,2.3083697779118073
+gjxl_butteraugli_fuzzy_erosion_f32,22,Integer and Complex Utilization,1.030249,10.418523166432804
+gjxl_convolve_symmetric5_f32,22,Integer and Complex Utilization,2.9835,11.14584967938144
+gjxl_aq_initial_cfl,22,Integer and Complex Utilization,4.532375,0.11108409934973781
+gjxl_aq_initial_quant_gradient,22,Integer and Complex Utilization,1.95925,10.212575658163733
+gjxl_aq_initial_quant_modulation,22,Integer and Complex Utilization,1.103041,4.002722013720992
+gjxl_aq_validate_initial_mask,22,Integer and Complex Utilization,1.881417,0.0
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,22,Integer and Complex Utilization,3.520834,20.01502619895364
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,22,Integer and Complex Utilization,3.679291,17.561099340769353
+gjxl_ac_strategy_dct32x16_candidate_loss_local,22,Integer and Complex Utilization,8.398917,15.359743057544007
+gjxl_ac_strategy_dct32_candidate_loss_local,22,Integer and Complex Utilization,31.607784,10.656443594044704
+gjxl_dct32_forward_simdgroup_2d_matmul_image,22,Integer and Complex Utilization,3.889417,15.760890606228381
+gjxl_aq_final_cfl,22,Integer and Complex Utilization,2.502625,24.393487490061858
+gjxl_aq_dc_quantize_simd_wave,22,Integer and Complex Utilization,2.990876,4.079146605538716
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,22,Integer and Complex Utilization,7.533458,5.952685801423139
+gjxl_aq_gaborish_f32,22,Integer and Complex Utilization,13.45346,1.2618881639729997
+gjxl_aq_epf_pass1_tile32x4_p2,22,Integer and Complex Utilization,4.482374,14.758176820989311
+gjxl_aq_epf_pass2_linear_tile32x4_p2,22,Integer and Complex Utilization,11.198084,14.307964185383115
+gjxl_butteraugli_malta_fixed_f32,22,Integer and Complex Utilization,2.549708,7.542630364218926
+gjxl_butteraugli_final_l2_masked_ac_f32,22,Integer and Complex Utilization,9.075249,1.265385075729741
+gjxl_butteraugli_resident_l2_reduce_w64_simd,22,Integer and Complex Utilization,4.076207,3.4140863491614772
+gjxl_ac_strategy_dct16_candidate_loss_parallel,22,Integer and Complex Utilization,7.254378,17.066541135900554
+all ordinary GPU active,23,L1 Cache Limiter,662.110066,11.824932347192311
+gjxl_aq_resident_input_transform,23,L1 Cache Limiter,6.374792,2.0943231703067298
+gjxl_aq_resident_input_statistics,23,L1 Cache Limiter,1.925875,6.301613493953974
+gjxl_butteraugli_low_medium_p1_device,23,L1 Cache Limiter,15.729545,21.711006584141057
+gjxl_butteraugli_convolve_transpose_f32,23,L1 Cache Limiter,9.670374,19.614815233227606
+gjxl_butteraugli_subsample2x_f32,23,L1 Cache Limiter,2.510083,2.3773526053335576
+gjxl_butteraugli_frequency_high_convolve_f32,23,L1 Cache Limiter,9.845999,26.085684313326087
+gjxl_butteraugli_frequency_suppress_x_f32,23,L1 Cache Limiter,4.082791,2.6843748097040407
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,23,L1 Cache Limiter,12.272249,8.156273084323036
+gjxl_butteraugli_fuzzy_erosion_f32,23,L1 Cache Limiter,1.030249,13.54176843357746
+gjxl_convolve_symmetric5_f32,23,L1 Cache Limiter,2.9835,25.074456025678668
+gjxl_aq_initial_cfl,23,L1 Cache Limiter,4.532375,5.079494095542999
+gjxl_aq_initial_quant_gradient,23,L1 Cache Limiter,1.95925,12.526251382162608
+gjxl_aq_initial_quant_modulation,23,L1 Cache Limiter,1.103041,14.906726943405504
+gjxl_aq_validate_initial_mask,23,L1 Cache Limiter,1.881417,0.521404472106716
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,23,L1 Cache Limiter,3.520834,10.117503247166544
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,23,L1 Cache Limiter,3.679291,8.979682220343944
+gjxl_ac_strategy_dct32x16_candidate_loss_local,23,L1 Cache Limiter,8.398917,10.155231717423298
+gjxl_ac_strategy_dct32_candidate_loss_local,23,L1 Cache Limiter,31.607784,7.629672472096053
+gjxl_dct32_forward_simdgroup_2d_matmul_image,23,L1 Cache Limiter,3.889417,10.367924230605475
+gjxl_aq_final_cfl,23,L1 Cache Limiter,2.502625,4.625424147799717
+gjxl_aq_dc_quantize_simd_wave,23,L1 Cache Limiter,2.990876,1.2478656642472397
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,23,L1 Cache Limiter,7.533458,10.745746427327495
+gjxl_aq_gaborish_f32,23,L1 Cache Limiter,13.45346,12.306710553497847
+gjxl_aq_epf_pass1_tile32x4_p2,23,L1 Cache Limiter,4.482374,14.17485036815453
+gjxl_aq_epf_pass2_linear_tile32x4_p2,23,L1 Cache Limiter,11.198084,5.345361718769962
+gjxl_butteraugli_malta_fixed_f32,23,L1 Cache Limiter,2.549708,10.476000397170198
+gjxl_butteraugli_final_l2_masked_ac_f32,23,L1 Cache Limiter,9.075249,2.5307633303500108
+gjxl_butteraugli_resident_l2_reduce_w64_simd,23,L1 Cache Limiter,4.076207,2.8814825626074434
+gjxl_ac_strategy_dct16_candidate_loss_parallel,23,L1 Cache Limiter,7.254378,9.656649484456608
+all ordinary GPU active,24,L1 Cache Utilization,662.110066,11.824656652678067
+gjxl_aq_resident_input_transform,24,L1 Cache Utilization,6.374792,2.0943231703067298
+gjxl_aq_resident_input_statistics,24,L1 Cache Utilization,1.925875,6.301613493953974
+gjxl_butteraugli_low_medium_p1_device,24,L1 Cache Utilization,15.729545,21.711004355665413
+gjxl_butteraugli_convolve_transpose_f32,24,L1 Cache Utilization,9.670374,19.614815233227606
+gjxl_butteraugli_subsample2x_f32,24,L1 Cache Utilization,2.510083,2.3773526053335576
+gjxl_butteraugli_frequency_high_convolve_f32,24,L1 Cache Utilization,9.845999,26.085684313326087
+gjxl_butteraugli_frequency_suppress_x_f32,24,L1 Cache Utilization,4.082791,2.6843748097040407
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,24,L1 Cache Utilization,12.272249,8.156273084323036
+gjxl_butteraugli_fuzzy_erosion_f32,24,L1 Cache Utilization,1.030249,13.54176843357746
+gjxl_convolve_symmetric5_f32,24,L1 Cache Utilization,2.9835,25.074456025678668
+gjxl_aq_initial_cfl,24,L1 Cache Utilization,4.532375,5.079494095542999
+gjxl_aq_initial_quant_gradient,24,L1 Cache Utilization,1.95925,12.525679364019318
+gjxl_aq_initial_quant_modulation,24,L1 Cache Utilization,1.103041,14.906721555001793
+gjxl_aq_validate_initial_mask,24,L1 Cache Utilization,1.881417,0.521404472106716
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,24,L1 Cache Utilization,3.520834,10.117503247166544
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,24,L1 Cache Utilization,3.679291,8.979682220343944
+gjxl_ac_strategy_dct32x16_candidate_loss_local,24,L1 Cache Utilization,8.398917,10.155231683406798
+gjxl_ac_strategy_dct32_candidate_loss_local,24,L1 Cache Utilization,31.607784,7.629672472096053
+gjxl_dct32_forward_simdgroup_2d_matmul_image,24,L1 Cache Utilization,3.889417,10.367923200521076
+gjxl_aq_final_cfl,24,L1 Cache Utilization,2.502625,4.625424147799717
+gjxl_aq_dc_quantize_simd_wave,24,L1 Cache Utilization,2.990876,1.2478656642472397
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,24,L1 Cache Utilization,7.533458,10.745746019863299
+gjxl_aq_gaborish_f32,24,L1 Cache Utilization,13.45346,12.306710538788245
+gjxl_aq_epf_pass1_tile32x4_p2,24,L1 Cache Utilization,4.482374,14.174819399189078
+gjxl_aq_epf_pass2_linear_tile32x4_p2,24,L1 Cache Utilization,11.198084,5.335093551955218
+gjxl_butteraugli_malta_fixed_f32,24,L1 Cache Utilization,2.549708,10.475879987370144
+gjxl_butteraugli_final_l2_masked_ac_f32,24,L1 Cache Utilization,9.075249,2.5307633303500108
+gjxl_butteraugli_resident_l2_reduce_w64_simd,24,L1 Cache Utilization,4.076207,2.8814747985565385
+gjxl_ac_strategy_dct16_candidate_loss_parallel,24,L1 Cache Utilization,7.254378,9.656649484456608
+all ordinary GPU active,25,L1 Total Residency,662.110066,92.85440258894002
+gjxl_aq_resident_input_transform,25,L1 Total Residency,6.374792,99.99999881851231
+gjxl_aq_resident_input_statistics,25,L1 Total Residency,1.925875,99.95377463555907
+gjxl_butteraugli_low_medium_p1_device,25,L1 Total Residency,15.729545,97.22502173101057
+gjxl_butteraugli_convolve_transpose_f32,25,L1 Total Residency,9.670374,99.99999924869543
+gjxl_butteraugli_subsample2x_f32,25,L1 Total Residency,2.510083,99.99936766958992
+gjxl_butteraugli_frequency_high_convolve_f32,25,L1 Total Residency,9.845999,99.99999902023097
+gjxl_butteraugli_frequency_suppress_x_f32,25,L1 Total Residency,4.082791,99.99999922339514
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,25,L1 Total Residency,12.272249,99.99999919259368
+gjxl_butteraugli_fuzzy_erosion_f32,25,L1 Total Residency,1.030249,99.99989751975525
+gjxl_convolve_symmetric5_f32,25,L1 Total Residency,2.9835,99.98029649594682
+gjxl_aq_initial_cfl,25,L1 Total Residency,4.532375,98.05306382888276
+gjxl_aq_initial_quant_gradient,25,L1 Total Residency,1.95925,99.76004156296324
+gjxl_aq_initial_quant_modulation,25,L1 Total Residency,1.103041,99.4402564488303
+gjxl_aq_validate_initial_mask,25,L1 Total Residency,1.881417,99.98256903902163
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,25,L1 Total Residency,3.520834,87.92685831012768
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,25,L1 Total Residency,3.679291,86.03971556415824
+gjxl_ac_strategy_dct32x16_candidate_loss_local,25,L1 Total Residency,8.398917,90.11326387697663
+gjxl_ac_strategy_dct32_candidate_loss_local,25,L1 Total Residency,31.607784,92.2219958342146
+gjxl_dct32_forward_simdgroup_2d_matmul_image,25,L1 Total Residency,3.889417,96.14693846164697
+gjxl_aq_final_cfl,25,L1 Total Residency,2.502625,99.7822083627011
+gjxl_aq_dc_quantize_simd_wave,25,L1 Total Residency,2.990876,24.91197268090159
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,25,L1 Total Residency,7.533458,95.91527256027955
+gjxl_aq_gaborish_f32,25,L1 Total Residency,13.45346,99.96113501877309
+gjxl_aq_epf_pass1_tile32x4_p2,25,L1 Total Residency,4.482374,95.40930757853779
+gjxl_aq_epf_pass2_linear_tile32x4_p2,25,L1 Total Residency,11.198084,95.50003487114316
+gjxl_butteraugli_malta_fixed_f32,25,L1 Total Residency,2.549708,95.38839244185279
+gjxl_butteraugli_final_l2_masked_ac_f32,25,L1 Total Residency,9.075249,99.99999707736718
+gjxl_butteraugli_resident_l2_reduce_w64_simd,25,L1 Total Residency,4.076207,98.91735055606154
+gjxl_ac_strategy_dct16_candidate_loss_parallel,25,L1 Total Residency,7.254378,88.11726564192102
+all ordinary GPU active,29,L1 Register Residency,662.110066,0.5769113291520047
+gjxl_aq_resident_input_transform,29,L1 Register Residency,6.374792,0.0
+gjxl_aq_resident_input_statistics,29,L1 Register Residency,1.925875,0.0
+gjxl_butteraugli_low_medium_p1_device,29,L1 Register Residency,15.729545,0.6105241877834966
+gjxl_butteraugli_convolve_transpose_f32,29,L1 Register Residency,9.670374,0.0
+gjxl_butteraugli_subsample2x_f32,29,L1 Register Residency,2.510083,3.147385539228146e-06
+gjxl_butteraugli_frequency_high_convolve_f32,29,L1 Register Residency,9.845999,0.0
+gjxl_butteraugli_frequency_suppress_x_f32,29,L1 Register Residency,4.082791,0.0
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,29,L1 Register Residency,12.272249,0.0
+gjxl_butteraugli_fuzzy_erosion_f32,29,L1 Register Residency,1.030249,0.00017312985377397058
+gjxl_convolve_symmetric5_f32,29,L1 Register Residency,2.9835,0.00378741100714677
+gjxl_aq_initial_cfl,29,L1 Register Residency,4.532375,0.49738707385006226
+gjxl_aq_initial_quant_gradient,29,L1 Register Residency,1.95925,0.8049017605998161
+gjxl_aq_initial_quant_modulation,29,L1 Register Residency,1.103041,2.050835655401126
+gjxl_aq_validate_initial_mask,29,L1 Register Residency,1.881417,0.0
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,29,L1 Register Residency,3.520834,0.09341455850218343
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,29,L1 Register Residency,3.679291,0.0
+gjxl_ac_strategy_dct32x16_candidate_loss_local,29,L1 Register Residency,8.398917,0.40502573893414506
+gjxl_ac_strategy_dct32_candidate_loss_local,29,L1 Register Residency,31.607784,4.1469418615843865e-05
+gjxl_dct32_forward_simdgroup_2d_matmul_image,29,L1 Register Residency,3.889417,0.09051174403247825
+gjxl_aq_final_cfl,29,L1 Register Residency,2.502625,3.7342335133692357
+gjxl_aq_dc_quantize_simd_wave,29,L1 Register Residency,2.990876,0.004757533055167301
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,29,L1 Register Residency,7.533458,0.2558204383523141
+gjxl_aq_gaborish_f32,29,L1 Register Residency,13.45346,0.025984019497493405
+gjxl_aq_epf_pass1_tile32x4_p2,29,L1 Register Residency,4.482374,0.030600586588530536
+gjxl_aq_epf_pass2_linear_tile32x4_p2,29,L1 Register Residency,11.198084,0.3862346918372903
+gjxl_butteraugli_malta_fixed_f32,29,L1 Register Residency,2.549708,0.26939775298990953
+gjxl_butteraugli_final_l2_masked_ac_f32,29,L1 Register Residency,9.075249,5.324255899807466e-06
+gjxl_butteraugli_resident_l2_reduce_w64_simd,29,L1 Register Residency,4.076207,0.6728199610143678
+gjxl_ac_strategy_dct16_candidate_loss_parallel,29,L1 Register Residency,7.254378,2.4862608130480892e-05
+all ordinary GPU active,30,L1 Stack Residency,662.110066,0.0
+gjxl_aq_resident_input_transform,30,L1 Stack Residency,6.374792,0.0
+gjxl_aq_resident_input_statistics,30,L1 Stack Residency,1.925875,0.0
+gjxl_butteraugli_low_medium_p1_device,30,L1 Stack Residency,15.729545,0.0
+gjxl_butteraugli_convolve_transpose_f32,30,L1 Stack Residency,9.670374,0.0
+gjxl_butteraugli_subsample2x_f32,30,L1 Stack Residency,2.510083,0.0
+gjxl_butteraugli_frequency_high_convolve_f32,30,L1 Stack Residency,9.845999,0.0
+gjxl_butteraugli_frequency_suppress_x_f32,30,L1 Stack Residency,4.082791,0.0
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,30,L1 Stack Residency,12.272249,0.0
+gjxl_butteraugli_fuzzy_erosion_f32,30,L1 Stack Residency,1.030249,0.0
+gjxl_convolve_symmetric5_f32,30,L1 Stack Residency,2.9835,0.0
+gjxl_aq_initial_cfl,30,L1 Stack Residency,4.532375,0.0
+gjxl_aq_initial_quant_gradient,30,L1 Stack Residency,1.95925,0.0
+gjxl_aq_initial_quant_modulation,30,L1 Stack Residency,1.103041,0.0
+gjxl_aq_validate_initial_mask,30,L1 Stack Residency,1.881417,0.0
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,30,L1 Stack Residency,3.520834,0.0
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,30,L1 Stack Residency,3.679291,0.0
+gjxl_ac_strategy_dct32x16_candidate_loss_local,30,L1 Stack Residency,8.398917,0.0
+gjxl_ac_strategy_dct32_candidate_loss_local,30,L1 Stack Residency,31.607784,0.0
+gjxl_dct32_forward_simdgroup_2d_matmul_image,30,L1 Stack Residency,3.889417,0.0
+gjxl_aq_final_cfl,30,L1 Stack Residency,2.502625,0.0
+gjxl_aq_dc_quantize_simd_wave,30,L1 Stack Residency,2.990876,0.0
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,30,L1 Stack Residency,7.533458,0.0
+gjxl_aq_gaborish_f32,30,L1 Stack Residency,13.45346,0.0
+gjxl_aq_epf_pass1_tile32x4_p2,30,L1 Stack Residency,4.482374,0.0
+gjxl_aq_epf_pass2_linear_tile32x4_p2,30,L1 Stack Residency,11.198084,0.0
+gjxl_butteraugli_malta_fixed_f32,30,L1 Stack Residency,2.549708,0.0
+gjxl_butteraugli_final_l2_masked_ac_f32,30,L1 Stack Residency,9.075249,0.0
+gjxl_butteraugli_resident_l2_reduce_w64_simd,30,L1 Stack Residency,4.076207,0.0
+gjxl_ac_strategy_dct16_candidate_loss_parallel,30,L1 Stack Residency,7.254378,0.0
+all ordinary GPU active,31,L1 Threadgroup Residency,662.110066,8.280754053257269
+gjxl_aq_resident_input_transform,31,L1 Threadgroup Residency,6.374792,0.0
+gjxl_aq_resident_input_statistics,31,L1 Threadgroup Residency,1.925875,0.0
+gjxl_butteraugli_low_medium_p1_device,31,L1 Threadgroup Residency,15.729545,8.929268571597811
+gjxl_butteraugli_convolve_transpose_f32,31,L1 Threadgroup Residency,9.670374,0.0
+gjxl_butteraugli_subsample2x_f32,31,L1 Threadgroup Residency,2.510083,0.0
+gjxl_butteraugli_frequency_high_convolve_f32,31,L1 Threadgroup Residency,9.845999,0.0
+gjxl_butteraugli_frequency_suppress_x_f32,31,L1 Threadgroup Residency,4.082791,0.0
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,31,L1 Threadgroup Residency,12.272249,0.0
+gjxl_butteraugli_fuzzy_erosion_f32,31,L1 Threadgroup Residency,1.030249,0.0
+gjxl_convolve_symmetric5_f32,31,L1 Threadgroup Residency,2.9835,0.0
+gjxl_aq_initial_cfl,31,L1 Threadgroup Residency,4.532375,0.0
+gjxl_aq_initial_quant_gradient,31,L1 Threadgroup Residency,1.95925,0.0
+gjxl_aq_initial_quant_modulation,31,L1 Threadgroup Residency,1.103041,0.0
+gjxl_aq_validate_initial_mask,31,L1 Threadgroup Residency,1.881417,0.0
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,31,L1 Threadgroup Residency,3.520834,23.340944592875044
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,31,L1 Threadgroup Residency,3.679291,27.861979610567165
+gjxl_ac_strategy_dct32x16_candidate_loss_local,31,L1 Threadgroup Residency,8.398917,27.53566630281448
+gjxl_ac_strategy_dct32_candidate_loss_local,31,L1 Threadgroup Residency,31.607784,22.287860615005922
+gjxl_dct32_forward_simdgroup_2d_matmul_image,31,L1 Threadgroup Residency,3.889417,15.043496758606654
+gjxl_aq_final_cfl,31,L1 Threadgroup Residency,2.502625,0.0012125382209763733
+gjxl_aq_dc_quantize_simd_wave,31,L1 Threadgroup Residency,2.990876,0.117188173160638
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,31,L1 Threadgroup Residency,7.533458,16.08279915983997
+gjxl_aq_gaborish_f32,31,L1 Threadgroup Residency,13.45346,0.0
+gjxl_aq_epf_pass1_tile32x4_p2,31,L1 Threadgroup Residency,4.482374,16.80988240104699
+gjxl_aq_epf_pass2_linear_tile32x4_p2,31,L1 Threadgroup Residency,11.198084,16.707245568138404
+gjxl_butteraugli_malta_fixed_f32,31,L1 Threadgroup Residency,2.549708,6.380345856814983
+gjxl_butteraugli_final_l2_masked_ac_f32,31,L1 Threadgroup Residency,9.075249,0.0
+gjxl_butteraugli_resident_l2_reduce_w64_simd,31,L1 Threadgroup Residency,4.076207,2.9835470304842704
+gjxl_ac_strategy_dct16_candidate_loss_parallel,31,L1 Threadgroup Residency,7.254378,26.01292398322443
+all ordinary GPU active,47,Buffer L1 Miss Rate,662.110066,34.54138345308831
+gjxl_aq_resident_input_transform,47,Buffer L1 Miss Rate,6.374792,45.07369914289044
+gjxl_aq_resident_input_statistics,47,Buffer L1 Miss Rate,1.925875,36.867655295301134
+gjxl_butteraugli_low_medium_p1_device,47,Buffer L1 Miss Rate,15.729545,7.387547927705264
+gjxl_butteraugli_convolve_transpose_f32,47,Buffer L1 Miss Rate,9.670374,11.880740769690357
+gjxl_butteraugli_subsample2x_f32,47,Buffer L1 Miss Rate,2.510083,43.392080941410285
+gjxl_butteraugli_frequency_high_convolve_f32,47,Buffer L1 Miss Rate,9.845999,8.234417582609018
+gjxl_butteraugli_frequency_suppress_x_f32,47,Buffer L1 Miss Rate,4.082791,60.418758666345674
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,47,Buffer L1 Miss Rate,12.272249,22.07800139454173
+gjxl_butteraugli_fuzzy_erosion_f32,47,Buffer L1 Miss Rate,1.030249,29.176557501165494
+gjxl_convolve_symmetric5_f32,47,Buffer L1 Miss Rate,2.9835,7.120320748732081
+gjxl_aq_initial_cfl,47,Buffer L1 Miss Rate,4.532375,27.563508501351066
+gjxl_aq_initial_quant_gradient,47,Buffer L1 Miss Rate,1.95925,26.90135358439761
+gjxl_aq_initial_quant_modulation,47,Buffer L1 Miss Rate,1.103041,15.46116286749255
+gjxl_aq_validate_initial_mask,47,Buffer L1 Miss Rate,1.881417,99.97864443276855
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,47,Buffer L1 Miss Rate,3.520834,30.07863155568805
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,47,Buffer L1 Miss Rate,3.679291,28.0762939174474
+gjxl_ac_strategy_dct32x16_candidate_loss_local,47,Buffer L1 Miss Rate,8.398917,30.33571208201517
+gjxl_ac_strategy_dct32_candidate_loss_local,47,Buffer L1 Miss Rate,31.607784,41.71550176991708
+gjxl_dct32_forward_simdgroup_2d_matmul_image,47,Buffer L1 Miss Rate,3.889417,10.089833693172402
+gjxl_aq_final_cfl,47,Buffer L1 Miss Rate,2.502625,14.41657503170865
+gjxl_aq_dc_quantize_simd_wave,47,Buffer L1 Miss Rate,2.990876,2.7186861156071864
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,47,Buffer L1 Miss Rate,7.533458,10.05473704003579
+gjxl_aq_gaborish_f32,47,Buffer L1 Miss Rate,13.45346,18.43389711644087
+gjxl_aq_epf_pass1_tile32x4_p2,47,Buffer L1 Miss Rate,4.482374,63.01264843693296
+gjxl_aq_epf_pass2_linear_tile32x4_p2,47,Buffer L1 Miss Rate,11.198084,58.49058869198733
+gjxl_butteraugli_malta_fixed_f32,47,Buffer L1 Miss Rate,2.549708,74.42229963885801
+gjxl_butteraugli_final_l2_masked_ac_f32,47,Buffer L1 Miss Rate,9.075249,85.84468382043337
+gjxl_butteraugli_resident_l2_reduce_w64_simd,47,Buffer L1 Miss Rate,4.076207,90.85531200368659
+gjxl_ac_strategy_dct16_candidate_loss_parallel,47,Buffer L1 Miss Rate,7.254378,34.16018372345688
+all ordinary GPU active,50,Compute Shader Launch Utilization,662.110066,2.806160261463389
+gjxl_aq_resident_input_transform,50,Compute Shader Launch Utilization,6.374792,2.792373371837355
+gjxl_aq_resident_input_statistics,50,Compute Shader Launch Utilization,1.925875,4.482532518048007
+gjxl_butteraugli_low_medium_p1_device,50,Compute Shader Launch Utilization,15.729545,0.9103170371823696
+gjxl_butteraugli_convolve_transpose_f32,50,Compute Shader Launch Utilization,9.670374,7.759250674429732
+gjxl_butteraugli_subsample2x_f32,50,Compute Shader Launch Utilization,2.510083,3.8033606898411096
+gjxl_butteraugli_frequency_high_convolve_f32,50,Compute Shader Launch Utilization,9.845999,4.8875691112384425
+gjxl_butteraugli_frequency_suppress_x_f32,50,Compute Shader Launch Utilization,4.082791,7.165083813947324
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,50,Compute Shader Launch Utilization,12.272249,2.638599251729965
+gjxl_butteraugli_fuzzy_erosion_f32,50,Compute Shader Launch Utilization,1.030249,8.340441627315382
+gjxl_convolve_symmetric5_f32,50,Compute Shader Launch Utilization,2.9835,5.572918332776932
+gjxl_aq_initial_cfl,50,Compute Shader Launch Utilization,4.532375,0.0
+gjxl_aq_initial_quant_gradient,50,Compute Shader Launch Utilization,1.95925,0.49502536370697353
+gjxl_aq_initial_quant_modulation,50,Compute Shader Launch Utilization,1.103041,0.10832582427477028
+gjxl_aq_validate_initial_mask,50,Compute Shader Launch Utilization,1.881417,8.342433362240117
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,50,Compute Shader Launch Utilization,3.520834,2.9115280392544673
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,50,Compute Shader Launch Utilization,3.679291,1.4788976073906823
+gjxl_ac_strategy_dct32x16_candidate_loss_local,50,Compute Shader Launch Utilization,8.398917,1.3004852396497084
+gjxl_ac_strategy_dct32_candidate_loss_local,50,Compute Shader Launch Utilization,31.607784,0.48313575915558454
+gjxl_dct32_forward_simdgroup_2d_matmul_image,50,Compute Shader Launch Utilization,3.889417,1.212323644518448
+gjxl_aq_final_cfl,50,Compute Shader Launch Utilization,2.502625,0.0030734977541159907
+gjxl_aq_dc_quantize_simd_wave,50,Compute Shader Launch Utilization,2.990876,0.0
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,50,Compute Shader Launch Utilization,7.533458,1.2530520490486763
+gjxl_aq_gaborish_f32,50,Compute Shader Launch Utilization,13.45346,2.523453610550887
+gjxl_aq_epf_pass1_tile32x4_p2,50,Compute Shader Launch Utilization,4.482374,1.2818845979329814
+gjxl_aq_epf_pass2_linear_tile32x4_p2,50,Compute Shader Launch Utilization,11.198084,1.5843504838035622
+gjxl_butteraugli_malta_fixed_f32,50,Compute Shader Launch Utilization,2.549708,4.472318008244728
+gjxl_butteraugli_final_l2_masked_ac_f32,50,Compute Shader Launch Utilization,9.075249,0.9203187257866636
+gjxl_butteraugli_resident_l2_reduce_w64_simd,50,Compute Shader Launch Utilization,4.076207,0.9339148500609215
+gjxl_ac_strategy_dct16_candidate_loss_parallel,50,Compute Shader Launch Utilization,7.254378,1.456340509886507
+all ordinary GPU active,51,Total SIMD Groups Inflight,662.110066,61.96686290141005
+gjxl_aq_resident_input_transform,51,Total SIMD Groups Inflight,6.374792,36.3828086456621
+gjxl_aq_resident_input_statistics,51,Total SIMD Groups Inflight,1.925875,32.48492101733859
+gjxl_butteraugli_low_medium_p1_device,51,Total SIMD Groups Inflight,15.729545,66.88068503276372
+gjxl_butteraugli_convolve_transpose_f32,51,Total SIMD Groups Inflight,9.670374,65.94024003728954
+gjxl_butteraugli_subsample2x_f32,51,Total SIMD Groups Inflight,2.510083,78.42051888222007
+gjxl_butteraugli_frequency_high_convolve_f32,51,Total SIMD Groups Inflight,9.845999,87.8076168746266
+gjxl_butteraugli_frequency_suppress_x_f32,51,Total SIMD Groups Inflight,4.082791,69.38494529945736
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,51,Total SIMD Groups Inflight,12.272249,65.82826454200756
+gjxl_butteraugli_fuzzy_erosion_f32,51,Total SIMD Groups Inflight,1.030249,71.13946843796985
+gjxl_convolve_symmetric5_f32,51,Total SIMD Groups Inflight,2.9835,94.78540508387766
+gjxl_aq_initial_cfl,51,Total SIMD Groups Inflight,4.532375,36.02532732480131
+gjxl_aq_initial_quant_gradient,51,Total SIMD Groups Inflight,1.95925,40.942837372795786
+gjxl_aq_initial_quant_modulation,51,Total SIMD Groups Inflight,1.103041,26.009573459993124
+gjxl_aq_validate_initial_mask,51,Total SIMD Groups Inflight,1.881417,11.007560737364864
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,51,Total SIMD Groups Inflight,3.520834,65.16867268499465
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,51,Total SIMD Groups Inflight,3.679291,32.839314210132585
+gjxl_ac_strategy_dct32x16_candidate_loss_local,51,Total SIMD Groups Inflight,8.398917,47.51732915926531
+gjxl_ac_strategy_dct32_candidate_loss_local,51,Total SIMD Groups Inflight,31.607784,23.867183269321686
+gjxl_dct32_forward_simdgroup_2d_matmul_image,51,Total SIMD Groups Inflight,3.889417,71.86686911218717
+gjxl_aq_final_cfl,51,Total SIMD Groups Inflight,2.502625,34.152828622969565
+gjxl_aq_dc_quantize_simd_wave,51,Total SIMD Groups Inflight,2.990876,2.594598404086391
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,51,Total SIMD Groups Inflight,7.533458,65.44404598556643
+gjxl_aq_gaborish_f32,51,Total SIMD Groups Inflight,13.45346,94.95709683199061
+gjxl_aq_epf_pass1_tile32x4_p2,51,Total SIMD Groups Inflight,4.482374,59.03066911874818
+gjxl_aq_epf_pass2_linear_tile32x4_p2,51,Total SIMD Groups Inflight,11.198084,58.507131951932415
+gjxl_butteraugli_malta_fixed_f32,51,Total SIMD Groups Inflight,2.549708,94.65594217697647
+gjxl_butteraugli_final_l2_masked_ac_f32,51,Total SIMD Groups Inflight,9.075249,91.09128246945268
+gjxl_butteraugli_resident_l2_reduce_w64_simd,51,Total SIMD Groups Inflight,4.076207,91.05086807943566
+gjxl_ac_strategy_dct16_candidate_loss_parallel,51,Total SIMD Groups Inflight,7.254378,35.58312964298393
+all ordinary GPU active,54,Compute SIMD Groups Inflight,662.110066,61.88957396141684
+gjxl_aq_resident_input_transform,54,Compute SIMD Groups Inflight,6.374792,36.3828086456621
+gjxl_aq_resident_input_statistics,54,Compute SIMD Groups Inflight,1.925875,32.48492101733859
+gjxl_butteraugli_low_medium_p1_device,54,Compute SIMD Groups Inflight,15.729545,66.8711060254315
+gjxl_butteraugli_convolve_transpose_f32,54,Compute SIMD Groups Inflight,9.670374,65.94024003728559
+gjxl_butteraugli_subsample2x_f32,54,Compute SIMD Groups Inflight,2.510083,78.42051888221398
+gjxl_butteraugli_frequency_high_convolve_f32,54,Compute SIMD Groups Inflight,9.845999,87.80761687463745
+gjxl_butteraugli_frequency_suppress_x_f32,54,Compute SIMD Groups Inflight,4.082791,69.38494529945736
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,54,Compute SIMD Groups Inflight,12.272249,65.82826454200756
+gjxl_butteraugli_fuzzy_erosion_f32,54,Compute SIMD Groups Inflight,1.030249,71.13946843795505
+gjxl_convolve_symmetric5_f32,54,Compute SIMD Groups Inflight,2.9835,94.78540508388278
+gjxl_aq_initial_cfl,54,Compute SIMD Groups Inflight,4.532375,36.02490818924442
+gjxl_aq_initial_quant_gradient,54,Compute SIMD Groups Inflight,1.95925,40.94283737281136
+gjxl_aq_initial_quant_modulation,54,Compute SIMD Groups Inflight,1.103041,26.009573460076126
+gjxl_aq_validate_initial_mask,54,Compute SIMD Groups Inflight,1.881417,11.007560737397306
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,54,Compute SIMD Groups Inflight,3.520834,65.16867268494263
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,54,Compute SIMD Groups Inflight,3.679291,32.83931382477392
+gjxl_ac_strategy_dct32x16_candidate_loss_local,54,Compute SIMD Groups Inflight,8.398917,47.459930823089266
+gjxl_ac_strategy_dct32_candidate_loss_local,54,Compute SIMD Groups Inflight,31.607784,23.829414660331004
+gjxl_dct32_forward_simdgroup_2d_matmul_image,54,Compute SIMD Groups Inflight,3.889417,71.8668691121911
+gjxl_aq_final_cfl,54,Compute SIMD Groups Inflight,2.502625,34.15282205400638
+gjxl_aq_dc_quantize_simd_wave,54,Compute SIMD Groups Inflight,2.990876,2.4000139799750393
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,54,Compute SIMD Groups Inflight,7.533458,65.44404598556643
+gjxl_aq_gaborish_f32,54,Compute SIMD Groups Inflight,13.45346,94.95053499650705
+gjxl_aq_epf_pass1_tile32x4_p2,54,Compute SIMD Groups Inflight,4.482374,59.03062338007202
+gjxl_aq_epf_pass2_linear_tile32x4_p2,54,Compute SIMD Groups Inflight,11.198084,58.507131951932415
+gjxl_butteraugli_malta_fixed_f32,54,Compute SIMD Groups Inflight,2.549708,94.65591748725362
+gjxl_butteraugli_final_l2_masked_ac_f32,54,Compute SIMD Groups Inflight,9.075249,91.09128246945268
+gjxl_butteraugli_resident_l2_reduce_w64_simd,54,Compute SIMD Groups Inflight,4.076207,91.05086807943566
+gjxl_ac_strategy_dct16_candidate_loss_parallel,54,Compute SIMD Groups Inflight,7.254378,35.54641529193931
+all ordinary GPU active,61,GPU Bandwidth,661.760732,132.50074988241258
+gjxl_aq_resident_input_transform,61,GPU Bandwidth,6.374792,185.5221465447504
+gjxl_aq_resident_input_statistics,61,GPU Bandwidth,1.875959,132.96451680655986
+gjxl_butteraugli_low_medium_p1_device,61,GPU Bandwidth,15.679628,79.74809136399699
+gjxl_butteraugli_convolve_transpose_f32,61,GPU Bandwidth,9.670374,180.48358620818436
+gjxl_butteraugli_subsample2x_f32,61,GPU Bandwidth,2.510083,197.79585542437167
+gjxl_butteraugli_frequency_high_convolve_f32,61,GPU Bandwidth,9.845999,212.87080554124074
+gjxl_butteraugli_frequency_suppress_x_f32,61,GPU Bandwidth,4.082791,224.83669151244388
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,61,GPU Bandwidth,12.272249,203.0495702520662
+gjxl_butteraugli_fuzzy_erosion_f32,61,GPU Bandwidth,1.030249,195.02620289391112
+gjxl_convolve_symmetric5_f32,61,GPU Bandwidth,2.9835,129.5495862133703
+gjxl_aq_initial_cfl,61,GPU Bandwidth,4.532375,191.8752534448815
+gjxl_aq_initial_quant_gradient,61,GPU Bandwidth,1.95925,177.78496368720505
+gjxl_aq_initial_quant_modulation,61,GPU Bandwidth,1.103041,217.15632335605284
+gjxl_aq_validate_initial_mask,61,GPU Bandwidth,1.881417,81.95625967566205
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,61,GPU Bandwidth,3.520834,47.1452152281752
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,61,GPU Bandwidth,3.679291,47.46016559278784
+gjxl_ac_strategy_dct32x16_candidate_loss_local,61,GPU Bandwidth,8.398917,45.452245105828936
+gjxl_ac_strategy_dct32_candidate_loss_local,61,GPU Bandwidth,31.607784,22.79037049842248
+gjxl_dct32_forward_simdgroup_2d_matmul_image,61,GPU Bandwidth,3.889417,182.85843369421116
+gjxl_aq_final_cfl,61,GPU Bandwidth,2.502625,96.73559864281177
+gjxl_aq_dc_quantize_simd_wave,61,GPU Bandwidth,2.990876,8.99804712090576
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,61,GPU Bandwidth,7.533458,188.99554205125278
+gjxl_aq_gaborish_f32,61,GPU Bandwidth,13.353626,175.66088146673215
+gjxl_aq_epf_pass1_tile32x4_p2,61,GPU Bandwidth,4.482374,154.07769344587413
+gjxl_aq_epf_pass2_linear_tile32x4_p2,61,GPU Bandwidth,11.198084,191.07396122583316
+gjxl_butteraugli_malta_fixed_f32,61,GPU Bandwidth,2.549708,173.68604140722908
+gjxl_butteraugli_final_l2_masked_ac_f32,61,GPU Bandwidth,9.075249,198.9064120114131
+gjxl_butteraugli_resident_l2_reduce_w64_simd,61,GPU Bandwidth,4.076207,208.80868606006493
+gjxl_ac_strategy_dct16_candidate_loss_parallel,61,GPU Bandwidth,7.254378,26.91033481594841
+all ordinary GPU active,62,GPU Read Bandwidth,661.760732,80.5537902559074
+gjxl_aq_resident_input_transform,62,GPU Read Bandwidth,6.374792,78.80147994192615
+gjxl_aq_resident_input_statistics,62,GPU Read Bandwidth,1.875959,131.6253669153217
+gjxl_butteraugli_low_medium_p1_device,62,GPU Read Bandwidth,15.679628,28.627105396125053
+gjxl_butteraugli_convolve_transpose_f32,62,GPU Read Bandwidth,9.670374,81.588806362514
+gjxl_butteraugli_subsample2x_f32,62,GPU Read Bandwidth,2.510083,144.4682136052635
+gjxl_butteraugli_frequency_high_convolve_f32,62,GPU Read Bandwidth,9.845999,91.9252273755438
+gjxl_butteraugli_frequency_suppress_x_f32,62,GPU Read Bandwidth,4.082791,133.66016265638464
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,62,GPU Read Bandwidth,12.272249,99.70262001127574
+gjxl_butteraugli_fuzzy_erosion_f32,62,GPU Read Bandwidth,1.030249,87.38593065565519
+gjxl_convolve_symmetric5_f32,62,GPU Read Bandwidth,2.9835,59.06996825560705
+gjxl_aq_initial_cfl,62,GPU Read Bandwidth,4.532375,190.29791401646818
+gjxl_aq_initial_quant_gradient,62,GPU Read Bandwidth,1.95925,89.97717594574196
+gjxl_aq_initial_quant_modulation,62,GPU Read Bandwidth,1.103041,214.0270550481737
+gjxl_aq_validate_initial_mask,62,GPU Read Bandwidth,1.881417,78.31645393074645
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,62,GPU Read Bandwidth,3.520834,42.826202038792424
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,62,GPU Read Bandwidth,3.679291,43.43967283286937
+gjxl_ac_strategy_dct32x16_candidate_loss_local,62,GPU Read Bandwidth,8.398917,43.98976515782689
+gjxl_ac_strategy_dct32_candidate_loss_local,62,GPU Read Bandwidth,31.607784,21.857387832421033
+gjxl_dct32_forward_simdgroup_2d_matmul_image,62,GPU Read Bandwidth,3.889417,91.53649554441036
+gjxl_aq_final_cfl,62,GPU Read Bandwidth,2.502625,93.85327960851068
+gjxl_aq_dc_quantize_simd_wave,62,GPU Read Bandwidth,2.990876,3.4662003856349046
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,62,GPU Read Bandwidth,7.533458,94.30329928312173
+gjxl_aq_gaborish_f32,62,GPU Read Bandwidth,13.353626,79.63612381677073
+gjxl_aq_epf_pass1_tile32x4_p2,62,GPU Read Bandwidth,4.482374,81.87759060736698
+gjxl_aq_epf_pass2_linear_tile32x4_p2,62,GPU Read Bandwidth,11.198084,101.26604657083563
+gjxl_butteraugli_malta_fixed_f32,62,GPU Read Bandwidth,2.549708,132.54628349895842
+gjxl_butteraugli_final_l2_masked_ac_f32,62,GPU Read Bandwidth,9.075249,183.66774948448005
+gjxl_butteraugli_resident_l2_reduce_w64_simd,62,GPU Read Bandwidth,4.076207,205.07609185120768
+gjxl_ac_strategy_dct16_candidate_loss_parallel,62,GPU Read Bandwidth,7.254378,24.50077751488009
+all ordinary GPU active,63,GPU Write Bandwidth,661.760732,51.94695962600011
+gjxl_aq_resident_input_transform,63,GPU Write Bandwidth,6.374792,106.72066660236467
+gjxl_aq_resident_input_statistics,63,GPU Write Bandwidth,1.875959,1.3391498906443953
+gjxl_butteraugli_low_medium_p1_device,63,GPU Write Bandwidth,15.679628,51.1209859673985
+gjxl_butteraugli_convolve_transpose_f32,63,GPU Write Bandwidth,9.670374,98.89477984510944
+gjxl_butteraugli_subsample2x_f32,63,GPU Write Bandwidth,2.510083,53.327641818545885
+gjxl_butteraugli_frequency_high_convolve_f32,63,GPU Write Bandwidth,9.845999,120.94557816523822
+gjxl_butteraugli_frequency_suppress_x_f32,63,GPU Write Bandwidth,4.082791,91.17652885557524
+gjxl_butteraugli_frequency_ultra_mask_convolve_f32,63,GPU Write Bandwidth,12.272249,103.34695024027134
+gjxl_butteraugli_fuzzy_erosion_f32,63,GPU Write Bandwidth,1.030249,107.64027223775976
+gjxl_convolve_symmetric5_f32,63,GPU Write Bandwidth,2.9835,70.47961795723137
+gjxl_aq_initial_cfl,63,GPU Write Bandwidth,4.532375,1.5773394279251682
+gjxl_aq_initial_quant_gradient,63,GPU Write Bandwidth,1.95925,87.80778774110483
+gjxl_aq_initial_quant_modulation,63,GPU Write Bandwidth,1.103041,3.1292683076439674
+gjxl_aq_validate_initial_mask,63,GPU Write Bandwidth,1.881417,3.6398057443803284
+gjxl_ac_strategy_dct16x8_candidate_loss_parallel,63,GPU Write Bandwidth,3.520834,4.3190131889277215
+gjxl_ac_strategy_dct8x16_candidate_loss_parallel,63,GPU Write Bandwidth,3.679291,4.020492759317122
+gjxl_ac_strategy_dct32x16_candidate_loss_local,63,GPU Write Bandwidth,8.398917,1.4624799475533037
+gjxl_ac_strategy_dct32_candidate_loss_local,63,GPU Write Bandwidth,31.607784,0.9329826654964867
+gjxl_dct32_forward_simdgroup_2d_matmul_image,63,GPU Write Bandwidth,3.889417,91.32193814934965
+gjxl_aq_final_cfl,63,GPU Write Bandwidth,2.502625,2.8823190337493045
+gjxl_aq_dc_quantize_simd_wave,63,GPU Write Bandwidth,2.990876,5.531846734903526
+gjxl_dct32_inverse_simdgroup_2d_matmul_image,63,GPU Write Bandwidth,7.533458,94.69224276758722
+gjxl_aq_gaborish_f32,63,GPU Write Bandwidth,13.353626,96.02475764945581
+gjxl_aq_epf_pass1_tile32x4_p2,63,GPU Write Bandwidth,4.482374,72.20010283808674
+gjxl_aq_epf_pass2_linear_tile32x4_p2,63,GPU Write Bandwidth,11.198084,89.8079146545111
+gjxl_butteraugli_malta_fixed_f32,63,GPU Write Bandwidth,2.549708,41.139757907770964
+gjxl_butteraugli_final_l2_masked_ac_f32,63,GPU Write Bandwidth,9.075249,15.238662526480773
+gjxl_butteraugli_resident_l2_reduce_w64_simd,63,GPU Write Bandwidth,4.076207,3.7325942083313253
+gjxl_ac_strategy_dct16_candidate_loss_parallel,63,GPU Write Bandwidth,7.254378,2.4095573006287085

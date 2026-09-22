@@ -1,0 +1,13 @@
+[
+  "cmake",
+  "--build",
+  "/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/build/traffic",
+  "--target",
+  "gjxl_encoding_benchmark",
+  "gjxl_encode",
+  "gjxl_metal_butteraugli_test",
+  "gjxl_metal_aq_evaluation_test",
+  "gjxl_adaptive_quantization_gpu_policy_test",
+  "-j",
+  "8"
+]

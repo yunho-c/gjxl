@@ -1,0 +1,2062 @@
+{
+  "butteraugli-traffic-20260921/HYPOTHESIS-AUDIT.md": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/HYPOTHESIS-AUDIT.md",
+    "sha256": "53507da8d7b08a48beeac9228fb6f00fd4aa05e2b38112382536d05f7da8b055"
+  },
+  "butteraugli-traffic-20260921/OPPORTUNITIES.md": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/OPPORTUNITIES.md",
+    "sha256": "874b30ade3cda98adbb1a51e7adedb61e00836bed18ab6023cc891fdcc580985"
+  },
+  "butteraugli-traffic-20260921/TRAFFIC-NOTES.md": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/TRAFFIC-NOTES.md",
+    "sha256": "2a99199e2cdb5d3ba52edb203c51bd0884d2596255d9f94c5b579170e0172c27"
+  },
+  "butteraugli-traffic-20260921/REPORT.md": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/REPORT.md",
+    "sha256": "597a3281c88af05402ef9a7d4cc36771925620b953671a63711f1895d9811d42"
+  },
+  "butteraugli-traffic-20260921/INCIDENTS.md": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/INCIDENTS.md",
+    "sha256": "eb2e7ef023b500e9ec11caa43822990577dc001146a4457c033d3cc1a94dca34"
+  },
+  "butteraugli-traffic-20260921/PHASE12-14.md": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/PHASE12-14.md",
+    "sha256": "21bfd14967e57b83867ca969e8853444755709a4e7a1137344a65da510ce6631"
+  },
+  "butteraugli-traffic-20260921/PHASE10-11.md": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/PHASE10-11.md",
+    "sha256": "52d53ba3c40ddf9c319b4078ce8be51084ae8fd54a22eedd4a6232a5cd21752e"
+  },
+  "butteraugli-traffic-20260921/PROGRESS.md": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/PROGRESS.md",
+    "sha256": "4eed555376cd62b725d79a7b24fd0b4fabc1c36efdb4956b60f476258f66eb63"
+  },
+  "butteraugli-traffic-20260921/PHASE6.md": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/PHASE6.md",
+    "sha256": "253ac90b539f98591f20280a35c6021b319a766385e208d81d300fd45e4561ae"
+  },
+  "butteraugli-traffic-20260921/PHASE5.md": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/PHASE5.md",
+    "sha256": "cd5ddbee3e0506d5e6f5949ada1f2dc91e13f8f4d51153c8408ddaf9121f278c"
+  },
+  "butteraugli-traffic-20260921/PHASE7-8.md": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/PHASE7-8.md",
+    "sha256": "9dece6b80a0f67c5c61a1ba7d35766436b989abb61f6ff45532c95fb0adc3f1a"
+  },
+  "butteraugli-traffic-20260921/PHASE4.md": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/PHASE4.md",
+    "sha256": "6f57fe42e84eaf2477698ee1037bdc435e193a73b0d325344c8e14e0995433d7"
+  },
+  "butteraugli-traffic-20260921/PHASE15-17.md": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/PHASE15-17.md",
+    "sha256": "f53f14bf8dbc354d42cb32d0f2856519fb90870434eeeaf23ba4cfc2909cea02"
+  },
+  "butteraugli-traffic-20260921/filter-adjacent-variants.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-adjacent-variants.json",
+    "sha256": "e165277fd231686909ef5a56d93052e26e236be307d6f54216f07dc4ffe70473"
+  },
+  "butteraugli-traffic-20260921/filter-vertical-wide-variants.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-vertical-wide-variants.json",
+    "sha256": "bd367d885416857bc755dbfd31b93c38aac606ac63119258eef45d06ce631656"
+  },
+  "butteraugli-traffic-20260921/filter-short-variants.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-variants.json",
+    "sha256": "78f2bd1348a65c08917453d91f8c52654c49a1b76831e92f15ecc696df720e4b"
+  },
+  "butteraugli-traffic-20260921/filter-interior-variants.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-interior-variants.json",
+    "sha256": "189c7fb2301cab10f63feedffcf7fdbd39ac875397fca5235fd9a1262760c360"
+  },
+  "butteraugli-traffic-20260921/filter-reuse-closure-variants.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-reuse-closure-variants.json",
+    "sha256": "0a24e201d180d9812d00fb5b520a40b5de5a9e971b6769454c95ad96c2583153"
+  },
+  "butteraugli-traffic-20260921/filter-rolling-variants.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-rolling-variants.json",
+    "sha256": "0bf17e8ad3ea9de949d62840791bcea43c66b8e430217b3922b85a0cf2f816d1"
+  },
+  "butteraugli-traffic-20260921/filter-malta-variants.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-malta-variants.json",
+    "sha256": "e986bd00522ec6e698e429b002566f4b9a5c680a34a6f43efe0b98fb23f991a6"
+  },
+  "butteraugli-traffic-20260921/filter-reuse-geometry-variants.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-reuse-geometry-variants.json",
+    "sha256": "6416b9039b06088226462e80a9d5f9d6ae2d0db7ef964f64eff5e9428cf3d7ef"
+  },
+  "butteraugli-traffic-20260921/filter-short-interactions-variants.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-interactions-variants.json",
+    "sha256": "e9deab51ab7d8b36dbb1cdb883b44f399c5a5866020e8a6064d2d3827c25ebee"
+  },
+  "butteraugli-traffic-20260921/filter-malta-adj-variants.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-malta-adj-variants.json",
+    "sha256": "f237f8690eae288f07a512f8a75a0b34e04cf6703eaa08e1a6d529dd806d36a9"
+  },
+  "butteraugli-traffic-20260921/filter-norm-variants.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-norm-variants.json",
+    "sha256": "b30364ed29691bb7586b572a9f7c1234031ae9abb6e7556dd34681352329c589"
+  },
+  "butteraugli-traffic-20260921/filter-short-reuse-variants.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-reuse-variants.json",
+    "sha256": "0c8fbfbc8b9d84710a797a93922d7458c30c6884d52ce64d70e08613d2c64aba"
+  },
+  "butteraugli-traffic-20260921/filter-geometry-variants.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-geometry-variants.json",
+    "sha256": "0eaa9cda2c94ff4afc3378010e74a78f8a615cd52f33bea91036b6a069fc69b6"
+  },
+  "butteraugli-traffic-20260921/filter-short-horizontal-variants.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-short-horizontal-variants.json",
+    "sha256": "26dbe8dcef14921fec191a2539c8e8cc91fa59cf27f4df10b715407884abe166"
+  },
+  "butteraugli-traffic-20260921/filter-vertical-variants.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-vertical-variants.json",
+    "sha256": "ec00ec7969af9d4de9b446d4e12ecb43978477d508e077bc4d84c20d364332be"
+  },
+  "butteraugli-traffic-20260921/campaign10-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign10-state.json",
+    "sha256": "65c0aec3c6275dad775932af4aebda142c00d592c2de9c709d2a3dd7cb3a6e67"
+  },
+  "butteraugli-traffic-20260921/campaign3-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign3-state.json",
+    "sha256": "7adbc378897fa625f6c15379e2477409014d89242bef4268a1d5931f99f04275"
+  },
+  "butteraugli-traffic-20260921/campaign18-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign18-state.json",
+    "sha256": "367d07703c01ff90efe57bfa26b6d114f8151c878fbf265b5fdd04eb42d04767"
+  },
+  "butteraugli-traffic-20260921/campaign6-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign6-state.json",
+    "sha256": "764fb5f0a474ef1e53843bc83d01925c13394c16cf3eba74da3975199b2f0d8e"
+  },
+  "butteraugli-traffic-20260921/campaign15-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign15-state.json",
+    "sha256": "9705a96ec44b5f6e3938da1649945ff88151de54f5d8ad59294f1de2983b970d"
+  },
+  "butteraugli-traffic-20260921/campaign12-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign12-state.json",
+    "sha256": "26b6af1928166e5f2daef648a5ce7e24ab7f703afe607506b1c80400a367138e"
+  },
+  "butteraugli-traffic-20260921/campaign8-first-failed-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign8-first-failed-state.json",
+    "sha256": "e498437601706b6cc19581ce5d48b3c434b9093a0c0986513c79e748b5bb95d9"
+  },
+  "butteraugli-traffic-20260921/campaign4-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign4-state.json",
+    "sha256": "d5a91906d422466285955bbf640edbd0842376cd447f155a5e2091daa11cbc03"
+  },
+  "butteraugli-traffic-20260921/campaign9-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign9-state.json",
+    "sha256": "99844c0aee4d93ea396338a75d421668af1521707831d264468b58ecddcf60a8"
+  },
+  "butteraugli-traffic-20260921/campaign17-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign17-state.json",
+    "sha256": "c98b5930910f338a1032f12b1d74f91ec0daebefa7fbaca087e54a43ae8ef6d4"
+  },
+  "butteraugli-traffic-20260921/campaign20-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign20-state.json",
+    "sha256": "900942f5ae3b123940def2fab257362bb008d3d587b9b2573bf2d3e37f51f2b5"
+  },
+  "butteraugli-traffic-20260921/campaign19-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign19-state.json",
+    "sha256": "6eef42809be0c6771174a847930f797a8c7d0e8f9c45cd7bb9fc76a4a4e2c345"
+  },
+  "butteraugli-traffic-20260921/campaign7-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign7-state.json",
+    "sha256": "6e52553e3955dc2dc6043daa8244d9c50b7f69fe938e587601b217ba4d4fbb0e"
+  },
+  "butteraugli-traffic-20260921/campaign14-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign14-state.json",
+    "sha256": "234256221763438e1fd5e8dd0e40fb002db0d8550de48d44b7098d312db01e99"
+  },
+  "butteraugli-traffic-20260921/campaign11-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign11-state.json",
+    "sha256": "a1de1acf2904de28a9c836b568d7d052f2e58d17659ae24f8d321b7221dc3cd4"
+  },
+  "butteraugli-traffic-20260921/campaign5-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign5-state.json",
+    "sha256": "c3c4f9e5a53d017d84eb645b17a9e66efa08252a0e29fd0897937cc35f0ac4c8"
+  },
+  "butteraugli-traffic-20260921/campaign8-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign8-state.json",
+    "sha256": "f21d32c51c78fd4e59135b888a66e1339f94eabc3871fa5c3476d8d8a4f2e9a3"
+  },
+  "butteraugli-traffic-20260921/campaign16-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign16-state.json",
+    "sha256": "99fbdbf4285d2bccfea6e2ec750eabcabc988618e76e95cc7a51c3e2d2f886ef"
+  },
+  "butteraugli-traffic-20260921/campaign13-state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/campaign13-state.json",
+    "sha256": "63175be077f1b86c716e7d75819a57404d9cab18f69945b964315e561d16640b"
+  },
+  "butteraugli-traffic-20260921/study.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/study.json",
+    "sha256": "0ae3ee3add27bdc035cf6bc1bd0ea8aa4ac632463f90aee63824b5a15fdc5c47"
+  },
+  "butteraugli-traffic-20260921/short-artifact-audit.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-artifact-audit.json",
+    "sha256": "1c11e171841a3b13f64f3587a8f5607c505f0b941f047e1dab91a42617fc6a9a"
+  },
+  "butteraugli-traffic-20260921/experiments.jsonl": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/experiments.jsonl",
+    "sha256": "8c82f1db7a7ba436c5d7a3e78be6fa6ef5f4d96603b025aeaa085c1d8c213862"
+  },
+  "butteraugli-traffic-20260921/make_progress_report.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/make_progress_report.py",
+    "sha256": "7db4cf56ca8b4178053e9f3e51ba1f7ce980cf6244f2305b18a20f8ab587dcde"
+  },
+  "butteraugli-traffic-20260921/update_short_report.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/update_short_report.py",
+    "sha256": "ee6b41d856644f3639dcc8fa7de7ec138de9f62e8040f775d162f5319145df5a"
+  },
+  "butteraugli-traffic-20260921/audit_short_artifacts.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/audit_short_artifacts.py",
+    "sha256": "f89b7e1ecb75eb13b4334d495aecca5c9583e29bdb78fe822bca523a36711b24"
+  },
+  "butteraugli-traffic-20260921/ac-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ac-increment-stage/summary.json",
+    "sha256": "270f7eff7c65c08fe88da1be8701223411d912562341c1060b68885345280555"
+  },
+  "butteraugli-traffic-20260921/ac-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ac-increment-stage/identity.json",
+    "sha256": "5cd7eac6bd934d587b3501b2d48f408add9adc8715ed9854e081325b27c81139"
+  },
+  "butteraugli-traffic-20260921/ac-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ac-increment-stage/state.json",
+    "sha256": "9d97227ac1e5e73ef12e31bf3e7a387433e617da55b8232c54032878c931fd4e"
+  },
+  "butteraugli-traffic-20260921/ac-interior-broad-wall/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ac-interior-broad-wall/summary.json",
+    "sha256": "c1d44f349fa994abf58ad84fe43ce13b896b1915460dd3f21891dfc64db9035a"
+  },
+  "butteraugli-traffic-20260921/ac-interior-broad-wall/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ac-interior-broad-wall/identity.json",
+    "sha256": "44e3987fab315345c262a937fb7bf9471983b6838e3f4f12fc3e4aeb24e749e4"
+  },
+  "butteraugli-traffic-20260921/ac-interior-broad-wall/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ac-interior-broad-wall/state.json",
+    "sha256": "b0965cfae1c3dae951f2c4fb7d56d2a2cd0f4919a1aa47595f5f7e6379e70e82"
+  },
+  "butteraugli-traffic-20260921/ac-interior-canonical-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ac-interior-canonical-parity/summary.json",
+    "sha256": "93dd9a1dda3865959681ec9ef5325be22231fdd4240e55f8277319707a76a1bc"
+  },
+  "butteraugli-traffic-20260921/ac-interior-canonical-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ac-interior-canonical-parity/identity.json",
+    "sha256": "49fcd9d0f3f5f34f38d17095196f45bdb8d19f23fc79fa4c92f398288a361f3f"
+  },
+  "butteraugli-traffic-20260921/ac-interior-canonical-parity/finite-pixels.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ac-interior-canonical-parity/finite-pixels.json",
+    "sha256": "6f0011e7fc837f7a2e8a55a13bdaeda7ff87ce0d33a5ec595d502969d4959973"
+  },
+  "butteraugli-traffic-20260921/ac-interior-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ac-interior-stage/summary.json",
+    "sha256": "941690ca9bf2d95d36888d5396c636e2022a7702661abddf22c18ff343fe41c2"
+  },
+  "butteraugli-traffic-20260921/ac-interior-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ac-interior-stage/identity.json",
+    "sha256": "55b098065058e2c424b838d3ece83dc7c4682126e53e26218777fe593922d427"
+  },
+  "butteraugli-traffic-20260921/ac-interior-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ac-interior-stage/state.json",
+    "sha256": "ca6490273f359ae6b83dff8b74311185125f6b506933df02a20de5c94a310626"
+  },
+  "butteraugli-traffic-20260921/address-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/address-increment-stage/summary.json",
+    "sha256": "7d9ffddc30932d27dad7ec2f1027547d2cc802f19c362a926d603ca16d110c6a"
+  },
+  "butteraugli-traffic-20260921/address-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/address-increment-stage/identity.json",
+    "sha256": "6a7c1308637fc53ce7d297e54508cc46d73246f20c0b8fddd30a5e64f6c25eaa"
+  },
+  "butteraugli-traffic-20260921/address-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/address-increment-stage/state.json",
+    "sha256": "4d444993f64f06ad8487ace621fc18a059d0c46cc7f7e807d7ba967cead2ddd1"
+  },
+  "butteraugli-traffic-20260921/adjacent-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/adjacent-parity/summary.json",
+    "sha256": "d2095432743d824d31b06b967a7db3ab95d25b5c42f368bdff89e34e9c5a39ad"
+  },
+  "butteraugli-traffic-20260921/adjacent-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/adjacent-parity/identity.json",
+    "sha256": "4466cda1b7ee78784a88af6405842ffb88f3a5f86d64a9356befb7d56ede7520"
+  },
+  "butteraugli-traffic-20260921/adjacent-parity/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/adjacent-parity/state.json",
+    "sha256": "eb0ea2cd16a3c4c1cee37c7654265ed5dbce6c8b7a2838fc9525402224b8b0f4"
+  },
+  "butteraugli-traffic-20260921/adjacent-timing/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/adjacent-timing/summary.json",
+    "sha256": "a4e482bf1c7e289ebcf82d0e9d2f0a938ffcba48980c6d33d91544d4f60236be"
+  },
+  "butteraugli-traffic-20260921/adjacent-timing/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/adjacent-timing/identity.json",
+    "sha256": "c2bbd88e7dc48714bbd332a1952c9f06d2a8791128fc679803ba6b236bb8250a"
+  },
+  "butteraugli-traffic-20260921/adjacent-timing/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/adjacent-timing/state.json",
+    "sha256": "6bf5553eabf017ea60705d5bda2b65cfd9a8c9b064c8292232540558f1b3e113"
+  },
+  "butteraugli-traffic-20260921/control-wall-confirm/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/control-wall-confirm/summary.json",
+    "sha256": "6b82efaf8e0e8b090f5c9493c17fe242c99efcf2dab5f2a56f6296189ac2e10a"
+  },
+  "butteraugli-traffic-20260921/control-wall-confirm/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/control-wall-confirm/identity.json",
+    "sha256": "378ef5b5fc9c947f828d8d52992c1ff0c8faf51fcdc78c0d14795b3144ca17cb"
+  },
+  "butteraugli-traffic-20260921/control-wall-confirm/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/control-wall-confirm/state.json",
+    "sha256": "ba08f6c9721503759629d3822650e1118954d0f66bcb8c78f1fa02c807189c9d"
+  },
+  "butteraugli-traffic-20260921/control-wall-final/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/control-wall-final/summary.json",
+    "sha256": "16bc74fe520bfa2ec432922726ffb105d485f6b6de4740708c4b2b4390302c6a"
+  },
+  "butteraugli-traffic-20260921/control-wall-final/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/control-wall-final/identity.json",
+    "sha256": "ab3d0452c1e1fae95889b104b4815203b7cfe8e7b351c46ba7d8668c7bd5a546"
+  },
+  "butteraugli-traffic-20260921/control-wall-final/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/control-wall-final/state.json",
+    "sha256": "1b6818f43e20b0917ef64a9e6ab6577c53077f0b64ba5da2193e3f71eadb3e87"
+  },
+  "butteraugli-traffic-20260921/control-wall-short-final/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/control-wall-short-final/summary.json",
+    "sha256": "32b52aad5bb6a9729ef5753def92131891b732330578ec052e2849f94ed14df8"
+  },
+  "butteraugli-traffic-20260921/control-wall-short-final/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/control-wall-short-final/identity.json",
+    "sha256": "9dd9b24538462f4a87959b0b5bd4a3615645d2999f8b0712715a4b52a797ab62"
+  },
+  "butteraugli-traffic-20260921/control-wall-short-final/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/control-wall-short-final/state.json",
+    "sha256": "a3375e72a2f46db02bd68ad995eb3fb9ac29294c61a795522218daea7d2b9840"
+  },
+  "butteraugli-traffic-20260921/control-wall-short-increment/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/control-wall-short-increment/summary.json",
+    "sha256": "a1bb5b7a48eb6f1106c5c4f9fae3ebfcf77fcc00393b32d283322a5cf1cddf24"
+  },
+  "butteraugli-traffic-20260921/control-wall-short-increment/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/control-wall-short-increment/identity.json",
+    "sha256": "5b4db004cea0324e0d244bff43ac25b9c8544129aee349ca6ec65f7ae5355c39"
+  },
+  "butteraugli-traffic-20260921/control-wall-short-increment/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/control-wall-short-increment/state.json",
+    "sha256": "3a1107b485c5c76d1a71cb89f7abf34769e1bcc9382846acffb496b7c0b77d00"
+  },
+  "butteraugli-traffic-20260921/dc-integrated-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/dc-integrated-stage/summary.json",
+    "sha256": "a5d5a38d19111c1e53c21b79d1b066979e5c7730eb40805b9095c702ccafa12a"
+  },
+  "butteraugli-traffic-20260921/dc-integrated-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/dc-integrated-stage/identity.json",
+    "sha256": "f688c5922808653f015ebf30c06439c2f919099e805ddd99d649365a61a30afd"
+  },
+  "butteraugli-traffic-20260921/dc-integrated-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/dc-integrated-stage/state.json",
+    "sha256": "c6777693445fb8137aec93d1c90370fdebf8dcf8bc9385c62362ccdf5343686e"
+  },
+  "butteraugli-traffic-20260921/dc-integrated-wall-confirm/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/dc-integrated-wall-confirm/summary.json",
+    "sha256": "f7fa57704a70bd653aa4372d88dbd5716baff3ed151f927c6622e8c6c2ad9ae5"
+  },
+  "butteraugli-traffic-20260921/dc-integrated-wall-confirm/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/dc-integrated-wall-confirm/identity.json",
+    "sha256": "00a8c8dbc904f2b07f5d29e1cda0bd5fbf1b2fa1940e61d14f500a9e120912d5"
+  },
+  "butteraugli-traffic-20260921/dc-integrated-wall-confirm/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/dc-integrated-wall-confirm/state.json",
+    "sha256": "e05c08e3b4c60f002ebfef9fd419b0ae651b2d540e1c00358e72bd53bdce1448"
+  },
+  "butteraugli-traffic-20260921/dc-interior-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/dc-interior-stage/summary.json",
+    "sha256": "c4dc07db9eafc5ebc609b46a207e8e05bb48706a05cf20ddf9687fdefc8e38a8"
+  },
+  "butteraugli-traffic-20260921/dc-interior-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/dc-interior-stage/identity.json",
+    "sha256": "eeeab7e9f97f3a581d1d922504ce92ea368c60945ca00ad29989ab673c74cc85"
+  },
+  "butteraugli-traffic-20260921/dc-interior-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/dc-interior-stage/state.json",
+    "sha256": "4b24180475f5f7cdb875aad5ffb08085780e9d94f52a460780d718460de0565c"
+  },
+  "butteraugli-traffic-20260921/dc-interior-wall-confirm/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/dc-interior-wall-confirm/summary.json",
+    "sha256": "3b4250f995a81d1ac095ee0ca4eba6f8881bfa5ebfc1ec90c827e98337d23adf"
+  },
+  "butteraugli-traffic-20260921/dc-interior-wall-confirm/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/dc-interior-wall-confirm/identity.json",
+    "sha256": "949f811206be70419f1724f6346c30108389cd690884e94b418488efe54d9f3c"
+  },
+  "butteraugli-traffic-20260921/dc-interior-wall-confirm/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/dc-interior-wall-confirm/state.json",
+    "sha256": "c1fde0cdd4be4e5ecfb82505388bd163592571ec06b46529cca2fef5d349e14a"
+  },
+  "butteraugli-traffic-20260921/dc-sub-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/dc-sub-increment-stage/summary.json",
+    "sha256": "d7396934083574105a941af4b4618324b686a136d04dcce1126641320a23489e"
+  },
+  "butteraugli-traffic-20260921/dc-sub-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/dc-sub-increment-stage/identity.json",
+    "sha256": "4dfc17ce78158b7607eafd38f0e81faf6eb8850a6d1a93600c2b72a6e63d422c"
+  },
+  "butteraugli-traffic-20260921/dc-sub-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/dc-sub-increment-stage/state.json",
+    "sha256": "9d2332d8948a417f7992848f6b392a87853b1b29d5389922c1ce58f7f5808152"
+  },
+  "butteraugli-traffic-20260921/fusion-bundle-broad-wall/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/fusion-bundle-broad-wall/summary.json",
+    "sha256": "4213b033860594a37cf7afe3deb2109e9d9ab1cd31adc03d4abac8ccce5f7a50"
+  },
+  "butteraugli-traffic-20260921/fusion-bundle-broad-wall/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/fusion-bundle-broad-wall/identity.json",
+    "sha256": "49574d4a6edf885cd9438b5560eb0da8db197aaed4ea5a002ce0a373909844b7"
+  },
+  "butteraugli-traffic-20260921/fusion-bundle-broad-wall/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/fusion-bundle-broad-wall/state.json",
+    "sha256": "47f5c7f50b42917195dbb18141588700a4d003381800a7ddb8d70eb22f02a787"
+  },
+  "butteraugli-traffic-20260921/fusion-bundle-canonical-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/fusion-bundle-canonical-parity/summary.json",
+    "sha256": "e4042f3971989e093784c787cf32834b1036b79bd7f85a8f1325d6e1933dc689"
+  },
+  "butteraugli-traffic-20260921/fusion-bundle-canonical-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/fusion-bundle-canonical-parity/identity.json",
+    "sha256": "9df5ceee02aafaf68b555db45b7281c04655636458b5b7cc40be6288605398ea"
+  },
+  "butteraugli-traffic-20260921/fusion-bundle-canonical-parity/finite-pixels.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/fusion-bundle-canonical-parity/finite-pixels.json",
+    "sha256": "f8f9dc265a8f038d7930268381e2e34c2f27d198cd872e3470e4ff892a1b0282"
+  },
+  "butteraugli-traffic-20260921/fusion-bundle-original-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/fusion-bundle-original-stage/summary.json",
+    "sha256": "15daa08a6dd25ecdb20b862f561bd886f952d19ed28b087ced2a13758cb01d3c"
+  },
+  "butteraugli-traffic-20260921/fusion-bundle-original-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/fusion-bundle-original-stage/identity.json",
+    "sha256": "b1bc987ce8ab6e3acc2caf5b9a0572abd289d7ad933a4716b1b1719a3397b312"
+  },
+  "butteraugli-traffic-20260921/fusion-bundle-original-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/fusion-bundle-original-stage/state.json",
+    "sha256": "b3cca7eb2b6e68ecf987e8add8c6733d83a7c9b7aaaf8170b121c39d0c10aaf4"
+  },
+  "butteraugli-traffic-20260921/fusion-bundle-wall-confirm/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/fusion-bundle-wall-confirm/summary.json",
+    "sha256": "c87b4b742488a0eb3f6e35fef56c999498f0325f4b9663c6f0bd86cf492b80fe"
+  },
+  "butteraugli-traffic-20260921/fusion-bundle-wall-confirm/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/fusion-bundle-wall-confirm/identity.json",
+    "sha256": "9d9193278098c7c55ab5403aea151fe192dea7084df4bac3b5f77943a2dbb4fc"
+  },
+  "butteraugli-traffic-20260921/fusion-bundle-wall-confirm/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/fusion-bundle-wall-confirm/state.json",
+    "sha256": "ed19706a342c451faffb91658e945ab994bc17c558282b5340b7f6af0820d9ae"
+  },
+  "butteraugli-traffic-20260921/geometry-integrated-stage-v2/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/geometry-integrated-stage-v2/summary.json",
+    "sha256": "4e3a113a49e0e5c57ba3242bcc653014f49a4cd12090a1d70f7f10c591e5ff6f"
+  },
+  "butteraugli-traffic-20260921/geometry-integrated-stage-v2/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/geometry-integrated-stage-v2/identity.json",
+    "sha256": "b201b3f1b2d05dd4ac84a8a6573830db4db57369f0e219f8f1a6df7f38976cf2"
+  },
+  "butteraugli-traffic-20260921/geometry-integrated-stage-v2/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/geometry-integrated-stage-v2/state.json",
+    "sha256": "e49cfef27571acbe364722c2aa8ea9cf6abfb2c61359e244661c271ae6a29d10"
+  },
+  "butteraugli-traffic-20260921/geometry-integrated-wall/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/geometry-integrated-wall/summary.json",
+    "sha256": "22edc1a7190ed27d11542c255068c81ca2ec4f818402207f182f15657e1da1a8"
+  },
+  "butteraugli-traffic-20260921/geometry-integrated-wall/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/geometry-integrated-wall/identity.json",
+    "sha256": "df6bc3b25a1926acea1994d9e7bcd65134836759c58e193d2f49269a2f1966ce"
+  },
+  "butteraugli-traffic-20260921/geometry-integrated-wall/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/geometry-integrated-wall/state.json",
+    "sha256": "7772620d17b5668c5b593b805cc683df1b9d2465fc66aeb19eba848421e3a0d0"
+  },
+  "butteraugli-traffic-20260921/geometry-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/geometry-parity/summary.json",
+    "sha256": "592081c0103d7aea6760d45e6d38c1ada05a544f7c9ff510f3611fd8640e4cff"
+  },
+  "butteraugli-traffic-20260921/geometry-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/geometry-parity/identity.json",
+    "sha256": "e40c898dc84d0ebe83b35ee935dd1ab8d9af9ecc22bba1cf3999d70d67048816"
+  },
+  "butteraugli-traffic-20260921/geometry-parity/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/geometry-parity/state.json",
+    "sha256": "fd679105e8eb01cb75874a57b0e05b7fff1e636b4ea7847683e9d85c46c3e231"
+  },
+  "butteraugli-traffic-20260921/geometry-timing/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/geometry-timing/summary.json",
+    "sha256": "f94fc972f84e686f3a5ac9be8c912001b882b3745cc35e2bc97f9811f4218de8"
+  },
+  "butteraugli-traffic-20260921/geometry-timing/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/geometry-timing/identity.json",
+    "sha256": "0bde32f5c18385829fed56d3f191235e4cf1dbed52fe90c4cef921bd252a746a"
+  },
+  "butteraugli-traffic-20260921/geometry-timing/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/geometry-timing/state.json",
+    "sha256": "433015a4691aefcb033d6894852c1fb6b770ad8cfd4814d62d5653c2f6b97217"
+  },
+  "butteraugli-traffic-20260921/high-reuse-bundle-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/high-reuse-bundle-increment-stage/summary.json",
+    "sha256": "15e40bf3a9a364455ecb505dbe17514d99759cba744f1269ff2cfa6c4e23b20b"
+  },
+  "butteraugli-traffic-20260921/high-reuse-bundle-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/high-reuse-bundle-increment-stage/identity.json",
+    "sha256": "af700237a3ce49eb013bf44e2471976b853af3446547fe4fb5e41122d0369c47"
+  },
+  "butteraugli-traffic-20260921/high-reuse-bundle-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/high-reuse-bundle-increment-stage/state.json",
+    "sha256": "849299f125ce64a511358fb21d3ccd406ae13f32aab66c89e44e3139a2a993bb"
+  },
+  "butteraugli-traffic-20260921/high-reuse-bundle-increment-wall/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/high-reuse-bundle-increment-wall/summary.json",
+    "sha256": "64f4065036478549819ed3d6963c533444966a354acd5d3ece78f33d9c0fd300"
+  },
+  "butteraugli-traffic-20260921/high-reuse-bundle-increment-wall/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/high-reuse-bundle-increment-wall/identity.json",
+    "sha256": "023ce837083da4cd1c846cb4e3af58009416668ebfde2b56d38871b259703f34"
+  },
+  "butteraugli-traffic-20260921/high-reuse-bundle-increment-wall/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/high-reuse-bundle-increment-wall/state.json",
+    "sha256": "34e9a91495deea65d022cf429a77bd850c08dd87090eebf1726eaeb07eda52ea"
+  },
+  "butteraugli-traffic-20260921/integrated-control/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated-control/summary.json",
+    "sha256": "79d6eafcdb7906e80769345d845674d2fc6e41f4c9a2dcaf585c56de04b07e8a"
+  },
+  "butteraugli-traffic-20260921/integrated-control/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated-control/identity.json",
+    "sha256": "48adb111c2ad68100b2611330ccaf422195e1671398f10d72ed8b590b2baeff7"
+  },
+  "butteraugli-traffic-20260921/integrated-control/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated-control/state.json",
+    "sha256": "8db1f6f218ac351e3db6bdefbaddcdf3905547f5ee0339603422ebc62afa5c17"
+  },
+  "butteraugli-traffic-20260921/integrated-control-stage-v2/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated-control-stage-v2/summary.json",
+    "sha256": "712360b8f9baa78a0ec968503fa7da5d48ad23b4f165fd61e9d179f47483b168"
+  },
+  "butteraugli-traffic-20260921/integrated-control-stage-v2/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated-control-stage-v2/identity.json",
+    "sha256": "1f5fe319b64dca2f1fd8a29b67d43c8bb39d09240369fef056ce4679d7fd2478"
+  },
+  "butteraugli-traffic-20260921/integrated-control-stage-v2/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated-control-stage-v2/state.json",
+    "sha256": "b537f181dbbfb52eebd498363d810cfe40e1e6c62584b729340349d4cb91c52d"
+  },
+  "butteraugli-traffic-20260921/interior-integrated-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/interior-integrated-stage/summary.json",
+    "sha256": "6dcde517b46ddf42e5e9af773f23fd74676656f52e0baa09533dacf092e01a17"
+  },
+  "butteraugli-traffic-20260921/interior-integrated-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/interior-integrated-stage/identity.json",
+    "sha256": "e5d5b4ba9fa1dd32a8a82c8b4fdeb5286c70786e4d5abc9bb94affde31001424"
+  },
+  "butteraugli-traffic-20260921/interior-integrated-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/interior-integrated-stage/state.json",
+    "sha256": "a4675dd867b41154e4e652b550ada5676f267edd000fee18b2c9a3def9152c7e"
+  },
+  "butteraugli-traffic-20260921/interior-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/interior-parity/summary.json",
+    "sha256": "b35f1b7eecc6e4a628221bd210d5b91e91bf46e8425759dae2c6ce428a9592a2"
+  },
+  "butteraugli-traffic-20260921/interior-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/interior-parity/identity.json",
+    "sha256": "1f807af73dced3df4378aa751e6742ba60cee515e8d8a901785484ffff951dda"
+  },
+  "butteraugli-traffic-20260921/interior-parity/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/interior-parity/state.json",
+    "sha256": "2b633b4118e5135621804771b0567051b9f4184d0451ea98e5d4ab90393ec90f"
+  },
+  "butteraugli-traffic-20260921/interior-timing/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/interior-timing/summary.json",
+    "sha256": "46e14fd0f42b8f3297e7812c911fb5e4bc86b8bd7ce6db14116c299ac864ac13"
+  },
+  "butteraugli-traffic-20260921/interior-timing/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/interior-timing/identity.json",
+    "sha256": "e11cd30e4ad1492e9f0857039f25ede8d5807d7ac4c391bcb38bef53e88ed952"
+  },
+  "butteraugli-traffic-20260921/interior-timing/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/interior-timing/state.json",
+    "sha256": "b9d37802ea05d264f5bc1d38954e29da4fa3416c70e22a45db4e2ad432959bf8"
+  },
+  "butteraugli-traffic-20260921/interior-wall-confirm/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/interior-wall-confirm/summary.json",
+    "sha256": "ed23af14577a6142c99504334f3f4388ee3ede322c2f6494b7f4f25a52af3c29"
+  },
+  "butteraugli-traffic-20260921/interior-wall-confirm/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/interior-wall-confirm/identity.json",
+    "sha256": "f26621260342f782cc0c1087d218dc3dd01595ca7bae31fedcf94a054000fc26"
+  },
+  "butteraugli-traffic-20260921/interior-wall-confirm/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/interior-wall-confirm/state.json",
+    "sha256": "562f25c024032e3328836e37fb748c81b9ed58243dffe47b9c4785fbb5221d83"
+  },
+  "butteraugli-traffic-20260921/malta-adj-timing/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta-adj-timing/summary.json",
+    "sha256": "fd24263b8014b939c852632409e3d28849253c9032d52697d57882e9b06a6beb"
+  },
+  "butteraugli-traffic-20260921/malta-adj-timing/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta-adj-timing/identity.json",
+    "sha256": "832f7f9bc606a2ce1c967818a55aadf168264c45b1c7236e15d355c8f080b239"
+  },
+  "butteraugli-traffic-20260921/malta-adj-timing/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta-adj-timing/state.json",
+    "sha256": "0e18b77fd60f81a643b1e61be18029f678137e7a9adb361a182c93db35635414"
+  },
+  "butteraugli-traffic-20260921/malta-bundle-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta-bundle-increment-stage/summary.json",
+    "sha256": "d3e3720e886cc63ebb05cc1b4c632e081cc203c105594f4ad9c356b127455761"
+  },
+  "butteraugli-traffic-20260921/malta-bundle-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta-bundle-increment-stage/identity.json",
+    "sha256": "bc1915d689d441b0e0e48fc74376d36a39cef1dc4c46f6b3b76a7323e95028e3"
+  },
+  "butteraugli-traffic-20260921/malta-bundle-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta-bundle-increment-stage/state.json",
+    "sha256": "b4b1e9cc8db82b2974b48c4eadc56cf4c0b8f51800c1c72bd1d3455f10fe51dc"
+  },
+  "butteraugli-traffic-20260921/malta-bundle-increment-wall/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta-bundle-increment-wall/summary.json",
+    "sha256": "f270e6fec08b8fc406168eb0335910fb719958d0ab4e00d1583f4a4b485046cf"
+  },
+  "butteraugli-traffic-20260921/malta-bundle-increment-wall/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta-bundle-increment-wall/identity.json",
+    "sha256": "585db8c3eb58662a0dec097882a43777b10b104351d6112514964b76eab65c25"
+  },
+  "butteraugli-traffic-20260921/malta-bundle-increment-wall/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta-bundle-increment-wall/state.json",
+    "sha256": "b786fe90719d9bd350188d85b976f0222b8b956b4e00245ec6af868f70550044"
+  },
+  "butteraugli-traffic-20260921/malta-geometry-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta-geometry-stage/summary.json",
+    "sha256": "92d878c27c56ac9b6dbf37bdcced18a72ec8920aea1ecf2caea1307e1cc778b8"
+  },
+  "butteraugli-traffic-20260921/malta-geometry-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta-geometry-stage/identity.json",
+    "sha256": "fdc6c4f7a6ce0045a27ad8fb6d3c4e5b567bfa0c86bfd7ee6a0dde7fddd955c1"
+  },
+  "butteraugli-traffic-20260921/malta-geometry-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta-geometry-stage/state.json",
+    "sha256": "3a21713c5b170a0e419d97586ba4b444ff74e472035afbdf7bacb6fd7ad71f24"
+  },
+  "butteraugli-traffic-20260921/malta-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta-parity/summary.json",
+    "sha256": "fe7199d0624e51d66fa912c68cccf3a769a7b8ba7f418bd97cf2066a51383bef"
+  },
+  "butteraugli-traffic-20260921/malta-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta-parity/identity.json",
+    "sha256": "a08eb150e60539c728581ef59695271ec7e3de471cf94b685ef0af765e4d8024"
+  },
+  "butteraugli-traffic-20260921/malta-parity/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta-parity/state.json",
+    "sha256": "9f7443685bf97f93a6b046f64a14cb0768783b78ae75893d88fb2f6b4a8d270c"
+  },
+  "butteraugli-traffic-20260921/malta-timing/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta-timing/summary.json",
+    "sha256": "a39782e58cefd0faaee31efca2c9c09e8b6f6974356e429b0b32ca048518b278"
+  },
+  "butteraugli-traffic-20260921/malta-timing/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta-timing/identity.json",
+    "sha256": "9d40a8750cdca958e3457de5692caffac832c35757ddbc95c1d6af3d6dfbc106"
+  },
+  "butteraugli-traffic-20260921/malta-timing/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta-timing/state.json",
+    "sha256": "e2709422c601b11ef035f0cc2fffe73c8f8f28a2d6ea26be39e7a8db833cf34a"
+  },
+  "butteraugli-traffic-20260921/malta_adj-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta_adj-parity/summary.json",
+    "sha256": "50fbf26037770fffe7125a0d19b4996ce92c73e674bbf57b8840ad3e6221e099"
+  },
+  "butteraugli-traffic-20260921/malta_adj-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta_adj-parity/identity.json",
+    "sha256": "bf3a2e4f077cbc3342fdcb4bd8bd6e4fecd14c496f8afd87c872f034d198e168"
+  },
+  "butteraugli-traffic-20260921/malta_adj-parity/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta_adj-parity/state.json",
+    "sha256": "6782bc39bb0fc0d437162af97d38e3084cc829cf1f826cc4dd54b573148f1b50"
+  },
+  "butteraugli-traffic-20260921/mask-compose-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-compose-increment-stage/summary.json",
+    "sha256": "0f7c914c91e790c3bcc37256b31fdf98085aea9e6e67a1009b3bbc85b6094549"
+  },
+  "butteraugli-traffic-20260921/mask-compose-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-compose-increment-stage/identity.json",
+    "sha256": "438e3d47dda1a301d0b31e07fb4d44a531bc4f241726868d54b0d0cc4095597c"
+  },
+  "butteraugli-traffic-20260921/mask-compose-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-compose-increment-stage/state.json",
+    "sha256": "faf67e7a60920a6e7b5050367074c37a5ab6df177d3e075ee9f1ad9151fef3b4"
+  },
+  "butteraugli-traffic-20260921/mask-compose-transpose-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-compose-transpose-increment-stage/summary.json",
+    "sha256": "d8893d3debab4c2026e0728df38c4bef0829ea4f86c540a7e42dea47ccd4f2be"
+  },
+  "butteraugli-traffic-20260921/mask-compose-transpose-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-compose-transpose-increment-stage/identity.json",
+    "sha256": "fe8fc0252bbb64ca5760e678b389303b42a3bb50df6814f757c61708ea45ded5"
+  },
+  "butteraugli-traffic-20260921/mask-compose-transpose-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-compose-transpose-increment-stage/state.json",
+    "sha256": "6f0c410eaa8e2dd71ccd4f09186468775bc33cec3a435a1e3722cbbd75d1d706"
+  },
+  "butteraugli-traffic-20260921/mask-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-parity/summary.json",
+    "sha256": "ee066c4f0ac94772f21e62d8e4665e69f1655c95fef4d30bea2262c5afdba1ab"
+  },
+  "butteraugli-traffic-20260921/mask-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-parity/identity.json",
+    "sha256": "057c2a382baa2b81e0f5fccc6d0940651ad0ebc478e9f6c2da6f44ce79e2fd25"
+  },
+  "butteraugli-traffic-20260921/mask-parity/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-parity/state.json",
+    "sha256": "7866724090d28f94bd53e8d4caf10cb85e9a2fd93d76ee55f80ab58cd5567f7f"
+  },
+  "butteraugli-traffic-20260921/mask-parity-pool/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-parity-pool/summary.json",
+    "sha256": "f02d5484b7e92e3e634aebd9532d69d01f8fd6e122f0a20b0fd312e796f4e2e2"
+  },
+  "butteraugli-traffic-20260921/mask-parity-pool/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-parity-pool/identity.json",
+    "sha256": "5f1df6f4e0a561e92f7c3832b6b1e4f36d213cf1ec035d8d5b35a535bcd5874b"
+  },
+  "butteraugli-traffic-20260921/mask-parity-pool/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-parity-pool/state.json",
+    "sha256": "f8cd7f1c2a493362f57892173595b3a3579b1faaa69bca0eccba547ae472702f"
+  },
+  "butteraugli-traffic-20260921/mask-reuse-bundle-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-reuse-bundle-increment-stage/summary.json",
+    "sha256": "c9ba3f5dc883eaa264651097ec42b75563b888de28f7646843b67f26f6717814"
+  },
+  "butteraugli-traffic-20260921/mask-reuse-bundle-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-reuse-bundle-increment-stage/identity.json",
+    "sha256": "c4e2ff81644cc4e08182aad55af248a03bb43bcacc6cc745474f1ae5d335c96e"
+  },
+  "butteraugli-traffic-20260921/mask-reuse-bundle-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-reuse-bundle-increment-stage/state.json",
+    "sha256": "23bb8d66299c74787e836c7ac7b1bbcc0c0d0f8a09c06bcb4bd02365ee389641"
+  },
+  "butteraugli-traffic-20260921/mask-reuse-bundle-increment-wall/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-reuse-bundle-increment-wall/summary.json",
+    "sha256": "c939cde0f33d262c658c2f4650ae24ae29336bedb858fc9cc73e631a5c584390"
+  },
+  "butteraugli-traffic-20260921/mask-reuse-bundle-increment-wall/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-reuse-bundle-increment-wall/identity.json",
+    "sha256": "55ea22214b26600807cd74454c1e47d56d1938e7d2b7275765e65b959d976d17"
+  },
+  "butteraugli-traffic-20260921/mask-reuse-bundle-increment-wall/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-reuse-bundle-increment-wall/state.json",
+    "sha256": "66d90593c7c9054713ddf4a50077301d34e29f8f86e69ba21ea8f595d3b73107"
+  },
+  "butteraugli-traffic-20260921/mask-timing/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-timing/summary.json",
+    "sha256": "0ef932caf66c8d9eef893b98f48e4502adb190fdcd6e087a34e2137210f976b8"
+  },
+  "butteraugli-traffic-20260921/mask-timing/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-timing/identity.json",
+    "sha256": "78359485c934d9f2b40659d9247fa3fba7a4ea441aef59d0d359cc35fa6ca618"
+  },
+  "butteraugli-traffic-20260921/mask-timing/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-timing/state.json",
+    "sha256": "8ab5a4fdd02ac06069f200e624c0162a8d6d32c0381aaa80e09ae8a81761704d"
+  },
+  "butteraugli-traffic-20260921/mask16-bundle-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask16-bundle-increment-stage/summary.json",
+    "sha256": "a1a51e2332c273a3580eccb0a5a4ab513235c3fc328c5128440a7e8c4f2b2565"
+  },
+  "butteraugli-traffic-20260921/mask16-bundle-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask16-bundle-increment-stage/identity.json",
+    "sha256": "ddb83710fa0b4fc500187849b37852247a6f43c71a0f4762cd5f2592450e355e"
+  },
+  "butteraugli-traffic-20260921/mask16-bundle-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask16-bundle-increment-stage/state.json",
+    "sha256": "6192342f553f6280a08bdd819e03f6cff9b07636b2d68e04b0eb9bf385131a1b"
+  },
+  "butteraugli-traffic-20260921/mask16-bundle-increment-wall/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask16-bundle-increment-wall/summary.json",
+    "sha256": "778e7ddbb78f92443067d5cecbe1d3cc19a1d0a185496ea28eaf241937303231"
+  },
+  "butteraugli-traffic-20260921/mask16-bundle-increment-wall/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask16-bundle-increment-wall/identity.json",
+    "sha256": "600c80abf35738502f00a12c2e1196a8086c97d78485f159ba181904438794d6"
+  },
+  "butteraugli-traffic-20260921/mask16-bundle-increment-wall/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask16-bundle-increment-wall/state.json",
+    "sha256": "749c339998302428ee58a9c843a8f10b2f09bf2390306e73f5ce04cd55c9c151"
+  },
+  "butteraugli-traffic-20260921/materialized-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/materialized-increment-stage/summary.json",
+    "sha256": "9dca3e708376238b4b33f34a99452ebb4eef1805b494b86b3aee91ef7a5d76a3"
+  },
+  "butteraugli-traffic-20260921/materialized-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/materialized-increment-stage/identity.json",
+    "sha256": "4e9b4905ec54d8bd4450c1978c48ca0080bfe2d497a111b01609e1821efb902d"
+  },
+  "butteraugli-traffic-20260921/materialized-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/materialized-increment-stage/state.json",
+    "sha256": "3f4a35ec19c8417adb2c7ad13bc1a28448cc7f24b074ef9d743b31073158de97"
+  },
+  "butteraugli-traffic-20260921/medium-reuse-bundle-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/medium-reuse-bundle-increment-stage/summary.json",
+    "sha256": "76c16bb0a5009e349da31bd0c1099b7fcfa47b4989263ceb07a1880d46b9579d"
+  },
+  "butteraugli-traffic-20260921/medium-reuse-bundle-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/medium-reuse-bundle-increment-stage/identity.json",
+    "sha256": "d247c81f8ea83932b0ffb542fecb3b52157508fcd0910b0b512080d173769da2"
+  },
+  "butteraugli-traffic-20260921/medium-reuse-bundle-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/medium-reuse-bundle-increment-stage/state.json",
+    "sha256": "7e37034c2807265eeb8c2d5ee8fecee26bcdca5a83d9fea36653debb1502f0ff"
+  },
+  "butteraugli-traffic-20260921/medium-reuse-bundle-increment-wall/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/medium-reuse-bundle-increment-wall/summary.json",
+    "sha256": "d5941a095f4c098cd8261600badc43af3ed3c3781e90a23295d999d3e12eed46"
+  },
+  "butteraugli-traffic-20260921/medium-reuse-bundle-increment-wall/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/medium-reuse-bundle-increment-wall/identity.json",
+    "sha256": "566e2e5d949d1c6b90e7327245ee26d572c135fc9ea845351af2f784168c4459"
+  },
+  "butteraugli-traffic-20260921/medium-reuse-bundle-increment-wall/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/medium-reuse-bundle-increment-wall/state.json",
+    "sha256": "72703fdf41451ec00cdca245f584b832e24d2b5cb8cb6f14882465d20ea79ef4"
+  },
+  "butteraugli-traffic-20260921/norm-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/norm-parity/summary.json",
+    "sha256": "03de49df91a275dfa6aa5dcc63827d722e6a10580eb74f7ff6e339005bcd10ce"
+  },
+  "butteraugli-traffic-20260921/norm-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/norm-parity/identity.json",
+    "sha256": "c9818bf30d7c1039d55725a3641e811ffc2d3c1b2bb5fe126aff54ae9f141889"
+  },
+  "butteraugli-traffic-20260921/norm-parity/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/norm-parity/state.json",
+    "sha256": "7cf588e23cb30ec181427107d5180afdc12b732f4d5369f1518ebf0d6b207dcc"
+  },
+  "butteraugli-traffic-20260921/norm-timing/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/norm-timing/summary.json",
+    "sha256": "9517729b7df46b5a9cea6d4d3cbc0d5c9ba9024de47492f057990a5a9a1a08db"
+  },
+  "butteraugli-traffic-20260921/norm-timing/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/norm-timing/identity.json",
+    "sha256": "3bcdaa22a758657501c3e105e772f499f2d126c45f58b6227d988fa6961241e3"
+  },
+  "butteraugli-traffic-20260921/norm-timing/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/norm-timing/state.json",
+    "sha256": "b8e12841492be0c9acc4317867dff98973aad46066b0c889370a140cdc40923d"
+  },
+  "butteraugli-traffic-20260921/opsin32-bundle-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/opsin32-bundle-increment-stage/summary.json",
+    "sha256": "4656761f8636e70ff3276124fd6854c20544759520429598d0da6bcf2c145670"
+  },
+  "butteraugli-traffic-20260921/opsin32-bundle-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/opsin32-bundle-increment-stage/identity.json",
+    "sha256": "d7f8ea5685b830d39397517728646df7a74f25983a02c57cf09473ed81750692"
+  },
+  "butteraugli-traffic-20260921/opsin32-bundle-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/opsin32-bundle-increment-stage/state.json",
+    "sha256": "582568e67d18f887c23379d0b075f3d8912e689601616c01079385441e6a1616"
+  },
+  "butteraugli-traffic-20260921/opsin32-bundle-increment-wall/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/opsin32-bundle-increment-wall/summary.json",
+    "sha256": "6fd8d95a3615368b81c42a0523c61bd155aaab787a85cae2582c67597cf53d1f"
+  },
+  "butteraugli-traffic-20260921/opsin32-bundle-increment-wall/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/opsin32-bundle-increment-wall/identity.json",
+    "sha256": "dba77b9be05bc51e3b98499713c222639e8c5101f538acec519f78e4c4b62845"
+  },
+  "butteraugli-traffic-20260921/opsin32-bundle-increment-wall/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/opsin32-bundle-increment-wall/state.json",
+    "sha256": "86295f3164cee1f1711a2094db0fe1aa5e4605bb35ae28c407f97d545a72b61a"
+  },
+  "butteraugli-traffic-20260921/reuse-closure-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-closure-parity/summary.json",
+    "sha256": "ebc5fd2f04e5bf3e84d858fff0fd9b170190737efcd1cfa7d973f17774a0f46c"
+  },
+  "butteraugli-traffic-20260921/reuse-closure-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-closure-parity/identity.json",
+    "sha256": "019f5540b4158d0fc3bba84cc4e79810e2392f3f6adaf6267ad7878a7ff4d289"
+  },
+  "butteraugli-traffic-20260921/reuse-closure-parity/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-closure-parity/state.json",
+    "sha256": "e61e04e766003e1273ae61e941a78e934c641cf75bd8e4a22d9694757bd5b759"
+  },
+  "butteraugli-traffic-20260921/reuse-closure-timing/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-closure-timing/summary.json",
+    "sha256": "6dcbea413e3bb62131c01993bb7b6a6b15c2abb620c3cf0cd6a3f5b8d67f0549"
+  },
+  "butteraugli-traffic-20260921/reuse-closure-timing/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-closure-timing/identity.json",
+    "sha256": "c00d914ba1541560d67ee369bf4da1a1479a31d00a0ef9a7df7e7aeff55c6a5f"
+  },
+  "butteraugli-traffic-20260921/reuse-closure-timing/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-closure-timing/state.json",
+    "sha256": "c7341066f7acd4bd83bda8cf2287116cec4c797e4763bb9619d53a9e4c16ea08"
+  },
+  "butteraugli-traffic-20260921/reuse-geometry-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-geometry-parity/summary.json",
+    "sha256": "ff150f36e011563d0228ab70d2e8daf989e8cafee44050123e6621c25018ec7c"
+  },
+  "butteraugli-traffic-20260921/reuse-geometry-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-geometry-parity/identity.json",
+    "sha256": "94bfac9a35a06f1bb4ef8ce7f806db7266f202415e380c7f5ac536c0c0a89558"
+  },
+  "butteraugli-traffic-20260921/reuse-geometry-parity/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-geometry-parity/state.json",
+    "sha256": "05db3c56875f1a947a8f0e889fc595bf50f5e6ab4d6f74aba8c25f678fc4eaf0"
+  },
+  "butteraugli-traffic-20260921/reuse-geometry-timing/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-geometry-timing/summary.json",
+    "sha256": "29e8560cae3b26ac4c3bf63982d6066f260e078b1c1e2462cd32f63ff866b688"
+  },
+  "butteraugli-traffic-20260921/reuse-geometry-timing/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-geometry-timing/identity.json",
+    "sha256": "39e6bf2b4c843f47bb060f2aa6a7ae8b2770e85d7daa8866f131be90a23b2469"
+  },
+  "butteraugli-traffic-20260921/reuse-geometry-timing/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-geometry-timing/state.json",
+    "sha256": "68661904682a5fe8141a6b2fb901c4df05de771921ed3d64bc19426bed4d0686"
+  },
+  "butteraugli-traffic-20260921/reuse-h64-bundle-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-h64-bundle-increment-stage/summary.json",
+    "sha256": "88514efa2d8fec15983e2da16c8bab5984f5ed87b2913801e15ddfe61018f4df"
+  },
+  "butteraugli-traffic-20260921/reuse-h64-bundle-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-h64-bundle-increment-stage/identity.json",
+    "sha256": "fd69aef0caa4c92122c593f0d4d9d12c88b9fbfa0cbffcbcd2415ef10ad4b10e"
+  },
+  "butteraugli-traffic-20260921/reuse-h64-bundle-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-h64-bundle-increment-stage/state.json",
+    "sha256": "cae388428bfefa7bee3c337cd939efc5fde4f2f1e6923a8bd54be617c122081f"
+  },
+  "butteraugli-traffic-20260921/reuse-h64-bundle-increment-wall/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-h64-bundle-increment-wall/summary.json",
+    "sha256": "3c04a0f75a5fc3e61f96a81937b4cd5543f2e051da8ffef223a6aba2454b9bc6"
+  },
+  "butteraugli-traffic-20260921/reuse-h64-bundle-increment-wall/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-h64-bundle-increment-wall/identity.json",
+    "sha256": "4cacc187472131346731cd72ab81993c5632785cd0ff3a8c952151a982d16d95"
+  },
+  "butteraugli-traffic-20260921/reuse-h64-bundle-increment-wall/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-h64-bundle-increment-wall/state.json",
+    "sha256": "d3ba15c52bce93a8fba030e0e7de3d50ce07a799d29783d68b7f2b0d596e50e2"
+  },
+  "butteraugli-traffic-20260921/reuse-h96-bundle-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-h96-bundle-increment-stage/summary.json",
+    "sha256": "83f2653c0303723bf47a28380e4c5f84b9225ab76457ca1eb8f8834e5c739075"
+  },
+  "butteraugli-traffic-20260921/reuse-h96-bundle-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-h96-bundle-increment-stage/identity.json",
+    "sha256": "10271fdcafb279c9e3e203868896475ce175e2fcaabd1396620477500778eb68"
+  },
+  "butteraugli-traffic-20260921/reuse-h96-bundle-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-h96-bundle-increment-stage/state.json",
+    "sha256": "c06843d85c5edbe638bb88b91bbb3f83516348a86ac868ee97f081b22f678e32"
+  },
+  "butteraugli-traffic-20260921/reuse-h96-bundle-increment-wall/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-h96-bundle-increment-wall/summary.json",
+    "sha256": "4c28cbcaf8d2d6c64369f6141248f4c1e15c6820763e015f2a906f84e53b6cd9"
+  },
+  "butteraugli-traffic-20260921/reuse-h96-bundle-increment-wall/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-h96-bundle-increment-wall/identity.json",
+    "sha256": "94ade17b057170827c785c94a6c52b5b0b1ba212fc216756698cbc1d7ea8db64"
+  },
+  "butteraugli-traffic-20260921/reuse-h96-bundle-increment-wall/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse-h96-bundle-increment-wall/state.json",
+    "sha256": "18c5ca52e5160c74ce48b5e7a6fc156de92bd7ab92095141d74f0f04972f9407"
+  },
+  "butteraugli-traffic-20260921/rolling-integrated-stage-v2/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/rolling-integrated-stage-v2/summary.json",
+    "sha256": "c731fa4c5af540bdc22e5716f70a65b3b88ad7c2d6f93c96be38dbffbe313e2d"
+  },
+  "butteraugli-traffic-20260921/rolling-integrated-stage-v2/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/rolling-integrated-stage-v2/identity.json",
+    "sha256": "0a4d183bf531ea819974a75bcfe3076a24acddca7795efd15ab33a442e9fca34"
+  },
+  "butteraugli-traffic-20260921/rolling-integrated-stage-v2/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/rolling-integrated-stage-v2/state.json",
+    "sha256": "5f481c5874ce0947e0d0e579b6bc82e0e60dd980af233a24be8ad7aeebd6194d"
+  },
+  "butteraugli-traffic-20260921/rolling-integrated-wall-v2/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/rolling-integrated-wall-v2/summary.json",
+    "sha256": "de2302935d3ef2549f07452a5b2d472513bb20ba561762de4a33427dd1aedfb1"
+  },
+  "butteraugli-traffic-20260921/rolling-integrated-wall-v2/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/rolling-integrated-wall-v2/identity.json",
+    "sha256": "661803c600612ba10eeee592be238a8da1a0c7519b7ac5599f425f512cf40bfa"
+  },
+  "butteraugli-traffic-20260921/rolling-integrated-wall-v2/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/rolling-integrated-wall-v2/state.json",
+    "sha256": "6c80103f79ebf5caabe6cbb63b8b643270ca547ddc9069c08855905d30426846"
+  },
+  "butteraugli-traffic-20260921/rolling-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/rolling-parity/summary.json",
+    "sha256": "e6bf29690d13f6f621b73fc56756b372726fc0d35a3b29e4c319a50094fce677"
+  },
+  "butteraugli-traffic-20260921/rolling-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/rolling-parity/identity.json",
+    "sha256": "03d9a2b24e18058c9740091b03af251a9b4490d0381dae519ce14c1eaf6ec653"
+  },
+  "butteraugli-traffic-20260921/rolling-parity/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/rolling-parity/state.json",
+    "sha256": "8b0a6b986168578141c3b05c8357633fb6ac6ea266188d0d1431850dad12e9a7"
+  },
+  "butteraugli-traffic-20260921/rolling-timing/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/rolling-timing/summary.json",
+    "sha256": "58ecf5a59e64e315e84a740b9f9d187d138f301d5ad8d0a3c2d88bf99c8b46a4"
+  },
+  "butteraugli-traffic-20260921/rolling-timing/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/rolling-timing/identity.json",
+    "sha256": "f0c73871f0f8e8feea018d5ab1f940eb6d9479e1063415379d9d71cd629831ee"
+  },
+  "butteraugli-traffic-20260921/rolling-timing/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/rolling-timing/state.json",
+    "sha256": "e4ee6159d85257bad03143e6b921a16952598fd9db8b2537ee9b0e3b4813f13b"
+  },
+  "butteraugli-traffic-20260921/short-bundle-broad-wall/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-broad-wall/summary.json",
+    "sha256": "929ec8e2e2868d02e50326dcdcaa20ff7b0906f1024d2dc0fb19f1b533794453"
+  },
+  "butteraugli-traffic-20260921/short-bundle-broad-wall/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-broad-wall/identity.json",
+    "sha256": "87c11d2327f7b6711275b8dd65a70843281c32c6ab896b68f8c0b697962e2d9b"
+  },
+  "butteraugli-traffic-20260921/short-bundle-broad-wall/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-broad-wall/state.json",
+    "sha256": "ac1db5431bab6318b31b7025422427848bf86a16fb52959ee33693faa53eb9bb"
+  },
+  "butteraugli-traffic-20260921/short-bundle-canonical-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/summary.json",
+    "sha256": "52ee40b551a72fdcd24ab1e63287961d4e69672e55e5052c5276d4bc6d1edbbd"
+  },
+  "butteraugli-traffic-20260921/short-bundle-canonical-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/identity.json",
+    "sha256": "d44fe9fcfa180c4fcffd4ddc63ce9a7acc9a631629cd4cd58701632dd88647bb"
+  },
+  "butteraugli-traffic-20260921/short-bundle-canonical-parity/finite-pixels.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-canonical-parity/finite-pixels.json",
+    "sha256": "a4157fac66a889cdc756ed850ba1818b10c29599af56f6c1f3763f73b6ca7187"
+  },
+  "butteraugli-traffic-20260921/short-bundle-high-increment-wall-confirm/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-high-increment-wall-confirm/summary.json",
+    "sha256": "d7eda841f222d03bd831796e6fda0bb6d86ea55112479e63f84d22de83aa266a"
+  },
+  "butteraugli-traffic-20260921/short-bundle-high-increment-wall-confirm/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-high-increment-wall-confirm/identity.json",
+    "sha256": "1b405a9147cd741912e941b3816971a332e870916bc4cf5589ca8c1849023f11"
+  },
+  "butteraugli-traffic-20260921/short-bundle-high-increment-wall-confirm/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-high-increment-wall-confirm/state.json",
+    "sha256": "549696ea285b1fc0000fc2619fcb09762fbd72980ae8daa7c7cb0d89bd9357eb"
+  },
+  "butteraugli-traffic-20260921/short-bundle-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-increment-stage/summary.json",
+    "sha256": "fc000dda4d592e2b24af914e248e203ee4e8412ea2fdafffba5ed9769ed05701"
+  },
+  "butteraugli-traffic-20260921/short-bundle-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-increment-stage/identity.json",
+    "sha256": "968ec6ac2257a14a5f140feb221cbee52b7f6104070b21d8f7c167572c66781b"
+  },
+  "butteraugli-traffic-20260921/short-bundle-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-increment-stage/state.json",
+    "sha256": "aef760b038f5b07771cb22f58d1b1ba655b5c37813a805a3b71f3ddab66d0655"
+  },
+  "butteraugli-traffic-20260921/short-bundle-increment-wall/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-increment-wall/summary.json",
+    "sha256": "a5f1f251b89311d24f78c207cb2a63632e5ad7617893a91496ebc56cebf5644a"
+  },
+  "butteraugli-traffic-20260921/short-bundle-increment-wall/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-increment-wall/identity.json",
+    "sha256": "c667b58923415d262d688c21ebaf2ceb7803cbd8668b4534adf8f7e0a281df17"
+  },
+  "butteraugli-traffic-20260921/short-bundle-increment-wall/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-increment-wall/state.json",
+    "sha256": "2166029ecfd1f65948096c497effbc6ae73dece6bce61aab39f8e65e72bbbe0d"
+  },
+  "butteraugli-traffic-20260921/short-bundle-original-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-original-stage/summary.json",
+    "sha256": "6e7a4a0a4ba4a31b1600671004278baaaa3d5fc3760c24b39a26ec16098d07ee"
+  },
+  "butteraugli-traffic-20260921/short-bundle-original-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-original-stage/identity.json",
+    "sha256": "b86dc7238ae15aaed1730e90247cceefcf3b6733b3959fd018c7a11b756f9621"
+  },
+  "butteraugli-traffic-20260921/short-bundle-original-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-original-stage/state.json",
+    "sha256": "05335cde6dc9f5ebf89b5e9614f33f7d0e65e6a2143feb9b5fc261bad3bf0110"
+  },
+  "butteraugli-traffic-20260921/short-bundle-wall-confirm/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-wall-confirm/summary.json",
+    "sha256": "524fbeb3842110910ca4abd7e27db561727070fb11fd4d4185a8e3ecaec9806d"
+  },
+  "butteraugli-traffic-20260921/short-bundle-wall-confirm/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-wall-confirm/identity.json",
+    "sha256": "e6a82523e090d893a797ed0239a3564f7b5dc6796e150d63e22a9feb3d4b0e15"
+  },
+  "butteraugli-traffic-20260921/short-bundle-wall-confirm/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-wall-confirm/state.json",
+    "sha256": "f3ced77fff4777223c4d65896795e89c15997d3abcae7698e7a64a8e2c1a6cc3"
+  },
+  "butteraugli-traffic-20260921/short-eight-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-eight-increment-stage/summary.json",
+    "sha256": "11f8fa1704c4f743c70350ae648ce798acea6944639182d0b6b98d8fea878f5c"
+  },
+  "butteraugli-traffic-20260921/short-eight-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-eight-increment-stage/identity.json",
+    "sha256": "fc69d7cbe9db91905bab0e939ba8aaa86987be1f0d942380f0a764ff534f8cf2"
+  },
+  "butteraugli-traffic-20260921/short-eight-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-eight-increment-stage/state.json",
+    "sha256": "8f8e2a3d50bc32d9c43165261f052645fd8826b744169bc983544cc4b35bef68"
+  },
+  "butteraugli-traffic-20260921/short-eight-increment-wall/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-eight-increment-wall/summary.json",
+    "sha256": "415935140fa6abfe11534ae247aec5d878a51de1e645154d79d271d19bd00b05"
+  },
+  "butteraugli-traffic-20260921/short-eight-increment-wall/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-eight-increment-wall/identity.json",
+    "sha256": "cb5804a9f0ef5c9b51a7e45fc83539eb9a39eeb4d9c9d97ad45a241ed24472a1"
+  },
+  "butteraugli-traffic-20260921/short-eight-increment-wall/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-eight-increment-wall/state.json",
+    "sha256": "07b38d76819aa7f87aca47edde31505cf8f2d7f06f380a82fcd4a6f8acb9da67"
+  },
+  "butteraugli-traffic-20260921/short-final-canonical-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-canonical-parity/summary.json",
+    "sha256": "e783b683bcfefdf5171dc9dd95363867c1800891e195f0790faf989bfb44b821"
+  },
+  "butteraugli-traffic-20260921/short-final-canonical-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-canonical-parity/identity.json",
+    "sha256": "56d2895d55a2424a1ef18c7029797b3a4208e886b4ab1aa337f1b03648e5798c"
+  },
+  "butteraugli-traffic-20260921/short-final-canonical-parity/finite-pixels.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-canonical-parity/finite-pixels.json",
+    "sha256": "80fbb4b49103f5ea729fdedef157b35bab35bc16db435b1198d0107786dc9d0d"
+  },
+  "butteraugli-traffic-20260921/short-final-increment-broad-wall/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-increment-broad-wall/summary.json",
+    "sha256": "4b817175626702853d26c078ba95745cc4471dd47c773fb7b9c16ef5ad3a071e"
+  },
+  "butteraugli-traffic-20260921/short-final-increment-broad-wall/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-increment-broad-wall/identity.json",
+    "sha256": "ef2726b41cfe39515a369cc3d13cdea0b5085ce1fe75a4042e2daeddb4025483"
+  },
+  "butteraugli-traffic-20260921/short-final-increment-broad-wall/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-increment-broad-wall/state.json",
+    "sha256": "07f3981b66c989863a43574475eca492e3da543362ad2f0e0abb26e0ade1d223"
+  },
+  "butteraugli-traffic-20260921/short-final-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-increment-stage/summary.json",
+    "sha256": "ccb29d8c01a19dd42f43bf14b26fe848939ff8a8b8cfddba8b099d15d5a0618b"
+  },
+  "butteraugli-traffic-20260921/short-final-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-increment-stage/identity.json",
+    "sha256": "d1533bd721147731da7eae9fd15667f1adbf0592ef6bfabe1e07306f738f1386"
+  },
+  "butteraugli-traffic-20260921/short-final-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-increment-stage/state.json",
+    "sha256": "dcb07fb71c877b1e4384954018fed16a629182598ea67df795aedc90afe68952"
+  },
+  "butteraugli-traffic-20260921/short-final-increment-wall-confirm/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-increment-wall-confirm/summary.json",
+    "sha256": "f1bcd294cc4972d2b91d844dea024517fc5f69442b8dd1b79315ac20da39c50d"
+  },
+  "butteraugli-traffic-20260921/short-final-increment-wall-confirm/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-increment-wall-confirm/identity.json",
+    "sha256": "738ad82c2ef4154870fb351734b7010a79b447c9148682f1b1808a4989bf4f2e"
+  },
+  "butteraugli-traffic-20260921/short-final-increment-wall-confirm/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-increment-wall-confirm/state.json",
+    "sha256": "8b1fe61928d495310c9f30125bd3d12ea253a667d044155b40e4b8a7de64e81b"
+  },
+  "butteraugli-traffic-20260921/short-horizontal-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-horizontal-parity/summary.json",
+    "sha256": "78af01f41196976e34436806ab5b3955036560286dfda7ff6a9a12d9a225d7b8"
+  },
+  "butteraugli-traffic-20260921/short-horizontal-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-horizontal-parity/identity.json",
+    "sha256": "7cb310ed68d830968386d748bcf554f8ddfc32425f980581c9308ff92b63ff2f"
+  },
+  "butteraugli-traffic-20260921/short-horizontal-parity/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-horizontal-parity/state.json",
+    "sha256": "01c149274da16178798f89f011b814ad19d006b5ce7696b00c1be44250a1b428"
+  },
+  "butteraugli-traffic-20260921/short-horizontal-timing/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-horizontal-timing/summary.json",
+    "sha256": "cde641e77fe0e4db30f332173e51be6956c47669e710d1e37ffa611daaefd823"
+  },
+  "butteraugli-traffic-20260921/short-horizontal-timing/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-horizontal-timing/identity.json",
+    "sha256": "4a9dd47dd2efaa3df23e34cba2c5f18c9a0588791a02eb46eec2164c22279401"
+  },
+  "butteraugli-traffic-20260921/short-horizontal-timing/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-horizontal-timing/state.json",
+    "sha256": "ad6d4c2a0daa2e31eaab86e098e20e5538c5656521cbb6c1b1aae7299abb8aa0"
+  },
+  "butteraugli-traffic-20260921/short-interactions-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-interactions-parity/summary.json",
+    "sha256": "f86831e42d8b027e2285d60394f5ff569fe951e5cd5714f0b49459686e9cfe85"
+  },
+  "butteraugli-traffic-20260921/short-interactions-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-interactions-parity/identity.json",
+    "sha256": "dd2f9beeae10c6916ab26f2164e8c95624734e68f257fa3f0cd9f435001a5bdb"
+  },
+  "butteraugli-traffic-20260921/short-interactions-parity/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-interactions-parity/state.json",
+    "sha256": "f6ba1398a5eea5bfb5b07bada99a12f6164c7a454a70b6960837e34013eb3f8f"
+  },
+  "butteraugli-traffic-20260921/short-interactions-timing/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-interactions-timing/summary.json",
+    "sha256": "7dc47c391f61e2373b7ef797bcd6c2178ca80dedc84a14441a15017489abed17"
+  },
+  "butteraugli-traffic-20260921/short-interactions-timing/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-interactions-timing/identity.json",
+    "sha256": "9d53280af48151190484ce2e0271b977ae118492446bb5770ad35e0cbb6fa719"
+  },
+  "butteraugli-traffic-20260921/short-interactions-timing/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-interactions-timing/state.json",
+    "sha256": "b801eef49229a31fb3a794ff7c9bbd22a3cf106a7552c4ec07d6a25332d82cf5"
+  },
+  "butteraugli-traffic-20260921/short-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-parity/summary.json",
+    "sha256": "f44edaafde8e6f4bf634b61c6fa47e80223565e08c8497dc07ce612b44a4072f"
+  },
+  "butteraugli-traffic-20260921/short-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-parity/identity.json",
+    "sha256": "d179510f3c76a16980a32b10824cee73a1d95e74d620c16acdb5ff9dc0d39fcd"
+  },
+  "butteraugli-traffic-20260921/short-parity/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-parity/state.json",
+    "sha256": "cd2c402e487093b9599662f965aba46476a9466588ccb92fbc06283c7e79a9d6"
+  },
+  "butteraugli-traffic-20260921/short-reuse-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-reuse-parity/summary.json",
+    "sha256": "91cf6e3e105f51ca3071bb2055536b5313f8913519ccf74f53aa22569c040c77"
+  },
+  "butteraugli-traffic-20260921/short-reuse-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-reuse-parity/identity.json",
+    "sha256": "602192195b1c2e67bfa24cb9e8b72b75d4cb83c1ba3d506a631c7c48710851f7"
+  },
+  "butteraugli-traffic-20260921/short-reuse-parity/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-reuse-parity/state.json",
+    "sha256": "56d17acb1057fa24e57713e6c50ce19d15ecf94d995b4883f1cdcc9befe37210"
+  },
+  "butteraugli-traffic-20260921/short-reuse-timing/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-reuse-timing/summary.json",
+    "sha256": "d5c14d4b998fe664d4eb6972ef7fca032b4e2dc908817329985ca2bc915308c2"
+  },
+  "butteraugli-traffic-20260921/short-reuse-timing/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-reuse-timing/identity.json",
+    "sha256": "09faa4be4c00b516cc826a69ffa4bc3e9cac19ad12351a754ec6fcecb5c647c8"
+  },
+  "butteraugli-traffic-20260921/short-reuse-timing/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-reuse-timing/state.json",
+    "sha256": "36e02ee7dccd057cabe2243c8b629a6780f857478dc39892f06699764d2d56d9"
+  },
+  "butteraugli-traffic-20260921/short-timing/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-timing/summary.json",
+    "sha256": "b8d0e5bfbd135f3fe82ddb4b165c09ac915fe383714ed934e15a47c28f51adc5"
+  },
+  "butteraugli-traffic-20260921/short-timing/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-timing/identity.json",
+    "sha256": "b38291b67c4d9efb4bf6cc5bef15410feac2535580d113b0dba1a7e287439498"
+  },
+  "butteraugli-traffic-20260921/short-timing/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-timing/state.json",
+    "sha256": "55258fbaacc9f88e5aaa8751f3d58adc9b844ed401a789b1ca6fcf2ece4fd07b"
+  },
+  "butteraugli-traffic-20260921/short-wide-ultra-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-wide-ultra-increment-stage/summary.json",
+    "sha256": "f50fcb6db2bcc722f65d875726d0567b83b6e49701bb0aa632c992216ab732c2"
+  },
+  "butteraugli-traffic-20260921/short-wide-ultra-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-wide-ultra-increment-stage/identity.json",
+    "sha256": "3885e28e21d4af7235cbfa196980cdd174d9b1c19fdde7f11bb175bb20cad88d"
+  },
+  "butteraugli-traffic-20260921/short-wide-ultra-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-wide-ultra-increment-stage/state.json",
+    "sha256": "44afc9a84451b553c10a0e56be2e0dcf8678f9b9dfacc1795ef878988ba1ab63"
+  },
+  "butteraugli-traffic-20260921/short-wide-ultra-increment-wall/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-wide-ultra-increment-wall/summary.json",
+    "sha256": "f0c89b234b0fcdb3212ac95785961364792e6a39aca762dd804248ca94ba8f7b"
+  },
+  "butteraugli-traffic-20260921/short-wide-ultra-increment-wall/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-wide-ultra-increment-wall/identity.json",
+    "sha256": "f7553896355e6fa9b9ebf33dec8ae77e8788d94e8438b4e4da3a9d0c2669e2a1"
+  },
+  "butteraugli-traffic-20260921/short-wide-ultra-increment-wall/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-wide-ultra-increment-wall/state.json",
+    "sha256": "6a2417b8ba67208e7f73e442aea59b095f733798c9e13d21c9e296e9dd14449b"
+  },
+  "butteraugli-traffic-20260921/ultra-bundle-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ultra-bundle-increment-stage/summary.json",
+    "sha256": "9265f45aae6d4c1a970e9a8c38e7f7cd04e95c32ef6ccb9d81214c260a9a7419"
+  },
+  "butteraugli-traffic-20260921/ultra-bundle-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ultra-bundle-increment-stage/identity.json",
+    "sha256": "812473a538e5cf79140182db7d69662b4d73ac9e0c87637faa6d0ee2f1d48566"
+  },
+  "butteraugli-traffic-20260921/ultra-bundle-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ultra-bundle-increment-stage/state.json",
+    "sha256": "5a6a2d6b23949d3c3fe0a85e5724358e187ee58ccf1504868e7b90106b493764"
+  },
+  "butteraugli-traffic-20260921/ultra-reuse-bundle-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ultra-reuse-bundle-increment-stage/summary.json",
+    "sha256": "57b6813690d1e0d0123b8b3ef90a79b82eabea86660298030bf8e925a391618f"
+  },
+  "butteraugli-traffic-20260921/ultra-reuse-bundle-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ultra-reuse-bundle-increment-stage/identity.json",
+    "sha256": "ac28a0b1042c6e159b917392aed875ed917631382ac36783d6e8fff7e4679664"
+  },
+  "butteraugli-traffic-20260921/ultra-reuse-bundle-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ultra-reuse-bundle-increment-stage/state.json",
+    "sha256": "17372f88efb904af01637ebf830f4bdbb78674b0fb7a7f8629df2357c1b6732c"
+  },
+  "butteraugli-traffic-20260921/ultra-reuse-bundle-increment-wall/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ultra-reuse-bundle-increment-wall/summary.json",
+    "sha256": "2eb9f1dce59ce13aca6a99caa838002deef21baf231ced55aa5b5af1ccc52f4d"
+  },
+  "butteraugli-traffic-20260921/ultra-reuse-bundle-increment-wall/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ultra-reuse-bundle-increment-wall/identity.json",
+    "sha256": "6a2b43a5a70b6551a4329931233d0395a11a95acd97afaf4769a209468fe43a2"
+  },
+  "butteraugli-traffic-20260921/ultra-reuse-bundle-increment-wall/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ultra-reuse-bundle-increment-wall/state.json",
+    "sha256": "aa69055b3c88cf3bfbfd6a55a9f56bb5a0fec24f346d9b2b25384bf64f623d5a"
+  },
+  "butteraugli-traffic-20260921/ultra-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ultra-stage/summary.json",
+    "sha256": "ed9f3ae34efa91ad06e8987c348c00051c73dcb7b8d9ebbb956a279db7e8b9b3"
+  },
+  "butteraugli-traffic-20260921/ultra-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ultra-stage/identity.json",
+    "sha256": "111fff4eac964591a7d68e586d0e26f1db9f7b6ca3b3b864f48c967b46f9628b"
+  },
+  "butteraugli-traffic-20260921/ultra-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ultra-stage/state.json",
+    "sha256": "3978eb5d1ae0d13d039e2f94a9e54e1f5ddf69b68ec2cd92af3bc2eb852b0327"
+  },
+  "butteraugli-traffic-20260921/vertical-increment-stage/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/vertical-increment-stage/summary.json",
+    "sha256": "e475950785314a95468a011629bc583ed7f828ec4f3837a64f7c779ded68b36f"
+  },
+  "butteraugli-traffic-20260921/vertical-increment-stage/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/vertical-increment-stage/identity.json",
+    "sha256": "42c263e92777106d1d520b357364643fb8830cd8af0053355687409a7449743a"
+  },
+  "butteraugli-traffic-20260921/vertical-increment-stage/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/vertical-increment-stage/state.json",
+    "sha256": "1ae1bd58829aedaacc41a9a1406c712a5a5504a018bf36a4e3b986eb20ed8043"
+  },
+  "butteraugli-traffic-20260921/vertical-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/vertical-parity/summary.json",
+    "sha256": "41f9e1c802534090edc8200da585ada61673d74ebf00a102d87bc32d563a0ade"
+  },
+  "butteraugli-traffic-20260921/vertical-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/vertical-parity/identity.json",
+    "sha256": "a92fb012f4a4971ed6bad682f75a8c4407ef36c8be89c5ec72e5501ec9aba898"
+  },
+  "butteraugli-traffic-20260921/vertical-parity/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/vertical-parity/state.json",
+    "sha256": "84c0781fbefdcaf73d995a0bea68d07a6703a6779d3fb1cfbf6f7ef4f77dfdfb"
+  },
+  "butteraugli-traffic-20260921/vertical-timing/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/vertical-timing/summary.json",
+    "sha256": "190cb4cbc266ca7bb6abd627a9b642cb12dc15b3cf3f9feb9e8c914dbd143169"
+  },
+  "butteraugli-traffic-20260921/vertical-timing/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/vertical-timing/identity.json",
+    "sha256": "d92683e4f457a91a46ba24eac4c86b3231672e692360277419092b8876f61e28"
+  },
+  "butteraugli-traffic-20260921/vertical-timing/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/vertical-timing/state.json",
+    "sha256": "73cc5d0dd7bf6ea4026d518f7da7be3b03f77c93c78645aa917a7d9a2134592d"
+  },
+  "butteraugli-traffic-20260921/vertical-wide-parity/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/vertical-wide-parity/summary.json",
+    "sha256": "6fcd240c419810c22a5d885cfbd3b9b31f906db6cba312ac3c2f1a6455a42151"
+  },
+  "butteraugli-traffic-20260921/vertical-wide-parity/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/vertical-wide-parity/identity.json",
+    "sha256": "d12ab5ad5ed83b08a01d51ece883e6dacb3053cd408dabba102a0dc0e912db0a"
+  },
+  "butteraugli-traffic-20260921/vertical-wide-parity/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/vertical-wide-parity/state.json",
+    "sha256": "172a907f9b794497985d143f8a3d93a2f80b160de6d63a1768c78e0f6d0c3cf9"
+  },
+  "butteraugli-traffic-20260921/vertical-wide-timing/summary.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/vertical-wide-timing/summary.json",
+    "sha256": "c6702a8681a0523e5a33b620493518df999045a3c5f862fb721c8340de5134a6"
+  },
+  "butteraugli-traffic-20260921/vertical-wide-timing/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/vertical-wide-timing/identity.json",
+    "sha256": "480cd44ddbe13323c594da8d1647d5ee877fed48809ffb15f78f71f15e7fc0bb"
+  },
+  "butteraugli-traffic-20260921/vertical-wide-timing/state.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/vertical-wide-timing/state.json",
+    "sha256": "393261141c4ddae26830c62ba288af1b176b55726a93b80afe38f892caa7325c"
+  },
+  "butteraugli-traffic-20260921/ultra-reuse-bundle-increment-stage/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ultra-reuse-bundle-increment-stage/pairs.json",
+    "sha256": "8e601119149f4e78924edfb864358a19f359e5a89026cd2ed495b5f01fc6fcf0"
+  },
+  "butteraugli-traffic-20260921/ultra-reuse-bundle-increment-stage/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ultra-reuse-bundle-increment-stage/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/ultra-reuse-bundle-increment-wall/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ultra-reuse-bundle-increment-wall/pairs.json",
+    "sha256": "218e3344aef8f47b9432a7d8d4c5a541444a82ac219106b91c07ca07d69d4921"
+  },
+  "butteraugli-traffic-20260921/ultra-reuse-bundle-increment-wall/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/ultra-reuse-bundle-increment-wall/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/high-reuse-bundle-increment-stage/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/high-reuse-bundle-increment-stage/pairs.json",
+    "sha256": "28f1171f69b73146cb7dd18e284593e61a91d56476c01deae7bbd6285ecba0e9"
+  },
+  "butteraugli-traffic-20260921/high-reuse-bundle-increment-stage/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/high-reuse-bundle-increment-stage/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/high-reuse-bundle-increment-wall/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/high-reuse-bundle-increment-wall/pairs.json",
+    "sha256": "3713cfa2e13fd211a871cdeac14c1a3a03e163d696d460ae535628a2110e2d24"
+  },
+  "butteraugli-traffic-20260921/high-reuse-bundle-increment-wall/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/high-reuse-bundle-increment-wall/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/mask-reuse-bundle-increment-stage/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-reuse-bundle-increment-stage/pairs.json",
+    "sha256": "446ffa957685aee106c050c2a8aa6d8560e63d740cdf2415bff90b489e264ede"
+  },
+  "butteraugli-traffic-20260921/mask-reuse-bundle-increment-stage/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-reuse-bundle-increment-stage/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/mask-reuse-bundle-increment-wall/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-reuse-bundle-increment-wall/pairs.json",
+    "sha256": "50295107cceae1febec2b7bfeaeb10e5043576b1ec088a9c85eab617faf3cb5e"
+  },
+  "butteraugli-traffic-20260921/mask-reuse-bundle-increment-wall/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-reuse-bundle-increment-wall/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/medium-reuse-bundle-increment-stage/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/medium-reuse-bundle-increment-stage/pairs.json",
+    "sha256": "875f185e98a526937c1ed53c2c6e5760bfed7c7b02a15c7e86381677ccf703d9"
+  },
+  "butteraugli-traffic-20260921/medium-reuse-bundle-increment-stage/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/medium-reuse-bundle-increment-stage/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/medium-reuse-bundle-increment-wall/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/medium-reuse-bundle-increment-wall/pairs.json",
+    "sha256": "22b26bb6e30e625ea1eb6bc5f0aa8554afcc3231a66905da207e94cf34f6838d"
+  },
+  "butteraugli-traffic-20260921/medium-reuse-bundle-increment-wall/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/medium-reuse-bundle-increment-wall/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/short-bundle-increment-stage/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-increment-stage/pairs.json",
+    "sha256": "b89ffe0617d045de0fd150d0cd23b0b1a2a1f871d7ef3eb6d2a24a69145a7032"
+  },
+  "butteraugli-traffic-20260921/short-bundle-increment-stage/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-increment-stage/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/short-bundle-increment-wall/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-increment-wall/pairs.json",
+    "sha256": "a172e9a1b4df3e5e7842ea5e4b2a0190ef5ae0b6a66c891df0d3f6fcb5ee01a7"
+  },
+  "butteraugli-traffic-20260921/short-bundle-increment-wall/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-increment-wall/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/short-bundle-broad-wall/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-broad-wall/pairs.json",
+    "sha256": "211f789990a1a8f8e1f4c2d355a99a125936612bd8ffa1e5c481e899eca67259"
+  },
+  "butteraugli-traffic-20260921/short-bundle-broad-wall/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-broad-wall/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/short-bundle-wall-confirm/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-wall-confirm/pairs.json",
+    "sha256": "92fcc50e4cb9859db00ce1e7eee4766fbe6100b7f919683a72d2ddaacb8eb2d7"
+  },
+  "butteraugli-traffic-20260921/short-bundle-wall-confirm/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-wall-confirm/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/control-wall-short-final/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/control-wall-short-final/pairs.json",
+    "sha256": "0d430dc3ecd558ef410d18a4692d57f2a9a1ab262286097ed3195f1418e1d9ad"
+  },
+  "butteraugli-traffic-20260921/control-wall-short-final/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/control-wall-short-final/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/short-bundle-original-stage/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-original-stage/pairs.json",
+    "sha256": "c7a5447195f12e3b47a51a110f23a4b8ce93cab5a7a19d4b91254762a6e73e85"
+  },
+  "butteraugli-traffic-20260921/short-bundle-original-stage/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-original-stage/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/short-bundle-high-increment-wall-confirm/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-high-increment-wall-confirm/pairs.json",
+    "sha256": "a1c9991f7b65b401475f7c696937f8e0a4613469be18be7df28600f862e3b6ef"
+  },
+  "butteraugli-traffic-20260921/short-bundle-high-increment-wall-confirm/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-bundle-high-increment-wall-confirm/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/short-final-increment-stage/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-increment-stage/pairs.json",
+    "sha256": "955f45828b52eac3e482d4fe3b0dbaf2dd89bc50ff5241d1a858d536b0e451ef"
+  },
+  "butteraugli-traffic-20260921/short-final-increment-stage/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-increment-stage/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/short-final-increment-wall-confirm/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-increment-wall-confirm/pairs.json",
+    "sha256": "40ee4f540e5b22eb44cde661628617c9be25a8d69bb356554b4ab4216d428182"
+  },
+  "butteraugli-traffic-20260921/short-final-increment-wall-confirm/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-increment-wall-confirm/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/control-wall-short-increment/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/control-wall-short-increment/pairs.json",
+    "sha256": "9b2f9352774f36821397e762ef4ff1c42cbd0e332bd9ca41350529b6e16fc19f"
+  },
+  "butteraugli-traffic-20260921/control-wall-short-increment/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/control-wall-short-increment/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/short-final-increment-broad-wall/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-increment-broad-wall/pairs.json",
+    "sha256": "0551399f4bbedcdd4e9b5b13aa8937428ce859a2c86de3c28c62238a1fbeeca4"
+  },
+  "butteraugli-traffic-20260921/short-final-increment-broad-wall/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-final-increment-broad-wall/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/short-eight-increment-stage/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-eight-increment-stage/pairs.json",
+    "sha256": "4390cae2b3954d30ac0db5a3699a1ca2ea0a4758930ce5696db81bd4224f8411"
+  },
+  "butteraugli-traffic-20260921/short-eight-increment-stage/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-eight-increment-stage/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/short-eight-increment-wall/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-eight-increment-wall/pairs.json",
+    "sha256": "d96066eda1c9154b00ace45aaa2b628abf3d449da42140edf529af869bc1378c"
+  },
+  "butteraugli-traffic-20260921/short-eight-increment-wall/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-eight-increment-wall/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/short-wide-ultra-increment-stage/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-wide-ultra-increment-stage/pairs.json",
+    "sha256": "69b7060f41089c80f7080278a19089b0072ffe266e60fb66ab59eac9971580f7"
+  },
+  "butteraugli-traffic-20260921/short-wide-ultra-increment-stage/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-wide-ultra-increment-stage/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/short-wide-ultra-increment-wall/pairs.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-wide-ultra-increment-wall/pairs.json",
+    "sha256": "a9acb52bacf7ee0bba32e16d7cf533ec1a01daa54104bb34d4aff2f09c5e05d2"
+  },
+  "butteraugli-traffic-20260921/short-wide-ultra-increment-wall/protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/short-wide-ultra-increment-wall/protocol.py",
+    "sha256": "3d45f43710714b0d4bed97fa1cfc50b69eeeca28085c137bf577dbf321b7058c"
+  },
+  "butteraugli-traffic-20260921/integrated/short-bundle/build-probe-command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/build-probe-command.json",
+    "sha256": "0b3d391e8114de6a59926ffdc715037c6180d029326e439b6a7fafe06fbbd756"
+  },
+  "butteraugli-traffic-20260921/integrated/short-bundle/source.patch": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/source.patch",
+    "sha256": "4a5df322f6d4227cb2535cdc31a447bc4912ac055a5231db719287ab3c4c2f7a"
+  },
+  "butteraugli-traffic-20260921/integrated/short-bundle/build-command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/build-command.json",
+    "sha256": "f4e1008a19d6bc8a16d24e7be818c16f961cbf798b0a605a2a73a40379707e4b"
+  },
+  "butteraugli-traffic-20260921/integrated/short-bundle/build-protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/build-protocol.py",
+    "sha256": "f36a45bda4d64623b8a0035924b5f4e458b1797f5d04643163739347899bb647"
+  },
+  "butteraugli-traffic-20260921/integrated/short-bundle/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/identity.json",
+    "sha256": "5074c32dd7af6b071a23940548e1c044c519e7381d3d0d3c654cb6d832855040"
+  },
+  "butteraugli-traffic-20260921/integrated/short-bundle/tests.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/tests.log",
+    "sha256": "ec5fd4f23c3a7283d393d5cf80030cf27b6db73daf57fee09a6ea41940936f7b"
+  },
+  "butteraugli-traffic-20260921/integrated/short-bundle/encode_probe.cpp": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/encode_probe.cpp",
+    "sha256": "2ef7d22048819fabbee39880a283f61616f49b6ece3c7e4f04c278020974bcdf"
+  },
+  "butteraugli-traffic-20260921/integrated/short-bundle/build-probe.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/build-probe.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "butteraugli-traffic-20260921/integrated/short-bundle/test-command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/test-command.json",
+    "sha256": "cd3f68a7490a0366c8ae534c594e9bf6ac1bcac68e0b3e1ae042f90b5223f5fc"
+  },
+  "butteraugli-traffic-20260921/integrated/short-bundle/build.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-bundle/build.log",
+    "sha256": "19177d1836b0dacbd60dd6adbd9c92ea4295b69dcd7cebb1de4778f108194f33"
+  },
+  "butteraugli-traffic-20260921/integrated/short-final/build-probe-command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-final/build-probe-command.json",
+    "sha256": "670f54ab24426a588a62a8a7a1b46012d8f3491acd74ec87ae598195efc368ba"
+  },
+  "butteraugli-traffic-20260921/integrated/short-final/source.patch": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-final/source.patch",
+    "sha256": "c36aa2db6b0a308d6d949b229b854a133cc8941e0e2f26b83572959852bc83bd"
+  },
+  "butteraugli-traffic-20260921/integrated/short-final/build-command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-final/build-command.json",
+    "sha256": "f4e1008a19d6bc8a16d24e7be818c16f961cbf798b0a605a2a73a40379707e4b"
+  },
+  "butteraugli-traffic-20260921/integrated/short-final/build-protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-final/build-protocol.py",
+    "sha256": "f36a45bda4d64623b8a0035924b5f4e458b1797f5d04643163739347899bb647"
+  },
+  "butteraugli-traffic-20260921/integrated/short-final/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-final/identity.json",
+    "sha256": "96d901e2412f0481d5cef95938a5fee00f8f24982b5c136547718a15ac13d7d4"
+  },
+  "butteraugli-traffic-20260921/integrated/short-final/tests.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-final/tests.log",
+    "sha256": "29d24737e7feec0f842ad5bdb8b06a35490b1f56a3a9565890191a867b878730"
+  },
+  "butteraugli-traffic-20260921/integrated/short-final/encode_probe.cpp": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-final/encode_probe.cpp",
+    "sha256": "2ef7d22048819fabbee39880a283f61616f49b6ece3c7e4f04c278020974bcdf"
+  },
+  "butteraugli-traffic-20260921/integrated/short-final/build-probe.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-final/build-probe.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "butteraugli-traffic-20260921/integrated/short-final/test-command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-final/test-command.json",
+    "sha256": "cd3f68a7490a0366c8ae534c594e9bf6ac1bcac68e0b3e1ae042f90b5223f5fc"
+  },
+  "butteraugli-traffic-20260921/integrated/short-final/build.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/short-final/build.log",
+    "sha256": "965b0982076d39fc43660fea2c972c268cc30fad8c756ab5c845c4d62b164925"
+  },
+  "butteraugli-traffic-20260921/integrated/fusion-bundle/build-probe-command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/fusion-bundle/build-probe-command.json",
+    "sha256": "c11512b09217899f41de401e51e0fc274269b5bd75f09e3f2905edeccff8772f"
+  },
+  "butteraugli-traffic-20260921/integrated/fusion-bundle/source.patch": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/fusion-bundle/source.patch",
+    "sha256": "95dc837799d4c00bf590b72ab833619d418d465d0af775208bd8d9a1c6930d73"
+  },
+  "butteraugli-traffic-20260921/integrated/fusion-bundle/build-command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/fusion-bundle/build-command.json",
+    "sha256": "f4e1008a19d6bc8a16d24e7be818c16f961cbf798b0a605a2a73a40379707e4b"
+  },
+  "butteraugli-traffic-20260921/integrated/fusion-bundle/build-protocol.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/fusion-bundle/build-protocol.py",
+    "sha256": "f36a45bda4d64623b8a0035924b5f4e458b1797f5d04643163739347899bb647"
+  },
+  "butteraugli-traffic-20260921/integrated/fusion-bundle/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/fusion-bundle/identity.json",
+    "sha256": "dc509ec932ec38ecb078ab298dac87a1e0197c7bf1e696315fcc765c410f160d"
+  },
+  "butteraugli-traffic-20260921/integrated/fusion-bundle/tests.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/fusion-bundle/tests.log",
+    "sha256": "c23c5c638e9280c67588c0d213a896ae53db3e161caeef961d61ea54e5647b94"
+  },
+  "butteraugli-traffic-20260921/integrated/fusion-bundle/encode_probe.cpp": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/fusion-bundle/encode_probe.cpp",
+    "sha256": "2ef7d22048819fabbee39880a283f61616f49b6ece3c7e4f04c278020974bcdf"
+  },
+  "butteraugli-traffic-20260921/integrated/fusion-bundle/build-probe.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/fusion-bundle/build-probe.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "butteraugli-traffic-20260921/integrated/fusion-bundle/test-command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/fusion-bundle/test-command.json",
+    "sha256": "cd3f68a7490a0366c8ae534c594e9bf6ac1bcac68e0b3e1ae042f90b5223f5fc"
+  },
+  "butteraugli-traffic-20260921/integrated/fusion-bundle/build.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/fusion-bundle/build.log",
+    "sha256": "2186f0cb0f5e871b1e7124650a15cc1e8a0d6fc0b00dee60945ebb71be1a0ea7"
+  },
+  "butteraugli-traffic-20260921/baseline/build-probe-command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/build-probe-command.json",
+    "sha256": "a915822745c1e2d037be0bba2b3bc6170f16bdc9cddb16e2ca301b5f25e71811"
+  },
+  "butteraugli-traffic-20260921/baseline/sha256.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/sha256.json",
+    "sha256": "4420c6c14deca0bee72a24771859b75a20c2475b2f3762d63486d68511ca9427"
+  },
+  "butteraugli-traffic-20260921/baseline/metal_butteraugli.cpp": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/metal_butteraugli.cpp",
+    "sha256": "a5f8264e98dc043446273cb54ec7724f7e72f06918ebefd53036e15ca4bbe3fe"
+  },
+  "butteraugli-traffic-20260921/baseline/encode_probe.cpp": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/encode_probe.cpp",
+    "sha256": "cc0201a7dd78dfcf32c2569808aa109fece5f348a656dbe0ea4cab66db6a263b"
+  },
+  "butteraugli-traffic-20260921/baseline/build-probe.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/build-probe.log",
+    "sha256": "da91be0956ba95d2bcdb9676fc08e0cbc5cab1858106997bced19ef32868fc41"
+  },
+  "butteraugli-traffic-20260921/baseline/build-probe-final.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/build-probe-final.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "butteraugli-traffic-20260921/baseline-v2/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline-v2/identity.json",
+    "sha256": "5e6cdd44094b3afcb0b7f7168aad4396dcb2297486c4296933131f7ce0a8f80f"
+  },
+  "butteraugli-traffic-20260921/baseline-v2/command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline-v2/command.json",
+    "sha256": "58d835d0f2b5a46de6a26e71ea99b4a8cc39affd03e7848736912bb937868bdd"
+  },
+  "butteraugli-traffic-20260921/baseline-v2/encode_probe.cpp": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline-v2/encode_probe.cpp",
+    "sha256": "2ef7d22048819fabbee39880a283f61616f49b6ece3c7e4f04c278020974bcdf"
+  },
+  "butteraugli-traffic-20260921/baseline-v2/build-probe.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline-v2/build-probe.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "butteraugli-traffic-20260921/baseline-v2/build.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline-v2/build.log",
+    "sha256": "33f29e794c6878d77e2e7dfb68af5f304eb559c53287e8985334d7468f76a025"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/corpus.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/corpus.json",
+    "sha256": "03a23a0e08abb4174f1124681093ad707ee8fbad859ca4d2e20ba4067c835308"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/extra-contracts.command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/extra-contracts.command.json",
+    "sha256": "a3b0cf5880953cb339969ae8e395ac6291c4fae37a7cedfa83a9ff49994ea484"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/build.command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/build.command.json",
+    "sha256": "9b9661a41a0abb43ffc3b42048ed3f2333af3a3a39d592a051b2eab77bfb27c1"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/build-extra-tests.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/build-extra-tests.log",
+    "sha256": "6aecbc5134c6c856dfb4c9b24e5b501d344d795aed5b6adc1a284d9ce6d45167"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/timing-plan.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/timing-plan.json",
+    "sha256": "f731b379ae3fd8e149c4bf3b9c54e435ae3bdf50aa0ce6c5bfd4c75b7face83b"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/parity.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/parity.py",
+    "sha256": "9e0354caedcf92b2da920fa215bbe8a0d9752206149009efa677eab722e498f6"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/timing-3.command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/timing-3.command.json",
+    "sha256": "d248055c74c9576e745c7f658b551b4893b3e3238f86a8b40cb1c5ad4bce4523"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/timing-5.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/timing-5.log",
+    "sha256": "c26aad7a621b802c269666dbccca741a29df720e5bd1719d13f69ea60fe16f3c"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/timing-4.command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/timing-4.command.json",
+    "sha256": "d971459a54a2cfef21ffbb94662ef42a228e2d7c7adec8465eeeeefba673091f"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/extra-contracts.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/extra-contracts.log",
+    "sha256": "a1f78830713f6d892d373e375627b22c8448914574803dcc8c4d85e84bd86324"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/timing-4.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/timing-4.log",
+    "sha256": "f88edb71bda59e39dd6949d1631bdd4079bcbc7398189f96d30359b5179a678b"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/timing-0.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/timing-0.log",
+    "sha256": "efc66745d1568de096090d65b8e9ea4b69f2defdbf466e9e5790845a0abfc8f3"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/timing-1.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/timing-1.log",
+    "sha256": "643eb588540aacb504d47934da63dd76476b5e597417934a210b28043ef5392d"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/timing-3.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/timing-3.log",
+    "sha256": "3511dcf7ef5a15daf721f2c3de23510c2c1a8333d1d99a3045cf4eb6ea85c0cf"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/timing-5.command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/timing-5.command.json",
+    "sha256": "a1d1d8f9b64284a0152e343277cd193141e4a46126b71dc725fab4d4c6a1f58b"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/timing-2.command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/timing-2.command.json",
+    "sha256": "f53b05b0876443311498bd2483bb32fb7651d329eeb9566b3ef668117c0dc14e"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/timing-2.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/timing-2.log",
+    "sha256": "bebfbcc401e40ee8b21d427207877197d68a5d882193b2a91eaa7d9fd8f28889"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/build-extra-tests.command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/build-extra-tests.command.json",
+    "sha256": "d5ea940529d2d730150cd292e583d63b9c466d135e7562dbba3385f75c5135e5"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/identity.json",
+    "sha256": "fce696cc453feb92f6684f8d3b1087b8e4af24611e2f83cb9cb05feab395fc06"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/timing-0.command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/timing-0.command.json",
+    "sha256": "ba8d3847a1f3197c8800573767ed925406ff4b837db08f7731bcb79a6beaaf12"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/canonical-parity.command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/canonical-parity.command.json",
+    "sha256": "46da1873c656ff12254ba400e2a1162ac1e2331fe2628f041e93eedabb748d32"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/timing-1.command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/timing-1.command.json",
+    "sha256": "9ae68052b711c58e59d215445f7038402c0e335cdd249134e10c6a7753ffac58"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/canonical-parity.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/canonical-parity.log",
+    "sha256": "818e975be56b1805ae250af82494cd8cdeeddbf90d4a188df8dd9f4d2786c099"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/generate.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/generate.log",
+    "sha256": "8e99895311e1ea78e11d5a9d169cbd234a60f63bd4771ca8da448d73573bc556"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/compare.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/compare.py",
+    "sha256": "51bb843159ac8177bf97048a338828ea4439518cd2efeb5b7b3ff003c870219d"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/generate.command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/generate.command.json",
+    "sha256": "a8b2dd1e2c40781d2ec37d245ad93a7128e466d38d5447139255ae32615e2f7a"
+  },
+  "butteraugli-traffic-20260921/phase15-short-bundle/build.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase15-short-bundle/build.log",
+    "sha256": "bc4c786579b05dee7be25ad818f84d026051c28f95131e02b167524c2dd85411"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/corpus.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/corpus.json",
+    "sha256": "03a23a0e08abb4174f1124681093ad707ee8fbad859ca4d2e20ba4067c835308"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/extra-contracts.command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/extra-contracts.command.json",
+    "sha256": "a3b0cf5880953cb339969ae8e395ac6291c4fae37a7cedfa83a9ff49994ea484"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/build.command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/build.command.json",
+    "sha256": "a672522ad1dd5d888f34661a62f4428b5257e2492bbaf520e70c676863e70065"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/build-extra-tests.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/build-extra-tests.log",
+    "sha256": "8c301bd62a69f517af32c50d5003a74753d4e31985b0c87283471a373f90edde"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/timing-plan.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/timing-plan.json",
+    "sha256": "52df3d7da66bac9d1ef2f3c18ffa04e338d42de471a7a4fdf40dfbb513b6d31e"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/parity.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/parity.py",
+    "sha256": "9e0354caedcf92b2da920fa215bbe8a0d9752206149009efa677eab722e498f6"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/extra-contracts.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/extra-contracts.log",
+    "sha256": "95f820ec181f1f30283d9d5cee4514f5a4b5cfa8329731d9051b089fd6a6adae"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/timing-0.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/timing-0.log",
+    "sha256": "24bc4d6393d96e8df6cb42c588e086a98783cb348d3f1c941acae8a09237b8c3"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/timing-1.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/timing-1.log",
+    "sha256": "9e4c47fbd184eb60a9921f92f524ce7d663c5f88d48e6d0ee450466fca2adbd1"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/timing-2.command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/timing-2.command.json",
+    "sha256": "0026cfe24ff0f676577109211464ff83e86188ea9283b556722f2d491295496d"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/timing-2.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/timing-2.log",
+    "sha256": "150bb8867456ee4a30cf98924d6cb8c7fa197fdb2b516a894ff05f006df70715"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/build-extra-tests.command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/build-extra-tests.command.json",
+    "sha256": "d5ea940529d2d730150cd292e583d63b9c466d135e7562dbba3385f75c5135e5"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/identity.json",
+    "sha256": "c0beae786bad042361780901f8868df337bdf6af098fdfc0f2673e5e6d803c30"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/timing-0.command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/timing-0.command.json",
+    "sha256": "0435ed2156f1b2eba07cecb28d466cf3e28c8418a145a43a0ed643de8d49a1b6"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/canonical-parity.command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/canonical-parity.command.json",
+    "sha256": "b0cb5027258dbcff89a6c63c48f25a0e5fbe93edfcd96e40db960e6673b96a26"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/timing-1.command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/timing-1.command.json",
+    "sha256": "b89edbc8c602cccf9a966034d2431658ad016291bf17b214b6ec7bc9b09f82ac"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/canonical-parity.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/canonical-parity.log",
+    "sha256": "818e975be56b1805ae250af82494cd8cdeeddbf90d4a188df8dd9f4d2786c099"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/compare.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/compare.py",
+    "sha256": "51bb843159ac8177bf97048a338828ea4439518cd2efeb5b7b3ff003c870219d"
+  },
+  "butteraugli-traffic-20260921/phase19-short-final/build.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase19-short-final/build.log",
+    "sha256": "5cdb5d869e85f0880b5f47165fb46454a4e4421654533b15e1b96418e9566237"
+  },
+  "butteraugli-traffic-20260921/restored-qualified/build-command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/restored-qualified/build-command.json",
+    "sha256": "49ce6465207e7089c53424c958e148f81ca7e281a00b73b4b6e122eddc678f31"
+  },
+  "butteraugli-traffic-20260921/restored-qualified/identity.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/restored-qualified/identity.json",
+    "sha256": "8020326922d91a1658554b7d4e908bc65d091175a1e0f958e84d016c417bc343"
+  },
+  "butteraugli-traffic-20260921/restored-qualified/tests.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/restored-qualified/tests.log",
+    "sha256": "dce424e71adbb9c1b53bf2cc3856176cb8d19d00e8d6ca52af3682e2c4a9ffa8"
+  },
+  "butteraugli-traffic-20260921/restored-qualified/test-command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/restored-qualified/test-command.json",
+    "sha256": "0018632c2e518b006184e0de3ef3f78a9be18e1e2cdb8bbdd959eafee4116c8e"
+  },
+  "butteraugli-traffic-20260921/restored-qualified/build.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/restored-qualified/build.log",
+    "sha256": "72076a7a4099de973c25f7a17fbb4f77abda81b51c026a448a67eb1a757f71b0"
+  },
+  "butteraugli-traffic-20260921/encode_probe.cpp": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/encode_probe.cpp",
+    "sha256": "2ef7d22048819fabbee39880a283f61616f49b6ece3c7e4f04c278020974bcdf"
+  },
+  "butteraugli-traffic-20260921/phase5-prepare/inherited-build-failure.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/phase5-prepare/inherited-build-failure.json",
+    "sha256": "3db49a6acb024940c5df842c1f9c1fbaf11ded8cf98babb53c3398a1acdf3e1f"
+  },
+  "performance-headroom-20260921/REPORT.md": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/REPORT.md",
+    "sha256": "866d686423b1f0af9d786775e4de648380a05b899f89add22c06afb5e2c439dd"
+  },
+  "performance-headroom-20260921/summary.csv": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/summary.csv",
+    "sha256": "f8604cd054e59766f32220e939540a5e6ae8db2bea909a8c3f70834340f19560"
+  },
+  "performance-headroom-20260921/gpu-stage-means.csv": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/gpu-stage-means.csv",
+    "sha256": "373d509c5690317bc115ba519ba15aa577f47e6622e3b8019032259988528d81"
+  },
+  "performance-headroom-20260921/saved-data-validation.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/saved-data-validation.json",
+    "sha256": "b17e65dc4323bcea006daf564272763c78b8d9370217e23319340113b686243d"
+  },
+  "performance-headroom-20260921/batch-evidence.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/batch-evidence.json",
+    "sha256": "68f5f884e44eb2b87ba007a64815604d8fe47d94f971bcfebc661ca449fe2f41"
+  },
+  "performance-headroom-20260921/trace-analysis.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/trace-analysis.json",
+    "sha256": "713e9eadaa6944966b92636d59c64907ef24e796f39b5ca66dc7cfdc5945cf84"
+  },
+  "performance-headroom-20260921/trace-counters.csv": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/trace-counters.csv",
+    "sha256": "110a5341882c14ddaa026f1f1e0fa9ff460b283ccec042e7d2d32ff8bde498c4"
+  },
+  "performance-headroom-20260921/amdahl-scenarios.csv": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/amdahl-scenarios.csv",
+    "sha256": "598fbd3ae965a7e09057d400f4ac880e4539a4e530be64aebed0fede4a9a4941"
+  },
+  "performance-headroom-20260921/performance-budget.png": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/performance-budget.png",
+    "sha256": "1df6a1d577174be6d3dc501e9f2babb5d604a1ee53b593b7e98066f6a6c93474"
+  },
+  "performance-headroom-20260921/performance-budget.svg": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/performance-budget.svg",
+    "sha256": "96fc6e1a770adb191191298e28203fe8848118803d4884f8196268f880a73a64"
+  },
+  "performance-headroom-20260921/analyze_saved.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/analyze_saved.py",
+    "sha256": "cb28f87c44059e12d3b42ba8b6a83c218e51fadeec976518d5e547c92f318eb8"
+  },
+  "performance-headroom-20260921/analyze_trace.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/analyze_trace.py",
+    "sha256": "521db0e8c5cd036b164307684d77d5a77d5212834531129d0528eb628f4ed76f"
+  },
+  "performance-headroom-20260921/plot_budget.py": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/plot_budget.py",
+    "sha256": "04815be673fdff2cf9ade3290e31738ac4f377364fd094c790f39880103fede5"
+  },
+  "performance-headroom-20260921/GJXL-Performance-Limiters.tracetemplate": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/GJXL-Performance-Limiters.tracetemplate",
+    "sha256": "9ade33905f8edebe8003b83f20032160e156edf3b70617e706bc74610479e633"
+  },
+  "performance-headroom-20260921/ARTIFACTS.sha256": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/ARTIFACTS.sha256",
+    "sha256": "5e39cd948f1216e448c5f401dd127418de0c68fc09ef55219feedcfd7986d0da"
+  },
+  "performance-headroom-20260921/trace-24mp-e7/command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/trace-24mp-e7/command.json",
+    "sha256": "b97e2cb555ca89365759ef0292eb2a378b880d99e7f35d469a8b0ae5c6d2ed31"
+  },
+  "performance-headroom-20260921/trace-24mp-e7/paired.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/trace-24mp-e7/paired.json",
+    "sha256": "9e8fdcc82e7ffa1ba839d3220bdb8b07c2ca2c163c7b0eff7b113ab114891d6f"
+  },
+  "performance-headroom-20260921/trace-24mp-e7/gpu.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/trace-24mp-e7/gpu.json",
+    "sha256": "43871a16ad970bf859156051a2a3e2635f75b477accb13064ecacb2693721b1e"
+  },
+  "performance-headroom-20260921/trace-24mp-e7/toc.xml": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/trace-24mp-e7/toc.xml",
+    "sha256": "17505b015afdb74780e538a3334c9b7941890d49b1a6faac30f6bcb2cd9df51e"
+  },
+  "performance-headroom-20260921/trace-24mp-e7/xctrace.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/trace-24mp-e7/xctrace.log",
+    "sha256": "afe38272d0d13e3f56f0f6db983d90569fadbd774c0d5d2d49dd38bd271a1cd8"
+  },
+  "performance-headroom-20260921/trace-counters-24mp-e7/command.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/trace-counters-24mp-e7/command.json",
+    "sha256": "bce7b2501a96b72545af4bebb3b128bd271ca8ef7fa2542e7813b656d62e95ad"
+  },
+  "performance-headroom-20260921/trace-counters-24mp-e7/paired.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/trace-counters-24mp-e7/paired.json",
+    "sha256": "6311399b2ff1c444f1fc02e49937d783214e2d214fb79f875c29ffff31280782"
+  },
+  "performance-headroom-20260921/trace-counters-24mp-e7/gpu.json": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/trace-counters-24mp-e7/gpu.json",
+    "sha256": "96177d4f1e1a9ba3bffca0c98edbf970bc06ac1c82236c50361a99f4132cdfc2"
+  },
+  "performance-headroom-20260921/trace-counters-24mp-e7/toc.xml": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/trace-counters-24mp-e7/toc.xml",
+    "sha256": "bf1940766fdb651d1c0c36103820ea2042798e1642e6d9669329e21693c116ee"
+  },
+  "performance-headroom-20260921/trace-counters-24mp-e7/xctrace.log": {
+    "source": "/Users/yunhocho/GitHub/gjxl/reports/performance-headroom-20260921/trace-counters-24mp-e7/xctrace.log",
+    "sha256": "5893a49889e4eabd20cb00269884f0020ec5d5e5565ab57003d8d3429a989cdf"
+  }
+}

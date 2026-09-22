@@ -1,0 +1,145 @@
+{
+  "at": "2026-09-22T02:19:18.783338+00:00",
+  "cohorts": [
+    {
+      "cohort": "ultra-reuse-bundle-increment-stage",
+      "pairs": 6,
+      "profiled": true,
+      "summary_sha256": "57b6813690d1e0d0123b8b3ef90a79b82eabea86660298030bf8e925a391618f"
+    },
+    {
+      "cohort": "ultra-reuse-bundle-increment-wall",
+      "pairs": 6,
+      "profiled": false,
+      "summary_sha256": "2eb9f1dce59ce13aca6a99caa838002deef21baf231ced55aa5b5af1ccc52f4d"
+    },
+    {
+      "cohort": "high-reuse-bundle-increment-stage",
+      "pairs": 6,
+      "profiled": true,
+      "summary_sha256": "15e40bf3a9a364455ecb505dbe17514d99759cba744f1269ff2cfa6c4e23b20b"
+    },
+    {
+      "cohort": "high-reuse-bundle-increment-wall",
+      "pairs": 6,
+      "profiled": false,
+      "summary_sha256": "64f4065036478549819ed3d6963c533444966a354acd5d3ece78f33d9c0fd300"
+    },
+    {
+      "cohort": "mask-reuse-bundle-increment-stage",
+      "pairs": 6,
+      "profiled": true,
+      "summary_sha256": "c9ba3f5dc883eaa264651097ec42b75563b888de28f7646843b67f26f6717814"
+    },
+    {
+      "cohort": "mask-reuse-bundle-increment-wall",
+      "pairs": 6,
+      "profiled": false,
+      "summary_sha256": "c939cde0f33d262c658c2f4650ae24ae29336bedb858fc9cc73e631a5c584390"
+    },
+    {
+      "cohort": "medium-reuse-bundle-increment-stage",
+      "pairs": 6,
+      "profiled": true,
+      "summary_sha256": "76c16bb0a5009e349da31bd0c1099b7fcfa47b4989263ceb07a1880d46b9579d"
+    },
+    {
+      "cohort": "medium-reuse-bundle-increment-wall",
+      "pairs": 6,
+      "profiled": false,
+      "summary_sha256": "d5941a095f4c098cd8261600badc43af3ed3c3781e90a23295d999d3e12eed46"
+    },
+    {
+      "cohort": "short-bundle-increment-stage",
+      "pairs": 6,
+      "profiled": true,
+      "summary_sha256": "fc000dda4d592e2b24af914e248e203ee4e8412ea2fdafffba5ed9769ed05701"
+    },
+    {
+      "cohort": "short-bundle-increment-wall",
+      "pairs": 6,
+      "profiled": false,
+      "summary_sha256": "a5f1f251b89311d24f78c207cb2a63632e5ad7617893a91496ebc56cebf5644a"
+    },
+    {
+      "cohort": "short-bundle-broad-wall",
+      "pairs": 24,
+      "profiled": false,
+      "summary_sha256": "929ec8e2e2868d02e50326dcdcaa20ff7b0906f1024d2dc0fb19f1b533794453"
+    },
+    {
+      "cohort": "short-bundle-wall-confirm",
+      "pairs": 28,
+      "profiled": false,
+      "summary_sha256": "524fbeb3842110910ca4abd7e27db561727070fb11fd4d4185a8e3ecaec9806d"
+    },
+    {
+      "cohort": "control-wall-short-final",
+      "pairs": 14,
+      "profiled": false,
+      "summary_sha256": "32b52aad5bb6a9729ef5753def92131891b732330578ec052e2849f94ed14df8"
+    },
+    {
+      "cohort": "short-bundle-original-stage",
+      "pairs": 6,
+      "profiled": true,
+      "summary_sha256": "6e7a4a0a4ba4a31b1600671004278baaaa3d5fc3760c24b39a26ec16098d07ee"
+    },
+    {
+      "cohort": "short-bundle-high-increment-wall-confirm",
+      "pairs": 28,
+      "profiled": false,
+      "summary_sha256": "d7eda841f222d03bd831796e6fda0bb6d86ea55112479e63f84d22de83aa266a"
+    },
+    {
+      "cohort": "short-final-increment-stage",
+      "pairs": 6,
+      "profiled": true,
+      "summary_sha256": "ccb29d8c01a19dd42f43bf14b26fe848939ff8a8b8cfddba8b099d15d5a0618b"
+    },
+    {
+      "cohort": "short-final-increment-wall-confirm",
+      "pairs": 28,
+      "profiled": false,
+      "summary_sha256": "f1bcd294cc4972d2b91d844dea024517fc5f69442b8dd1b79315ac20da39c50d"
+    },
+    {
+      "cohort": "control-wall-short-increment",
+      "pairs": 14,
+      "profiled": false,
+      "summary_sha256": "a1bb5b7a48eb6f1106c5c4f9fae3ebfcf77fcc00393b32d283322a5cf1cddf24"
+    },
+    {
+      "cohort": "short-final-increment-broad-wall",
+      "pairs": 24,
+      "profiled": false,
+      "summary_sha256": "4b817175626702853d26c078ba95745cc4471dd47c773fb7b9c16ef5ad3a071e"
+    },
+    {
+      "cohort": "short-eight-increment-stage",
+      "pairs": 6,
+      "profiled": true,
+      "summary_sha256": "11f8fa1704c4f743c70350ae648ce798acea6944639182d0b6b98d8fea878f5c"
+    },
+    {
+      "cohort": "short-eight-increment-wall",
+      "pairs": 6,
+      "profiled": false,
+      "summary_sha256": "415935140fa6abfe11534ae247aec5d878a51de1e645154d79d271d19bd00b05"
+    },
+    {
+      "cohort": "short-wide-ultra-increment-stage",
+      "pairs": 6,
+      "profiled": true,
+      "summary_sha256": "f50fcb6db2bcc722f65d875726d0567b83b6e49701bb0aa632c992216ab732c2"
+    },
+    {
+      "cohort": "short-wide-ultra-increment-wall",
+      "pairs": 6,
+      "profiled": false,
+      "summary_sha256": "f0c89b234b0fcdb3212ac95785961364792e6a39aca762dd804248ca94ba8f7b"
+    }
+  ],
+  "files_hashed": 3356,
+  "scope": "Frozen binaries/inputs/source identities, case file hashes, byte/submission equality, ordinary medians, paired changes and summaries. The collection drivers separately validate GPU timestamps; this audit is not a remeasurement."
+}

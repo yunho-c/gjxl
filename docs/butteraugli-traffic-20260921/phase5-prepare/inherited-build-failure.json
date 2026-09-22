@@ -1,0 +1,7 @@
+{
+  "path": "src/gpu/ops/gpu_execution_profile_internal.h",
+  "unchanged_from": "4f3e414",
+  "sha256": "157fd9ea72db7538a1a7b9bd555c7b4863706cbcae0eeaeacf08bd5ecb5cacc2",
+  "error": "C API -Werror rejects four unused parameters in existing profiling header; shader experiment changes do not touch this file",
+  "scope": "workflow_admission target only; remaining focused targets will build separately"
+}

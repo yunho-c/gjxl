@@ -1,0 +1,379 @@
+[
+  {
+    "variant": {
+      "name": "baseline_control",
+      "width": 32,
+      "height": 8,
+      "threads_y": 8
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "gjxl_butteraugli_malta_fixed_f32",
+      "32",
+      "8",
+      "8",
+      "0"
+    ],
+    "started_at": "2026-09-21T23:17:41.722906+00:00",
+    "finished_at": "2026-09-21T23:17:42.128071+00:00",
+    "returncode": 0,
+    "log_sha256": "cf0f3f8b86ee88e8d4d411e9a8d3ef1f781a8ffc5264a036791bf5ff53d63115",
+    "stderr_sha256": "98dbc9d0a91940d0ee7f8ac40fedbb60417a867b27433819b967c5372ae82a38",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 240,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_malta_w16_h16_p1",
+      "width": 16,
+      "height": 16,
+      "threads_y": 16
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-malta.metallib",
+      "gjxl_ba_malta_w16_h16_p1",
+      "16",
+      "16",
+      "16",
+      "0"
+    ],
+    "started_at": "2026-09-21T23:17:42.128947+00:00",
+    "finished_at": "2026-09-21T23:17:42.637694+00:00",
+    "returncode": 0,
+    "log_sha256": "cf0f3f8b86ee88e8d4d411e9a8d3ef1f781a8ffc5264a036791bf5ff53d63115",
+    "stderr_sha256": "deb58f260759135f27a6b112999ff9664fd53dc9983e19cd3c2160c6b5833bc4",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 240,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_malta_w16_h32_p1",
+      "width": 16,
+      "height": 32,
+      "threads_y": 32
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-malta.metallib",
+      "gjxl_ba_malta_w16_h32_p1",
+      "16",
+      "32",
+      "32",
+      "0"
+    ],
+    "started_at": "2026-09-21T23:17:42.638487+00:00",
+    "finished_at": "2026-09-21T23:17:43.192066+00:00",
+    "returncode": 0,
+    "log_sha256": "cf0f3f8b86ee88e8d4d411e9a8d3ef1f781a8ffc5264a036791bf5ff53d63115",
+    "stderr_sha256": "72926f88b9c2228eeae609a2e4ba9fe59b50a5a85b7758393598921c3e5d9313",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 240,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_malta_w16_h32_p2",
+      "width": 16,
+      "height": 32,
+      "threads_y": 16
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-malta.metallib",
+      "gjxl_ba_malta_w16_h32_p2",
+      "16",
+      "32",
+      "16",
+      "0"
+    ],
+    "started_at": "2026-09-21T23:17:43.192953+00:00",
+    "finished_at": "2026-09-21T23:17:43.750820+00:00",
+    "returncode": 0,
+    "log_sha256": "cf0f3f8b86ee88e8d4d411e9a8d3ef1f781a8ffc5264a036791bf5ff53d63115",
+    "stderr_sha256": "16f60cd2dba0f4628384fdd6f280b809bbb8b441e140bcdc873f3a07d277a8d5",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 240,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_malta_w32_h8_p1",
+      "width": 32,
+      "height": 8,
+      "threads_y": 8
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-malta.metallib",
+      "gjxl_ba_malta_w32_h8_p1",
+      "32",
+      "8",
+      "8",
+      "0"
+    ],
+    "started_at": "2026-09-21T23:17:43.751764+00:00",
+    "finished_at": "2026-09-21T23:17:44.264431+00:00",
+    "returncode": 0,
+    "log_sha256": "cf0f3f8b86ee88e8d4d411e9a8d3ef1f781a8ffc5264a036791bf5ff53d63115",
+    "stderr_sha256": "7fffa5a0bd726fa518d7d9046262f0580116ba5c366de5cf75035ce135166258",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 240,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_malta_w32_h16_p1",
+      "width": 32,
+      "height": 16,
+      "threads_y": 16
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-malta.metallib",
+      "gjxl_ba_malta_w32_h16_p1",
+      "32",
+      "16",
+      "16",
+      "0"
+    ],
+    "started_at": "2026-09-21T23:17:44.265523+00:00",
+    "finished_at": "2026-09-21T23:17:44.769682+00:00",
+    "returncode": 0,
+    "log_sha256": "cf0f3f8b86ee88e8d4d411e9a8d3ef1f781a8ffc5264a036791bf5ff53d63115",
+    "stderr_sha256": "6cf44361db75ed75938609c8ba4888874df2565902a99d99e2e060d0d685fe70",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 240,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_malta_w32_h16_p2",
+      "width": 32,
+      "height": 16,
+      "threads_y": 8
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-malta.metallib",
+      "gjxl_ba_malta_w32_h16_p2",
+      "32",
+      "16",
+      "8",
+      "0"
+    ],
+    "started_at": "2026-09-21T23:17:44.770734+00:00",
+    "finished_at": "2026-09-21T23:17:45.327598+00:00",
+    "returncode": 0,
+    "log_sha256": "cf0f3f8b86ee88e8d4d411e9a8d3ef1f781a8ffc5264a036791bf5ff53d63115",
+    "stderr_sha256": "80eb54da5f165ee986e52682fce65a3b2cb6fe6c64836441e29c7b1ee7a13c3b",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 240,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_malta_w32_h32_p1",
+      "width": 32,
+      "height": 32,
+      "threads_y": 32
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-malta.metallib",
+      "gjxl_ba_malta_w32_h32_p1",
+      "32",
+      "32",
+      "32",
+      "0"
+    ],
+    "started_at": "2026-09-21T23:17:45.328445+00:00",
+    "finished_at": "2026-09-21T23:17:45.832822+00:00",
+    "returncode": 0,
+    "log_sha256": "cf0f3f8b86ee88e8d4d411e9a8d3ef1f781a8ffc5264a036791bf5ff53d63115",
+    "stderr_sha256": "7ebfebe9799bdf8d26f3530b6a9601ae1df00a73cb7fed3f72468caaae2f199c",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 240,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_malta_w32_h32_p2",
+      "width": 32,
+      "height": 32,
+      "threads_y": 16
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-malta.metallib",
+      "gjxl_ba_malta_w32_h32_p2",
+      "32",
+      "32",
+      "16",
+      "0"
+    ],
+    "started_at": "2026-09-21T23:17:45.833636+00:00",
+    "finished_at": "2026-09-21T23:17:46.397536+00:00",
+    "returncode": 0,
+    "log_sha256": "cf0f3f8b86ee88e8d4d411e9a8d3ef1f781a8ffc5264a036791bf5ff53d63115",
+    "stderr_sha256": "87be976f1efdc54a84311060c0c6c31bb10a6e0cf80cbadd8d578061da9cad2d",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 240,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_malta_w64_h8_p1",
+      "width": 64,
+      "height": 8,
+      "threads_y": 8
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-malta.metallib",
+      "gjxl_ba_malta_w64_h8_p1",
+      "64",
+      "8",
+      "8",
+      "0"
+    ],
+    "started_at": "2026-09-21T23:17:46.398562+00:00",
+    "finished_at": "2026-09-21T23:17:46.952385+00:00",
+    "returncode": 0,
+    "log_sha256": "cf0f3f8b86ee88e8d4d411e9a8d3ef1f781a8ffc5264a036791bf5ff53d63115",
+    "stderr_sha256": "07bb2b8d8f1f105749d9cf48df96c03ac682c06ac20365975af3ffb41112daaf",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 240,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_malta_w64_h16_p1",
+      "width": 64,
+      "height": 16,
+      "threads_y": 16
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-malta.metallib",
+      "gjxl_ba_malta_w64_h16_p1",
+      "64",
+      "16",
+      "16",
+      "0"
+    ],
+    "started_at": "2026-09-21T23:17:46.953210+00:00",
+    "finished_at": "2026-09-21T23:17:47.455007+00:00",
+    "returncode": 0,
+    "log_sha256": "cf0f3f8b86ee88e8d4d411e9a8d3ef1f781a8ffc5264a036791bf5ff53d63115",
+    "stderr_sha256": "f5107adec83d11bc746b5d1e5176bc0fca4389f3cad9b8e2d06531c71d571df3",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 240,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_malta_w64_h16_p2",
+      "width": 64,
+      "height": 16,
+      "threads_y": 8
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-malta.metallib",
+      "gjxl_ba_malta_w64_h16_p2",
+      "64",
+      "16",
+      "8",
+      "0"
+    ],
+    "started_at": "2026-09-21T23:17:47.455839+00:00",
+    "finished_at": "2026-09-21T23:17:47.967934+00:00",
+    "returncode": 0,
+    "log_sha256": "cf0f3f8b86ee88e8d4d411e9a8d3ef1f781a8ffc5264a036791bf5ff53d63115",
+    "stderr_sha256": "c74779e857a4d2e1a203d99ed18002a2c60a43ea19687c0b8101d86b5235a14d",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 240,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_malta_w32_h64_p2",
+      "width": 32,
+      "height": 64,
+      "threads_y": 32
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/malta_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-malta.metallib",
+      "gjxl_ba_malta_w32_h64_p2",
+      "32",
+      "64",
+      "32",
+      "0"
+    ],
+    "started_at": "2026-09-21T23:17:47.968836+00:00",
+    "finished_at": "2026-09-21T23:17:48.525445+00:00",
+    "returncode": 0,
+    "log_sha256": "cf0f3f8b86ee88e8d4d411e9a8d3ef1f781a8ffc5264a036791bf5ff53d63115",
+    "stderr_sha256": "47bdb4d9a09e55faac4412680a03600c39cf59a0de90ba745e5ffac6f008a556",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 240,
+      "guards": true
+    }
+  }
+]

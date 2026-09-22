@@ -1,0 +1,62 @@
+[1/27] Compiling strict-math Metal Butteraugli shaders
+/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/src/gpu/metal/kernels/butteraugli.metal:2073:15: warning: unused variable 'dc_mask_value' [-Wunused-variable]
+  const float dc_mask_value = mask_dc_y(mask[mask_index]);
+              ^
+/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/src/gpu/metal/kernels/butteraugli.metal:2407:8: warning: constexpr if is a C++17 extension [-Wc++17-extensions]
+    if constexpr(Q==2u) {
+       ^
+/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/src/gpu/metal/kernels/butteraugli.metal:2418:15: warning: constexpr if is a C++17 extension [-Wc++17-extensions]
+    } else if constexpr(Q==4u) {
+              ^
+/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/src/gpu/metal/kernels/butteraugli.metal:2575:4: warning: constexpr if is a C++17 extension [-Wc++17-extensions]
+if constexpr(P==4u) {
+   ^
+/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/src/gpu/metal/kernels/butteraugli.metal:2745:8: warning: constexpr if is a C++17 extension [-Wc++17-extensions]
+    if constexpr(Q==2u) {
+       ^
+/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/src/gpu/metal/kernels/butteraugli.metal:2756:15: warning: constexpr if is a C++17 extension [-Wc++17-extensions]
+    } else if constexpr(Q==4u) {
+              ^
+/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/src/gpu/metal/kernels/butteraugli.metal:2913:4: warning: constexpr if is a C++17 extension [-Wc++17-extensions]
+if constexpr(P==4u) {
+   ^
+/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/src/gpu/metal/kernels/butteraugli.metal:3074:8: warning: constexpr if is a C++17 extension [-Wc++17-extensions]
+    if constexpr(Q==2u) {
+       ^
+/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/src/gpu/metal/kernels/butteraugli.metal:3085:15: warning: constexpr if is a C++17 extension [-Wc++17-extensions]
+    } else if constexpr(Q==4u) {
+              ^
+/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/src/gpu/metal/kernels/butteraugli.metal:3242:4: warning: constexpr if is a C++17 extension [-Wc++17-extensions]
+if constexpr(P==4u) {
+   ^
+10 warnings generated.
+[2/27] Linking gjxl.metallib
+[3/27] Embedding gjxl.metallib
+[4/27] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_aq_host_storage_plan.cpp.o
+[5/27] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_aq_butteraugli.cpp.o
+[6/27] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_aq_postprocess.cpp.o
+[7/27] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_ac_strategy.cpp.o
+[8/27] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_backend.cpp.o
+[9/27] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_aq_reconstruction.cpp.o
+[10/27] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_embedded_library.cpp.o
+[11/27] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_aq_strategy_metadata.cpp.o
+[12/27] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_aq_strategy_dispatch.cpp.o
+[13/27] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_primitives.cpp.o
+[14/27] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_submission_storage_plan.cpp.o
+[15/27] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_butteraugli.cpp.o
+[16/27] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_submission.cpp.o
+[17/27] Building CXX object CMakeFiles/gjxl_metal_cache_admission_test.dir/tests/metal_cache_admission_test.cpp.o
+[18/27] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_aq_evaluation.cpp.o
+[19/27] Linking CXX static library libgjxl_metal.a
+[20/27] Linking CXX executable gjxl_metal_cache_admission_test
+[21/27] Linking CXX executable gjxl_metal_aq_evaluation_test
+ld: warning: ignoring duplicate libraries: 'libgjxl_codec.a'
+[22/27] Linking CXX executable gjxl_butteraugli_device_operation_test
+ld: warning: ignoring duplicate libraries: 'libgjxl_codec.a'
+[23/27] Linking CXX executable gjxl_encoding_benchmark
+[24/27] Linking CXX executable gjxl_adaptive_quantization_gpu_policy_test
+ld: warning: ignoring duplicate libraries: 'libgjxl_codec.a'
+[25/27] Linking CXX executable gjxl_metal_butteraugli_test
+ld: warning: ignoring duplicate libraries: 'libgjxl_codec.a'
+[26/27] Linking CXX executable gjxl_encode
+[27/27] Linking CXX executable gjxl_resident_workflow_storage_plan_test

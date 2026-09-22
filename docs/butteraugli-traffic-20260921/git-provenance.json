@@ -1,0 +1,14 @@
+{
+  "branch": "perf/butteraugli-traffic-20260921",
+  "base": "4f3e4147c8bde16b0b49523adbf10ddd8043585f",
+  "short-bundle": "db8a4d67d554bcb04b651243c3660c42ec245bb8",
+  "short-final": "ef5f29003c52ec788d339f00b6f2e50a6f1818e7",
+  "primary_at_checkpoint": "3b0de6d9d47846f6aa13f33ad6cca7e24e52ada6",
+  "original_artifact_root": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921",
+  "source_paths": {
+    "butteraugli.metal": "src/gpu/metal/kernels/butteraugli.metal",
+    "metal_butteraugli.cpp": "src/gpu/metal/metal_butteraugli.cpp",
+    "metal_backend_internal.h": "src/gpu/metal/metal_backend_internal.h"
+  },
+  "source_verification": "Both commits exactly match their independently measured frozen source hashes. No new benchmark campaign was run for this packaging."
+}

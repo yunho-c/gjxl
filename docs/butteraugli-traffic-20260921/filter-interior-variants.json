@@ -1,0 +1,74 @@
+[
+  {
+    "name": "gjxl_ba_interior_o2_s1_p1",
+    "width": 16,
+    "height": 64,
+    "threads_y": 64,
+    "scratch_bytes": 18432,
+    "horizontal_halo_factor": 1.5,
+    "horizontal_source_loads_per_output": 17.0
+  },
+  {
+    "name": "gjxl_ba_interior_o2_s1_p2",
+    "width": 16,
+    "height": 64,
+    "threads_y": 32,
+    "scratch_bytes": 18432,
+    "horizontal_halo_factor": 1.5,
+    "horizontal_source_loads_per_output": 17.0
+  },
+  {
+    "name": "gjxl_ba_interior_o2_s8_p1",
+    "width": 16,
+    "height": 512,
+    "threads_y": 64,
+    "scratch_bytes": 18432,
+    "horizontal_halo_factor": 1.0625,
+    "horizontal_source_loads_per_output": 17.0
+  },
+  {
+    "name": "gjxl_ba_interior_o2_s8_p2",
+    "width": 16,
+    "height": 512,
+    "threads_y": 32,
+    "scratch_bytes": 18432,
+    "horizontal_halo_factor": 1.0625,
+    "horizontal_source_loads_per_output": 17.0
+  },
+  {
+    "name": "gjxl_ba_interior_o4_s1_p1",
+    "width": 16,
+    "height": 64,
+    "threads_y": 64,
+    "scratch_bytes": 18432,
+    "horizontal_halo_factor": 1.5,
+    "horizontal_source_loads_per_output": 9.0
+  },
+  {
+    "name": "gjxl_ba_interior_o4_s1_p2",
+    "width": 16,
+    "height": 64,
+    "threads_y": 32,
+    "scratch_bytes": 18432,
+    "horizontal_halo_factor": 1.5,
+    "horizontal_source_loads_per_output": 9.0
+  },
+  {
+    "name": "gjxl_ba_interior_o4_s8_p1",
+    "width": 16,
+    "height": 512,
+    "threads_y": 64,
+    "scratch_bytes": 18432,
+    "horizontal_halo_factor": 1.0625,
+    "horizontal_source_loads_per_output": 9.0
+  },
+  {
+    "name": "gjxl_ba_interior_o4_s8_p2",
+    "width": 16,
+    "height": 512,
+    "threads_y": 32,
+    "scratch_bytes": 18432,
+    "horizontal_halo_factor": 1.0625,
+    "horizontal_source_loads_per_output": 9.0
+  }
+]

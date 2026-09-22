@@ -1,0 +1,99 @@
+{
+  "files": {
+    "malta_screen": "a7827f68c98aa1bf7d6ff21bcbe7e85a8d11d5daf96c842248b631246ebfe584",
+    "malta_screen.cpp": "bad90eda28f2fb7efad95dd6ccc5b0ce6451034166568d5939873fcc4e8e1040",
+    "baseline/gjxl.metallib": "3a1f0d488e799bc7d074800fcf5d8630c7422497c3ea48db8c8c8c89e733dc16",
+    "filter-malta.metallib": "56f460413ec63a254fd2b435dfec4bda9f50a4bb51c81edcb141ed07611ddad3",
+    "filter-malta.metal": "a2af64f0b127ec17d1052e7db9f1919fddf7d129349a15bcab11b5eb2717604d",
+    "run_malta_screen.py": "b17d9bc99dd03c100ef68655bed4586fd0a993f4d64510fbab0a29b6034c1de6"
+  },
+  "variants": [
+    {
+      "name": "baseline_control",
+      "width": 32,
+      "height": 8,
+      "threads_y": 8
+    },
+    {
+      "name": "gjxl_ba_malta_w16_h16_p1",
+      "width": 16,
+      "height": 16,
+      "threads_y": 16
+    },
+    {
+      "name": "gjxl_ba_malta_w16_h32_p1",
+      "width": 16,
+      "height": 32,
+      "threads_y": 32
+    },
+    {
+      "name": "gjxl_ba_malta_w16_h32_p2",
+      "width": 16,
+      "height": 32,
+      "threads_y": 16
+    },
+    {
+      "name": "gjxl_ba_malta_w32_h8_p1",
+      "width": 32,
+      "height": 8,
+      "threads_y": 8
+    },
+    {
+      "name": "gjxl_ba_malta_w32_h16_p1",
+      "width": 32,
+      "height": 16,
+      "threads_y": 16
+    },
+    {
+      "name": "gjxl_ba_malta_w32_h16_p2",
+      "width": 32,
+      "height": 16,
+      "threads_y": 8
+    },
+    {
+      "name": "gjxl_ba_malta_w32_h32_p1",
+      "width": 32,
+      "height": 32,
+      "threads_y": 32
+    },
+    {
+      "name": "gjxl_ba_malta_w32_h32_p2",
+      "width": 32,
+      "height": 32,
+      "threads_y": 16
+    },
+    {
+      "name": "gjxl_ba_malta_w64_h8_p1",
+      "width": 64,
+      "height": 8,
+      "threads_y": 8
+    },
+    {
+      "name": "gjxl_ba_malta_w64_h16_p1",
+      "width": 64,
+      "height": 16,
+      "threads_y": 16
+    },
+    {
+      "name": "gjxl_ba_malta_w64_h16_p2",
+      "width": 64,
+      "height": 16,
+      "threads_y": 8
+    },
+    {
+      "name": "gjxl_ba_malta_w32_h64_p2",
+      "width": 32,
+      "height": 64,
+      "threads_y": 32
+    }
+  ],
+  "extents": [
+    null
+  ],
+  "timing": false,
+  "pairs": 5,
+  "warmups": 3,
+  "samples": 5,
+  "repeats_per_submission": 3,
+  "boundary": "GPU command buffer duration per repeated kernel dispatch; not full-encode latency"
+}

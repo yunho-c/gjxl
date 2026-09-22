@@ -1,0 +1,298 @@
+[
+  {
+    "kind": "filter",
+    "extent": [
+      3839,
+      2159
+    ],
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask_filter_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/ac-fusion/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-cache.metallib",
+      "gjxl_ba_low_medium_packed_dc",
+      "16",
+      "64",
+      "64",
+      "1",
+      "3839",
+      "2159"
+    ],
+    "log_sha256": "7d4d26cce7275c8c53da08b9b12c3ddac2a79cb3bfc449b213d10d21676c0c5b",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "at": "2026-09-21T23:46:47.067920+00:00",
+    "summary": {
+      "x": {
+        "median_change_percent": -0.8633715227890804,
+        "wins": 5,
+        "changes_percent": [
+          -0.8633715227890804,
+          -0.7962569029266842,
+          -0.9002176962381814,
+          -0.846702553631562,
+          -0.8915391240972625
+        ],
+        "baseline_ms": 3.77131,
+        "candidate_ms": 3.73961
+      }
+    }
+  },
+  {
+    "kind": "filter",
+    "extent": [
+      6000,
+      4000
+    ],
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask_filter_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/ac-fusion/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-cache.metallib",
+      "gjxl_ba_low_medium_packed_dc",
+      "16",
+      "64",
+      "64",
+      "1",
+      "6000",
+      "4000"
+    ],
+    "log_sha256": "d87e3e4fd62de044e21ab0b4437f7f617223f8b23bf11e69ee632a1579e65671",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "at": "2026-09-21T23:46:51.482284+00:00",
+    "summary": {
+      "x": {
+        "median_change_percent": -0.7974365509958892,
+        "wins": 5,
+        "changes_percent": [
+          -0.794886503318859,
+          -0.8329312808935563,
+          -0.7966785333831106,
+          -0.7974365509958892,
+          -0.8274393074633402
+        ],
+        "baseline_ms": 10.9852,
+        "candidate_ms": 10.8954
+      }
+    }
+  },
+  {
+    "kind": "reduction",
+    "extent": [
+      3839,
+      2159
+    ],
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask_reduction_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/ac-fusion/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-cache.metallib",
+      "--timing",
+      "--extent",
+      "3839x2159"
+    ],
+    "log_sha256": "ea7015b0f7530d877758c68fa3a1d656c3da1a230c7f8275234e7be2c96d545b",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "at": "2026-09-21T23:47:04.623121+00:00",
+    "summary": {
+      "8x8": {
+        "median_change_percent": -0.6744803184431714,
+        "wins": 3,
+        "changes_percent": [
+          1.115588388926203,
+          -1.452318299760702,
+          -3.51770941517745,
+          0.9016729386340794,
+          -0.6744803184431714
+        ],
+        "baseline_ms": 1.08528,
+        "candidate_ms": 1.07796
+      },
+      "16x8": {
+        "median_change_percent": -0.2808864928865229,
+        "wins": 5,
+        "changes_percent": [
+          -0.2808864928865229,
+          -0.12101119983864983,
+          -0.43121628171958193,
+          -0.3418943338727276,
+          -0.12043330769133664
+        ],
+        "baseline_ms": 1.58783,
+        "candidate_ms": 1.58337
+      },
+      "8x16": {
+        "median_change_percent": -0.8725663716814158,
+        "wins": 5,
+        "changes_percent": [
+          -0.8013670378881677,
+          -1.003559306053181,
+          -0.9509088878832617,
+          -0.6036241025217826,
+          -0.8725663716814158
+        ],
+        "baseline_ms": 1.69696,
+        "candidate_ms": 1.6835
+      },
+      "16x16": {
+        "median_change_percent": 0.1715218157206655,
+        "wins": 1,
+        "changes_percent": [
+          3.4980852980928123,
+          0.1715218157206655,
+          -0.6536489260824285,
+          0.07114544160990999,
+          1.1278678888297033
+        ],
+        "baseline_ms": 1.08229,
+        "candidate_ms": 1.08306
+      },
+      "32x16": {
+        "median_change_percent": 0.11894422837290808,
+        "wins": 2,
+        "changes_percent": [
+          3.9035914165987062,
+          -0.10781263299255439,
+          -0.01986285173799507,
+          1.7135300407045362,
+          0.11894422837290808
+        ],
+        "baseline_ms": 1.05932,
+        "candidate_ms": 1.06058
+      },
+      "16x32": {
+        "median_change_percent": -0.42113917690586034,
+        "wins": 4,
+        "changes_percent": [
+          0.04136143459838593,
+          -2.3788396210348894,
+          -0.16022559764148347,
+          -1.1857386502071021,
+          -0.42113917690586034
+        ],
+        "baseline_ms": 1.09465,
+        "candidate_ms": 1.09004
+      },
+      "32x32": {
+        "median_change_percent": 0.3315425651814641,
+        "wins": 2,
+        "changes_percent": [
+          0.3315425651814641,
+          -0.1507250718518538,
+          0.39766081871344117,
+          0.5987186302212955,
+          -0.09068641199678762
+        ],
+        "baseline_ms": 1.06875,
+        "candidate_ms": 1.06865
+      }
+    }
+  },
+  {
+    "kind": "reduction",
+    "extent": [
+      6000,
+      4000
+    ],
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask_reduction_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/integrated/ac-fusion/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/mask-cache.metallib",
+      "--timing",
+      "--extent",
+      "6000x4000"
+    ],
+    "log_sha256": "fd11ff29d5ce424522d27ccc7de813a8905ae9c0d847aad7919ab0eff8d4f3d6",
+    "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "at": "2026-09-21T23:47:41.754361+00:00",
+    "summary": {
+      "8x8": {
+        "median_change_percent": -0.5139024649897905,
+        "wins": 5,
+        "changes_percent": [
+          -2.2163114966420427,
+          -0.5139024649897905,
+          -0.24655294425577345,
+          -0.2631179149683027,
+          -3.182261958203969
+        ],
+        "baseline_ms": 3.09981,
+        "candidate_ms": 3.08553
+      },
+      "16x8": {
+        "median_change_percent": -0.13478472672778796,
+        "wins": 5,
+        "changes_percent": [
+          -0.15188202590954436,
+          -0.09832669810208028,
+          -0.13478472672778796,
+          -0.14110071664311663,
+          -0.1308780408933785
+        ],
+        "baseline_ms": 4.57678,
+        "candidate_ms": 4.5715
+      },
+      "8x16": {
+        "median_change_percent": -0.10995391818934275,
+        "wins": 4,
+        "changes_percent": [
+          -0.4015734114832692,
+          -0.020993529053392468,
+          -0.20323365500007906,
+          0.02284688675147084,
+          -0.10995391818934275
+        ],
+        "baseline_ms": 4.85864,
+        "candidate_ms": 4.85643
+      },
+      "16x16": {
+        "median_change_percent": 0.08979163154960723,
+        "wins": 1,
+        "changes_percent": [
+          0.08979163154960723,
+          -0.008406649012704381,
+          0.36384669322813146,
+          0.180560221194348,
+          0.013889516967813265
+        ],
+        "baseline_ms": 3.09471,
+        "candidate_ms": 3.09629
+      },
+      "32x16": {
+        "median_change_percent": -0.17138295619307797,
+        "wins": 3,
+        "changes_percent": [
+          -0.17693463194011771,
+          2.5482050964101832,
+          0.35263694067864115,
+          -1.2807515111071144,
+          -0.17138295619307797
+        ],
+        "baseline_ms": 3.06893,
+        "candidate_ms": 3.07344
+      },
+      "16x32": {
+        "median_change_percent": -0.23054153542559908,
+        "wins": 3,
+        "changes_percent": [
+          0.24156546891753727,
+          -0.23054153542559908,
+          -1.6278121389247557,
+          0.01233700912939284,
+          -0.41263346656311706
+        ],
+        "baseline_ms": 3.16746,
+        "candidate_ms": 3.16161
+      },
+      "32x32": {
+        "median_change_percent": -0.34817940502848144,
+        "wins": 3,
+        "changes_percent": [
+          0.7200379885452968,
+          -0.9513116714587433,
+          -1.0152107062045612,
+          -0.34817940502848144,
+          1.5389883447794794
+        ],
+        "baseline_ms": 3.13057,
+        "candidate_ms": 3.11908
+      }
+    }
+  }
+]

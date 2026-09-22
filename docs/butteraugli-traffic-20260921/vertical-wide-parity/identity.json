@@ -1,0 +1,51 @@
+{
+  "files": {
+    "vertical_wide_screen": "11253aa211fc48125238dc2efe18336e6469ac565177173b1d12694150f51fb3",
+    "vertical_wide_screen.cpp": "3add3caa19d83545e154bf9fb423d55f648353f2f54b7e2053138fe6f9944992",
+    "baseline/gjxl.metallib": "3a1f0d488e799bc7d074800fcf5d8630c7422497c3ea48db8c8c8c89e733dc16",
+    "filter-vertical-wide.metallib": "e159ce2947351aa2e11b3d5f5d7c676076e5e425e8bb86afb887b0af94ddfa01",
+    "filter-vertical-wide.metal": "e3411a7209557998462bdb837d699b06117d31849b9400c7a5bb6d7890fed96a",
+    "run_vertical_wide_screen.py": "57edfacddf08cb3f8585c118d7f72de12a925784087d3ba3d9d2b48371b6800f"
+  },
+  "variants": [
+    {
+      "name": "baseline_control",
+      "width": 16,
+      "height": 64,
+      "threads_y": 64
+    },
+    {
+      "name": "gjxl_ba_vertical_wide_o2_p4",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16
+    },
+    {
+      "name": "gjxl_ba_vertical_wide_o2_p8",
+      "width": 16,
+      "height": 64,
+      "threads_y": 8
+    },
+    {
+      "name": "gjxl_ba_vertical_wide_o4_p4",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16
+    },
+    {
+      "name": "gjxl_ba_vertical_wide_o4_p8",
+      "width": 16,
+      "height": 64,
+      "threads_y": 8
+    }
+  ],
+  "extents": [
+    null
+  ],
+  "timing": false,
+  "pairs": 5,
+  "warmups": 3,
+  "samples": 5,
+  "repeats_per_submission": 3,
+  "boundary": "GPU command buffer duration per repeated kernel dispatch; not full-encode latency"
+}

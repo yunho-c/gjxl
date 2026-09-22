@@ -1,0 +1,263 @@
+[
+  {
+    "variant": {
+      "name": "baseline_control",
+      "width": 16,
+      "height": 64,
+      "threads_y": 64
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse_closure_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "gjxl_butteraugli_low_medium_p1_device",
+      "16",
+      "64",
+      "64",
+      "0"
+    ],
+    "started_at": "2026-09-22T00:28:47.698099+00:00",
+    "finished_at": "2026-09-22T00:28:48.293105+00:00",
+    "returncode": 0,
+    "log_sha256": "85b8d82d8b9988755960c9e27f41f36d46158f5f1d06afd7dc07b21bcf5ec57b",
+    "stderr_sha256": "d374813c027654e6dbc01da385965231238627cc82cd9e230eea0d32f1664dc7",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 48,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_reuse_close_h64_s1_b0",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse_closure_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-reuse-closure.metallib",
+      "gjxl_ba_reuse_close_h64_s1_b0",
+      "16",
+      "64",
+      "16",
+      "0"
+    ],
+    "started_at": "2026-09-22T00:28:48.293814+00:00",
+    "finished_at": "2026-09-22T00:28:48.846023+00:00",
+    "returncode": 0,
+    "log_sha256": "85b8d82d8b9988755960c9e27f41f36d46158f5f1d06afd7dc07b21bcf5ec57b",
+    "stderr_sha256": "9e962ea4812440b911282c834c688d6d00b1d011c325f576cd1db2fe1f2f9380",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 48,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_reuse_close_h96_s1_b0",
+      "width": 16,
+      "height": 96,
+      "threads_y": 24
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse_closure_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-reuse-closure.metallib",
+      "gjxl_ba_reuse_close_h96_s1_b0",
+      "16",
+      "96",
+      "24",
+      "0"
+    ],
+    "started_at": "2026-09-22T00:28:48.846567+00:00",
+    "finished_at": "2026-09-22T00:28:49.396700+00:00",
+    "returncode": 0,
+    "log_sha256": "85b8d82d8b9988755960c9e27f41f36d46158f5f1d06afd7dc07b21bcf5ec57b",
+    "stderr_sha256": "f94033a7a74d09af3b0b12bfe7b3464d9451f9674b9fbb309af691c5fb69490a",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 48,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_reuse_close_h64_s2_b0",
+      "width": 16,
+      "height": 128,
+      "threads_y": 16
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse_closure_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-reuse-closure.metallib",
+      "gjxl_ba_reuse_close_h64_s2_b0",
+      "16",
+      "128",
+      "16",
+      "0"
+    ],
+    "started_at": "2026-09-22T00:28:49.397260+00:00",
+    "finished_at": "2026-09-22T00:28:49.947136+00:00",
+    "returncode": 0,
+    "log_sha256": "85b8d82d8b9988755960c9e27f41f36d46158f5f1d06afd7dc07b21bcf5ec57b",
+    "stderr_sha256": "e550904a8a451f9808109de116274007b7e2354b5d73c10959e491a08cbc926f",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 48,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_reuse_close_h64_s4_b0",
+      "width": 16,
+      "height": 256,
+      "threads_y": 16
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse_closure_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-reuse-closure.metallib",
+      "gjxl_ba_reuse_close_h64_s4_b0",
+      "16",
+      "256",
+      "16",
+      "0"
+    ],
+    "started_at": "2026-09-22T00:28:49.947686+00:00",
+    "finished_at": "2026-09-22T00:28:50.498641+00:00",
+    "returncode": 0,
+    "log_sha256": "85b8d82d8b9988755960c9e27f41f36d46158f5f1d06afd7dc07b21bcf5ec57b",
+    "stderr_sha256": "5ddc5773d8df1f8bfe8738eef054ab7fd33a1a665233447b1c1f378a9bd80f39",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 48,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_reuse_close_h96_s2_b0",
+      "width": 16,
+      "height": 192,
+      "threads_y": 24
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse_closure_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-reuse-closure.metallib",
+      "gjxl_ba_reuse_close_h96_s2_b0",
+      "16",
+      "192",
+      "24",
+      "0"
+    ],
+    "started_at": "2026-09-22T00:28:50.499184+00:00",
+    "finished_at": "2026-09-22T00:28:51.050126+00:00",
+    "returncode": 0,
+    "log_sha256": "85b8d82d8b9988755960c9e27f41f36d46158f5f1d06afd7dc07b21bcf5ec57b",
+    "stderr_sha256": "73a9813c7f99fe5d2e7ce3d239a2cb58325e468fffdf91a7f4d98a0b6178d5ad",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 48,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_reuse_close_h96_s4_b0",
+      "width": 16,
+      "height": 384,
+      "threads_y": 24
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse_closure_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-reuse-closure.metallib",
+      "gjxl_ba_reuse_close_h96_s4_b0",
+      "16",
+      "384",
+      "24",
+      "0"
+    ],
+    "started_at": "2026-09-22T00:28:51.050684+00:00",
+    "finished_at": "2026-09-22T00:28:51.593330+00:00",
+    "returncode": 0,
+    "log_sha256": "85b8d82d8b9988755960c9e27f41f36d46158f5f1d06afd7dc07b21bcf5ec57b",
+    "stderr_sha256": "43d2c527f5590c4267369fc0dde53d2bdf103c73b82ccbe23ec08a629ccf50fe",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 48,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_reuse_close_h64_s1_b256",
+      "width": 16,
+      "height": 64,
+      "threads_y": 16
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse_closure_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-reuse-closure.metallib",
+      "gjxl_ba_reuse_close_h64_s1_b256",
+      "16",
+      "64",
+      "16",
+      "0"
+    ],
+    "started_at": "2026-09-22T00:28:51.594046+00:00",
+    "finished_at": "2026-09-22T00:28:52.138361+00:00",
+    "returncode": 0,
+    "log_sha256": "85b8d82d8b9988755960c9e27f41f36d46158f5f1d06afd7dc07b21bcf5ec57b",
+    "stderr_sha256": "0f4f6affc11edac5c7b9992e4bbad7f0cadb6c5221b622dcaa496e5b7ff8e320",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 48,
+      "guards": true
+    }
+  },
+  {
+    "variant": {
+      "name": "gjxl_ba_reuse_close_h96_s1_b384",
+      "width": 16,
+      "height": 96,
+      "threads_y": 24
+    },
+    "extent": null,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/reuse_closure_screen",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/baseline/gjxl.metallib",
+      "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/filter-reuse-closure.metallib",
+      "gjxl_ba_reuse_close_h96_s1_b384",
+      "16",
+      "96",
+      "24",
+      "0"
+    ],
+    "started_at": "2026-09-22T00:28:52.138944+00:00",
+    "finished_at": "2026-09-22T00:28:52.678027+00:00",
+    "returncode": 0,
+    "log_sha256": "85b8d82d8b9988755960c9e27f41f36d46158f5f1d06afd7dc07b21bcf5ec57b",
+    "stderr_sha256": "51733ced93a8347460092c6470cc4dd5a0dd0d915ac9ff16b9a65635825913c2",
+    "validation": {
+      "type": "validation",
+      "bitwise_cases": 48,
+      "guards": true
+    }
+  }
+]

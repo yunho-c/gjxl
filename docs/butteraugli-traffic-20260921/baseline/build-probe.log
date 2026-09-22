@@ -1,0 +1,22 @@
+/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/encode_probe.cpp:17:51: error: use of undeclared identifier 'GpuProfilingMode'; did you mean 'gjxl::gpu_profile_internal::GpuProfilingMode'?
+   17 |   const bool profiled=options.gpu_profiling_mode==GpuProfilingMode::kStage;
+      |                                                   ^~~~~~~~~~~~~~~~
+      |                                                   gjxl::gpu_profile_internal::GpuProfilingMode
+/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/src/gpu/ops/gpu_execution_profile_internal.h:34:12: note: 'gjxl::gpu_profile_internal::GpuProfilingMode' declared here
+   34 | enum class GpuProfilingMode : uint8_t {
+      |            ^
+/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/encode_probe.cpp:43:5: error: unknown type name 'GpuExecutionProfile'; did you mean 'gjxl::gpu_profile_internal::GpuExecutionProfile'?
+   43 |     GpuExecutionProfile profile;
+      |     ^~~~~~~~~~~~~~~~~~~
+      |     gjxl::gpu_profile_internal::GpuExecutionProfile
+/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/src/gpu/ops/gpu_execution_profile_internal.h:120:8: note: 'gjxl::gpu_profile_internal::GpuExecutionProfile' declared here
+  120 | struct GpuExecutionProfile {
+      |        ^
+/Users/yunhocho/GitHub/gjxl/reports/butteraugli-traffic-20260921/encode_probe.cpp:48:61: error: use of undeclared identifier 'GpuProfilingMode'; did you mean 'gjxl::gpu_profile_internal::GpuProfilingMode'?
+   48 |           image.ConstView(),encoding_options,gpu.get(),true,GpuProfilingMode::kStage,
+      |                                                             ^~~~~~~~~~~~~~~~
+      |                                                             gjxl::gpu_profile_internal::GpuProfilingMode
+/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/src/gpu/ops/gpu_execution_profile_internal.h:34:12: note: 'gjxl::gpu_profile_internal::GpuProfilingMode' declared here
+   34 | enum class GpuProfilingMode : uint8_t {
+      |            ^
+3 errors generated.

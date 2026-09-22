@@ -1,0 +1,11 @@
+[
+  "cmake",
+  "--build",
+  "/Users/yunhocho/GitHub/gjxl-butteraugli-traffic-20260921/build/traffic",
+  "--target",
+  "gjxl_butteraugli_device_operation_test",
+  "gjxl_resident_workflow_storage_plan_test",
+  "gjxl_metal_cache_admission_test",
+  "-j",
+  "8"
+]

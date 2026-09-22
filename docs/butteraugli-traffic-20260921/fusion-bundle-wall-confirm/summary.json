@@ -1,0 +1,38 @@
+{
+  "alpine24-e7": {
+    "complete_call_ms": {
+      "median_change_percent": -7.659468492865706,
+      "wins": 7,
+      "pairs": 7,
+      "baseline_ms": 466.562167,
+      "candidate_ms": 432.107
+    }
+  },
+  "forest48-e10": {
+    "complete_call_ms": {
+      "median_change_percent": -6.883242802707345,
+      "wins": 7,
+      "pairs": 7,
+      "baseline_ms": 1860.407792,
+      "candidate_ms": 1738.753708
+    }
+  },
+  "kodak01-e7": {
+    "complete_call_ms": {
+      "median_change_percent": -2.482832813152025,
+      "wins": 6,
+      "pairs": 7,
+      "baseline_ms": 16.795417,
+      "candidate_ms": 16.418125
+    }
+  },
+  "kodak17-e10-d08": {
+    "complete_call_ms": {
+      "median_change_percent": -2.2754435315201937,
+      "wins": 7,
+      "pairs": 7,
+      "baseline_ms": 32.395584,
+      "candidate_ms": 31.792958
+    }
+  }
+}
