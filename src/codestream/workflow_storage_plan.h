@@ -33,8 +33,8 @@ struct WorkflowStoragePlan {
   HostStorageBound output;
   HostStorageBound working;
   // One production backend's idle pools: resident input, AQ persistent, AQ
-  // staging, Butteraugli, completed frame. Already included in backend_working.
-  std::array<size_t, 5> idle_pool_capacity{};
+  // staging, Butteraugli, token metadata, token output, completed frame. Already included in backend_working.
+  std::array<size_t, 7> idle_pool_capacity{};
   // CUDA can retain exact-size backings from several image shapes. Sum this
   // inventory across batch requests rather than taking a per-pool maximum.
   size_t cuda_idle_capacity = 0;

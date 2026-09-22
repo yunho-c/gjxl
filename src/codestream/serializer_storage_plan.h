@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <array>
+
 #include "codestream/entropy_storage_plan.h"
 #include "codestream/representation_storage_plan.h"
 #include "codestream/token_storage_plan.h"
@@ -31,6 +33,8 @@ struct SerializerStoragePlan {
   // envelope already includes this output; do not add it twice.
   HostStorageBound output;
   HostStorageBound working;
+  // Experimental Metal token metadata/output arenas, already in working.
+  std::array<size_t, 2> token_idle_pool_capacity{};
   bool operator==(const SerializerStoragePlan &) const = default;
 };
 

@@ -5,6 +5,8 @@
 
 #include "codestream/dc_group.h"
 #include "codestream/weighted_dc.h"
+#include "codestream/parallel_sections_internal.h"
+#include <cstdlib>
 
 #include <algorithm>
 #include <array>
@@ -456,15 +458,16 @@ Status codestream_internal::TokenizeSimpleDcGroupsForEncoder(
 
   try {
     Storage<SimpleDcGroupTokenStreams> candidate;
-    candidate.reserve(group_count);
+    candidate.resize(group_count);
     const ConstImage3I32View dc = frame.quantized_dc();
     const ConstPlaneI32View quant = frame.raw_quant_field();
     const ConstPlaneU8View sharpness = frame.epf_sharpness();
     const ConstPlaneI8View y_to_x = frame.color_correlation().y_to_x_map();
     const ConstPlaneI8View y_to_b = frame.color_correlation().y_to_b_map();
 
-    for (size_t group_y = 0; group_y < group_extent.height; ++group_y) {
-      for (size_t group_x = 0; group_x < group_extent.width; ++group_x) {
+    const auto tokenize_group = [&](size_t group_index) -> Status {
+        const size_t group_y = group_index / group_extent.width;
+        const size_t group_x = group_index % group_extent.width;
         SimpleDcGroupTokenStreams stream;
         stream.block_x = group_x * kSimpleDcGroupBlockDimension;
         stream.block_y = group_y * kSimpleDcGroupBlockDimension;
@@ -510,9 +513,19 @@ Status codestream_internal::TokenizeSimpleDcGroupsForEncoder(
         if (!status.ok()) {
           return status;
         }
-        candidate.push_back(std::move(stream));
-      }
+        candidate[group_index] = std::move(stream);
+        return Status::Ok();
+    };
+    size_t maximum_workers = codestream_internal::kSerializerMaximumSectionWorkers;
+#ifdef GJXL_TOKENIZATION_EXPERIMENT
+    if (const char* value = std::getenv("GJXL_EXPERIMENT_DC_WORKERS")) {
+      const long count = std::strtol(value, nullptr, 10);
+      if (count >= 1 && count <= 8) maximum_workers = static_cast<size_t>(count);
     }
+#endif
+    const Status token_status = codestream_internal::RunParallelSections(
+        group_count, tokenize_group, maximum_workers);
+    if (!token_status.ok()) return token_status;
     *groups = std::move(candidate);
   } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
     return error.status();

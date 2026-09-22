@@ -247,6 +247,8 @@ enum class MetalAqScratchArena : uint8_t {
   kPersistent,
   kStaging,
   kResidentInput,
+  kAcTokenization,
+  kAcTokenOutput,
   kCount,
 };
 
@@ -500,6 +502,7 @@ public:
   }
 
 private:
+  friend class MetalAcTokenizer;
   friend Status ComputeAcSubmissionStoragePlan(
     const AcSubmissionStorageOptions&, AcSubmissionStoragePlan*);
   friend class MetalPreparedAqEvaluation;
@@ -790,6 +793,9 @@ private:
   NS::SharedPtr<MTL::Device> device_;
   NS::SharedPtr<MTL::CommandQueue> command_queue_;
   NS::SharedPtr<MTL::Library> library_;
+  std::mutex ac_tokenization_mutex_;
+  std::atomic<uint32_t> ac_tokenization_capacity_hint_{0};
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>,6> ac_tokenization_pipelines_;
   NS::SharedPtr<MTL::Buffer> dct_basis_buffer_;
   TransformPipelineRegistry transform_pipelines_;
   AcStrategyPipelines ac_strategy_pipelines_;

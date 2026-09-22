@@ -88,6 +88,10 @@ class MetalCompletedVarDctFrame final
     });
   }
 
+  const DeviceBuffer* resident_ac_buffer(size_t* offset) const noexcept override {
+    *offset = coefficient_offset_bytes; return allocation.get();
+  }
+  size_t coefficient_offset_bytes = 0;
   std::unique_ptr<DeviceBuffer> allocation;
   // Populated only after successful completion/publication. Failed operations
   // release their output allocation instead of returning it to the cache.
@@ -3238,6 +3242,7 @@ Status MetalPreparedAqEvaluation::PrepareCompletedFrame(
     }
     frame->population.present_mask = present_mask;
     const auto& coefficients = storage_plan.coefficients;
+    frame->coefficient_offset_bytes = coefficients.offset_bytes;
     const auto& destination_plane = storage_plan.destinations;
     completed_coefficients_ = {
       frame->allocation.get(), coefficients.offset_bytes, coefficients.element_type,

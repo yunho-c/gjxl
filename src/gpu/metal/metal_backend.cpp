@@ -1087,7 +1087,9 @@ Status MetalBackend::AcquireAqScratchArena(
   const resource_budget_internal::ResourceClassScope resource_class(
     kind == MetalAqScratchArena::kResidentInput
       ? resource_budget_internal::ResourceClass::kInput
-      : resource_budget_internal::ResourceClass::kAqScratch);
+      : (kind == MetalAqScratchArena::kAcTokenization || kind == MetalAqScratchArena::kAcTokenOutput)
+          ? resource_budget_internal::ResourceClass::kSerializer
+          : resource_budget_internal::ResourceClass::kAqScratch);
   uint64_t generation = 0;
   DeviceScratchArena candidate;
   {
