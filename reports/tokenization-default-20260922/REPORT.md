@@ -25,3 +25,13 @@ The existing finite-domain workflow and batch tests cover resource bounds, cache
 Screening scripts now explicitly select each named CPU/GPU mode, set their ablation parameters, record the stable override, and capture the source commit as well as the diff. Their Python syntax was checked. Existing captures remain tied to their frozen scripts and binaries.
 
 [Validation metadata](validation.json) records build configuration, log hashes, and source hashes. Build logs and binaries are generated under the worktree's ignored `build/` directory. Test durations are correctness-run durations, not performance measurements. No push or merge was performed.
+
+## DC test portability follow-up
+
+The pre-merge review reproduced a failure in the new DC fault-injection test when the hardware-concurrency query returned 1, 2, or 3. The dispatcher correctly caps worker launches at the hardware count and uses the caller as one participant; the test incorrectly expected every injection point to be reachable.
+
+The test now skips only unreachable launch-failure points, matching the existing worker-failure test convention. Its eight stream-equality, finite-storage, and CPU-cap cases still run at every hardware count. The output reports how many launch-failure cases actually ran.
+
+[Before/after validation](dc-portability-validation.json), using a [diagnostic link-time shim](dc-portability-hardware-shim.cpp), passed simulated hardware counts 0/1/2/3/4/8. Zero and one ran eight ordinary cases and no launch-failure cases; two ran 12 total/four failure cases; three ran 16/eight; four and eight ran all 20/12. Zero exercises the standard's unknown-concurrency result and the dispatcher's one-participant fallback. The normal Metal-enabled and Metal-disabled Release test targets also passed. This is simulated scheduler-query coverage, not validation on six physical machines.
+
+Only the test and this evidence changed. The production encoder retains its earlier 159/159 full-suite qualification; the full suite was not repeated for this test-only adjustment.

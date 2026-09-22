@@ -5,8 +5,10 @@
 #include "core/thread_budget.h"
 #include "core/worker_launch_internal.h"
 #include "quantized_frame_fixture.h"
+#include <algorithm>
 #include <iostream>
 #include <stdexcept>
+#include <thread>
 using namespace gjxl;
 using namespace gjxl::codestream_internal;
 using namespace gjxl::thread_budget_internal;
@@ -39,7 +41,7 @@ int main() {
                    .color_correlation = &owner.color_correlation(),
                    .epf_sharpness = owner.epf_sharpness()},
          .quantized_dc = dc_view});
-    size_t cases = 0;
+    size_t cases = 0, failure_cases = 0;
     for (auto prediction :
          {VarDctDcPrediction::kGradient, VarDctDcPrediction::kWeighted}) {
       Storage<SimpleDcGroupTokenStreams> expected;
@@ -84,6 +86,12 @@ int main() {
       for (auto kind : {WorkerLaunchFailureKind::kSystemError,
                         WorkerLaunchFailureKind::kBadAlloc})
         for (size_t before : {size_t{0}, size_t{1}, size_t{2}}) {
+          // The dispatcher caps even an explicit limit at hardware concurrency;
+          // the caller occupies one participant slot. Inject only at launches
+          // that this host can reach, retaining serial coverage above.
+          if (before >=
+              std::max(1u, std::thread::hardware_concurrency()) - 1)
+            continue;
           CpuParticipantTracker tracker;
           EncodeScope scope(4, &tracker);
           WorkerLaunchFaultForTesting fault{
@@ -105,10 +113,12 @@ int main() {
           Check(TokenizeSimpleDcGroupsForEncoder(frame, &actual, prediction));
           Require(actual == expected, "DC launch fault poisoned recovery");
           ++cases;
+          ++failure_cases;
         }
     }
     std::cout << "Verified " << cases
-              << " DC cases: exact gradient/weighted streams, finite storage "
+              << " DC cases (" << failure_cases
+              << " launch-failure cases): exact gradient/weighted streams, finite storage "
                  "plans, CPU caps, partial launch failure and recovery.\n";
   } catch (const std::exception &e) {
     std::cerr << e.what() << '\n';
