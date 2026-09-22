@@ -957,7 +957,7 @@ private:
       Bind(encoder,Handle(metal_,output),output.offset_bytes,2);
       encoder->setBytes(&p,sizeof(p),3);
       encoder->setThreadgroupMemoryLength(16*(64+12)*sizeof(float),0);
-      DispatchMetalThreadgroups(encoder,MTL::Size((plane_extent.width+15)/16,(plane_extent.height+63)/64,1),MTL::Size(16,16,1));
+      DispatchMetalThreadgroups(encoder,MTL::Size((plane_extent.width+15)/16,(plane_extent.height+63)/64,1),MTL::Size(16,8,1));
       return;
     }
     if (kKernelSizes[kernel_index] == 5) {
@@ -1217,7 +1217,7 @@ private:
       Bind(encoder,Handle(metal_,high),high.offset_bytes,3);
       encoder->setBytes(&p,sizeof(p),4);
       encoder->setThreadgroupMemoryLength(16*(64+14)*sizeof(float),0);
-      DispatchMetalThreadgroups(encoder,MTL::Size((scale_extent.width+15)/16,(scale_extent.height+63)/64,1),MTL::Size(16,16,1));
+      DispatchMetalThreadgroups(encoder,MTL::Size((scale_extent.width+15)/16,(scale_extent.height+63)/64,1),MTL::Size(16,8,1));
     }
     if (selected(MetalButteraugliPsychoStage::kMediumB)) {
       DevicePlaneView medium_b = psycho[5];
@@ -1231,7 +1231,7 @@ private:
       Bind(encoder,Handle(metal_,medium_b),medium_b.offset_bytes,2);
       encoder->setBytes(&p,sizeof(p),3);
       encoder->setThreadgroupMemoryLength(16*(64+14)*sizeof(float),0);
-      DispatchMetalThreadgroups(encoder,MTL::Size((scale_extent.width+15)/16,(scale_extent.height+63)/64,1),MTL::Size(16,16,1));
+      DispatchMetalThreadgroups(encoder,MTL::Size((scale_extent.width+15)/16,(scale_extent.height+63)/64,1),MTL::Size(16,8,1));
     }
 
     if (selected(MetalButteraugliPsychoStage::kSuppressX)) {
@@ -1269,8 +1269,8 @@ private:
       Bind(encoder,Handle(metal_,hx),hx.offset_bytes,5);
       Bind(encoder,Handle(metal_,ux),ux.offset_bytes,6);
       Bind(encoder,Handle(metal_,mask),mask.offset_bytes,7);
-      encoder->setThreadgroupMemoryLength(16*(64+6)*sizeof(float),0);
-      DispatchMetalThreadgroups(encoder,MTL::Size((scale_extent.width+15)/16,(scale_extent.height+63)/64,1),MTL::Size(16,32,1));
+      encoder->setThreadgroupMemoryLength(32*(32+6)*sizeof(float),0);
+      DispatchMetalThreadgroups(encoder,MTL::Size((scale_extent.width+31)/32,(scale_extent.height+31)/32,1),MTL::Size(32,8,1));
     }
     if (capture_reference && selected(MetalButteraugliPsychoStage::kUltraY)) {
       for (size_t channel = 0; channel < 3; ++channel) {

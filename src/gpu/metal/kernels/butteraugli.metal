@@ -2395,51 +2395,16 @@ kernel void gjxl_ba_ultra_direct(
  device const float* high_x [[buffer(5)]],device const float* ultra_x [[buffer(6)]],device float* mask [[buffer(7)]],
  threadgroup float* scratch [[threadgroup(0)]],uint2 local [[thread_position_in_threadgroup]],
  uint2 group [[threadgroup_position_in_grid]],uint2 group_size [[threads_per_threadgroup]]) {
- constexpr uint R=3,W=16,H=64,P=2;
+ constexpr uint R=3,W=32,H=32,P=4,Q=4;
  const uint thread_index=local.y*group_size.x+local.x,threads=group_size.x*group_size.y;
  const int gx=int(group.x*W),gy=int(group.y*H);
- for(uint i=thread_index;i<W*(H+2*R);i+=threads) {
-  int x=gx+int(i%W),y=gy-int(R)+int(i/W);float sum=0.0f,ws=0.0f;
-  if(x<int(p.width)&&y>=0&&y<int(p.height)) {
-   int first=max(0,x-int(R)),last=min(int(p.width)-1,x+int(R));
-   for(int sx=first;sx<=last;++sx){float w=weights[sx+int(R)-x];ws+=w;sum+=input[uint(y)*p.input_stride+uint(sx)]*w;}
-  }
-  scratch[i]=ws==0.0f?0.0f:sum/ws;
- }
- threadgroup_barrier(mem_flags::mem_threadgroup);
- for(uint pixel=0;pixel<P;++pixel) {
-  uint x=uint(gx)+local.x,y=uint(gy)+local.y+pixel*(H/P);
-  if(x>=p.width||y>=p.height)continue;
-  int first=max(0,int(y)-int(R)),last=min(int(p.height)-1,int(y)+int(R));float sum=0.0f,ws=0.0f;
-  for(int sy=first;sy<=last;++sy){float w=weights[sy+int(R)-int(y)];ws+=w;sum+=scratch[uint(sy-gy+int(R))*W+local.x]*w;}
-  float low_pass=sum/ws;const float original=input[y*p.input_stride+x];const uint oi=y*p.output_stride+x;
-  if(p.channel==0u){ultra[oi]=remove_range(original-low_pass,0.04f);high[oi]=remove_range(low_pass,1.5f);}
-  else {
-   low_pass=maximum_clamp(low_pass,28.4691806922f);
-   const float ultra_value=maximum_clamp(original-low_pass,5.19175294647f)*2.69313763794f;
-   const float high_value=amplify_range(low_pass*2.155f,0.132f);
-   ultra[oi]=ultra_value;high[oi]=high_value;
-   if(p.emit_mask!=0u)mask[oi]=mask_precompute_value(high_x[oi],high_value,ultra_x[oi],ultra_value);
-  }
- }
-}
-
-struct TrafficHighParams {uint width,height,input_stride,medium_stride,high_stride,channel;};
-kernel void gjxl_ba_high_reuse(
- device const float* input [[buffer(0)]],device const float* weights [[buffer(1)]],
- device float* medium [[buffer(2)]],device float* high [[buffer(3)]],
- constant TrafficHighParams& p [[buffer(4)]],
- threadgroup float* scratch [[threadgroup(0)]],uint2 local [[thread_position_in_threadgroup]],
- uint2 group [[threadgroup_position_in_grid]],uint2 group_size [[threads_per_threadgroup]]) {
- constexpr uint R=7,W=16,H=64,P=4;
- const uint thread_index=local.y*group_size.x+local.x,threads=group_size.x*group_size.y;
- const int gx=int(group.x*W),gy=int(group.y*H);
- for(uint i=thread_index;i<W*(H+2*R)/2;i+=threads) {
-  uint lx=(i%(W/2))*2,ly=i/(W/2);
+ for(uint i=thread_index;i<W*(H+2*R)/Q;i+=threads) {
+  uint lx=(i%(W/Q))*Q,ly=i/(W/Q);
   int first_x=gx+int(lx),y=gy-int(R)+int(ly);
-  float sum[2]={0,0},ws[2]={0,0};
+  float sum[Q]={0.0f},ws[Q]={0.0f};
   if(first_x<int(p.width)&&y>=0&&y<int(p.height)) {
-   if(first_x>=int(R)&&first_x+1+int(R)<int(p.width)) {
+   if(first_x>=int(R)&&first_x+int(Q)-1+int(R)<int(p.width)) {
+    if constexpr(Q==2u) {
 {float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(0))];
 {float w=weights[(0)-0];ws[0]+=w;sum[0]+=v*w;}
 }
@@ -2450,17 +2415,144 @@ for(int t=1;t<int(2*R+1);++t){float v=input[uint(y)*p.input_stride+uint(first_x-
 {float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+0))];
 {float w=weights[(int(2*R+1)+0)-1];ws[1]+=w;sum[1]+=v*w;}
 }
+    } else if constexpr(Q==4u) {
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(0))];
+{float w=weights[(0)-0];ws[0]+=w;sum[0]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(1))];
+{float w=weights[(1)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(1)-1];ws[1]+=w;sum[1]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(2))];
+{float w=weights[(2)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(2)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(2)-2];ws[2]+=w;sum[2]+=v*w;}
+}
+for(int t=3;t<int(2*R+1);++t){float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(t))];
+{float w=weights[(t)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(t)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(t)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(t)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+0))];
+{float w=weights[(int(2*R+1)+0)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+1))];
+{float w=weights[(int(2*R+1)+1)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+2))];
+{float w=weights[(int(2*R+1)+2)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+    } else {
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(0))];
+{float w=weights[(0)-0];ws[0]+=w;sum[0]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(1))];
+{float w=weights[(1)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(1)-1];ws[1]+=w;sum[1]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(2))];
+{float w=weights[(2)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(2)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(2)-2];ws[2]+=w;sum[2]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(3))];
+{float w=weights[(3)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(3)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(3)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(3)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(4))];
+{float w=weights[(4)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(4)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(4)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(4)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(4)-4];ws[4]+=w;sum[4]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(5))];
+{float w=weights[(5)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(5)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(5)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(5)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(5)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(5)-5];ws[5]+=w;sum[5]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(6))];
+{float w=weights[(6)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(6)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(6)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(6)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(6)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(6)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(6)-6];ws[6]+=w;sum[6]+=v*w;}
+}
+for(int t=7;t<int(2*R+1);++t){float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(t))];
+{float w=weights[(t)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(t)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(t)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(t)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(t)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(t)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(t)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(t)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+0))];
+{float w=weights[(int(2*R+1)+0)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+1))];
+{float w=weights[(int(2*R+1)+1)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+2))];
+{float w=weights[(int(2*R+1)+2)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+3))];
+{float w=weights[(int(2*R+1)+3)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+3)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+3)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+3)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+4))];
+{float w=weights[(int(2*R+1)+4)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+4)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+4)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+5))];
+{float w=weights[(int(2*R+1)+5)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+5)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+6))];
+{float w=weights[(int(2*R+1)+6)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+    }
    } else {
-    int first=max(0,first_x-int(R)),last=min(int(p.width)-1,first_x+1+int(R));
+    int first=max(0,first_x-int(R)),last=min(int(p.width)-1,first_x+int(Q)-1+int(R));
     for(int x=first;x<=last;++x) {
      float v=input[uint(y)*p.input_stride+uint(x)];
-     for(uint k=0;k<2;++k)if(first_x+int(k)<int(p.width)&&x>=first_x+int(k)-int(R)&&x<=first_x+int(k)+int(R)) {
+     for(uint k=0;k<Q;++k)if(first_x+int(k)<int(p.width)&&x>=first_x+int(k)-int(R)&&x<=first_x+int(k)+int(R)) {
       float w=weights[x+int(R)-first_x-int(k)];ws[k]+=w;sum[k]+=v*w;
      }
     }
    }
   }
-  for(uint k=0;k<2;++k)scratch[ly*W+lx+k]=ws[k]==0.0f?0.0f:sum[k]/ws[k];
+  for(uint k=0;k<Q;++k)scratch[ly*W+lx+k]=ws[k]==0.0f?0.0f:sum[k]/ws[k];
  }
  threadgroup_barrier(mem_flags::mem_threadgroup);
  const uint x=uint(gx)+local.x;
@@ -2480,6 +2572,7 @@ for(int t=1;t<int(2*R+1);++t){float v=scratch[uint(first_y-int(R)+(t)-gy+int(R))
 {float w=weights[(int(2*R+1)+0)-1];ws[1]+=w;sum[1]+=v*w;}
 }
    } else {
+if constexpr(P==4u) {
 {float v=scratch[uint(first_y-int(R)+(0)-gy+int(R))*W+local.x];
 {float w=weights[(0)-0];ws[0]+=w;sum[0]+=v*w;}
 }
@@ -2509,6 +2602,440 @@ for(int t=3;t<int(2*R+1);++t){float v=scratch[uint(first_y-int(R)+(t)-gy+int(R))
 }
 {float v=scratch[uint(first_y-int(R)+(int(2*R+1)+2)-gy+int(R))*W+local.x];
 {float w=weights[(int(2*R+1)+2)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+} else {
+{float v=scratch[uint(first_y-int(R)+(0)-gy+int(R))*W+local.x];
+{float w=weights[(0)-0];ws[0]+=w;sum[0]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(1)-gy+int(R))*W+local.x];
+{float w=weights[(1)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(1)-1];ws[1]+=w;sum[1]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(2)-gy+int(R))*W+local.x];
+{float w=weights[(2)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(2)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(2)-2];ws[2]+=w;sum[2]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(3)-gy+int(R))*W+local.x];
+{float w=weights[(3)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(3)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(3)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(3)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(4)-gy+int(R))*W+local.x];
+{float w=weights[(4)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(4)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(4)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(4)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(4)-4];ws[4]+=w;sum[4]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(5)-gy+int(R))*W+local.x];
+{float w=weights[(5)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(5)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(5)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(5)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(5)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(5)-5];ws[5]+=w;sum[5]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(6)-gy+int(R))*W+local.x];
+{float w=weights[(6)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(6)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(6)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(6)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(6)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(6)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(6)-6];ws[6]+=w;sum[6]+=v*w;}
+}
+for(int t=7;t<int(2*R+1);++t){float v=scratch[uint(first_y-int(R)+(t)-gy+int(R))*W+local.x];
+{float w=weights[(t)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(t)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(t)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(t)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(t)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(t)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(t)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(t)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+0)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+0)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+1)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+1)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+2)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+2)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+3)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+3)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+3)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+3)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+3)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+4)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+4)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+4)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+4)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+5)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+5)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+5)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+6)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+6)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+}
+   }
+  } else {
+   for(uint k=0;k<P;++k) {
+    int y=first_y+int(k);if(y>=int(p.height))continue;
+    int first=max(0,y-int(R)),last=min(int(p.height)-1,y+int(R));
+    for(int sy=first;sy<=last;++sy) {
+     float w=weights[sy+int(R)-y];ws[k]+=w;
+     sum[k]+=scratch[uint(sy-gy+int(R))*W+local.x]*w;
+    }
+   }
+  }
+ }
+ for(uint k=0;k<P;++k) {
+  uint y=uint(first_y)+k;
+  if(x>=p.width||y>=p.height)continue;
+  float low_pass=sum[k]/ws[k];const float original=input[y*p.input_stride+x];const uint oi=y*p.output_stride+x;
+  if(p.channel==0u){ultra[oi]=remove_range(original-low_pass,0.04f);high[oi]=remove_range(low_pass,1.5f);}
+  else {
+   low_pass=maximum_clamp(low_pass,28.4691806922f);
+   const float ultra_value=maximum_clamp(original-low_pass,5.19175294647f)*2.69313763794f;
+   const float high_value=amplify_range(low_pass*2.155f,0.132f);
+   ultra[oi]=ultra_value;high[oi]=high_value;
+   if(p.emit_mask!=0u)mask[oi]=mask_precompute_value(high_x[oi],high_value,ultra_x[oi],ultra_value);
+  }
+ }
+}
+
+struct TrafficHighParams {uint width,height,input_stride,medium_stride,high_stride,channel;};
+kernel void gjxl_ba_high_reuse(
+ device const float* input [[buffer(0)]],device const float* weights [[buffer(1)]],
+ device float* medium [[buffer(2)]],device float* high [[buffer(3)]],
+ constant TrafficHighParams& p [[buffer(4)]],
+ threadgroup float* scratch [[threadgroup(0)]],uint2 local [[thread_position_in_threadgroup]],
+ uint2 group [[threadgroup_position_in_grid]],uint2 group_size [[threads_per_threadgroup]]) {
+ constexpr uint R=7,W=16,H=64,P=8,Q=4;
+ const uint thread_index=local.y*group_size.x+local.x,threads=group_size.x*group_size.y;
+ const int gx=int(group.x*W),gy=int(group.y*H);
+ for(uint i=thread_index;i<W*(H+2*R)/Q;i+=threads) {
+  uint lx=(i%(W/Q))*Q,ly=i/(W/Q);
+  int first_x=gx+int(lx),y=gy-int(R)+int(ly);
+  float sum[Q]={0.0f},ws[Q]={0.0f};
+  if(first_x<int(p.width)&&y>=0&&y<int(p.height)) {
+   if(first_x>=int(R)&&first_x+int(Q)-1+int(R)<int(p.width)) {
+    if constexpr(Q==2u) {
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(0))];
+{float w=weights[(0)-0];ws[0]+=w;sum[0]+=v*w;}
+}
+for(int t=1;t<int(2*R+1);++t){float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(t))];
+{float w=weights[(t)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(t)-1];ws[1]+=w;sum[1]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+0))];
+{float w=weights[(int(2*R+1)+0)-1];ws[1]+=w;sum[1]+=v*w;}
+}
+    } else if constexpr(Q==4u) {
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(0))];
+{float w=weights[(0)-0];ws[0]+=w;sum[0]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(1))];
+{float w=weights[(1)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(1)-1];ws[1]+=w;sum[1]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(2))];
+{float w=weights[(2)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(2)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(2)-2];ws[2]+=w;sum[2]+=v*w;}
+}
+for(int t=3;t<int(2*R+1);++t){float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(t))];
+{float w=weights[(t)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(t)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(t)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(t)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+0))];
+{float w=weights[(int(2*R+1)+0)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+1))];
+{float w=weights[(int(2*R+1)+1)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+2))];
+{float w=weights[(int(2*R+1)+2)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+    } else {
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(0))];
+{float w=weights[(0)-0];ws[0]+=w;sum[0]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(1))];
+{float w=weights[(1)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(1)-1];ws[1]+=w;sum[1]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(2))];
+{float w=weights[(2)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(2)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(2)-2];ws[2]+=w;sum[2]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(3))];
+{float w=weights[(3)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(3)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(3)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(3)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(4))];
+{float w=weights[(4)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(4)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(4)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(4)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(4)-4];ws[4]+=w;sum[4]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(5))];
+{float w=weights[(5)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(5)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(5)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(5)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(5)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(5)-5];ws[5]+=w;sum[5]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(6))];
+{float w=weights[(6)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(6)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(6)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(6)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(6)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(6)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(6)-6];ws[6]+=w;sum[6]+=v*w;}
+}
+for(int t=7;t<int(2*R+1);++t){float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(t))];
+{float w=weights[(t)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(t)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(t)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(t)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(t)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(t)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(t)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(t)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+0))];
+{float w=weights[(int(2*R+1)+0)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+1))];
+{float w=weights[(int(2*R+1)+1)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+2))];
+{float w=weights[(int(2*R+1)+2)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+3))];
+{float w=weights[(int(2*R+1)+3)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+3)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+3)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+3)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+4))];
+{float w=weights[(int(2*R+1)+4)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+4)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+4)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+5))];
+{float w=weights[(int(2*R+1)+5)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+5)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+6))];
+{float w=weights[(int(2*R+1)+6)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+    }
+   } else {
+    int first=max(0,first_x-int(R)),last=min(int(p.width)-1,first_x+int(Q)-1+int(R));
+    for(int x=first;x<=last;++x) {
+     float v=input[uint(y)*p.input_stride+uint(x)];
+     for(uint k=0;k<Q;++k)if(first_x+int(k)<int(p.width)&&x>=first_x+int(k)-int(R)&&x<=first_x+int(k)+int(R)) {
+      float w=weights[x+int(R)-first_x-int(k)];ws[k]+=w;sum[k]+=v*w;
+     }
+    }
+   }
+  }
+  for(uint k=0;k<Q;++k)scratch[ly*W+lx+k]=ws[k]==0.0f?0.0f:sum[k]/ws[k];
+ }
+ threadgroup_barrier(mem_flags::mem_threadgroup);
+ const uint x=uint(gx)+local.x;
+ const int first_y=gy+int(local.y*P);
+ float sum[P]={0.0f},ws[P]={0.0f};
+ if(x<p.width) {
+  if(first_y>=int(R)&&first_y+int(P)-1+int(R)<int(p.height)) {
+   if(P==2u) {
+{float v=scratch[uint(first_y-int(R)+(0)-gy+int(R))*W+local.x];
+{float w=weights[(0)-0];ws[0]+=w;sum[0]+=v*w;}
+}
+for(int t=1;t<int(2*R+1);++t){float v=scratch[uint(first_y-int(R)+(t)-gy+int(R))*W+local.x];
+{float w=weights[(t)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(t)-1];ws[1]+=w;sum[1]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+0)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+0)-1];ws[1]+=w;sum[1]+=v*w;}
+}
+   } else {
+if constexpr(P==4u) {
+{float v=scratch[uint(first_y-int(R)+(0)-gy+int(R))*W+local.x];
+{float w=weights[(0)-0];ws[0]+=w;sum[0]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(1)-gy+int(R))*W+local.x];
+{float w=weights[(1)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(1)-1];ws[1]+=w;sum[1]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(2)-gy+int(R))*W+local.x];
+{float w=weights[(2)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(2)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(2)-2];ws[2]+=w;sum[2]+=v*w;}
+}
+for(int t=3;t<int(2*R+1);++t){float v=scratch[uint(first_y-int(R)+(t)-gy+int(R))*W+local.x];
+{float w=weights[(t)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(t)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(t)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(t)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+0)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+0)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+1)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+1)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+2)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+2)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+} else {
+{float v=scratch[uint(first_y-int(R)+(0)-gy+int(R))*W+local.x];
+{float w=weights[(0)-0];ws[0]+=w;sum[0]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(1)-gy+int(R))*W+local.x];
+{float w=weights[(1)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(1)-1];ws[1]+=w;sum[1]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(2)-gy+int(R))*W+local.x];
+{float w=weights[(2)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(2)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(2)-2];ws[2]+=w;sum[2]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(3)-gy+int(R))*W+local.x];
+{float w=weights[(3)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(3)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(3)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(3)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(4)-gy+int(R))*W+local.x];
+{float w=weights[(4)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(4)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(4)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(4)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(4)-4];ws[4]+=w;sum[4]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(5)-gy+int(R))*W+local.x];
+{float w=weights[(5)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(5)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(5)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(5)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(5)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(5)-5];ws[5]+=w;sum[5]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(6)-gy+int(R))*W+local.x];
+{float w=weights[(6)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(6)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(6)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(6)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(6)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(6)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(6)-6];ws[6]+=w;sum[6]+=v*w;}
+}
+for(int t=7;t<int(2*R+1);++t){float v=scratch[uint(first_y-int(R)+(t)-gy+int(R))*W+local.x];
+{float w=weights[(t)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(t)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(t)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(t)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(t)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(t)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(t)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(t)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+0)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+0)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+1)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+1)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+2)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+2)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+3)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+3)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+3)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+3)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+3)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+4)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+4)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+4)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+4)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+5)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+5)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+5)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+6)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+6)-7];ws[7]+=w;sum[7]+=v*w;}
+}
 }
    }
   } else {
@@ -2532,18 +3059,19 @@ for(int t=3;t<int(2*R+1);++t){float v=scratch[uint(first_y-int(R)+(t)-gy+int(R))
  }
 }
 
-template<uint R,uint W,uint H,uint P>
+template<uint R,uint W,uint H,uint P,uint Q>
 inline void TrafficShortReuse(device const float* input,device const float* weights,
  device float* output,constant ConvolutionParams& p,threadgroup float* scratch,
  uint2 local,uint2 group,uint2 group_size) {
  const uint thread_index=local.y*group_size.x+local.x,threads=group_size.x*group_size.y;
  const int gx=int(group.x*W),gy=int(group.y*H);
- for(uint i=thread_index;i<W*(H+2*R)/2;i+=threads) {
-  uint lx=(i%(W/2))*2,ly=i/(W/2);
+ for(uint i=thread_index;i<W*(H+2*R)/Q;i+=threads) {
+  uint lx=(i%(W/Q))*Q,ly=i/(W/Q);
   int first_x=gx+int(lx),y=gy-int(R)+int(ly);
-  float sum[2]={0,0},ws[2]={0,0};
+  float sum[Q]={0.0f},ws[Q]={0.0f};
   if(first_x<int(p.width)&&y>=0&&y<int(p.height)) {
-   if(first_x>=int(R)&&first_x+1+int(R)<int(p.width)) {
+   if(first_x>=int(R)&&first_x+int(Q)-1+int(R)<int(p.width)) {
+    if constexpr(Q==2u) {
 {float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(0))];
 {float w=weights[(0)-0];ws[0]+=w;sum[0]+=v*w;}
 }
@@ -2554,17 +3082,144 @@ for(int t=1;t<int(2*R+1);++t){float v=input[uint(y)*p.input_stride+uint(first_x-
 {float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+0))];
 {float w=weights[(int(2*R+1)+0)-1];ws[1]+=w;sum[1]+=v*w;}
 }
+    } else if constexpr(Q==4u) {
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(0))];
+{float w=weights[(0)-0];ws[0]+=w;sum[0]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(1))];
+{float w=weights[(1)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(1)-1];ws[1]+=w;sum[1]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(2))];
+{float w=weights[(2)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(2)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(2)-2];ws[2]+=w;sum[2]+=v*w;}
+}
+for(int t=3;t<int(2*R+1);++t){float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(t))];
+{float w=weights[(t)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(t)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(t)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(t)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+0))];
+{float w=weights[(int(2*R+1)+0)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+1))];
+{float w=weights[(int(2*R+1)+1)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+2))];
+{float w=weights[(int(2*R+1)+2)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+    } else {
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(0))];
+{float w=weights[(0)-0];ws[0]+=w;sum[0]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(1))];
+{float w=weights[(1)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(1)-1];ws[1]+=w;sum[1]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(2))];
+{float w=weights[(2)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(2)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(2)-2];ws[2]+=w;sum[2]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(3))];
+{float w=weights[(3)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(3)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(3)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(3)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(4))];
+{float w=weights[(4)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(4)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(4)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(4)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(4)-4];ws[4]+=w;sum[4]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(5))];
+{float w=weights[(5)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(5)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(5)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(5)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(5)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(5)-5];ws[5]+=w;sum[5]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(6))];
+{float w=weights[(6)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(6)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(6)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(6)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(6)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(6)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(6)-6];ws[6]+=w;sum[6]+=v*w;}
+}
+for(int t=7;t<int(2*R+1);++t){float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(t))];
+{float w=weights[(t)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(t)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(t)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(t)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(t)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(t)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(t)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(t)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+0))];
+{float w=weights[(int(2*R+1)+0)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+1))];
+{float w=weights[(int(2*R+1)+1)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+2))];
+{float w=weights[(int(2*R+1)+2)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+3))];
+{float w=weights[(int(2*R+1)+3)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+3)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+3)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+3)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+4))];
+{float w=weights[(int(2*R+1)+4)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+4)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+4)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+5))];
+{float w=weights[(int(2*R+1)+5)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+5)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=input[uint(y)*p.input_stride+uint(first_x-int(R)+(int(2*R+1)+6))];
+{float w=weights[(int(2*R+1)+6)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+    }
    } else {
-    int first=max(0,first_x-int(R)),last=min(int(p.width)-1,first_x+1+int(R));
+    int first=max(0,first_x-int(R)),last=min(int(p.width)-1,first_x+int(Q)-1+int(R));
     for(int x=first;x<=last;++x) {
      float v=input[uint(y)*p.input_stride+uint(x)];
-     for(uint k=0;k<2;++k)if(first_x+int(k)<int(p.width)&&x>=first_x+int(k)-int(R)&&x<=first_x+int(k)+int(R)) {
+     for(uint k=0;k<Q;++k)if(first_x+int(k)<int(p.width)&&x>=first_x+int(k)-int(R)&&x<=first_x+int(k)+int(R)) {
       float w=weights[x+int(R)-first_x-int(k)];ws[k]+=w;sum[k]+=v*w;
      }
     }
    }
   }
-  for(uint k=0;k<2;++k)scratch[ly*W+lx+k]=ws[k]==0.0f?0.0f:sum[k]/ws[k];
+  for(uint k=0;k<Q;++k)scratch[ly*W+lx+k]=ws[k]==0.0f?0.0f:sum[k]/ws[k];
  }
  threadgroup_barrier(mem_flags::mem_threadgroup);
  const uint x=uint(gx)+local.x;
@@ -2584,6 +3239,7 @@ for(int t=1;t<int(2*R+1);++t){float v=scratch[uint(first_y-int(R)+(t)-gy+int(R))
 {float w=weights[(int(2*R+1)+0)-1];ws[1]+=w;sum[1]+=v*w;}
 }
    } else {
+if constexpr(P==4u) {
 {float v=scratch[uint(first_y-int(R)+(0)-gy+int(R))*W+local.x];
 {float w=weights[(0)-0];ws[0]+=w;sum[0]+=v*w;}
 }
@@ -2614,6 +3270,102 @@ for(int t=3;t<int(2*R+1);++t){float v=scratch[uint(first_y-int(R)+(t)-gy+int(R))
 {float v=scratch[uint(first_y-int(R)+(int(2*R+1)+2)-gy+int(R))*W+local.x];
 {float w=weights[(int(2*R+1)+2)-3];ws[3]+=w;sum[3]+=v*w;}
 }
+} else {
+{float v=scratch[uint(first_y-int(R)+(0)-gy+int(R))*W+local.x];
+{float w=weights[(0)-0];ws[0]+=w;sum[0]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(1)-gy+int(R))*W+local.x];
+{float w=weights[(1)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(1)-1];ws[1]+=w;sum[1]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(2)-gy+int(R))*W+local.x];
+{float w=weights[(2)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(2)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(2)-2];ws[2]+=w;sum[2]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(3)-gy+int(R))*W+local.x];
+{float w=weights[(3)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(3)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(3)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(3)-3];ws[3]+=w;sum[3]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(4)-gy+int(R))*W+local.x];
+{float w=weights[(4)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(4)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(4)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(4)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(4)-4];ws[4]+=w;sum[4]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(5)-gy+int(R))*W+local.x];
+{float w=weights[(5)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(5)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(5)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(5)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(5)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(5)-5];ws[5]+=w;sum[5]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(6)-gy+int(R))*W+local.x];
+{float w=weights[(6)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(6)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(6)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(6)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(6)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(6)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(6)-6];ws[6]+=w;sum[6]+=v*w;}
+}
+for(int t=7;t<int(2*R+1);++t){float v=scratch[uint(first_y-int(R)+(t)-gy+int(R))*W+local.x];
+{float w=weights[(t)-0];ws[0]+=w;sum[0]+=v*w;}
+{float w=weights[(t)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(t)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(t)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(t)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(t)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(t)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(t)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+0)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+0)-1];ws[1]+=w;sum[1]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+0)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+1)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+1)-2];ws[2]+=w;sum[2]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+1)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+2)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+2)-3];ws[3]+=w;sum[3]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+2)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+3)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+3)-4];ws[4]+=w;sum[4]+=v*w;}
+{float w=weights[(int(2*R+1)+3)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+3)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+3)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+4)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+4)-5];ws[5]+=w;sum[5]+=v*w;}
+{float w=weights[(int(2*R+1)+4)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+4)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+5)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+5)-6];ws[6]+=w;sum[6]+=v*w;}
+{float w=weights[(int(2*R+1)+5)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+{float v=scratch[uint(first_y-int(R)+(int(2*R+1)+6)-gy+int(R))*W+local.x];
+{float w=weights[(int(2*R+1)+6)-7];ws[7]+=w;sum[7]+=v*w;}
+}
+}
    }
   } else {
    for(uint k=0;k<P;++k) {
@@ -2631,11 +3383,11 @@ for(int t=3;t<int(2*R+1);++t){float v=scratch[uint(first_y-int(R)+(t)-gy+int(R))
   if(x<p.width&&y<p.height)output[y*p.output_stride+x]=sum[k]/ws[k];
  }
 }
-#define TRAFFIC_SHORT_REUSE(name,r,w,h,p) \
+#define TRAFFIC_SHORT_REUSE(name,r,w,h,p,q) \
 kernel void name(device const float* input [[buffer(0)]],device const float* weights [[buffer(1)]], \
  device float* output [[buffer(2)]],constant ConvolutionParams& params [[buffer(3)]], \
  threadgroup float* scratch [[threadgroup(0)]],uint2 local [[thread_position_in_threadgroup]], \
  uint2 group [[threadgroup_position_in_grid]],uint2 size [[threads_per_threadgroup]]) { \
- TrafficShortReuse<r,w,h,p>(input,weights,output,params,scratch,local,group,size); }
-TRAFFIC_SHORT_REUSE(gjxl_ba_mask_reuse,6,16,64,4)
-TRAFFIC_SHORT_REUSE(gjxl_ba_medium_b_reuse,7,16,64,4)
+ TrafficShortReuse<r,w,h,p,q>(input,weights,output,params,scratch,local,group,size); }
+TRAFFIC_SHORT_REUSE(gjxl_ba_mask_reuse,6,16,64,8,2)
+TRAFFIC_SHORT_REUSE(gjxl_ba_medium_b_reuse,7,16,64,8,4)
