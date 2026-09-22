@@ -259,6 +259,7 @@ struct ButteraugliPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> convolution_transpose;
   NS::SharedPtr<MTL::ComputePipelineState> opsin_blur5_tiled;
   NS::SharedPtr<MTL::ComputePipelineState> frequency_low_medium_tiled;
+  NS::SharedPtr<MTL::ComputePipelineState> frequency_low_medium_packed_dc;
   NS::SharedPtr<MTL::ComputePipelineState> frequency_high_convolve;
   NS::SharedPtr<MTL::ComputePipelineState> frequency_suppress_x;
   NS::SharedPtr<MTL::ComputePipelineState> frequency_ultra_convolve;
@@ -266,6 +267,11 @@ struct ButteraugliPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> malta_scale;
   NS::SharedPtr<MTL::ComputePipelineState> malta_response;
   NS::SharedPtr<MTL::ComputePipelineState> malta_fused;
+  NS::SharedPtr<MTL::ComputePipelineState> medium_b_reuse;
+  NS::SharedPtr<MTL::ComputePipelineState> mask_reuse;
+  NS::SharedPtr<MTL::ComputePipelineState> high_reuse;
+  NS::SharedPtr<MTL::ComputePipelineState> ultra_direct;
+  NS::SharedPtr<MTL::ComputePipelineState> malta_l2;
   NS::SharedPtr<MTL::ComputePipelineState> l2;
   NS::SharedPtr<MTL::ComputePipelineState> mask_precompute;
   NS::SharedPtr<MTL::ComputePipelineState> fuzzy_erosion;
