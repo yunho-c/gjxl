@@ -544,20 +544,74 @@ bool CheckDispatchConsumers(GpuBackend &gpu, bool resident_metadata = false) {
       return false;
     }
     if (trial == 0) {
-      std::vector<double> rejected_scores{-99.0};
+      std::vector<double> profiled_scores{-99.0};
+      std::vector<float> profiled_quant(expected.size(), -123.0f);
       gpu_profile_internal::GpuExecutionProfile profile;
       const auto submissions = gpu.stats().committed_submissions;
       auto *profiler =
           dynamic_cast<gpu_profile_internal::PreparedAqEvaluationProfiler *>(
               oracle.prepared.get());
-      if (!profiler ||
-          profiler->EvaluateResidentButteraugliPolicyProfiled(
-                      input, {.score_history = &rejected_scores},
-                      gpu_profile_internal::GpuProfilingMode::kStage, &profile)
-                  .code() != StatusCode::kUnavailable ||
-          rejected_scores != std::vector<double>{-99.0} ||
-          gpu.stats().committed_submissions != submissions)
+      auto *submission_profiler =
+          dynamic_cast<gpu_profile_internal::GpuSubmissionProfiler *>(&gpu);
+      if (!profiler || !submission_profiler)
         return false;
+      const auto capabilities =
+          submission_profiler->QueryGpuProfilingCapabilities();
+      const auto status = profiler->EvaluateResidentButteraugliPolicyProfiled(
+          input, {.quant_field = {profiled_quant.data(), blocks, blocks.width},
+                  .score_history = &profiled_scores},
+          gpu_profile_internal::GpuProfilingMode::kStage, &profile);
+      if (capabilities.timestamp_counter && capabilities.stage_boundary) {
+        // Production-aligned stage profiling supports both indirect dispatch
+        // and resident metadata. It must preserve outputs and one submission.
+        if (!Ok(status) || profiled_scores != expected_scores ||
+            profiled_quant != expected ||
+            gpu.stats().committed_submissions != submissions + 1 ||
+            profile.mode != gpu_profile_internal::GpuProfilingMode::kStage ||
+            profile.capabilities != capabilities ||
+            profile.submissions.size() != 1 ||
+            profile.submissions[0].stages.empty()) {
+          std::cerr << "Indirect AQ stage profiling changed the contract\n";
+          return false;
+        }
+        uint64_t previous_end = 0;
+        size_t timed_stages = 0;
+        for (const auto &stage : profile.submissions[0].stages) {
+          if (!stage.timestamp_valid) {
+            // Empty indirect families have no timestamp samples. Their
+            // resolved dispatch arguments must establish that no work ran.
+            if (stage.begin_timestamp != 0 || stage.end_timestamp != 0 ||
+                stage.gpu_nanoseconds != 0 || stage.dispatches.empty() ||
+                !std::ranges::all_of(stage.dispatches, [](const auto &dispatch) {
+                  return dispatch.kind == gpu_profile_internal::GpuDispatchKind::kIndirectThreadgroups &&
+                         (dispatch.grid.width == 0 || dispatch.grid.height == 0 ||
+                          dispatch.grid.depth == 0);
+                })) {
+              std::cerr << "Indirect AQ empty stage lacks zero-work evidence\n";
+              return false;
+            }
+            continue;
+          }
+          if (stage.begin_timestamp < previous_end ||
+              stage.end_timestamp < stage.begin_timestamp ||
+              stage.gpu_nanoseconds !=
+                  stage.end_timestamp - stage.begin_timestamp) {
+            std::cerr << "Indirect AQ stage timestamps are invalid\n";
+            return false;
+          }
+          previous_end = stage.end_timestamp;
+          ++timed_stages;
+        }
+        if (timed_stages == 0)
+          return false;
+      } else if (status.code() != StatusCode::kUnavailable ||
+                 profiled_scores != std::vector<double>{-99.0} ||
+                 !std::ranges::all_of(profiled_quant,
+                                     [](float v) { return v == -123.0f; }) ||
+                 gpu.stats().committed_submissions != submissions) {
+        std::cerr << "Unavailable indirect AQ profiling changed outputs\n";
+        return false;
+      }
     }
     if (completed) {
       const auto a = expected_completed->view().coefficient_order_population();
