@@ -1,0 +1,99 @@
+{
+  "base": "3b0de6d9d47846f6aa13f33ad6cca7e24e52ada6",
+  "scope": "Prepared main bundle only; small refinement excluded. Warm complete call against current main.",
+  "cohorts": [
+    {
+      "name": "ordinary-confirmation",
+      "args": [
+        "--candidate",
+        "candidate",
+        "--baseline",
+        "baseline",
+        "--output",
+        "ordinary-confirmation",
+        "--pairs",
+        "7",
+        "--warmups",
+        "3",
+        "--samples",
+        "7",
+        "--job",
+        "alpine24-e7",
+        "--job",
+        "forest48-e10",
+        "--job",
+        "kodak01-e7",
+        "--job",
+        "kodak17-e10-d08"
+      ]
+    },
+    {
+      "name": "ordinary-broad",
+      "args": [
+        "--candidate",
+        "candidate",
+        "--baseline",
+        "baseline",
+        "--output",
+        "ordinary-broad",
+        "--pairs",
+        "3",
+        "--warmups",
+        "2",
+        "--samples",
+        "3",
+        "--job",
+        "alpine24-e7",
+        "--job",
+        "forest48-e10",
+        "--job",
+        "campus12-e7",
+        "--job",
+        "alpine12-e10-d08",
+        "--job",
+        "forest24-e7-d08",
+        "--job",
+        "campus48-e10-d08",
+        "--job",
+        "kodak01-e7",
+        "--job",
+        "kodak17-e10-d08"
+      ]
+    },
+    {
+      "name": "unchanged-control",
+      "args": [
+        "--candidate",
+        "baseline",
+        "--baseline",
+        "baseline",
+        "--output",
+        "unchanged-control",
+        "--pairs",
+        "7",
+        "--warmups",
+        "3",
+        "--samples",
+        "7"
+      ]
+    },
+    {
+      "name": "stage-attribution",
+      "args": [
+        "--candidate",
+        "candidate",
+        "--baseline",
+        "baseline",
+        "--output",
+        "stage-attribution",
+        "--profile",
+        "--pairs",
+        "3",
+        "--warmups",
+        "2",
+        "--samples",
+        "3"
+      ]
+    }
+  ]
+}

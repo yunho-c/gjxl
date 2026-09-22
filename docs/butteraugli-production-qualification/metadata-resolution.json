@@ -1,0 +1,12 @@
+{
+  "classification": "inherited stale test expectation, corrected without encoder changes",
+  "original_failure": "metal_aq_strategy_metadata expected Unavailable from a stage profiling path now supported by current main",
+  "diagnostic": "metadata-diagnostic-v2.log",
+  "original_source_line": 560,
+  "baseline": "3b0de6d9d47846f6aa13f33ad6cca7e24e52ada6",
+  "fix_commit": "b58c236fe408b5a8e1265f913e5038b1368257ce",
+  "test_sha256": "f2a055ab63131adecf6548a678be76ad53790c586a3af45df030defd0b8b3b39",
+  "corrected_baseline": "metadata-corrected-baseline-v3.log",
+  "corrected_candidate": "metadata-candidate.log",
+  "contract": "equal quantization and score history; one submission; ordered valid stage timestamps; explicit zero-work indirect arguments for untimed stages; unchanged outputs when profiling is unavailable"
+}

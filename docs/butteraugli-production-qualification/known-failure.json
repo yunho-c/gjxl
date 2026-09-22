@@ -1,0 +1,6 @@
+{
+  "test": "metal_aq_strategy_metadata",
+  "baseline_reproduced": true,
+  "candidate_log": "full-suite-final.log",
+  "baseline_log": "baseline-failure-control.log"
+}

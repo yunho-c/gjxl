@@ -1,0 +1,16 @@
+Test project /Users/yunhocho/GitHub/gjxl-butteraugli-production/build/production
+    Start 139: metal_aq_host_storage_plan
+1/3 Test #139: metal_aq_host_storage_plan ..........   Passed   11.37 sec
+    Start 148: metal_aq_host_storage_plan_legacy
+2/3 Test #148: metal_aq_host_storage_plan_legacy ...   Passed   10.60 sec
+    Start 155: encoding_benchmark_cli
+3/3 Test #155: encoding_benchmark_cli ..............   Passed    4.19 sec
+
+100% tests passed, 0 tests failed out of 3
+
+Label Time Summary:
+benchmark    =   4.19 sec*proc (1 test)
+cli          =   4.19 sec*proc (1 test)
+metal        =   4.19 sec*proc (1 test)
+
+Total Test time (real) =  26.16 sec

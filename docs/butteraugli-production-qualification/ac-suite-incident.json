@@ -1,0 +1,5 @@
+{
+  "status": "failed",
+  "step": "RuntimeError('full-suite-production: exit 8, expected 0')",
+  "at": "2026-09-22T03:38:35.235377+00:00"
+}

@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="(empty)"
+	tests="3"
+	failures="1"
+	disabled="0"
+	skipped="0"
+	hostname=""
+	time="6"
+	timestamp="2026-09-21T23:01:11"
+	>
+	<testcase name="metal_aq_strategy_metadata" classname="metal_aq_strategy_metadata" time="0.37829" status="fail">
+		<failure message="Failed"/>
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="metal_aq_host_storage_plan" classname="metal_aq_host_storage_plan" time="4.49695" status="run">
+		<properties/>
+		<system-out>AQ host plan formula cases: 2592
+Auxiliary profiles: 6 reference/adjustment; 60 initial-quantization cases
+AQ callback inputs: two physical failures and one typed underplan, with recovery
+Resident AQ profile input/first-use/exact cases: 436
+Dispatch-boundary timestamps unavailable; stage mode qualified
+AQ runtime 1x1 mode 0
+AQ runtime 1x1 mode 1
+AQ runtime 1x1 mode 2
+AQ runtime 1x1 mode 3
+AQ runtime 1x1 mode 4
+AQ runtime 1x1 mode 5
+AQ runtime 1x1 mode 6
+AQ runtime 8x8 mode 0
+AQ runtime 8x8 mode 1
+AQ runtime 8x8 mode 2
+AQ runtime 8x8 mode 3
+AQ runtime 8x8 mode 4
+AQ runtime 8x8 mode 5
+AQ runtime 8x8 mode 6
+AQ runtime 17x9 mode 0
+AQ runtime 17x9 mode 1
+AQ runtime 17x9 mode 2
+AQ runtime 17x9 mode 3
+AQ runtime 17x9 mode 4
+AQ runtime 17x9 mode 5
+AQ runtime 17x9 mode 6
+AQ runtime 65x63 mode 0
+AQ runtime 65x63 mode 1
+AQ runtime 65x63 mode 2
+AQ runtime 65x63 mode 3
+AQ runtime 65x63 mode 4
+AQ runtime 65x63 mode 5
+AQ runtime 65x63 mode 6
+AQ runtime 257x9 mode 0
+AQ runtime 257x9 mode 1
+AQ runtime 257x9 mode 2
+AQ runtime ...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+	<testcase name="encoding_benchmark_cli" classname="encoding_benchmark_cli" time="1.61474" status="run">
+		<properties>
+			<property name="cmake_labels" value="benchmark;cli;metal"/>
+		</properties>
+		<system-out>.............
+----------------------------------------------------------------------
+Ran 13 tests in 1.575s
+
+OK
+</system-out>
+	</testcase>
+</testsuite>

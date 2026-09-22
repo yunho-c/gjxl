@@ -1,0 +1,23 @@
+Test project /Users/yunhocho/GitHub/gjxl-butteraugli-production/build/production
+    Start  95: resident_workflow_legacy_dc_tree
+1/9 Test  #95: resident_workflow_legacy_dc_tree .......   Passed   16.69 sec
+    Start 124: metal_butteraugli_operation_contract
+2/9 Test #124: metal_butteraugli_operation_contract ...   Passed    0.64 sec
+    Start 125: metal_butteraugli
+3/9 Test #125: metal_butteraugli ......................   Passed    2.21 sec
+    Start 126: metal_aq_evaluation
+4/9 Test #126: metal_aq_evaluation ....................   Passed    6.68 sec
+    Start 127: adaptive_quantization_gpu_policy
+5/9 Test #127: adaptive_quantization_gpu_policy .......   Passed    0.71 sec
+    Start 144: resident_workflow_storage_plan
+6/9 Test #144: resident_workflow_storage_plan .........   Passed   11.25 sec
+    Start 146: metal_butteraugli_legacy
+7/9 Test #146: metal_butteraugli_legacy ...............   Passed    1.97 sec
+    Start 147: metal_aq_evaluation_legacy
+8/9 Test #147: metal_aq_evaluation_legacy .............   Passed    5.92 sec
+    Start 148: metal_cache_admission
+9/9 Test #148: metal_cache_admission ..................   Passed    1.43 sec
+
+100% tests passed, 0 tests failed out of 9
+
+Total Test time (real) =  47.51 sec

@@ -1,0 +1,10 @@
+[
+  "ctest",
+  "--test-dir",
+  "/Users/yunhocho/GitHub/gjxl-butteraugli-production/build/production",
+  "-j",
+  "2",
+  "--output-on-failure",
+  "--output-junit",
+  "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/full-suite.xml"
+]

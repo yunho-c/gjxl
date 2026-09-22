@@ -1,0 +1,8 @@
+{
+  "command": [
+    "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/metadata-corrected-baseline-v3",
+    "--metallib",
+    "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/gjxl.metallib"
+  ],
+  "metal_validation": true
+}

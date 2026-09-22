@@ -1,0 +1,1277 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="(empty)"
+	tests="156"
+	failures="1"
+	disabled="0"
+	skipped="0"
+	hostname=""
+	time="249"
+	timestamp="2026-09-21T23:34:25"
+	>
+	<testcase name="planning_recipes" classname="planning_recipes" time="0.00605171" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="resident_qualification_controller" classname="resident_qualification_controller" time="0.217902" status="run">
+		<properties>
+			<property name="cmake_labels" value="cli"/>
+		</properties>
+		<system-out>.........Sealed smoke qualification verified without rewriting evidence.
+.
+----------------------------------------------------------------------
+Ran 10 tests in 0.135s
+
+OK
+</system-out>
+	</testcase>
+	<testcase name="stdlib_storage_compat" classname="stdlib_storage_compat" time="0.00357888" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="stdlib_storage_compat_cxx23" classname="stdlib_storage_compat_cxx23" time="0.00262912" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="storage_toolchain" classname="storage_toolchain" time="5.28965" status="run">
+		<properties/>
+		<system-out>Storage toolchain: supported public header and unsupported identities/modes checked
+</system-out>
+	</testcase>
+	<testcase name="metal_build_graph" classname="metal_build_graph" time="12.5835" status="run">
+		<properties/>
+		<system-out>Unix Makefiles profiling=False: single producer, complete and refreshed payload
+Unix Makefiles profiling=True: single producer, complete and refreshed payload
+Ninja profiling=False: single producer, complete and refreshed payload
+Ninja profiling=True: single producer, complete and refreshed payload
+</system-out>
+	</testcase>
+	<testcase name="metal_embedded_library" classname="metal_embedded_library" time="0.044723" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="metal_profile_driver" classname="metal_profile_driver" time="0.977524" status="run">
+		<properties>
+			<property name="cmake_labels" value="cli"/>
+		</properties>
+		<system-out>Profiling artifact already exists: /var/folders/pd/9mrlsj5x3q1c81q4jsd0gq7c0000gn/T/gjxl-profile-test-205sa8mj/existing
+..Metal profiling failed: Source checkout changed during profiling
+Partial artifact preserved at /private/var/folders/pd/9mrlsj5x3q1c81q4jsd0gq7c0000gn/T/gjxl-profile-test-__nan8he/changed-artifact
+....Metal profiling failed: mock trace failure
+Partial artifact preserved at /private/var/folders/pd/9mrlsj5x3q1c81q4jsd0gq7c0000gn/T/gjxl-profile-test-ebh_atxa/failed-artifact
+.
+----------------------------------------------------------------------
+Ran 7 tests in 0.911s
+
+OK
+Metal profiling artifact: /private/var/folders/pd/9mrlsj5x3q1c81q4jsd0gq7c0000gn/T/gjxl-profile-test-4z4a2ovt/artifact
+</system-out>
+	</testcase>
+	<testcase name="encode_image" classname="encode_image" time="0.612687" status="run">
+		<properties>
+			<property name="cmake_labels" value="cli"/>
+		</properties>
+		<system-out>........
+----------------------------------------------------------------------
+Ran 8 tests in 0.575s
+
+OK
+</system-out>
+	</testcase>
+	<testcase name="codestream_conformance_smoke" classname="codestream_conformance_smoke" time="0.49737" status="run">
+		<properties>
+			<property name="cmake_labels" value="conformance"/>
+		</properties>
+		<system-out>one-pixel-flat: 75 bytes, max_error=0, tolerance_ratio=0, rms=0
+no-gaborish-odd: 215 bytes, max_error=5.78165e-06, tolerance_ratio=0.102538, rms=1.69793e-06
+odd-gradient: 214 bytes, max_error=5.24521e-06, tolerance_ratio=0.087525, rms=1.45057e-06
+ac-edge-random: 4648 bytes, max_error=5.44786e-05, tolerance_ratio=0.905062, rms=9.29736e-06
+mixed-strategy-random: 4671 bytes, max_error=2.92659e-05, tolerance_ratio=0.402327, rms=5.0455e-06
+workflow-sample/distance: 201 bytes, Butteraugli distance=1.10811484
+workflow-sample/high-density: 217 bytes, Butteraugli distance=0.876459837
+workflow-sample/maximum-error: 216 bytes, Butteraugli distance=1.02485538
+workflow-sample/target-bytes: 190 bytes, Butteraugli distance=1.29610884
+All 5 smoke codestream conformance fixtures passed.
+</system-out>
+	</testcase>
+	<testcase name="bit_writer_append" classname="bit_writer_append" time="0.268738" status="run">
+		<properties/>
+		<system-out>Bit-writer append PASS cases=18936 insufficient=18864 rollbacks=37872 offsets=8 tails=8
+</system-out>
+	</testcase>
+	<testcase name="bit_writer_word" classname="bit_writer_word" time="0.0105978" status="run">
+		<properties/>
+		<system-out>Bit-writer word oracle PASS cases=2280 offsets=8 widths=57 rollback=2
+</system-out>
+	</testcase>
+	<testcase name="ans_bit_emission" classname="ans_bit_emission" time="0.369016" status="run">
+		<properties/>
+		<system-out>ANS bit emission PASS configs=816 comparisons=30240 atomic_failures=30240 widths=32 tails=8 exact56=1 reference_chunk_writes=1651280 predicted_batch_writes=808688
+</system-out>
+	</testcase>
+	<testcase name="bit_writer" classname="bit_writer" time="0.00386358" status="run">
+		<properties/>
+		<system-out>All bit-writer tests passed.
+</system-out>
+	</testcase>
+	<testcase name="entropy" classname="entropy" time="0.157508" status="run">
+		<properties/>
+		<system-out>Verified 816 HybridUint configurations and 443904 value encodings.
+Verified 40 late ANS section failures after populated and empty sections.
+All entropy primitive tests passed.
+</system-out>
+	</testcase>
+	<testcase name="context_map" classname="context_map" time="0.552512" status="run">
+		<properties/>
+		<system-out>351 context maps passed; reference decoder=0
+</system-out>
+	</testcase>
+	<testcase name="ans_reverse_bits" classname="ans_reverse_bits" time="0.720774" status="run">
+		<properties/>
+		<system-out>ANS reverse bits PASS cases=102552 rollback=102552 chunks=6081088 words=1710194 payload_bits=98515702 exact=113670 split=1596524 repeated=102552 late=102552 thrown=102552 widths=32 pending=56 tails=8
+</system-out>
+	</testcase>
+	<testcase name="sections" classname="sections" time="0.00272254" status="run">
+		<properties/>
+		<system-out>All codestream-section tests passed.
+</system-out>
+	</testcase>
+	<testcase name="dc_group" classname="dc_group" time="0.038228" status="run">
+		<properties/>
+		<system-out>Verified 6148 DC gradient-context cases with clamping and guarded layouts.
+All DC-group tokenization tests passed.
+</system-out>
+	</testcase>
+	<testcase name="ac_group" classname="ac_group" time="0.0721379" status="run">
+		<properties/>
+		<system-out>All AC-group tokenization tests passed.
+</system-out>
+	</testcase>
+	<testcase name="coefficient_order" classname="coefficient_order" time="0.262057" status="run">
+		<properties/>
+		<system-out>Verified 218 frame coefficient-order cases, cached/uncached policies, copied/moved cache ownership, small-frame cutoff, and invalid-input atomicity.
+</system-out>
+	</testcase>
+	<testcase name="ac_direct_tokenization" classname="ac_direct_tokenization" time="1.79503" status="run">
+		<properties/>
+		<system-out>Verified 4096 direct AC group cases with exact tokens and populations.
+</system-out>
+	</testcase>
+	<testcase name="token_storage_plan" classname="token_storage_plan" time="0.090977" status="run">
+		<properties/>
+		<system-out>Verified 50 tokenizer allocation failure positions
+Token storage bounds and real allocation checks passed
+</system-out>
+	</testcase>
+	<testcase name="entropy_storage_plan" classname="entropy_storage_plan" time="1.74376" status="run">
+		<properties/>
+		<system-out>50 aggregation cases checked
+Writer 0/1: 246 failures checked
+Writer 0/0: 13 failures checked
+Writer 1/1: 182 failures checked
+Writer 1/0: 2 failures checked
+Variant 4: 887 failures checked
+Variant 0: 14 failures checked
+Variant 1: 205 failures checked
+Variant 2: 207 failures checked
+Variant 3: 40 failures checked
+Variant 4: 117 failures checked
+Variant 5: 139 failures checked
+Variant 6: 129 failures checked
+Variant 7: 123 failures checked
+Variant 8: 40 failures checked
+Variant 9: 172 failures checked
+Variant 10: 172 failures checked
+Variant 11: 163 failures checked
+Variant 12: 55 failures checked
+Variant 13: 58 failures checked
+288 optimizer matrix cases passed; all entropy storage tests passed.
+</system-out>
+	</testcase>
+	<testcase name="representation_storage_plan" classname="representation_storage_plan" time="0.0666117" status="run">
+		<properties/>
+		<system-out>Representation allocation failure positions: 19
+Representation allocation failure positions: 35
+Representation allocation failure positions: 91
+Representation allocation failure positions: 145
+Representation allocation failure positions: 22
+Representation allocation failure positions: 8
+</system-out>
+	</testcase>
+	<testcase name="serializer_storage_plan" classname="serializer_storage_plan" time="30.777" status="run">
+		<properties/>
+		<system-out>Whole-serializer reservation cases: 1560
+Whole-serializer allocation failure positions 0: 700
+Whole-serializer allocation failure positions 1: 743
+Whole-serializer allocation failure positions 3: 1495
+Whole-serializer allocation failure positions 2: 3633
+Whole-serializer allocation failure positions 0: 705
+Whole-serializer allocation failure positions 1: 748
+Whole-serializer allocation failure positions 3: 1500
+Whole-serializer allocation failure positions 2: 3638
+</system-out>
+	</testcase>
+	<testcase name="ac_section_validation" classname="ac_section_validation" time="0.03668" status="run">
+		<properties/>
+		<system-out>AC section validation PASS valid=192 invalid_models=1408 invalid_tokens=96 concurrent=64
+</system-out>
+	</testcase>
+	<testcase name="compact_vardct_frame" classname="compact_vardct_frame" time="1.53218" status="run">
+		<properties/>
+		<system-out>Compact frame PASS cases=96 exact_streams=384 atomic_failures=480 bitwise_reconstructions=96
+</system-out>
+	</testcase>
+	<testcase name="compact_frame_allocation" classname="compact_frame_allocation" time="0.675829" status="run">
+		<properties/>
+		<system-out>Compact allocation PASS cases=12 injected_failures=162 allocation_free_queries=12
+</system-out>
+	</testcase>
+	<testcase name="frame_validation" classname="frame_validation" time="0.980781" status="run">
+		<properties/>
+		<system-out>Frame validation PASS cases=72 injected_failures=1044 allocation_free_validations=144 rejected_tails=81
+</system-out>
+	</testcase>
+	<testcase name="sparse_coefficients" classname="sparse_coefficients" time="0.0318807" status="run">
+		<properties/>
+		<system-out>Sparse coefficients PASS cases=405 subranges=335205 rejected=3846 large_empty_shapes=9
+</system-out>
+	</testcase>
+	<testcase name="sparse_vardct_frame" classname="sparse_vardct_frame" time="6.0672" status="run">
+		<properties/>
+		<system-out>Sparse frame PASS cases=384 exact_streams=1536 atomic_failures=1488 bitwise_reconstructions=384
+</system-out>
+	</testcase>
+	<testcase name="sparse_frame_allocation" classname="sparse_frame_allocation" time="0.439316" status="run">
+		<properties/>
+		<system-out>Sparse allocation PASS cases=12 injected_failures=174 allocation_free_queries=48
+</system-out>
+	</testcase>
+	<testcase name="quantization_storage" classname="quantization_storage" time="0.0114958" status="run">
+		<properties/>
+		<system-out>Host initial storage: 6 cases, 18 atomic allocation failures passed.
+</system-out>
+	</testcase>
+	<testcase name="block_context_map" classname="block_context_map" time="0.003425" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="codestream_encoder" classname="codestream_encoder" time="6.59547" status="run">
+		<properties/>
+		<system-out>Admitted rate fallback cases: 80; atomic policy launch failures: 2
+All codestream encoder tests passed.
+</system-out>
+	</testcase>
+	<testcase name="codestream_workflow" classname="codestream_workflow" time="1.59069" status="run">
+		<properties/>
+		<system-out>Public workflow bytes=182 hash=17549798887378340505 strategies=5
+All public codestream workflow tests passed.
+</system-out>
+	</testcase>
+	<testcase name="codestream_batch_workflow" classname="codestream_batch_workflow" time="0.127291" status="run">
+		<properties/>
+		<system-out>Codestream batch workflow checks passed
+</system-out>
+	</testcase>
+	<testcase name="batch_lifecycle" classname="batch_lifecycle" time="0.105797" status="run">
+		<properties/>
+		<system-out>Batch shutdown/drain checks passed
+</system-out>
+	</testcase>
+	<testcase name="batch_lifecycle_cpu" classname="batch_lifecycle_cpu" time="0.0253616" status="run">
+		<properties/>
+		<system-out>Batch shutdown/drain checks passed
+</system-out>
+	</testcase>
+	<testcase name="batch_scheduling" classname="batch_scheduling" time="0.0878365" status="run">
+		<properties/>
+		<system-out>Batch queue/service boundary checks passed
+</system-out>
+	</testcase>
+	<testcase name="batch_scheduling_cpu" classname="batch_scheduling_cpu" time="0.0144262" status="run">
+		<properties/>
+		<system-out>Batch queue/service boundary checks passed
+</system-out>
+	</testcase>
+	<testcase name="parallel_work" classname="parallel_work" time="0.00309217" status="run">
+		<properties/>
+		<system-out>Parallel worker orchestration passed
+</system-out>
+	</testcase>
+	<testcase name="worker_launch_failure_startup" classname="worker_launch_failure_startup" time="0.00653062" status="run">
+		<properties>
+			<property name="cmake_labels" value="worker-launch-cpu"/>
+		</properties>
+		<system-out>startup before=0 kind=0 passed
+startup before=1 kind=0 passed
+startup before=3 kind=0 passed
+startup before=0 kind=1 passed
+startup before=1 kind=1 passed
+startup before=3 kind=1 passed
+Worker launch group startup passed
+</system-out>
+	</testcase>
+	<testcase name="worker_launch_failure_forward" classname="worker_launch_failure_forward" time="0.332264" status="run">
+		<properties>
+			<property name="cmake_labels" value="worker-launch-cpu"/>
+		</properties>
+		<system-out>direct forward before=0 kind=0 threads=0 passed
+direct forward before=1 kind=0 threads=0 passed
+direct forward before=2 kind=0 threads=0 passed
+direct forward before=0 kind=1 threads=0 passed
+direct forward before=1 kind=1 threads=0 passed
+direct forward before=2 kind=1 threads=0 passed
+direct forward before=0 kind=0 threads=4 passed
+direct forward before=1 kind=0 threads=4 passed
+direct forward before=2 kind=0 threads=4 passed
+direct forward before=0 kind=1 threads=4 passed
+direct forward before=1 kind=1 threads=4 passed
+direct forward before=2 kind=1 threads=4 passed
+Worker launch group forward passed
+</system-out>
+	</testcase>
+	<testcase name="worker_launch_failure_cpu_color" classname="worker_launch_failure_cpu_color" time="5.76213" status="run">
+		<properties>
+			<property name="cmake_labels" value="worker-launch-cpu"/>
+		</properties>
+		<system-out>single site=0 before=0 kind=0 threads=0 metal=0 exact=0 passed
+single site=0 before=1 kind=0 threads=0 metal=0 exact=0 passed
+single site=0 before=2 kind=0 threads=0 metal=0 exact=0 passed
+single site=0 before=0 kind=1 threads=0 metal=0 exact=0 passed
+single site=0 before=1 kind=1 threads=0 metal=0 exact=0 passed
+single site=0 before=2 kind=1 threads=0 metal=0 exact=0 passed
+single site=0 before=0 kind=0 threads=4 metal=0 exact=0 passed
+single site=0 before=1 kind=0 threads=4 metal=0 exact=0 passed
+single site=0 before=2 kind=0 threads=4 metal=0 exact=0 passed
+single site=0 before=0 kind=1 threads=4 metal=0 exact=0 passed
+single site=0 before=1 kind=1 threads=4 metal=0 exact=0 passed
+single site=0 before=2 kind=1 threads=4 metal=0 exact=0 passed
+Worker launch group cpu_color passed
+</system-out>
+	</testcase>
+	<testcase name="worker_launch_failure_cpu_aq" classname="worker_launch_failure_cpu_aq" time="6.0143" status="run">
+		<properties>
+			<property name="cmake_labels" value="worker-launch-cpu"/>
+		</properties>
+		<system-out>single site=1 before=0 kind=0 threads=0 metal=0 exact=0 passed
+single site=1 before=1 kind=0 threads=0 metal=0 exact=0 passed
+single site=1 before=2 kind=0 threads=0 metal=0 exact=0 passed
+single site=1 before=0 kind=1 threads=0 metal=0 exact=0 passed
+single site=1 before=1 kind=1 threads=0 metal=0 exact=0 passed
+single site=1 before=2 kind=1 threads=0 metal=0 exact=0 passed
+single site=1 before=0 kind=0 threads=4 metal=0 exact=0 passed
+single site=1 before=1 kind=0 threads=4 metal=0 exact=0 passed
+single site=1 before=2 kind=0 threads=4 metal=0 exact=0 passed
+single site=1 before=0 kind=1 threads=4 metal=0 exact=0 passed
+single site=1 before=1 kind=1 threads=4 metal=0 exact=0 passed
+single site=1 before=2 kind=1 threads=4 metal=0 exact=0 passed
+Worker launch group cpu_aq passed
+</system-out>
+	</testcase>
+	<testcase name="worker_launch_failure_cpu_orders" classname="worker_launch_failure_cpu_orders" time="7.5262" status="run">
+		<properties>
+			<property name="cmake_labels" value="worker-launch-cpu"/>
+		</properties>
+		<system-out>single site=3 before=0 kind=0 threads=0 metal=0 exact=0 passed
+single site=3 before=1 kind=0 threads=0 metal=0 exact=0 passed
+single site=3 before=2 kind=0 threads=0 metal=0 exact=0 passed
+single site=3 before=0 kind=1 threads=0 metal=0 exact=0 passed
+single site=3 before=1 kind=1 threads=0 metal=0 exact=0 passed
+single site=3 before=2 kind=1 threads=0 metal=0 exact=0 passed
+single site=3 before=0 kind=0 threads=4 metal=0 exact=0 passed
+single site=3 before=1 kind=0 threads=4 metal=0 exact=0 passed
+single site=3 before=2 kind=0 threads=4 metal=0 exact=0 passed
+single site=3 before=0 kind=1 threads=4 metal=0 exact=0 passed
+single site=3 before=1 kind=1 threads=4 metal=0 exact=0 passed
+single site=3 before=2 kind=1 threads=4 metal=0 exact=0 passed
+Worker launch group cpu_orders passed
+</system-out>
+	</testcase>
+	<testcase name="worker_launch_failure_cpu_sections" classname="worker_launch_failure_cpu_sections" time="7.50622" status="run">
+		<properties>
+			<property name="cmake_labels" value="worker-launch-cpu"/>
+		</properties>
+		<system-out>single site=4 before=0 kind=0 threads=0 metal=0 exact=0 passed
+single site=4 before=1 kind=0 threads=0 metal=0 exact=0 passed
+single site=4 before=2 kind=0 threads=0 metal=0 exact=0 passed
+single site=4 before=0 kind=1 threads=0 metal=0 exact=0 passed
+single site=4 before=1 kind=1 threads=0 metal=0 exact=0 passed
+single site=4 before=2 kind=1 threads=0 metal=0 exact=0 passed
+single site=4 before=0 kind=0 threads=4 metal=0 exact=0 passed
+single site=4 before=1 kind=0 threads=4 metal=0 exact=0 passed
+single site=4 before=2 kind=0 threads=4 metal=0 exact=0 passed
+single site=4 before=0 kind=1 threads=4 metal=0 exact=0 passed
+single site=4 before=1 kind=1 threads=4 metal=0 exact=0 passed
+single site=4 before=2 kind=1 threads=4 metal=0 exact=0 passed
+Worker launch group cpu_sections passed
+</system-out>
+	</testcase>
+	<testcase name="worker_launch_failure_cpu_drains" classname="worker_launch_failure_cpu_drains" time="2.48601" status="run">
+		<properties>
+			<property name="cmake_labels" value="worker-launch-cpu"/>
+		</properties>
+		<system-out>batch drain site=0 metal=0 passed
+batch drain site=1 metal=0 passed
+batch drain site=3 metal=0 passed
+Worker launch group cpu_drains passed
+</system-out>
+	</testcase>
+	<testcase name="worker_launch_failure_metal_forward" classname="worker_launch_failure_metal_forward" time="0.818497" status="run">
+		<properties>
+			<property name="cmake_labels" value="worker-launch-metal"/>
+		</properties>
+		<system-out>single site=2 before=0 kind=0 threads=0 metal=1 exact=1 passed
+single site=2 before=1 kind=0 threads=0 metal=1 exact=1 passed
+single site=2 before=2 kind=0 threads=0 metal=1 exact=1 passed
+single site=2 before=0 kind=1 threads=0 metal=1 exact=1 passed
+single site=2 before=1 kind=1 threads=0 metal=1 exact=1 passed
+single site=2 before=2 kind=1 threads=0 metal=1 exact=1 passed
+single site=2 before=0 kind=0 threads=4 metal=1 exact=1 passed
+single site=2 before=1 kind=0 threads=4 metal=1 exact=1 passed
+single site=2 before=2 kind=0 threads=4 metal=1 exact=1 passed
+single site=2 before=0 kind=1 threads=4 metal=1 exact=1 passed
+single site=2 before=1 kind=1 threads=4 metal=1 exact=1 passed
+single site=2 before=2 kind=1 threads=4 metal=1 exact=1 passed
+Worker launch group metal_forward passed
+</system-out>
+	</testcase>
+	<testcase name="worker_launch_failure_metal_orders" classname="worker_launch_failure_metal_orders" time="1.12155" status="run">
+		<properties>
+			<property name="cmake_labels" value="worker-launch-metal"/>
+		</properties>
+		<system-out>single site=3 before=0 kind=0 threads=0 metal=1 exact=0 passed
+single site=3 before=1 kind=0 threads=0 metal=1 exact=0 passed
+single site=3 before=2 kind=0 threads=0 metal=1 exact=0 passed
+single site=3 before=0 kind=1 threads=0 metal=1 exact=0 passed
+single site=3 before=1 kind=1 threads=0 metal=1 exact=0 passed
+single site=3 before=2 kind=1 threads=0 metal=1 exact=0 passed
+single site=3 before=0 kind=0 threads=4 metal=1 exact=0 passed
+single site=3 before=1 kind=0 threads=4 metal=1 exact=0 passed
+single site=3 before=2 kind=0 threads=4 metal=1 exact=0 passed
+single site=3 before=0 kind=1 threads=4 metal=1 exact=0 passed
+single site=3 before=1 kind=1 threads=4 metal=1 exact=0 passed
+single site=3 before=2 kind=1 threads=4 metal=1 exact=0 passed
+single site=3 before=0 kind=0 threads=0 metal=1 exact=1 passed
+single site=3 before=1 kind=0 threads=0 metal=1 exact=1 passed
+single site=3 before=2 kind=0 threads=0 metal=1 exact=1 passed
+single site=3 before=0 kind=1 threads=0 metal=1 exact=1 passed
+single site=3 be...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+	<testcase name="worker_launch_failure_metal_sections" classname="worker_launch_failure_metal_sections" time="0.287697" status="run">
+		<properties>
+			<property name="cmake_labels" value="worker-launch-metal"/>
+		</properties>
+		<system-out>single site=4 before=0 kind=0 threads=0 metal=1 exact=0 passed
+single site=4 before=1 kind=0 threads=0 metal=1 exact=0 passed
+single site=4 before=2 kind=0 threads=0 metal=1 exact=0 passed
+single site=4 before=0 kind=1 threads=0 metal=1 exact=0 passed
+single site=4 before=1 kind=1 threads=0 metal=1 exact=0 passed
+single site=4 before=2 kind=1 threads=0 metal=1 exact=0 passed
+single site=4 before=0 kind=0 threads=4 metal=1 exact=0 passed
+single site=4 before=1 kind=0 threads=4 metal=1 exact=0 passed
+single site=4 before=2 kind=0 threads=4 metal=1 exact=0 passed
+single site=4 before=0 kind=1 threads=4 metal=1 exact=0 passed
+single site=4 before=1 kind=1 threads=4 metal=1 exact=0 passed
+single site=4 before=2 kind=1 threads=4 metal=1 exact=0 passed
+Worker launch group metal_sections passed
+</system-out>
+	</testcase>
+	<testcase name="worker_launch_failure_metal_drains" classname="worker_launch_failure_metal_drains" time="0.192383" status="run">
+		<properties>
+			<property name="cmake_labels" value="worker-launch-metal"/>
+		</properties>
+		<system-out>batch drain site=4 metal=1 passed
+batch drain site=2 metal=1 passed
+Worker launch group metal_drains passed
+</system-out>
+	</testcase>
+	<testcase name="rate_control_search" classname="rate_control_search" time="0.00386729" status="run">
+		<properties/>
+		<system-out>All target-size search tests passed.
+</system-out>
+	</testcase>
+	<testcase name="rate_control_probe" classname="rate_control_probe" time="0.0126012" status="run">
+		<properties/>
+		<system-out>input,width,height,target,bytes,bpp,score,backend,metal_aq,elapsed_ms,total_ms,size_monotonic,strategy_counts
+/Users/yunhocho/GitHub/gjxl-butteraugli-production/testdata/codestream_sample.pfm,17,13,1,201,7.2760180995475112,1.1081490516662598,cpu,none,5.291250,6.967125,1,DCT8=4;DCT8x16=1
+/Users/yunhocho/GitHub/gjxl-butteraugli-production/testdata/codestream_sample.pfm,17,13,1.20000005,175,6.3348416289592757,1.3362035751342773,cpu,none,1.674583,6.967125,1,DCT8=2;DCT8x16=2
+</system-out>
+	</testcase>
+	<testcase name="codestream_cli" classname="codestream_cli" time="0.656227" status="run">
+		<properties/>
+		<system-out>-- CLI deterministic SHA-256: c8a8c1215ac341df1a1a3337e428e9886bf8258fcde57aedd3958100d1cc3927
+</system-out>
+	</testcase>
+	<testcase name="codestream_sample_generated" classname="codestream_sample_generated" time="0.0304922" status="run">
+		<properties/>
+		<system-out>Verified deterministic sample: /Users/yunhocho/GitHub/gjxl-butteraugli-production/testdata/codestream_sample.pfm
+</system-out>
+	</testcase>
+	<testcase name="c_api_image_conversion" classname="c_api_image_conversion" time="0.00222171" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="c_api" classname="c_api" time="0.132884" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="c_api_cpp" classname="c_api_cpp" time="0.00612612" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="pfm" classname="pfm" time="0.008981" status="run">
+		<properties/>
+		<system-out>PFM loader tests passed
+</system-out>
+	</testcase>
+	<testcase name="butteraugli_primitives" classname="butteraugli_primitives" time="0.00205183" status="run">
+		<properties/>
+		<system-out>All native Butteraugli primitive tests passed.
+</system-out>
+	</testcase>
+	<testcase name="butteraugli_stages" classname="butteraugli_stages" time="0.00169188" status="run">
+		<properties/>
+		<system-out>All native Butteraugli opsin/frequency tests passed.
+</system-out>
+	</testcase>
+	<testcase name="butteraugli_distance" classname="butteraugli_distance" time="0.0283471" status="run">
+		<properties/>
+		<system-out>All native Butteraugli distance tests passed.
+</system-out>
+	</testcase>
+	<testcase name="core_geometry" classname="core_geometry" time="0.00241904" status="run">
+		<properties/>
+		<system-out>All core geometry tests passed.
+</system-out>
+	</testcase>
+	<testcase name="resource_budget" classname="resource_budget" time="0.0482056" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="cpu_budget" classname="cpu_budget" time="0.0342139" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="cpu_execution" classname="cpu_execution" time="0.0270727" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="workflow_cpu_coordination" classname="workflow_cpu_coordination" time="4.30894" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="workflow_cpu_coordination_cpu" classname="workflow_cpu_coordination_cpu" time="3.5354" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="managed_allocator" classname="managed_allocator" time="0.00334971" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="serializer_storage" classname="serializer_storage" time="0.0167434" status="run">
+		<properties/>
+		<system-out>Model 0: 16 allocation failures checked
+Model 1: 41 allocation failures checked
+Model 2: 118 allocation failures checked
+Model 3: 145 allocation failures checked
+All serializer storage tests passed.
+</system-out>
+	</testcase>
+	<testcase name="frontend_storage" classname="frontend_storage" time="0.0255725" status="run">
+		<properties/>
+		<system-out>Frame failure positions: 13
+Prepared failure positions: 14
+</system-out>
+	</testcase>
+	<testcase name="frontend_storage_plan" classname="frontend_storage_plan" time="0.288988" status="run">
+		<properties/>
+		<system-out>Frontend reservation cases: 12 images, 48 prepared transforms, 72 frames, 24 reconstructions
+Frontend allocation failure positions 0: 3
+Frontend allocation failure positions 1: 14
+Frontend allocation failure positions 2: 13
+Frontend allocation failure positions 3: 58
+Frontend allocation failure positions 4: 13
+</system-out>
+	</testcase>
+	<testcase name="frontend_field_storage_plan" classname="frontend_field_storage_plan" time="0.437582" status="run">
+		<properties/>
+		<system-out>Field reservation cases: 338
+Field allocation failure positions 0: 9
+Field allocation failure positions 1: 1
+Field allocation failure positions 2: 2
+Field allocation failure positions 3: 2
+Field allocation failure positions 4: 4
+Field allocation failure positions 5: 10
+Field allocation failure positions 6: 10
+Field allocation failure positions 7: 10
+Field allocation failure positions 8: 10
+Field allocation failure positions 9: 10
+</system-out>
+	</testcase>
+	<testcase name="perceptual_storage_plan" classname="perceptual_storage_plan" time="1.41298" status="run">
+		<properties/>
+		<system-out>0 1
+1 1
+2 1
+3 1
+4 1
+10 1
+Perceptual reservation cases: 351
+Native reference failure positions prepare: 46
+Native reference failure positions compare: 2
+Perceptual allocation failure positions 0: 3
+Perceptual allocation failure positions 1: 3
+Perceptual allocation failure positions 3: 3
+Perceptual allocation failure positions 4: 3
+Perceptual allocation failure positions 6: 3
+Perceptual allocation failure positions 7: 3
+Perceptual allocation failure positions 8: 6
+Perceptual allocation failure positions 9: 3
+Perceptual allocation failure positions 10: 9
+Perceptual allocation failure positions 11: 9
+Perceptual allocation failure positions 12: 12
+Perceptual allocation failure positions 13: 1
+Perceptual allocation failure positions 14: 1
+Perceptual allocation failure positions 15: 1
+Perceptual allocation failure positions 16: 44
+Perceptual allocation failure positions 17: 48
+</system-out>
+	</testcase>
+	<testcase name="publication_storage" classname="publication_storage" time="0.0299535" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="workflow_publication" classname="workflow_publication" time="0.585582" status="run">
+		<properties/>
+		<system-out>C publication failure positions: 868
+</system-out>
+	</testcase>
+	<testcase name="diagnostic_storage" classname="diagnostic_storage" time="0.00354308" status="run">
+		<properties/>
+		<system-out>Diagnostic graph failure positions: 29
+</system-out>
+	</testcase>
+	<testcase name="ac_strategy_grid" classname="ac_strategy_grid" time="0.00253583" status="run">
+		<properties/>
+		<system-out>All AC-strategy grid tests passed.
+</system-out>
+	</testcase>
+	<testcase name="fast_math" classname="fast_math" time="0.00143808" status="run">
+		<properties/>
+		<system-out>All fast math tests passed.
+</system-out>
+	</testcase>
+	<testcase name="dct_reference" classname="dct_reference" time="0.00194475" status="run">
+		<properties/>
+		<system-out>8x8 CPU reference round-trip max error: 3.88535e-08
+16x16 CPU reference round-trip max error: 4.70167e-08
+32x32 CPU reference round-trip max error: 4.84015e-08
+8x16 CPU reference round-trip max error: 4.30422e-08
+16x8 CPU reference round-trip max error: 3.90037e-08
+16x32 CPU reference round-trip max error: 4.63489e-08
+32x16 CPU reference round-trip max error: 4.80281e-08
+8x64 CPU reference round-trip max error: 5.0885e-08
+64x8 CPU reference round-trip max error: 4.37893e-08
+All DCT reference tests passed.
+</system-out>
+	</testcase>
+	<testcase name="cpu_dct" classname="cpu_dct" time="0.00188587" status="run">
+		<properties/>
+		<system-out>All CPU DCT tests passed.
+</system-out>
+	</testcase>
+	<testcase name="ac_strategy_cost" classname="ac_strategy_cost" time="0.00380546" status="run">
+		<properties/>
+		<system-out>All AC-strategy cost tests passed.
+</system-out>
+	</testcase>
+	<testcase name="ac_strategy_search" classname="ac_strategy_search" time="0.0144262" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="quantization" classname="quantization" time="0.00217788" status="run">
+		<properties/>
+		<system-out>All quantization tests passed.
+</system-out>
+	</testcase>
+	<testcase name="quantization_adjustment" classname="quantization_adjustment" time="0.00249396" status="run">
+		<properties/>
+		<system-out>All pinned AC quantization-adjustment tests passed.
+</system-out>
+	</testcase>
+	<testcase name="maximum_error" classname="maximum_error" time="0.05261" status="run">
+		<properties/>
+		<system-out>All maximum-error AQ tests passed.
+</system-out>
+	</testcase>
+	<testcase name="dc_conversion" classname="dc_conversion" time="0.00333121" status="run">
+		<properties/>
+		<system-out>All DC conversion tests passed.
+</system-out>
+	</testcase>
+	<testcase name="dc_quantization" classname="dc_quantization" time="0.00176625" status="run">
+		<properties/>
+		<system-out>All DC quantization tests passed.
+</system-out>
+	</testcase>
+	<testcase name="dc_processing" classname="dc_processing" time="0.0411855" status="run">
+		<properties/>
+		<system-out>DC prediction-aware quantization and smoothing checks passed
+</system-out>
+	</testcase>
+	<testcase name="cpu_workflow_storage_plan" classname="cpu_workflow_storage_plan" time="14.9704" status="run">
+		<properties/>
+		<system-out>CPU workflow plan shapes: 4480; search bounds: 64
+Bounded shared-policy cases: 40
+Isolated bounded CPU evaluator cases: 160
+Bounded CPU whole-workflow cases: 94
+</system-out>
+	</testcase>
+	<testcase name="cpu_workflow_legacy_dc_tree" classname="cpu_workflow_legacy_dc_tree" time="15.1323" status="run">
+		<properties/>
+		<system-out>CPU workflow plan shapes: 4480; search bounds: 64
+Bounded shared-policy cases: 40
+Isolated bounded CPU evaluator cases: 160
+Bounded CPU whole-workflow cases: 94
+</system-out>
+	</testcase>
+	<testcase name="resident_workflow_legacy_dc_tree" classname="resident_workflow_legacy_dc_tree" time="5.29849" status="run">
+		<properties/>
+		<system-out>Whole workflow plan shapes: 2240; search bounds: 64
+Bounded complete-workflow cases (cold/warm): 223
+</system-out>
+	</testcase>
+	<testcase name="compatibility_workflow_legacy_dc_tree" classname="compatibility_workflow_legacy_dc_tree" time="4.38111" status="run">
+		<properties/>
+		<system-out>Compatibility planning checks: 2800; mixed limits: 64
+Mixed target routing: Metal=1 CPU=63
+Mixed target routing: Metal=1 CPU=63
+Bounded compatibility workflows: 118
+</system-out>
+	</testcase>
+	<testcase name="dc_context_tree" classname="dc_context_tree" time="0.0254975" status="run">
+		<properties/>
+		<system-out>DC context selection, remapping, and tree checks passed
+</system-out>
+	</testcase>
+	<testcase name="adaptive_quantization" classname="adaptive_quantization" time="0.0074875" status="run">
+		<properties/>
+		<system-out>All initial quantization tests passed.
+</system-out>
+	</testcase>
+	<testcase name="adaptive_quantization_loop" classname="adaptive_quantization_loop" time="0.0249311" status="run">
+		<properties/>
+		<system-out>Two-update pin maximum errors: score=8.70227814e-06 quant=3.87430191e-06 block_distance=2.86102295e-06 raw_quant=exact
+All iterative adaptive-quantization tests passed.
+</system-out>
+	</testcase>
+	<testcase name="color_transform" classname="color_transform" time="0.00343737" status="run">
+		<properties/>
+		<system-out>All color transform tests passed.
+</system-out>
+	</testcase>
+	<testcase name="quantization_pipeline" classname="quantization_pipeline" time="0.0317345" status="run">
+		<properties/>
+		<system-out>Pipeline pin maximum errors: score=4.45246696e-05 final_quant=5.54323196e-06 raw_quant=exact
+All CPU quantization pipeline tests passed.
+</system-out>
+	</testcase>
+	<testcase name="quantization_pipeline_uniform" classname="quantization_pipeline_uniform" time="0.00399729" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="quantization_pipeline_search_policy" classname="quantization_pipeline_search_policy" time="0.00322471" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="low_effort_strategy_policy" classname="low_effort_strategy_policy" time="0.00717263" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="dc_policy" classname="dc_policy" time="0.598124" status="run">
+		<properties/>
+		<system-out>DC defaults, independent overrides, admission, and batch policy passed.
+</system-out>
+	</testcase>
+	<testcase name="gaborish" classname="gaborish" time="0.00277408" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="chroma_from_luma" classname="chroma_from_luma" time="0.0046195" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="epf" classname="epf" time="0.00198708" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="reconstruction" classname="reconstruction" time="0.0135192" status="run">
+		<properties/>
+		<system-out>All CPU reconstruction tests passed.
+</system-out>
+	</testcase>
+	<testcase name="overwrite_array" classname="overwrite_array" time="0.00227158" status="run">
+		<properties/>
+		<system-out>Overwrite-array ownership and failure tests passed.
+</system-out>
+	</testcase>
+	<testcase name="vardct_frame" classname="vardct_frame" time="0.127347" status="run">
+		<properties/>
+		<system-out>All VarDCT encoder-frame tests passed.
+</system-out>
+	</testcase>
+	<testcase name="vardct_frame_view" classname="vardct_frame_view" time="9.78724" status="run">
+		<properties/>
+		<system-out>Borrowed frame validation, consumer, lifetime, and byte parity passed
+</system-out>
+	</testcase>
+	<testcase name="simple_codestream_profile" classname="simple_codestream_profile" time="0.00368733" status="run">
+		<properties/>
+		<system-out>All simple codestream-profile tests passed.
+</system-out>
+	</testcase>
+	<testcase name="loop_filter" classname="loop_filter" time="0.00218117" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="butteraugli" classname="butteraugli" time="0.00442408" status="run">
+		<properties/>
+		<system-out>Butteraugli backing failure positions: 23
+All native Butteraugli facade tests passed.
+</system-out>
+	</testcase>
+	<testcase name="quantization_tables_generated" classname="quantization_tables_generated" time="0.0721526" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="gpu_image" classname="gpu_image" time="0.00307213" status="run">
+		<properties/>
+		<system-out>All device-image and scratch tests passed.
+</system-out>
+	</testcase>
+	<testcase name="ac_strategy_storage_plan" classname="ac_strategy_storage_plan" time="0.00461796" status="run">
+		<properties/>
+		<system-out>Sparse/dense AC geometry/capacity cases: 16400
+</system-out>
+	</testcase>
+	<testcase name="ac_strategy_host_storage_plan" classname="ac_strategy_host_storage_plan" time="1.59507" status="run">
+		<properties/>
+		<system-out>Fresh AC runtime/reservation cases: 234
+Fresh AC runtime/reservation cases: 234
+Physical AC allocation failures/recovery: 98
+Physical AC allocation failures/recovery: 98
+Prepared AC growth failures/recovery: 15; late underplans: 6
+AC host formula cases: 16384; reuse transitions: 12
+</system-out>
+	</testcase>
+	<testcase name="profile_storage_plan" classname="profile_storage_plan" time="0.00426288" status="run">
+		<properties/>
+		<system-out>String growth/copy/publication cases: 574
+Submission profile shapes: 48; snapshot failure/recovery positions: 23
+</system-out>
+	</testcase>
+	<testcase name="gpu_profile_json" classname="gpu_profile_json" time="0.0374553" status="run">
+		<properties/>
+		<system-out>Shared GPU-profile JSON escaping, locale, replacement and failure cleanup passed
+</system-out>
+	</testcase>
+	<testcase name="metal_profile_storage_plan" classname="metal_profile_storage_plan" time="0.0596915" status="run">
+		<properties/>
+		<system-out>Metal profile bound cases: 12; mode=1
+Unsupported Metal profiling mode: 2
+</system-out>
+	</testcase>
+	<testcase name="metal_gpu_primitives" classname="metal_gpu_primitives" time="0.056971" status="run">
+		<properties/>
+		<system-out>affine max error: 0
+chain convolution max error: 1.19209e-07
+primitive chain scratch capacity=4096 peak_layout=1284
+convolution max error: 0
+convolution max error: 1.78814e-07
+symmetric5 max error: 4.76837e-07
+symmetric5 max error: 2.98023e-08
+in-place constant convolution max error: 4.76837e-07
+concurrent affine max error: 0
+concurrent affine max error: 0
+concurrent affine max error: 0
+concurrent affine max error: 0
+All Metal primitive infrastructure tests passed.
+</system-out>
+	</testcase>
+	<testcase name="metal_butteraugli_operation_contract" classname="metal_butteraugli_operation_contract" time="0.141429" status="run">
+		<properties/>
+		<system-out>All device Butteraugli operation contract tests passed.
+</system-out>
+	</testcase>
+	<testcase name="metal_butteraugli" classname="metal_butteraugli" time="0.555783" status="run">
+		<properties/>
+		<system-out>Metal Butteraugli maximum map error: 0.000549316
+Metal Butteraugli maximum score error: 0.000549316
+Metal Butteraugli maximum stage error: 0.000396729
+</system-out>
+	</testcase>
+	<testcase name="metal_aq_evaluation" classname="metal_aq_evaluation" time="2.09385" status="run">
+		<properties/>
+		<system-out>Metal AQ Milestone 7 evaluation tests passed; max block reduction error 2.38419e-07; memory persistent 319744, staging 1180468, peak scratch 648296 bytes
+AQ memory 128x96 (128x96 -&gt; 128x96): persistent=640768 staging=2098484 peak=1360768 bytes
+AQ memory Flower (510x532 -&gt; 512x536): persistent=13219584 staging=46272180 peak=29991256 bytes
+AQ memory 480p (854x480 -&gt; 856x480): persistent=19856384 staging=69629812 peak=45034064 bytes
+AQ memory 720p (1280x720 -&gt; 1280x720): persistent=44529408 staging=156368948 peak=101072512 bytes
+AQ memory 1080p (1920x1080 -&gt; 1920x1080): persistent=100131584 staging=351814452 peak=227397920 bytes
+</system-out>
+	</testcase>
+	<testcase name="adaptive_quantization_gpu_policy" classname="adaptive_quantization_gpu_policy" time="0.250459" status="run">
+		<properties/>
+		<system-out>GPU AQ policy parity passed; max score error 0.000171661, quant-field error 2.65241e-06, block-map error 0.000358582, reconstructed RGB error 5.00679e-06; raw quant, frame, and supported codestream exact
+</system-out>
+	</testcase>
+	<testcase name="metal_aq_reconstruction" classname="metal_aq_reconstruction" time="0.750899" status="run">
+		<properties/>
+		<system-out>144 exact final CfL CPU/Metal cases passed
+Metal AQ Milestone 3 reconstruction tests passed
+</system-out>
+	</testcase>
+	<testcase name="metal_aq_postprocess" classname="metal_aq_postprocess" time="0.238403" status="run">
+		<properties/>
+		<system-out>Metal AQ Milestone 4 postprocess tests passed; max filter error 8.9407e-08, max color error 2.38419e-07, max combined error 8.9407e-07; Milestone 5 max isolated Butteraugli error 6.10352e-05, max chained error 6.86646e-05; Milestone 6 max production error 3.8147e-05
+</system-out>
+	</testcase>
+	<testcase name="metal_dct" classname="metal_dct" time="1.89384" status="run">
+		<properties/>
+		<system-out>Testing backend: Metal: Apple M4 Pro [scalar matmul]
+scalar matmul ForwardDCT8 max absolute error: 3.53103e-08
+scalar matmul InverseDCT8 max absolute error: 1.74014e-06
+scalar matmul DCT8 round-trip max error: 2.98023e-07
+scalar matmul ForwardDCT16x16 max absolute error: 2.03734e-08
+scalar matmul InverseDCT16x16 max absolute error: 6.41965e-06
+scalar matmul DCT16x16 round-trip max error: 4.76837e-07
+scalar matmul ForwardDCT32x32 max absolute error: 1.5416e-08
+scalar matmul InverseDCT32x32 max absolute error: 1.85016e-05
+scalar matmul DCT32x32 round-trip max error: 7.15256e-07
+scalar matmul ForwardDCT32x16 max absolute error: 2.22148e-08
+scalar matmul InverseDCT32x16 max absolute error: 9.69476e-06
+scalar matmul DCT32x16 round-trip max error: 5.36442e-07
+scalar matmul ForwardDCT16x32 max absolute error: 2.38684e-08
+scalar matmul InverseDCT16x32 max absolute error: 9.70428e-06
+scalar matmul DCT16x32 round-trip max error: 6.55651e-07
+scalar matmul ForwardDCT64x32 max absolute error: 1.30659e-08
+scalar matmul Inv...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+	<testcase name="metal_ac_strategy" classname="metal_ac_strategy" time="0.126685" status="fail">
+		<failure message="Failed"/>
+		<properties/>
+		<system-out>4K AC scratch mode=0 A=304496640 B=304496640 rate=3110400 device=626786016
+AC callback inputs: three physical failures/recoveries and three terminal underplans checked
+Dispatch-boundary timestamps unavailable; stage mode qualified
+exact loss fusion DCT8 max absolute cost error 0.000244141, max relative error 1.99471e-07
+exact loss fusion DCT16x8 max absolute cost error 0.000488281, max relative error 2.33452e-07
+exact loss fusion DCT8x16 max absolute cost error 0.000732422, max relative error 2.72404e-07
+exact loss fusion DCT16x16 max absolute cost error 0.000488281, max relative error 1.18516e-07
+exact loss fusion DCT32x16 max absolute cost error 0.00146484, max relative error 2.0857e-07
+exact loss fusion DCT16x32 max absolute cost error 0.00244141, max relative error 3.52006e-07
+exact loss fusion DCT32x32 max absolute cost error 0.00195312, max relative error 1.44533e-07
+4K AC scratch mode=1 A=1555200 B=0 rate=3110400 device=19347936
+AC callback inputs: three physical failures/recoveries and three terminal underplans checked
+Dispatch-boundary timestamps unavailable; stage mode qualified
+exact loss fusion DCT8 max absolute cost error 0.000244141, max relative error 1.99471e-07
+exact loss fusion DCT16x8 max absolute cost error 0.000488281, max relative error 2.33452e-07
+exact loss fusion DCT8x16 max absolute cost error 0.000732422, max relative error 2.72404e-07
+exact loss fusion DCT16x16 max absolute cost error 0.000488281, max relative error 1.18516e-07
+exact loss fusion DCT32x16 max absolute cost error 0.00146484, max relative error 2.0857e-07
+exact loss fusion DCT16x32 max absolute cost error 0.00244141, max relative error 3.52006e-07
+exact loss fusion DCT32x32 max absolute cost error 0.00195312, max relative error 1.44533e-07
+AC callback inputs: three physical failures/recoveries and three terminal underplans checked
+Dispatch-boundary timestamps unavailable; stage mode qualified
+scalar matmul DCT8 max absolute cost error 0.000244141, max relative error 1.99471e-07
+scalar matmul DCT16x8 max absolute cost error 0.000488281, max relative error 2.33452e-07
+scalar matmul DCT8x16 max absolute cost error 0.000732422, max relative error 2.72404e-07
+scalar matmul DCT16x16 max absolute cost error 0.000488281, max relative error 1.18516e-07
+scalar matmul DCT32x16 max absolute cost error 0.00146484, max relative error 2.0857e-07
+scalar matmul DCT16x32 max absolute cost error 0.00244141, max relative error 3.52006e-07
+scalar matmul DCT32x32 max absolute cost error 0.00195312, max relative error 1.44533e-07
+AC callback inputs: three physical failures/recoveries and three terminal underplans checked
+Dispatch-boundary timestamps unavailable; stage mode qualified
+simdgroup matmul DCT8 max absolute cost error 0.000244141, max relative error 1.99471e-07
+simdgroup matmul DCT16x8 max absolute cost error 0.000488281, max relative error 2.33452e-07
+simdgroup matmul DCT8x16 max absolute cost error 0.000732422, max relative error 2.72404e-07
+simdgroup matmul DCT16x16 max absolute cost error 0.000488281, max relative error 1.18516e-07
+simdgroup matmul DCT32x16 max absolute cost error 0.00146484, max relative error 2.0857e-07
+simdgroup matmul DCT16x32 max absolute cost error 0.00244141, max relative error 3.52006e-07
+</system-out>
+	</testcase>
+	<testcase name="metal_ac_strategy_search" classname="metal_ac_strategy_search" time="2.44249" status="run">
+		<properties/>
+		<system-out>Prepared AC search 128x96 arena_bytes=0 scratch_a_bytes=2304 scratch_b_bytes=0 rate_bytes=4608 conservative_a_bytes=430080
+Prepared AC search 72x72 arena_bytes=0 scratch_a_bytes=972 scratch_b_bytes=0 rate_bytes=1944 conservative_a_bytes=150528
+Prepared AC search 80x72 arena_bytes=0 scratch_a_bytes=1080 scratch_b_bytes=0 rate_bytes=2160 conservative_a_bytes=172032
+Prepared AC search 88x72 arena_bytes=0 scratch_a_bytes=1188 scratch_b_bytes=0 rate_bytes=2376 conservative_a_bytes=193536
+Prepared AC search 96x72 arena_bytes=0 scratch_a_bytes=1296 scratch_b_bytes=0 rate_bytes=2592 conservative_a_bytes=215040
+Prepared AC search 104x72 arena_bytes=0 scratch_a_bytes=1404 scratch_b_bytes=0 rate_bytes=2808 conservative_a_bytes=236544
+Prepared AC search 112x72 arena_bytes=0 scratch_a_bytes=1512 scratch_b_bytes=0 rate_bytes=3024 conservative_a_bytes=258048
+Prepared AC search 120x72 arena_bytes=0 scratch_a_bytes=1620 scratch_b_bytes=0 rate_bytes=3240 conservative_a_bytes=279552
+Prepared AC search 128x72 arena_bytes=0 scrat...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+	<testcase name="metal_aq_strategy_metadata" classname="metal_aq_strategy_metadata" time="0.839685" status="run">
+		<properties/>
+		<system-out>27 GPU-family/indirect AQ consumer cases matched CPU dispatch exactly
+27 full device-metadata AQ consumer cases matched CPU dispatch exactly
+12 malformed device maps rejected atomically through AQ
+42 managed allocation failures rejected atomically (37 after completion)
+3 complete resident-metadata lifetimes fit declared admission
+292 exact CPU-builder/GPU-metadata cases passed; guards, failure and reuse passed
+</system-out>
+	</testcase>
+	<testcase name="metal_quantization_pipeline" classname="metal_quantization_pipeline" time="4.42342" status="run">
+		<properties/>
+		<system-out>26 combined ACS/AQ attempts match profiled encodes; 6 failures preserve outputs and recover; no separate ACS submission
+26 combined ACS/AQ attempts match profiled encodes; 6 failures preserve outputs and recover; no separate ACS submission
+GPU Gaborish max error=2.98023e-07
+Complete GPU pipeline errors: quant=0 block=1.49012e-05 score=1.78814e-06 image=2.74181e-06; frame and codestream exact
+Default-update GPU pipeline errors: quant=3.69549e-06 block=1.12653e-05 score=9.11951e-06 image=4.11272e-06; frame and codestream exact
+Fully resident diagnostic errors: quant=4.82798e-06 block=5.1558e-05 score=4.61936e-05 image=3.75509e-06 frame=exact codestream=exact
+Prepared GPU attempts reuse exact and resident evaluator allocations and invalidate changed source generations
+Automatic and forced Metal preserve public workflow bytes
+Complete GPU quantization pipeline matches CPU.
+</system-out>
+	</testcase>
+	<testcase name="metal_completed_frame" classname="metal_completed_frame" time="1.25647" status="run">
+		<properties/>
+		<system-out>Completed Metal frames survive producer and backend lifetime.
+</system-out>
+	</testcase>
+	<testcase name="metal_resource_budget" classname="metal_resource_budget" time="2.017" status="run">
+		<properties/>
+		<system-out>Resident workflow host failure positions: 758
+</system-out>
+	</testcase>
+	<testcase name="metal_diagnostic_storage" classname="metal_diagnostic_storage" time="0.245002" status="run">
+		<properties/>
+		<system-out>Metal primitive diagnostic failure positions (1): 13
+Resident workflow diagnostic failure positions (1): 88
+Skipping unavailable Metal profiling mode 2
+</system-out>
+	</testcase>
+	<testcase name="metal_storage_plan" classname="metal_storage_plan" time="0.0236235" status="run">
+		<properties/>
+		<system-out>Frozen AQ capacity/layout cases: 18432
+Frozen completed-frame layout cases: 147
+</system-out>
+	</testcase>
+	<testcase name="metal_aq_host_storage_plan" classname="metal_aq_host_storage_plan" time="3.99021" status="run">
+		<properties/>
+		<system-out>AQ host plan formula cases: 2592
+Auxiliary profiles: 6 reference/adjustment; 60 initial-quantization cases
+AQ callback inputs: two physical failures and one typed underplan, with recovery
+Resident AQ profile input/first-use/exact cases: 436
+Dispatch-boundary timestamps unavailable; stage mode qualified
+AQ runtime 1x1 mode 0
+AQ runtime 1x1 mode 1
+AQ runtime 1x1 mode 2
+AQ runtime 1x1 mode 3
+AQ runtime 1x1 mode 4
+AQ runtime 1x1 mode 5
+AQ runtime 1x1 mode 6
+AQ runtime 8x8 mode 0
+AQ runtime 8x8 mode 1
+AQ runtime 8x8 mode 2
+AQ runtime 8x8 mode 3
+AQ runtime 8x8 mode 4
+AQ runtime 8x8 mode 5
+AQ runtime 8x8 mode 6
+AQ runtime 17x9 mode 0
+AQ runtime 17x9 mode 1
+AQ runtime 17x9 mode 2
+AQ runtime 17x9 mode 3
+AQ runtime 17x9 mode 4
+AQ runtime 17x9 mode 5
+AQ runtime 17x9 mode 6
+AQ runtime 65x63 mode 0
+AQ runtime 65x63 mode 1
+AQ runtime 65x63 mode 2
+AQ runtime 65x63 mode 3
+AQ runtime 65x63 mode 4
+AQ runtime 65x63 mode 5
+AQ runtime 65x63 mode 6
+AQ runtime 257x9 mode 0
+AQ runtime 257x9 mode 1
+AQ runtime 257x9 mode 2
+AQ runtime ...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+	<testcase name="metal_quantizer_selection" classname="metal_quantizer_selection" time="0.667354" status="run">
+		<properties/>
+		<system-out>Passed 672 exact guarded quantizer cases, including CPU median/MAD and invalid selected-value/DC checks.
+</system-out>
+	</testcase>
+	<testcase name="metal_dc_processing" classname="metal_dc_processing" time="4.21693" status="run">
+		<properties/>
+		<system-out>3102 raw-DC Metal cases match CPU exactly; 20 invalid cases reject atomically
+</system-out>
+	</testcase>
+	<testcase name="metal_submission_storage_plan" classname="metal_submission_storage_plan" time="0.00391321" status="run">
+		<properties/>
+		<system-out>AC submission shapes: 1190; resident AQ reserve shapes: 160
+Stable-context capacity guard cases: 9
+</system-out>
+	</testcase>
+	<testcase name="metal_aq_profile_storage_plan" classname="metal_aq_profile_storage_plan" time="0.00500442" status="run">
+		<properties/>
+		<system-out>Resident profile shapes: 640; auxiliary shapes: 128; reduction boundaries: 9; sort cases: 64
+</system-out>
+	</testcase>
+	<testcase name="resident_workflow_storage_plan" classname="resident_workflow_storage_plan" time="5.13675" status="run">
+		<properties/>
+		<system-out>Whole workflow plan shapes: 2240; search bounds: 64
+Bounded complete-workflow cases (cold/warm): 223
+</system-out>
+	</testcase>
+	<testcase name="compatibility_workflow_storage_plan" classname="compatibility_workflow_storage_plan" time="4.25656" status="run">
+		<properties/>
+		<system-out>Compatibility planning checks: 2800; mixed limits: 64
+Mixed target routing: Metal=1 CPU=63
+Mixed target routing: Metal=1 CPU=63
+Bounded compatibility workflows: 118
+</system-out>
+	</testcase>
+	<testcase name="metal_butteraugli_legacy" classname="metal_butteraugli_legacy" time="0.560047" status="run">
+		<properties/>
+		<system-out>Metal Butteraugli maximum map error: 0.000549316
+Metal Butteraugli maximum score error: 0.000549316
+Metal Butteraugli maximum stage error: 0.000396729
+</system-out>
+	</testcase>
+	<testcase name="metal_aq_evaluation_legacy" classname="metal_aq_evaluation_legacy" time="2.02983" status="run">
+		<properties/>
+		<system-out>Metal AQ Milestone 7 evaluation tests passed; max block reduction error 2.38419e-07; memory persistent 319744, staging 1180468, peak scratch 648296 bytes
+AQ memory 128x96 (128x96 -&gt; 128x96): persistent=640768 staging=2098484 peak=1360768 bytes
+AQ memory Flower (510x532 -&gt; 512x536): persistent=13219584 staging=46272180 peak=29991256 bytes
+AQ memory 480p (854x480 -&gt; 856x480): persistent=19856384 staging=69629812 peak=45034064 bytes
+AQ memory 720p (1280x720 -&gt; 1280x720): persistent=44529408 staging=156368948 peak=101072512 bytes
+AQ memory 1080p (1920x1080 -&gt; 1920x1080): persistent=100131584 staging=351814452 peak=227397920 bytes
+</system-out>
+	</testcase>
+	<testcase name="metal_aq_host_storage_plan_legacy" classname="metal_aq_host_storage_plan_legacy" time="4.21516" status="run">
+		<properties/>
+		<system-out>AQ host plan formula cases: 2592
+Auxiliary profiles: 6 reference/adjustment; 60 initial-quantization cases
+AQ callback inputs: two physical failures and one typed underplan, with recovery
+Resident AQ profile input/first-use/exact cases: 436
+Dispatch-boundary timestamps unavailable; stage mode qualified
+AQ runtime 1x1 mode 0
+AQ runtime 1x1 mode 1
+AQ runtime 1x1 mode 2
+AQ runtime 1x1 mode 3
+AQ runtime 1x1 mode 4
+AQ runtime 1x1 mode 5
+AQ runtime 1x1 mode 6
+AQ runtime 8x8 mode 0
+AQ runtime 8x8 mode 1
+AQ runtime 8x8 mode 2
+AQ runtime 8x8 mode 3
+AQ runtime 8x8 mode 4
+AQ runtime 8x8 mode 5
+AQ runtime 8x8 mode 6
+AQ runtime 17x9 mode 0
+AQ runtime 17x9 mode 1
+AQ runtime 17x9 mode 2
+AQ runtime 17x9 mode 3
+AQ runtime 17x9 mode 4
+AQ runtime 17x9 mode 5
+AQ runtime 17x9 mode 6
+AQ runtime 65x63 mode 0
+AQ runtime 65x63 mode 1
+AQ runtime 65x63 mode 2
+AQ runtime 65x63 mode 3
+AQ runtime 65x63 mode 4
+AQ runtime 65x63 mode 5
+AQ runtime 65x63 mode 6
+AQ runtime 257x9 mode 0
+AQ runtime 257x9 mode 1
+AQ runtime 257x9 mode 2
+AQ runtime ...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+	<testcase name="metal_cache_admission" classname="metal_cache_admission" time="0.238765" status="run">
+		<properties/>
+		<system-out>Begin aggregate backend
+Pass aggregate backend (0.0488946 s)
+Begin aggregate process
+Pass aggregate process (0.00830275 s)
+Begin domain eviction
+Pass domain eviction (0.00650946 s)
+Begin active return
+Pass active return (0.00527433 s)
+Begin oversized Butteraugli
+Pass oversized Butteraugli (0.00543858 s)
+Begin registry lifetime
+Pass registry lifetime (0.0639618 s)
+Begin frame cache
+Pass frame cache (0.0106532 s)
+Begin frame domains
+Pass frame domains (0.00528821 s)
+Begin frame queued admission
+Pass frame queued admission (0.00610496 s)
+Begin frame process limit/teardown
+Pass frame process limit/teardown (0.0715964 s)
+</system-out>
+	</testcase>
+	<testcase name="workflow_storage_plan" classname="workflow_storage_plan" time="0.371019" status="run">
+		<properties/>
+		<system-out>Unified recipe cases: 270
+Complete C adapter cases (three calls each): 8
+Complete heterogeneous batch cases: 3 worker limits, 3 calls each
+</system-out>
+	</testcase>
+	<testcase name="workflow_admission" classname="workflow_admission" time="17.5374" status="run">
+		<properties/>
+		<system-out>Completed-frame batch cache: 36 batches with mixed sizes/routes, cache retention and tight retirement
+</system-out>
+	</testcase>
+	<testcase name="workflow_admission_cpu" classname="workflow_admission_cpu" time="0.154857" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="codec_install_consumer" classname="codec_install_consumer" time="14.8451" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="quality_benchmark_cli" classname="quality_benchmark_cli" time="0.161137" status="run">
+		<properties>
+			<property name="cmake_labels" value="benchmark;cli;metal"/>
+		</properties>
+		<system-out>...
+----------------------------------------------------------------------
+Ran 3 tests in 0.107s
+
+OK
+</system-out>
+	</testcase>
+	<testcase name="encoding_benchmark_cli" classname="encoding_benchmark_cli" time="1.42306" status="run">
+		<properties>
+			<property name="cmake_labels" value="benchmark;cli;metal"/>
+		</properties>
+		<system-out>.............
+----------------------------------------------------------------------
+Ran 13 tests in 1.378s
+
+OK
+</system-out>
+	</testcase>
+	<testcase name="image_batch_benchmark_cli" classname="image_batch_benchmark_cli" time="0.835599" status="run">
+		<properties>
+			<property name="cmake_labels" value="benchmark;cli"/>
+		</properties>
+		<system-out>.....
+----------------------------------------------------------------------
+Ran 5 tests in 0.791s
+
+OK
+</system-out>
+	</testcase>
+</testsuite>

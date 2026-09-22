@@ -1,0 +1,16 @@
+{
+  "command": [
+    "ctest",
+    "--test-dir",
+    "build/production",
+    "--output-on-failure",
+    "-R",
+    "^(metal_aq_host_storage_plan|metal_aq_host_storage_plan_legacy|encoding_benchmark_cli)$",
+    "--output-junit",
+    "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/integration-tests.xml"
+  ],
+  "env": {
+    "MTL_DEBUG_LAYER": "1",
+    "MTL_SHADER_VALIDATION": "1"
+  }
+}

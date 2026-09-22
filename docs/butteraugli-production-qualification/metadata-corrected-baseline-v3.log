@@ -1,0 +1,8 @@
+2026-09-21 23:33:46.755 metadata-corrected-baseline-v3[8666:340194793] Metal API Validation Enabled
+2026-09-21 23:33:46.755 metadata-corrected-baseline-v3[8666:340194793] Metal GPU Validation Enabled
+27 GPU-family/indirect AQ consumer cases matched CPU dispatch exactly
+27 full device-metadata AQ consumer cases matched CPU dispatch exactly
+12 malformed device maps rejected atomically through AQ
+42 managed allocation failures rejected atomically (37 after completion)
+3 complete resident-metadata lifetimes fit declared admission
+292 exact CPU-builder/GPU-metadata cases passed; guards, failure and reuse passed

@@ -1,0 +1,10 @@
+[
+  "ctest",
+  "--test-dir",
+  "/Users/yunhocho/GitHub/gjxl-butteraugli-production-base/build/production",
+  "-R",
+  "^(metal_aq_strategy_metadata|metal_aq_host_storage_plan|encoding_benchmark_cli)$",
+  "--output-on-failure",
+  "--output-junit",
+  "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline-failure-control.xml"
+]

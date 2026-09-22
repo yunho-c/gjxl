@@ -1,0 +1,13 @@
+[
+  "cmake",
+  "-S",
+  "/Users/yunhocho/GitHub/gjxl-butteraugli-production",
+  "-B",
+  "/Users/yunhocho/GitHub/gjxl-butteraugli-production/build/production",
+  "-G",
+  "Ninja",
+  "-DCMAKE_BUILD_TYPE=Release",
+  "-DGJXL_BUILD_TESTS=ON",
+  "-DGJXL_BUILD_BENCHMARKS=ON",
+  "-DGJXL_ENABLE_LIBJXL_REFERENCE=OFF"
+]
