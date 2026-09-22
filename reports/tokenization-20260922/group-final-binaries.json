@@ -1,0 +1,10 @@
+{
+  "capture": {
+    "path": "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/group-final-profile/capture",
+    "sha256": "4ec2a256fbc792d71b3a2df1c991727371450d5db49ec233e0aa5e7fe8b08b20"
+  },
+  "batch": {
+    "path": "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/group-final-batch/candidate",
+    "sha256": "d4b0199fee456238d3e14639253f86b2cc6fd0b4217c07de1952af63a0300dbc"
+  }
+}

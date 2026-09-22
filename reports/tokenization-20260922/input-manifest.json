@@ -1,0 +1,54 @@
+{
+  "source_config": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/gjxl-stages-q80-20260921/config.json",
+  "source_config_sha256": "7cddd269ca6716efbe3974411764f113222b9ee3dc3aa3ba237f3dcd804484fe",
+  "images": [
+    {
+      "image_id": "kodak/01",
+      "resolution_class": "kodak_0_4mp",
+      "width": 768,
+      "height": 512,
+      "input_path": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/kodak/01.pfm",
+      "input_sha256": "85de56c3dbb999e135db21f4944a7d1e9ba0307d0499946721aa021fc0bfeb96"
+    },
+    {
+      "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "resolution_class": "clic_1_8_to_3_4mp",
+      "width": 1507,
+      "height": 2048,
+      "input_path": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/097cb426910ba8ce2525dd8bb7fb1777.pfm",
+      "input_sha256": "77aecbd6afc55bc5cb736f91aec30fdcb9a2a8f6a83acd2d740e8134ed5ac500"
+    },
+    {
+      "image_id": "clic2024_test/5e5ce43575fa67fdc0dd37146d7f479e",
+      "resolution_class": "clic_1_8_to_3_4mp",
+      "width": 2048,
+      "height": 1641,
+      "input_path": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/clic2024_test/5e5ce43575fa67fdc0dd37146d7f479e.pfm",
+      "input_sha256": "6873ea3ad57a3dfa1a95da508f4d3ad1523f2b6fad7d5b0986ec9d556dab1873"
+    },
+    {
+      "image_id": "unsplash/campus_interior/12mp",
+      "resolution_class": "12mp",
+      "width": 4249,
+      "height": 2824,
+      "input_path": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/campus_interior/12mp.pfm",
+      "input_sha256": "d64dc822ae9900fd3a0c8249ac62b1555b2c3da3389e62444bf7e8a3ec53e4e0"
+    },
+    {
+      "image_id": "unsplash/alpine_lake/24mp",
+      "resolution_class": "24mp",
+      "width": 6000,
+      "height": 4000,
+      "input_path": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/alpine_lake/24mp.pfm",
+      "input_sha256": "1d15d26a54e295f964bedd297556d72a1dd8db67d98c0514f8e5ad10981d19d4"
+    },
+    {
+      "image_id": "unsplash/forest_stream/48mp",
+      "resolution_class": "48mp",
+      "width": 8089,
+      "height": 5934,
+      "input_path": "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/48mp.pfm",
+      "input_sha256": "c7d6f149977ae44390eb34de6f531926bfa6537fa12fa82d20d1fdccbdb500d8"
+    }
+  ]
+}

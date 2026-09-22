@@ -1,0 +1,27 @@
+{
+  "run": "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/group-final-batch",
+  "images": "1,4,5",
+  "efforts": "1",
+  "batches": "1,4",
+  "rounds": 3,
+  "samples": 5,
+  "modes": "release,joined,group256",
+  "cpu": 8,
+  "memory_gib": 36,
+  "variants": "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/group-dct8-qualification-variants.json",
+  "runner_sha256": "669e4a972adf181b7d1e861ca00444910a982a2d61c9e31a4d09a6c7e524adf6",
+  "variant_overrides": {
+    "release": {
+      "GJXL_EXPERIMENT_PARALLEL_TOKEN_RELEASE": "1"
+    },
+    "group256": {
+      "GJXL_EXPERIMENT_GPU_TOKENS": "1",
+      "GJXL_EXPERIMENT_TOKEN_COMPACT": "2",
+      "GJXL_EXPERIMENT_TOKEN_OVERLAP": "1",
+      "GJXL_EXPERIMENT_TOKEN_SHARDS": "1",
+      "GJXL_EXPERIMENT_TOKEN_SCALAR_DCT8": "2",
+      "GJXL_EXPERIMENT_TOKEN_GROUP_DCT8": "1",
+      "GJXL_EXPERIMENT_TOKEN_GROUP_THREADS": "256"
+    }
+  }
+}
