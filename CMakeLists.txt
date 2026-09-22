@@ -3458,6 +3458,19 @@ if(GJXL_BUILD_TESTS)
   add_test(NAME compatibility_workflow_storage_plan COMMAND gjxl_compatibility_workflow_storage_plan_test)
   set_tests_properties(compatibility_workflow_storage_plan PROPERTIES TIMEOUT 300)
 
+  # Exercise the original fallback layout on the same physical device, including
+  # the resident AQ path, without exposing a production tuning switch.
+  foreach(target gjxl_metal_butteraugli_test gjxl_metal_aq_evaluation_test
+                 gjxl_metal_aq_host_storage_plan_test)
+    target_include_directories(${target} SYSTEM PRIVATE third_party/metal-cpp)
+  endforeach()
+  add_test(NAME metal_butteraugli_legacy
+    COMMAND gjxl_metal_butteraugli_test --legacy-butteraugli)
+  add_test(NAME metal_aq_evaluation_legacy
+    COMMAND gjxl_metal_aq_evaluation_test --legacy-butteraugli)
+  add_test(NAME metal_aq_host_storage_plan_legacy
+    COMMAND gjxl_metal_aq_host_storage_plan_test --legacy-butteraugli)
+
   add_executable(gjxl_metal_cache_admission_test tests/metal_cache_admission_test.cpp)
   target_link_libraries(gjxl_metal_cache_admission_test PRIVATE gjxl_metal)
   target_include_directories(gjxl_metal_cache_admission_test SYSTEM PRIVATE third_party/metal-cpp)

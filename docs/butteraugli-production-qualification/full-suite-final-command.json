@@ -1,0 +1,8 @@
+[
+  "ctest",
+  "--test-dir",
+  "build/production",
+  "--output-on-failure",
+  "--output-junit",
+  "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/full-suite-final.xml"
+]

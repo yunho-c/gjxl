@@ -1,0 +1,13 @@
+{
+  "command": [
+    "ctest",
+    "--test-dir",
+    "build/production",
+    "-R",
+    "^metal_aq_strategy_metadata$",
+    "--output-on-failure",
+    "--output-junit",
+    "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/metadata-candidate.xml"
+  ],
+  "metal_validation": true
+}

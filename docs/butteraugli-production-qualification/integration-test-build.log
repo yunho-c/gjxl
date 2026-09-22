@@ -1,0 +1,136 @@
+[0/1] Re-running CMake...
+-- Performing Test GJXL_CXX_STORAGE_TOOLCHAIN_SUPPORTED
+-- Performing Test GJXL_CXX_STORAGE_TOOLCHAIN_SUPPORTED - Success
+-- Performing Test GJXL_OBJCXX_STORAGE_TOOLCHAIN_SUPPORTED
+-- Performing Test GJXL_OBJCXX_STORAGE_TOOLCHAIN_SUPPORTED - Success
+-- Configuring done (0.8s)
+-- Generating done (0.1s)
+-- Build files have been written to: /Users/yunhocho/GitHub/gjxl-butteraugli-production/build/production
+[1/113] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_aq_profile_storage_plan.cpp.o
+[2/113] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_aq_host_storage_plan.cpp.o
+[3/113] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_aq_butteraugli.cpp.o
+[4/113] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_aq_postprocess.cpp.o
+[5/113] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_aq_strategy_dispatch.cpp.o
+[6/113] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_butteraugli.cpp.o
+[7/113] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_submission_storage_plan.cpp.o
+[8/113] Building CXX object CMakeFiles/gjxl_codestream.dir/src/codestream/resident_workflow_storage_plan.cpp.o
+[9/113] Building CXX object CMakeFiles/gjxl_codestream.dir/src/codestream/compatibility_workflow_storage_plan.cpp.o
+[10/113] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_aq_reconstruction.cpp.o
+[11/113] Building CXX object CMakeFiles/gjxl_metal_aq_profile_storage_plan_test.dir/tests/metal_aq_profile_storage_plan_test.cpp.o
+[12/113] Building CXX object CMakeFiles/gjxl_metal_coefficient_probe.dir/benchmarks/metal_coefficient_probe.cpp.o
+[13/113] Building CXX object CMakeFiles/gjxl_metal_dct_image_probe.dir/benchmarks/metal_dct_image_probe.cpp.o
+[14/113] Building CXX object CMakeFiles/gjxl_metal_epf_probe.dir/benchmarks/metal_epf_probe.cpp.o
+[15/113] Building CXX object CMakeFiles/gjxl_metal.dir/src/gpu/metal/metal_aq_evaluation.cpp.o
+[16/113] Linking CXX static library libgjxl_metal.a
+[17/113] Building CXX object CMakeFiles/gjxl_metal_aq_host_storage_plan_test.dir/tests/metal_aq_host_storage_plan_test.cpp.o
+[18/113] Linking CXX static library libgjxl_codestream.a
+[19/113] Linking CXX executable gjxl_metal_embedded_library_test
+[20/113] Linking CXX executable gjxl_profile_storage_plan_metal_test
+ld: warning: ignoring duplicate libraries: 'libgjxl_gpu_ops.a'
+[21/113] Linking CXX executable gjxl_gpu_primitives_metal_test
+[22/113] Linking CXX executable gjxl_butteraugli_device_operation_test
+ld: warning: ignoring duplicate libraries: 'libgjxl_codec.a'
+[23/113] Linking CXX executable gjxl_metal_aq_evaluation_test
+ld: warning: ignoring duplicate libraries: 'libgjxl_codec.a'
+[24/113] Linking CXX executable gjxl_metal_butteraugli_test
+ld: warning: ignoring duplicate libraries: 'libgjxl_codec.a'
+[25/113] Linking CXX executable gjxl_metal_aq_reconstruction_test
+ld: warning: ignoring duplicate libraries: 'libgjxl_codec.a'
+[26/113] Linking CXX executable gjxl_encode
+[27/113] Linking CXX executable gjxl_planning_recipes_test
+[28/113] Linking CXX executable gjxl_bit_writer_word_test
+[29/113] Linking CXX executable gjxl_rate_control_probe
+[30/113] Linking CXX executable gjxl_bit_writer_append_test
+[31/113] Linking CXX executable gjxl_codestream_conformance_test
+[32/113] Linking CXX executable gjxl_ans_bit_emission_test
+[33/113] Linking CXX executable gjxl_bit_writer_test
+[34/113] Linking CXX executable gjxl_entropy_test
+[35/113] Linking CXX executable gjxl_sections_test
+[36/113] Linking CXX executable gjxl_context_map_test
+[37/113] Linking CXX executable gjxl_ans_reverse_bits_test
+[38/113] Linking CXX executable gjxl_dc_group_test
+[39/113] Linking CXX executable gjxl_ac_direct_tokenization_test
+[40/113] Linking CXX executable gjxl_ac_group_test
+[41/113] Linking CXX executable gjxl_coefficient_order_test
+[42/113] Linking CXX executable gjxl_token_storage_plan_test
+[43/113] Linking CXX executable gjxl_entropy_storage_plan_test
+[44/113] Linking CXX executable gjxl_serializer_storage_plan_test
+[45/113] Linking CXX executable gjxl_representation_storage_plan_test
+[46/113] Linking CXX executable gjxl_ac_section_validation_test
+[47/113] Linking CXX executable gjxl_compact_frame_allocation_test
+[48/113] Linking CXX executable gjxl_frame_validation_test
+[49/113] Linking CXX executable gjxl_compact_vardct_frame_test
+[50/113] Linking CXX executable gjxl_sparse_coefficients_test
+[51/113] Linking CXX executable gjxl_sparse_vardct_frame_test
+[52/113] Linking CXX executable gjxl_sparse_frame_allocation_test
+[53/113] Linking CXX executable gjxl_block_context_map_test
+[54/113] Linking CXX executable gjxl_codestream_encoder_test
+[55/113] Linking CXX executable gjxl_codestream_workflow_test
+[56/113] Linking CXX executable gjxl_codestream_batch_workflow_test
+[57/113] Linking CXX executable gjxl_batch_lifecycle_test
+[58/113] Linking CXX executable gjxl_batch_scheduling_test
+[59/113] Linking CXX executable gjxl_rate_control_search_test
+[60/113] Linking CXX executable gjxl_worker_launch_failure_test
+[61/113] Linking CXX executable gjxl_c_api_test
+[62/113] Linking CXX executable gjxl_c_api_cpp_test
+[63/113] Linking CXX executable gjxl_managed_allocator_test
+[64/113] Linking CXX executable gjxl_workflow_cpu_coordination_test
+[65/113] Linking CXX executable gjxl_serializer_storage_test
+[66/113] Linking CXX executable gjxl_publication_storage_test
+[67/113] Linking CXX executable gjxl_workflow_publication_test
+[68/113] Linking CXX executable gjxl_cpu_workflow_storage_plan_test
+[69/113] Linking CXX executable gjxl_quantization_pipeline_test
+[70/113] Linking CXX executable gjxl_dc_context_tree_test
+[71/113] Linking CXX executable gjxl_low_effort_strategy_policy_test
+[72/113] Linking CXX executable gjxl_dc_policy_test
+[73/113] Linking CXX executable gjxl_vardct_frame_view_test
+[74/113] Linking CXX executable gjxl_adaptive_quantization_gpu_policy_test
+ld: warning: ignoring duplicate libraries: 'libgjxl_codec.a'
+[75/113] Linking CXX executable gjxl_metal_aq_postprocess_test
+ld: warning: ignoring duplicate libraries: 'libgjxl_codec.a'
+[76/113] Linking CXX executable gjxl_ac_strategy_metal_test
+ld: warning: ignoring duplicate libraries: 'libgjxl_codec.a'
+[77/113] Linking CXX executable gjxl_dct_test
+[78/113] Linking CXX executable gjxl_ac_strategy_gpu_search_test
+ld: warning: ignoring duplicate libraries: 'libgjxl_gpu_ops.a'
+[79/113] Linking CXX executable gjxl_quantization_gpu_pipeline_test
+ld: warning: ignoring duplicate libraries: 'libgjxl_gpu_ops.a'
+[80/113] Linking CXX executable gjxl_metal_aq_strategy_metadata_test
+ld: warning: ignoring duplicate libraries: 'libgjxl_codec.a'
+[81/113] Linking CXX executable gjxl_metal_completed_frame_test
+ld: warning: ignoring duplicate libraries: 'libgjxl_gpu_ops.a'
+[82/113] Linking CXX executable gjxl_metal_resource_budget_test
+[83/113] Linking CXX executable gjxl_metal_diagnostic_storage_test
+[84/113] Linking CXX executable gjxl_metal_storage_plan_test
+[85/113] Linking CXX executable gjxl_metal_submission_storage_plan_test
+[86/113] Linking CXX executable gjxl_metal_aq_host_storage_plan_test
+[87/113] Linking CXX executable gjxl_metal_dc_processing_test
+ld: warning: ignoring duplicate libraries: 'libgjxl_codec.a'
+[88/113] Linking CXX executable gjxl_metal_aq_profile_storage_plan_test
+[89/113] Linking CXX executable gjxl_resident_workflow_storage_plan_test
+[90/113] Linking CXX executable gjxl_compatibility_workflow_storage_plan_test
+[91/113] Linking CXX executable gjxl_metal_cache_admission_test
+[92/113] Linking CXX executable gjxl_workflow_storage_plan_test
+[93/113] Linking CXX executable gjxl_workflow_admission_test
+[94/113] Linking CXX executable gjxl_metal_qualification
+[95/113] Linking CXX executable gjxl_metal_butteraugli_benchmark
+ld: warning: ignoring duplicate libraries: 'libgjxl_codec.a'
+[96/113] Linking CXX executable gjxl_quality_benchmark
+[97/113] Linking CXX executable gjxl_dc_prediction_benchmark
+[98/113] Linking CXX executable gjxl_dc_tree_benchmark
+[99/113] Linking CXX executable gjxl_dc_processing_benchmark
+[100/113] Linking CXX executable gjxl_encoding_benchmark
+[101/113] Linking CXX executable gjxl_image_batch_benchmark
+[102/113] Linking CXX executable gjxl_dct_benchmark
+[103/113] Linking CXX executable gjxl_metal_coefficient_probe
+[104/113] Linking CXX executable gjxl_metal_dct_image_probe
+[105/113] Linking CXX executable gjxl_metal_precision_probe
+[106/113] Linking CXX executable gjxl_metal_precision_metric_probe
+[107/113] Linking CXX executable gjxl_metal_butteraugli_filter_probe
+[108/113] Linking CXX executable gjxl_metal_butteraugli_reduction_probe
+[109/113] Linking CXX executable gjxl_metal_epf_probe
+[110/113] Linking CXX executable gjxl_metal_ac_candidate_probe
+[111/113] Linking CXX executable gjxl_ac_strategy_benchmark
+ld: warning: ignoring duplicate libraries: 'libgjxl_codec.a'
+[112/113] Linking CXX executable gjxl_ac_strategy_search_benchmark
+ld: warning: ignoring duplicate libraries: 'libgjxl_gpu_ops.a'

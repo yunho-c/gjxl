@@ -1,0 +1,11 @@
+{
+  "command": [
+    "cmake",
+    "--build",
+    "build/production",
+    "-j8",
+    "--target",
+    "gjxl_metal_aq_strategy_metadata_test"
+  ],
+  "metal_validation": false
+}

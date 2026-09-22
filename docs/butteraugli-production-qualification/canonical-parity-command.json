@@ -1,0 +1,14 @@
+[
+  "python3",
+  "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/parity.py",
+  "--baseline-build",
+  "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline",
+  "--candidate-build",
+  "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/candidate",
+  "--corpus",
+  "/Users/yunhocho/GitHub/gjxl-libjxl-comparison/build/libjxl-comparison/corpus-phase1-pilot-pinned/canonical",
+  "--decoder",
+  "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/tools/djxl",
+  "--output",
+  "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/canonical-parity-v2"
+]

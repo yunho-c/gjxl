@@ -1,0 +1,16 @@
+{
+  "base": "3b0de6d9d47846f6aa13f33ad6cca7e24e52ada6",
+  "files": {
+    "build-command.json": "fc2b6d30bc59d30012ba0782632f55d21ae604d40e7ad43655fa6717ba78563a",
+    "gjxl.metallib": "8a9f5ca5f42132b5d70a14694d901c6abacd781f08d3ee2c66ad729417d268d6",
+    "gjxl_encode": "7fbee34cc7be5f9d1bb73ace58e44c03cff64fb95ac63caa98da6df13af17924",
+    "encode_probe": "e2cde5ee4bcba88f1881ec077311b75c623f23cdf3c286d9e22b67e5f7405cbf",
+    "build.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "sources": {
+    "src/gpu/metal/kernels/butteraugli.metal": "7649d5359c60b21ff97574772f25dcfca60dcdf37c662722eed3f456a2c805ea",
+    "src/gpu/metal/metal_butteraugli.cpp": "fe03cb586acba7dfafb3fb08453261a18880d67bac10749c49ece28e64035c7f",
+    "src/gpu/metal/metal_backend_internal.h": "47b78de985b8d8c933c1a2a6845ed32cf0efe255559c61cc6b60db977f67e0c9"
+  },
+  "probe_sha256": "6641021fe10fadf757bce839abfdf82ffc16a404553a1e48888732fc9c0904b4"
+}

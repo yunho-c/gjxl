@@ -18,6 +18,7 @@
 #include "gpu/metal/metal_aq_host_storage_plan.h"
 #include "gpu/metal/metal_aq_profile_storage_plan.h"
 #include "gpu/metal/metal_backend.h"
+#include "metal_butteraugli_traffic_test_utils.h"
 #include "gpu/metal/metal_storage_plan.h"
 #include "gpu/metal/metal_submission_storage_plan.h"
 #include "gpu/ops/gpu_execution_profile_internal.h"
@@ -454,7 +455,13 @@ bool CheckAuxiliaryProfiles(GpuBackend &gpu) {
                        size_t dispatches = 0;
                        for (const auto& stage : result.submissions[0].stages)
                          dispatches += stage.dispatches.size();
-                       return dispatches == plan.reference_dispatches;
+                       // The allocation-free planner covers both hardware paths.
+                       // Shared filters remove five psycho dispatches plus
+                       // one reference-mask pass at each prepared scale.
+                       const bool shared = MetalButteraugliTrafficTestAccess::Enabled(gpu);
+                       const size_t scales = extent.width >= 15 && extent.height >= 15 ? 2 : 1;
+                       return dispatches == plan.reference_dispatches -
+                         (shared ? 6 * scales : 0);
                      }(),
                    "Reference preparation count is not exact")) return false;
       }
@@ -1355,10 +1362,14 @@ bool CheckOperationFailures(GpuBackend &gpu) {
 } // namespace
 
 int main(int argc, char **argv) {
+  if (argc == 2 && std::string_view(argv[1]) == "--legacy-butteraugli") {
+    gjxl::test::force_legacy_butteraugli = true;
+    argc = 1;
+  }
   if (argc == 2 && (std::string_view(argv[1]) == "--exact-group-boundary" ||
                     std::string_view(argv[1]) == "--exact-group-underplan")) {
     std::unique_ptr<GpuBackend> gpu;
-    return Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &gpu)) &&
+    return Ok(gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &gpu)) &&
                    CheckExactGroupBoundary(*gpu, std::string_view(argv[1]) ==
                                                      "--exact-group-underplan")
                ? EXIT_SUCCESS
@@ -1369,7 +1380,7 @@ int main(int argc, char **argv) {
   if (!CheckPlans())
     return EXIT_FAILURE;
   std::unique_ptr<GpuBackend> gpu;
-  if (!Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &gpu)) ||
+  if (!Ok(gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &gpu)) ||
       !CheckAuxiliaryProfiles(*gpu) || !CheckProfileInputs(*gpu) ||
       !CheckRuntime(*gpu) || !CheckPrepareFailures(*gpu) ||
       !CheckOperationFailures(*gpu) || !CheckExactGroupBoundary(*gpu))

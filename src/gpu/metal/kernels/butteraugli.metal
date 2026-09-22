@@ -1500,40 +1500,50 @@ kernel void gjxl_butteraugli_compose_f32(
 
 // Widths below 256 are used only when the entire block fits in Width lanes.
 // This omits zero-only upper tree levels without changing the nonzero sums.
-template <uint Width, bool SimdTail>
+inline L2Contributions
+l2_ac_only_contributions(device const float *rlow0, device const float *rlow1,
+                         device const float *rlow2, device const float *rmed0,
+                         device const float *rmed1, device const float *rmed2,
+                         device const float *rhigh0, device const float *rhigh1,
+                         device const float *dlow0, device const float *dlow1,
+                         device const float *dlow2, device const float *dmed0,
+                         device const float *dmed1, device const float *dmed2,
+                         device const float *dhigh0, device const float *dhigh1,
+                         device const float *malta_ac0,
+                         device const float *malta_ac1, uint reference_index,
+                         uint distorted_index, uint work_index,
+                         float asymmetry) {
+
+  L2Contributions values;
+  values.ac0 = malta_ac0[work_index];
+  values.ac1 = malta_ac1[work_index];
+  const float md2 = rmed2[reference_index] - dmed2[distorted_index];
+  values.ac2 = md2 * md2 * 16.2176043152f;
+  values.dc0 = 0.0f;
+  values.dc1 = 0.0f;
+  values.dc2 = 0.0f;
+  return values;
+}
+
+template <uint Width, bool SimdTail, bool PackedDC>
 __attribute__((always_inline)) inline void ResidentL2Reduce(
 
-  device const float* rlow0,
-  device const float* rlow1,
-  device const float* rlow2,
-  device const float* rmed0,
-  device const float* rmed1,
-  device const float* rmed2,
-  device const float* rhigh0,
-  device const float* rhigh1,
-  device const float* dlow0,
-  device const float* dlow1,
-  device const float* dlow2,
-  device const float* dmed0,
-  device const float* dmed1,
-  device const float* dmed2,
-  device const float* dhigh0,
-  device const float* dhigh1,
-  device const float* malta_ac0,
-  device const float* malta_ac1,
-  device const float* mask,
-  device const float* mask_blurred_reference,
-  device const float* mask_blurred_distorted,
-  device const float* sub_map,
-  device const uint2* anchors,
-  device float* block_distance,
-  device float* score_partials,
-  device atomic_uint* error,
-  constant ResidentReductionParams& params,
-  uint anchor_index,
-  uint thread_index,
-  threadgroup float* partial_sum,
-  threadgroup float* partial_maximum) {
+    device const float *rlow0, device const float *rlow1,
+    device const float *rlow2, device const float *rmed0,
+    device const float *rmed1, device const float *rmed2,
+    device const float *rhigh0, device const float *rhigh1,
+    device const float *dlow0, device const float *dlow1,
+    device const float *dlow2, device const float *dmed0,
+    device const float *dmed1, device const float *dmed2,
+    device const float *dhigh0, device const float *dhigh1,
+    device const float *malta_ac0, device const float *malta_ac1,
+    device const float *mask, device const float *mask_blurred_reference,
+    device const float *mask_blurred_distorted, device const float *sub_map,
+    device const uint2 *anchors, device float *block_distance,
+    device float *score_partials, device atomic_uint *error,
+    constant ResidentReductionParams &params, uint anchor_index,
+    uint thread_index, threadgroup float *partial_sum,
+    threadgroup float *partial_maximum) {
 
   if (anchor_index >= params.anchor_count) return;
 
@@ -1562,10 +1572,16 @@ __attribute__((always_inline)) inline void ResidentL2Reduce(
     const uint y = y_begin + local_index / valid_width;
     const uint index = y * params.work_stride + x;
     // Internal main-scale psycho and accumulation planes share work_stride.
-    const L2Contributions l2 = l2_contributions(
-      rlow0, rlow1, rlow2, rmed0, rmed1, rmed2, rhigh0, rhigh1,
-      dlow0, dlow1, dlow2, dmed0, dmed1, dmed2, dhigh0, dhigh1,
-      malta_ac0, malta_ac1, index, index, index, params.asymmetry);
+    const L2Contributions l2 =
+        PackedDC
+            ? l2_ac_only_contributions(
+                  rlow0, rlow1, rlow2, rmed0, rmed1, rmed2, rhigh0, rhigh1,
+                  dlow0, dlow1, dlow2, dmed0, dmed1, dmed2, dhigh0, dhigh1,
+                  malta_ac0, malta_ac1, index, index, index, params.asymmetry)
+            : l2_contributions(rlow0, rlow1, rlow2, rmed0, rmed1, rmed2, rhigh0,
+                               rhigh1, dlow0, dlow1, dlow2, dmed0, dmed1, dmed2,
+                               dhigh0, dhigh1, malta_ac0, malta_ac1, index,
+                               index, index, params.asymmetry);
     const float difference =
       mask_blurred_reference[index] - mask_blurred_distorted[index];
     const float masked_ac_y =
@@ -1573,8 +1589,9 @@ __attribute__((always_inline)) inline void ResidentL2Reduce(
     const float mask_value = mask_y(mask[index]);
     const float dc_mask_value = mask_dc_y(mask[index]);
     const float masked_dc =
-      l2.dc0 * params.x_multiplier * dc_mask_value +
-      l2.dc1 * dc_mask_value + l2.dc2 * dc_mask_value;
+        PackedDC ? dlow0[index]
+                 : (l2.dc0 * params.x_multiplier * dc_mask_value +
+                    l2.dc1 * dc_mask_value + l2.dc2 * dc_mask_value);
     const float masked_ac =
       l2.ac0 * params.x_multiplier * mask_value +
       masked_ac_y * mask_value + l2.ac2 * mask_value;
@@ -1641,52 +1658,66 @@ __attribute__((always_inline)) inline void ResidentL2Reduce(
   }
 }
 
-#define GJXL_RESIDENT_L2_KERNEL(name, width, simd_tail) \
-kernel void name( \
- \
-  device const float* rlow0 [[buffer(0)]], \
-  device const float* rlow1 [[buffer(1)]], \
-  device const float* rlow2 [[buffer(2)]], \
-  device const float* rmed0 [[buffer(3)]], \
-  device const float* rmed1 [[buffer(4)]], \
-  device const float* rmed2 [[buffer(5)]], \
-  device const float* rhigh0 [[buffer(6)]], \
-  device const float* rhigh1 [[buffer(7)]], \
-  device const float* dlow0 [[buffer(8)]], \
-  device const float* dlow1 [[buffer(9)]], \
-  device const float* dlow2 [[buffer(10)]], \
-  device const float* dmed0 [[buffer(11)]], \
-  device const float* dmed1 [[buffer(12)]], \
-  device const float* dmed2 [[buffer(13)]], \
-  device const float* dhigh0 [[buffer(14)]], \
-  device const float* dhigh1 [[buffer(15)]], \
-  device const float* malta_ac0 [[buffer(16)]], \
-  device const float* malta_ac1 [[buffer(17)]], \
-  device const float* mask [[buffer(18)]], \
-  device const float* mask_blurred_reference [[buffer(19)]], \
-  device const float* mask_blurred_distorted [[buffer(20)]], \
-  device const float* sub_map [[buffer(21)]], \
-  device const uint2* anchors [[buffer(22)]], \
-  device float* block_distance [[buffer(23)]], \
-  device float* score_partials [[buffer(24)]], \
-  device atomic_uint* error [[buffer(25)]], \
-  constant ResidentReductionParams& params [[buffer(26)]], \
-  uint anchor_index [[threadgroup_position_in_grid]], \
-  uint thread_index [[thread_index_in_threadgroup]]) { \
-  threadgroup float partial_sum[width]; \
-  threadgroup float partial_maximum[width]; \
-  ResidentL2Reduce<width, simd_tail>( \
-    rlow0, rlow1, rlow2, rmed0, rmed1, rmed2, rhigh0, rhigh1, dlow0, dlow1, dlow2, dmed0, dmed1, dmed2, dhigh0, dhigh1, malta_ac0, malta_ac1, mask, mask_blurred_reference, mask_blurred_distorted, sub_map, anchors, block_distance, score_partials, error, params, anchor_index, thread_index, \
-    partial_sum, partial_maximum); \
-}
+#define GJXL_RESIDENT_L2_KERNEL(name, width, simd_tail, packed_dc)             \
+  kernel void name(                                                            \
+                                                                               \
+      device const float *rlow0 [[buffer(0)]],                                 \
+      device const float *rlow1 [[buffer(1)]],                                 \
+      device const float *rlow2 [[buffer(2)]],                                 \
+      device const float *rmed0 [[buffer(3)]],                                 \
+      device const float *rmed1 [[buffer(4)]],                                 \
+      device const float *rmed2 [[buffer(5)]],                                 \
+      device const float *rhigh0 [[buffer(6)]],                                \
+      device const float *rhigh1 [[buffer(7)]],                                \
+      device const float *dlow0 [[buffer(8)]],                                 \
+      device const float *dlow1 [[buffer(9)]],                                 \
+      device const float *dlow2 [[buffer(10)]],                                \
+      device const float *dmed0 [[buffer(11)]],                                \
+      device const float *dmed1 [[buffer(12)]],                                \
+      device const float *dmed2 [[buffer(13)]],                                \
+      device const float *dhigh0 [[buffer(14)]],                               \
+      device const float *dhigh1 [[buffer(15)]],                               \
+      device const float *malta_ac0 [[buffer(16)]],                            \
+      device const float *malta_ac1 [[buffer(17)]],                            \
+      device const float *mask [[buffer(18)]],                                 \
+      device const float *mask_blurred_reference [[buffer(19)]],               \
+      device const float *mask_blurred_distorted [[buffer(20)]],               \
+      device const float *sub_map [[buffer(21)]],                              \
+      device const uint2 *anchors [[buffer(22)]],                              \
+      device float *block_distance [[buffer(23)]],                             \
+      device float *score_partials [[buffer(24)]],                             \
+      device atomic_uint *error [[buffer(25)]],                                \
+      constant ResidentReductionParams &params [[buffer(26)]],                 \
+      uint anchor_index [[threadgroup_position_in_grid]],                      \
+      uint thread_index [[thread_index_in_threadgroup]]) {                     \
+    threadgroup float partial_sum[width];                                      \
+    threadgroup float partial_maximum[width];                                  \
+    ResidentL2Reduce<width, simd_tail, packed_dc>(                             \
+        rlow0, rlow1, rlow2, rmed0, rmed1, rmed2, rhigh0, rhigh1, dlow0,       \
+        dlow1, dlow2, dmed0, dmed1, dmed2, dhigh0, dhigh1, malta_ac0,          \
+        malta_ac1, mask, mask_blurred_reference, mask_blurred_distorted,       \
+        sub_map, anchors, block_distance, score_partials, error, params,       \
+        anchor_index, thread_index, partial_sum, partial_maximum);             \
+  }
 
-GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_f32, 256, false)
-GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_w64_tree, 64, false)
-GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_w64_simd, 64, true)
-GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_w128_tree, 128, false)
-GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_w128_simd, 128, true)
-GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_w256_tree, 256, false)
-GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_w256_simd, 256, true)
+GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_f32, 256, false,
+                        false)
+GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_w64_tree, 64, false,
+                        false)
+GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_w64_simd, 64, true,
+                        false)
+GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_w128_tree, 128,
+                        false, false)
+GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_w128_simd, 128,
+                        true, false)
+GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_w256_tree, 256,
+                        false, false)
+GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_resident_l2_reduce_w256_simd, 256,
+                        true, false)
+
+GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_packed_dc_reduce_f32, 256, false, true)
+GJXL_RESIDENT_L2_KERNEL(gjxl_butteraugli_packed_dc_reduce_w64_simd, 64, true,
+                        true)
 
 #undef GJXL_RESIDENT_L2_KERNEL
 
@@ -1731,3 +1762,1539 @@ kernel void gjxl_butteraugli_resident_parameters(
   records[i].butteraugli[5] = records[i].reconstruction[8];
   records[i].butteraugli[6] = records[i].reconstruction[9];
 }
+
+// Shared-load filters preserve ascending tap order, the horizontal FP32
+// rounding boundary and clipped-support normalization. Adjacent outputs share
+// loads only; they never share an accumulator or reassociate its arithmetic.
+struct ButteraugliPackedDCParams {
+  uint reference_stride, mask_stride;
+  float x_multiplier;
+};
+template <uint Outputs, uint Stripes, uint PixelsPerThread,
+          typename WeightPointer>
+inline void ButteraugliLowMediumPackedDC(
+
+    device const float *input0, device const float *input1,
+    device const float *input2, WeightPointer weights, device float *low0,
+    device float *low1, device float *low2, device float *medium0,
+    device float *medium1, device float *medium2,
+    constant FrequencyLowMediumTiledParams &params,
+    device const float *reference_low0, device const float *reference_low1,
+    device const float *reference_low2, device const float *reference_mask,
+    constant ButteraugliPackedDCParams &dc_params, threadgroup float *scratch,
+    uint2 local_position, uint2 group_position, uint2 group_size) {
+
+  constexpr int kRadius = 16;
+  const uint tile_height = 64u + 2 * uint(kRadius);
+  const uint horizontal_stride = 16u;
+  const uint horizontal_plane_size = horizontal_stride * tile_height;
+  threadgroup float *horizontal0 = scratch;
+  threadgroup float *horizontal1 = horizontal0 + horizontal_plane_size;
+  threadgroup float *horizontal2 = horizontal1 + horizontal_plane_size;
+
+  const uint thread_index = local_position.y * group_size.x + local_position.x;
+  const uint thread_count = group_size.x * group_size.y;
+  const int group_x = int(group_position.x * 16u);
+  for (uint stripe = 0; stripe < Stripes; ++stripe) {
+    const int group_y = int(group_position.y * (64u * Stripes) + 64u * stripe);
+    const int horizontal_origin_y = group_y - kRadius;
+
+    for (uint pair_index =
+             thread_index + (stripe == 0u ? 0u : 32u * 16u / Outputs);
+         pair_index < horizontal_plane_size / Outputs;
+         pair_index += thread_count) {
+      const uint local_x = (pair_index % (16u / Outputs)) * Outputs;
+      const uint tile_y = pair_index / (16u / Outputs);
+      const int first_x = group_x + int(local_x);
+      const int y = horizontal_origin_y + int(tile_y);
+      float sums0[Outputs], sums1[Outputs], sums2[Outputs],
+          weight_sums[Outputs];
+      for (uint p = 0; p < Outputs; ++p) {
+        sums0[p] = 0.0f;
+        sums1[p] = 0.0f;
+        sums2[p] = 0.0f;
+        weight_sums[p] = 0.0f;
+      }
+      if (first_x < int(params.width) && y >= 0 && y < int(params.height)) {
+        if (first_x >= kRadius &&
+            first_x + int(Outputs) - 1 + kRadius < int(params.width)) {
+          if (Outputs == 2u) {
+            {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + 0);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[0 - 0];
+                weight_sums[0] += w;
+                sums0[0] += v0 * w;
+                sums1[0] += v1 * w;
+                sums2[0] += v2 * w;
+              }
+            }
+            for (int t = 1; t < 33; ++t) {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + t);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[t - 0];
+                weight_sums[0] += w;
+                sums0[0] += v0 * w;
+                sums1[0] += v1 * w;
+                sums2[0] += v2 * w;
+              }
+              {
+                const float w = weights[t - 1];
+                weight_sums[1] += w;
+                sums0[1] += v0 * w;
+                sums1[1] += v1 * w;
+                sums2[1] += v2 * w;
+              }
+            }
+            {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + 33);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[33 - 1];
+                weight_sums[1] += w;
+                sums0[1] += v0 * w;
+                sums1[1] += v1 * w;
+                sums2[1] += v2 * w;
+              }
+            }
+          } else {
+            {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + 0);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[0 - 0];
+                weight_sums[0] += w;
+                sums0[0] += v0 * w;
+                sums1[0] += v1 * w;
+                sums2[0] += v2 * w;
+              }
+            }
+            {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + 1);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[1 - 0];
+                weight_sums[0] += w;
+                sums0[0] += v0 * w;
+                sums1[0] += v1 * w;
+                sums2[0] += v2 * w;
+              }
+              {
+                const float w = weights[1 - 1];
+                weight_sums[1] += w;
+                sums0[1] += v0 * w;
+                sums1[1] += v1 * w;
+                sums2[1] += v2 * w;
+              }
+            }
+            {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + 2);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[2 - 0];
+                weight_sums[0] += w;
+                sums0[0] += v0 * w;
+                sums1[0] += v1 * w;
+                sums2[0] += v2 * w;
+              }
+              {
+                const float w = weights[2 - 1];
+                weight_sums[1] += w;
+                sums0[1] += v0 * w;
+                sums1[1] += v1 * w;
+                sums2[1] += v2 * w;
+              }
+              {
+                const float w = weights[2 - 2];
+                weight_sums[2] += w;
+                sums0[2] += v0 * w;
+                sums1[2] += v1 * w;
+                sums2[2] += v2 * w;
+              }
+            }
+            for (int t = 3; t < 33; ++t) {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + t);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[t - 0];
+                weight_sums[0] += w;
+                sums0[0] += v0 * w;
+                sums1[0] += v1 * w;
+                sums2[0] += v2 * w;
+              }
+              {
+                const float w = weights[t - 1];
+                weight_sums[1] += w;
+                sums0[1] += v0 * w;
+                sums1[1] += v1 * w;
+                sums2[1] += v2 * w;
+              }
+              {
+                const float w = weights[t - 2];
+                weight_sums[2] += w;
+                sums0[2] += v0 * w;
+                sums1[2] += v1 * w;
+                sums2[2] += v2 * w;
+              }
+              {
+                const float w = weights[t - 3];
+                weight_sums[3] += w;
+                sums0[3] += v0 * w;
+                sums1[3] += v1 * w;
+                sums2[3] += v2 * w;
+              }
+            }
+            {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + 33);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[33 - 1];
+                weight_sums[1] += w;
+                sums0[1] += v0 * w;
+                sums1[1] += v1 * w;
+                sums2[1] += v2 * w;
+              }
+              {
+                const float w = weights[33 - 2];
+                weight_sums[2] += w;
+                sums0[2] += v0 * w;
+                sums1[2] += v1 * w;
+                sums2[2] += v2 * w;
+              }
+              {
+                const float w = weights[33 - 3];
+                weight_sums[3] += w;
+                sums0[3] += v0 * w;
+                sums1[3] += v1 * w;
+                sums2[3] += v2 * w;
+              }
+            }
+            {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + 34);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[34 - 2];
+                weight_sums[2] += w;
+                sums0[2] += v0 * w;
+                sums1[2] += v1 * w;
+                sums2[2] += v2 * w;
+              }
+              {
+                const float w = weights[34 - 3];
+                weight_sums[3] += w;
+                sums0[3] += v0 * w;
+                sums1[3] += v1 * w;
+                sums2[3] += v2 * w;
+              }
+            }
+            {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + 35);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[35 - 3];
+                weight_sums[3] += w;
+                sums0[3] += v0 * w;
+                sums1[3] += v1 * w;
+                sums2[3] += v2 * w;
+              }
+            }
+          }
+        } else {
+          const int first = max(0, first_x - kRadius);
+          const int last =
+              min(int(params.width) - 1, first_x + int(Outputs) - 1 + kRadius);
+          for (int source_x = first; source_x <= last; ++source_x) {
+            const uint input_index =
+                uint(y) * params.input_stride + uint(source_x);
+            const float v0 = input0[input_index], v1 = input1[input_index],
+                        v2 = input2[input_index];
+            for (uint p = 0; p < Outputs; ++p) {
+              const int x = first_x + int(p);
+              if (x < int(params.width) && source_x >= x - kRadius &&
+                  source_x <= x + kRadius) {
+                const float weight = weights[source_x + kRadius - x];
+                weight_sums[p] += weight;
+                sums0[p] += v0 * weight;
+                sums1[p] += v1 * weight;
+                sums2[p] += v2 * weight;
+              }
+            }
+          }
+        }
+      }
+      for (uint p = 0; p < Outputs; ++p) {
+        const uint index = tile_y * horizontal_stride + local_x + p;
+        horizontal0[index] =
+            weight_sums[p] == 0.0f ? 0.0f : sums0[p] / weight_sums[p];
+        horizontal1[index] =
+            weight_sums[p] == 0.0f ? 0.0f : sums1[p] / weight_sums[p];
+        horizontal2[index] =
+            weight_sums[p] == 0.0f ? 0.0f : sums2[p] / weight_sums[p];
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    const uint base_x = uint(group_x) + local_position.x;
+    const int first_y = group_y + int(local_position.y * 2u);
+    float vs0[2] = {0.0f, 0.0f}, vs1[2] = {0.0f, 0.0f}, vs2[2] = {0.0f, 0.0f},
+          vws[2] = {0.0f, 0.0f};
+    if (base_x < params.width) {
+      if (first_y >= kRadius && first_y + 1 + kRadius < int(params.height)) {
+        {
+          uint i = uint(first_y - kRadius - horizontal_origin_y) *
+                       horizontal_stride +
+                   local_position.x;
+          float w = weights[0];
+          vws[0] += w;
+          vs0[0] += horizontal0[i] * w;
+          vs1[0] += horizontal1[i] * w;
+          vs2[0] += horizontal2[i] * w;
+        }
+        for (int t = 1; t < 33; ++t) {
+          uint i = uint(first_y - kRadius + t - horizontal_origin_y) *
+                       horizontal_stride +
+                   local_position.x;
+          float v0 = horizontal0[i], v1 = horizontal1[i], v2 = horizontal2[i];
+          {
+            float w = weights[t];
+            vws[0] += w;
+            vs0[0] += v0 * w;
+            vs1[0] += v1 * w;
+            vs2[0] += v2 * w;
+          }
+          {
+            float w = weights[t - 1];
+            vws[1] += w;
+            vs0[1] += v0 * w;
+            vs1[1] += v1 * w;
+            vs2[1] += v2 * w;
+          }
+        }
+        {
+          uint i =
+              uint(first_y + 17 - horizontal_origin_y) * horizontal_stride +
+              local_position.x;
+          float w = weights[32];
+          vws[1] += w;
+          vs0[1] += horizontal0[i] * w;
+          vs1[1] += horizontal1[i] * w;
+          vs2[1] += horizontal2[i] * w;
+        }
+      } else {
+        for (uint p = 0; p < 2; ++p) {
+          int y = first_y + int(p);
+          if (y >= int(params.height))
+            continue;
+          int first = max(0, y - kRadius),
+              last = min(int(params.height) - 1, y + kRadius);
+          for (int sy = first; sy <= last; ++sy) {
+            float w = weights[sy + kRadius - y];
+            uint i = uint(sy - horizontal_origin_y) * horizontal_stride +
+                     local_position.x;
+            vws[p] += w;
+            vs0[p] += horizontal0[i] * w;
+            vs1[p] += horizontal1[i] * w;
+            vs2[p] += horizontal2[i] * w;
+          }
+        }
+      }
+    }
+    for (uint pixel = 0; pixel < 2; ++pixel) {
+      const uint2 position = uint2(base_x, uint(first_y) + pixel);
+      if (position.x >= params.width || position.y >= params.height)
+        continue;
+      const float low_x = vs0[pixel] / vws[pixel],
+                  low_y = vs1[pixel] / vws[pixel],
+                  low_b = vs2[pixel] / vws[pixel];
+      const uint input_index = position.y * params.input_stride + position.x;
+      const uint output_index = position.y * params.output_stride + position.x;
+      medium0[output_index] = input0[input_index] - low_x;
+      medium1[output_index] = input1[input_index] - low_y;
+      medium2[output_index] = input2[input_index] - low_b;
+      const float dlow0 = low_x * 33.832837186260f;
+      const float dlow1 = low_y * 14.458268100570f;
+      const float dlow2 = unfused_multiply_add(-0.362267051518f, low_y, low_b) *
+                          49.87984651440f;
+      const uint ri = position.y * dc_params.reference_stride + position.x;
+      const float ld0 = reference_low0[ri] - dlow0;
+      const float ld1 = reference_low1[ri] - dlow1;
+      const float ld2 = reference_low2[ri] - dlow2;
+      const float dc0 = ld0 * ld0 * 29.2353797994f;
+      const float dc1 = ld1 * ld1 * 0.844626970982f;
+      const float dc2 = ld2 * ld2 * 0.703646627719f;
+      const float dc_mask_value = mask_dc_y(
+          reference_mask[position.y * dc_params.mask_stride + position.x]);
+      low0[output_index] = dc0 * dc_params.x_multiplier * dc_mask_value +
+                           dc1 * dc_mask_value + dc2 * dc_mask_value;
+    }
+
+    if (stripe + 1u < Stripes) {
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      for (uint index = thread_index; index < 32u * 16u;
+           index += thread_count) {
+        horizontal0[index] = horizontal0[index + 64u * 16u];
+        horizontal1[index] = horizontal1[index + 64u * 16u];
+        horizontal2[index] = horizontal2[index + 64u * 16u];
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+  } // stripe
+}
+
+#define GJXL_BUTTERAUGLI_PACKED_DC(name, pixels)                               \
+  kernel void name(                                                            \
+                                                                               \
+      device const float *input0 [[buffer(0)]],                                \
+      device const float *input1 [[buffer(1)]],                                \
+      device const float *input2 [[buffer(2)]],                                \
+      device const float *weights [[buffer(3)]],                               \
+      device float *low0 [[buffer(4)]], device float *low1 [[buffer(5)]],      \
+      device float *low2 [[buffer(6)]], device float *medium0 [[buffer(7)]],   \
+      device float *medium1 [[buffer(8)]],                                     \
+      device float *medium2 [[buffer(9)]],                                     \
+      constant FrequencyLowMediumTiledParams &params [[buffer(10)]],           \
+      device const float *reference_low0 [[buffer(11)]],                       \
+      device const float *reference_low1 [[buffer(12)]],                       \
+      device const float *reference_low2 [[buffer(13)]],                       \
+      device const float *reference_mask [[buffer(14)]],                       \
+      constant ButteraugliPackedDCParams &dc_params [[buffer(15)]],            \
+      threadgroup float *scratch [[threadgroup(0)]],                           \
+      uint2 local_position [[thread_position_in_threadgroup]],                 \
+      uint2 group_position [[threadgroup_position_in_grid]],                   \
+      uint2 group_size [[threads_per_threadgroup]]) {                          \
+    ButteraugliLowMediumPackedDC<2, 1, pixels>(                                \
+        input0, input1, input2, weights, low0, low1, low2, medium0, medium1,   \
+        medium2, params, reference_low0, reference_low1, reference_low2,       \
+        reference_mask, dc_params, scratch, local_position, group_position,    \
+        group_size);                                                           \
+  }
+GJXL_BUTTERAUGLI_PACKED_DC(gjxl_butteraugli_low_medium_packed_dc_f32, 2)
+
+kernel void gjxl_butteraugli_final_packed_dc_f32(
+    device const float *rlow0 [[buffer(0)]],
+    device const float *rlow1 [[buffer(1)]],
+    device const float *rlow2 [[buffer(2)]],
+    device const float *rmed0 [[buffer(3)]],
+    device const float *rmed1 [[buffer(4)]],
+    device const float *rmed2 [[buffer(5)]],
+    device const float *rhigh0 [[buffer(6)]],
+    device const float *rhigh1 [[buffer(7)]],
+    device const float *dlow0 [[buffer(8)]],
+    device const float *dlow1 [[buffer(9)]],
+    device const float *dlow2 [[buffer(10)]],
+    device const float *dmed0 [[buffer(11)]],
+    device const float *dmed1 [[buffer(12)]],
+    device const float *dmed2 [[buffer(13)]],
+    device const float *dhigh0 [[buffer(14)]],
+    device const float *dhigh1 [[buffer(15)]],
+    device const float *malta_ac0 [[buffer(16)]],
+    device const float *malta_ac1 [[buffer(17)]],
+    device const float *mask [[buffer(18)]],
+    device const float *mask_blurred_reference [[buffer(19)]],
+    device const float *mask_blurred_distorted [[buffer(20)]],
+    device float *output [[buffer(21)]],
+    constant FinalL2Params &params [[buffer(22)]],
+    uint2 position [[thread_position_in_grid]]) {
+
+  if (position.x >= params.width || position.y >= params.height)
+    return;
+  const uint reference_index =
+      position.y * params.reference_stride + position.x;
+  const uint distorted_index =
+      position.y * params.distorted_stride + position.x;
+  const uint index = position.y * params.work_stride + position.x;
+  const L2Contributions l2 = l2_ac_only_contributions(
+      rlow0, rlow1, rlow2, rmed0, rmed1, rmed2, rhigh0, rhigh1, dlow0, dlow1,
+      dlow2, dmed0, dmed1, dmed2, dhigh0, dhigh1, malta_ac0, malta_ac1,
+      reference_index, distorted_index, index, params.asymmetry);
+  const float difference =
+      mask_blurred_reference[position.y * params.reference_mask_stride +
+                             position.x] -
+      mask_blurred_distorted[index];
+  const float masked_ac_y = l2.ac1 + 10.0f * difference * difference;
+  const uint mask_index = position.y * params.mask_stride + position.x;
+  const float mask_value = mask_y(mask[mask_index]);
+  const float dc_mask_value = mask_dc_y(mask[mask_index]);
+  const float masked_dc = dlow0[distorted_index];
+  const float masked_ac = l2.ac0 * params.x_multiplier * mask_value +
+                          masked_ac_y * mask_value + l2.ac2 * mask_value;
+  const float result = sqrt(masked_dc + masked_ac);
+  output[position.y * params.output_stride + position.x] =
+      isfinite(result) && result >= 0.0f ? result : NAN;
+}
+
+struct ButteraugliMaltaL2Params {
+  float asymmetry;
+  uint channel;
+};
+template <bool FixedShape>
+inline void
+ButteraugliMaltaL2(device const float *reference, device const float *distorted,
+                   device float *response, device float *accumulation,
+                   constant MaltaFusedParams &params,
+                   device const float *reference_high,
+                   device const float *distorted_high,
+                   constant ButteraugliMaltaL2Params &l2_params,
+                   threadgroup float *scaled_tile, uint2 local_position,
+                   uint2 group_position, uint2 dynamic_group_size) {
+  const uint2 group_size = FixedShape ? uint2(32, 8) : dynamic_group_size;
+  const uint tile_stride = group_size.x + 8u;
+  const uint tile_height = group_size.y + 8u;
+  const uint thread_index = local_position.y * group_size.x + local_position.x;
+  const uint thread_count = group_size.x * group_size.y;
+  const int origin_x = int(group_position.x * group_size.x) - 4;
+  const int origin_y = int(group_position.y * group_size.y) - 4;
+  for (uint index = thread_index; index < tile_stride * tile_height;
+       index += thread_count) {
+    const int source_x = origin_x + int(index % tile_stride);
+    const int source_y = origin_y + int(index / tile_stride);
+    float scaled = 0.0f;
+    if (source_x >= 0 && source_y >= 0 && source_x < int(params.width) &&
+        source_y < int(params.height)) {
+      const uint reference_index =
+          uint(source_y) * params.reference_stride + uint(source_x);
+      const uint distorted_index =
+          uint(source_y) * params.distorted_stride + uint(source_x);
+      scaled = malta_scale_value(
+          reference[reference_index], distorted[distorted_index],
+          params.norm2_0_gt_1, params.norm2_0_lt_1, params.norm);
+    }
+    scaled_tile[index] = scaled;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  const uint2 position = group_position * group_size + local_position;
+  if (position.x >= params.width || position.y >= params.height)
+    return;
+  const int tile_x = int(local_position.x) + 4;
+  const int tile_y = int(local_position.y) + 4;
+  const float result =
+      params.low_frequency != 0
+          ? malta_lf_tile(scaled_tile, tile_x, tile_y, tile_stride)
+          : malta_full_tile(scaled_tile, tile_x, tile_y, tile_stride);
+  if (params.write_response != 0u) {
+    response[position.y * params.response_stride + position.x] = result;
+  }
+  const uint accumulation_index =
+      position.y * params.accumulation_stride + position.x;
+  const float malta = params.initialize_accumulation != 0u
+                          ? result
+                          : accumulation[accumulation_index] + result;
+  const uint ri = position.y * params.reference_stride + position.x;
+  const uint di = position.y * params.distorted_stride + position.x;
+  const float high_weight = l2_params.channel == 0u ? 400.0f : 1.50815703118f;
+  const float medium_weight =
+      l2_params.channel == 0u ? 2150.0f : 10.6195433239f;
+  const float inv_asymmetry = 1.0f / l2_params.asymmetry;
+  const float total = l2_asymmetric(reference_high[ri], distorted_high[di],
+                                    high_weight * l2_params.asymmetry,
+                                    high_weight * inv_asymmetry, malta);
+  const float md = reference[ri] - distorted[di];
+  accumulation[accumulation_index] =
+      unfused_multiply_add(md * md, medium_weight, total);
+}
+
+kernel void gjxl_butteraugli_malta_l2_f32(
+    device const float *reference [[buffer(0)]],
+    device const float *distorted [[buffer(1)]],
+    device float *response [[buffer(2)]],
+    device float *accumulation [[buffer(3)]],
+    constant MaltaFusedParams &params [[buffer(4)]],
+    device const float *reference_high [[buffer(5)]],
+    device const float *distorted_high [[buffer(6)]],
+    constant ButteraugliMaltaL2Params &l2_params [[buffer(7)]],
+    threadgroup float *scaled_tile [[threadgroup(0)]],
+    uint2 local_position [[thread_position_in_threadgroup]],
+    uint2 group_position [[threadgroup_position_in_grid]],
+    uint2 group_size [[threads_per_threadgroup]]) {
+  ButteraugliMaltaL2<true>(reference, distorted, response, accumulation, params,
+                           reference_high, distorted_high, l2_params,
+                           scaled_tile, local_position, group_position,
+                           group_size);
+}
+
+template <uint Outputs, uint Stripes, uint PixelsPerThread,
+          typename WeightPointer>
+inline void ButteraugliLowMediumVertical(
+
+    device const float *input0, device const float *input1,
+    device const float *input2, WeightPointer weights, device float *low0,
+    device float *low1, device float *low2, device float *medium0,
+    device float *medium1, device float *medium2,
+    constant FrequencyLowMediumTiledParams &params, threadgroup float *scratch,
+    uint2 local_position, uint2 group_position, uint2 group_size) {
+
+  constexpr int kRadius = 16;
+  const uint tile_height = 64u + 2 * uint(kRadius);
+  const uint horizontal_stride = 16u;
+  const uint horizontal_plane_size = horizontal_stride * tile_height;
+  threadgroup float *horizontal0 = scratch;
+  threadgroup float *horizontal1 = horizontal0 + horizontal_plane_size;
+  threadgroup float *horizontal2 = horizontal1 + horizontal_plane_size;
+
+  const uint thread_index = local_position.y * group_size.x + local_position.x;
+  const uint thread_count = group_size.x * group_size.y;
+  const int group_x = int(group_position.x * 16u);
+  for (uint stripe = 0; stripe < Stripes; ++stripe) {
+    const int group_y = int(group_position.y * (64u * Stripes) + 64u * stripe);
+    const int horizontal_origin_y = group_y - kRadius;
+
+    for (uint pair_index =
+             thread_index + (stripe == 0u ? 0u : 32u * 16u / Outputs);
+         pair_index < horizontal_plane_size / Outputs;
+         pair_index += thread_count) {
+      const uint local_x = (pair_index % (16u / Outputs)) * Outputs;
+      const uint tile_y = pair_index / (16u / Outputs);
+      const int first_x = group_x + int(local_x);
+      const int y = horizontal_origin_y + int(tile_y);
+      float sums0[Outputs], sums1[Outputs], sums2[Outputs],
+          weight_sums[Outputs];
+      for (uint p = 0; p < Outputs; ++p) {
+        sums0[p] = 0.0f;
+        sums1[p] = 0.0f;
+        sums2[p] = 0.0f;
+        weight_sums[p] = 0.0f;
+      }
+      if (first_x < int(params.width) && y >= 0 && y < int(params.height)) {
+        if (first_x >= kRadius &&
+            first_x + int(Outputs) - 1 + kRadius < int(params.width)) {
+          if (Outputs == 2u) {
+            {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + 0);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[0 - 0];
+                weight_sums[0] += w;
+                sums0[0] += v0 * w;
+                sums1[0] += v1 * w;
+                sums2[0] += v2 * w;
+              }
+            }
+            for (int t = 1; t < 33; ++t) {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + t);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[t - 0];
+                weight_sums[0] += w;
+                sums0[0] += v0 * w;
+                sums1[0] += v1 * w;
+                sums2[0] += v2 * w;
+              }
+              {
+                const float w = weights[t - 1];
+                weight_sums[1] += w;
+                sums0[1] += v0 * w;
+                sums1[1] += v1 * w;
+                sums2[1] += v2 * w;
+              }
+            }
+            {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + 33);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[33 - 1];
+                weight_sums[1] += w;
+                sums0[1] += v0 * w;
+                sums1[1] += v1 * w;
+                sums2[1] += v2 * w;
+              }
+            }
+          } else {
+            {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + 0);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[0 - 0];
+                weight_sums[0] += w;
+                sums0[0] += v0 * w;
+                sums1[0] += v1 * w;
+                sums2[0] += v2 * w;
+              }
+            }
+            {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + 1);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[1 - 0];
+                weight_sums[0] += w;
+                sums0[0] += v0 * w;
+                sums1[0] += v1 * w;
+                sums2[0] += v2 * w;
+              }
+              {
+                const float w = weights[1 - 1];
+                weight_sums[1] += w;
+                sums0[1] += v0 * w;
+                sums1[1] += v1 * w;
+                sums2[1] += v2 * w;
+              }
+            }
+            {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + 2);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[2 - 0];
+                weight_sums[0] += w;
+                sums0[0] += v0 * w;
+                sums1[0] += v1 * w;
+                sums2[0] += v2 * w;
+              }
+              {
+                const float w = weights[2 - 1];
+                weight_sums[1] += w;
+                sums0[1] += v0 * w;
+                sums1[1] += v1 * w;
+                sums2[1] += v2 * w;
+              }
+              {
+                const float w = weights[2 - 2];
+                weight_sums[2] += w;
+                sums0[2] += v0 * w;
+                sums1[2] += v1 * w;
+                sums2[2] += v2 * w;
+              }
+            }
+            for (int t = 3; t < 33; ++t) {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + t);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[t - 0];
+                weight_sums[0] += w;
+                sums0[0] += v0 * w;
+                sums1[0] += v1 * w;
+                sums2[0] += v2 * w;
+              }
+              {
+                const float w = weights[t - 1];
+                weight_sums[1] += w;
+                sums0[1] += v0 * w;
+                sums1[1] += v1 * w;
+                sums2[1] += v2 * w;
+              }
+              {
+                const float w = weights[t - 2];
+                weight_sums[2] += w;
+                sums0[2] += v0 * w;
+                sums1[2] += v1 * w;
+                sums2[2] += v2 * w;
+              }
+              {
+                const float w = weights[t - 3];
+                weight_sums[3] += w;
+                sums0[3] += v0 * w;
+                sums1[3] += v1 * w;
+                sums2[3] += v2 * w;
+              }
+            }
+            {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + 33);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[33 - 1];
+                weight_sums[1] += w;
+                sums0[1] += v0 * w;
+                sums1[1] += v1 * w;
+                sums2[1] += v2 * w;
+              }
+              {
+                const float w = weights[33 - 2];
+                weight_sums[2] += w;
+                sums0[2] += v0 * w;
+                sums1[2] += v1 * w;
+                sums2[2] += v2 * w;
+              }
+              {
+                const float w = weights[33 - 3];
+                weight_sums[3] += w;
+                sums0[3] += v0 * w;
+                sums1[3] += v1 * w;
+                sums2[3] += v2 * w;
+              }
+            }
+            {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + 34);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[34 - 2];
+                weight_sums[2] += w;
+                sums0[2] += v0 * w;
+                sums1[2] += v1 * w;
+                sums2[2] += v2 * w;
+              }
+              {
+                const float w = weights[34 - 3];
+                weight_sums[3] += w;
+                sums0[3] += v0 * w;
+                sums1[3] += v1 * w;
+                sums2[3] += v2 * w;
+              }
+            }
+            {
+              const uint ix =
+                  uint(y) * params.input_stride + uint(first_x - kRadius + 35);
+              const float v0 = input0[ix], v1 = input1[ix], v2 = input2[ix];
+              {
+                const float w = weights[35 - 3];
+                weight_sums[3] += w;
+                sums0[3] += v0 * w;
+                sums1[3] += v1 * w;
+                sums2[3] += v2 * w;
+              }
+            }
+          }
+        } else {
+          const int first = max(0, first_x - kRadius);
+          const int last =
+              min(int(params.width) - 1, first_x + int(Outputs) - 1 + kRadius);
+          for (int source_x = first; source_x <= last; ++source_x) {
+            const uint input_index =
+                uint(y) * params.input_stride + uint(source_x);
+            const float v0 = input0[input_index], v1 = input1[input_index],
+                        v2 = input2[input_index];
+            for (uint p = 0; p < Outputs; ++p) {
+              const int x = first_x + int(p);
+              if (x < int(params.width) && source_x >= x - kRadius &&
+                  source_x <= x + kRadius) {
+                const float weight = weights[source_x + kRadius - x];
+                weight_sums[p] += weight;
+                sums0[p] += v0 * weight;
+                sums1[p] += v1 * weight;
+                sums2[p] += v2 * weight;
+              }
+            }
+          }
+        }
+      }
+      for (uint p = 0; p < Outputs; ++p) {
+        const uint index = tile_y * horizontal_stride + local_x + p;
+        horizontal0[index] =
+            weight_sums[p] == 0.0f ? 0.0f : sums0[p] / weight_sums[p];
+        horizontal1[index] =
+            weight_sums[p] == 0.0f ? 0.0f : sums1[p] / weight_sums[p];
+        horizontal2[index] =
+            weight_sums[p] == 0.0f ? 0.0f : sums2[p] / weight_sums[p];
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    const uint base_x = uint(group_x) + local_position.x;
+    const int first_y = group_y + int(local_position.y * 2u);
+    float vs0[2] = {0.0f, 0.0f}, vs1[2] = {0.0f, 0.0f}, vs2[2] = {0.0f, 0.0f},
+          vws[2] = {0.0f, 0.0f};
+    if (base_x < params.width) {
+      if (first_y >= kRadius && first_y + 1 + kRadius < int(params.height)) {
+        {
+          uint i = uint(first_y - kRadius - horizontal_origin_y) *
+                       horizontal_stride +
+                   local_position.x;
+          float w = weights[0];
+          vws[0] += w;
+          vs0[0] += horizontal0[i] * w;
+          vs1[0] += horizontal1[i] * w;
+          vs2[0] += horizontal2[i] * w;
+        }
+        for (int t = 1; t < 33; ++t) {
+          uint i = uint(first_y - kRadius + t - horizontal_origin_y) *
+                       horizontal_stride +
+                   local_position.x;
+          float v0 = horizontal0[i], v1 = horizontal1[i], v2 = horizontal2[i];
+          {
+            float w = weights[t];
+            vws[0] += w;
+            vs0[0] += v0 * w;
+            vs1[0] += v1 * w;
+            vs2[0] += v2 * w;
+          }
+          {
+            float w = weights[t - 1];
+            vws[1] += w;
+            vs0[1] += v0 * w;
+            vs1[1] += v1 * w;
+            vs2[1] += v2 * w;
+          }
+        }
+        {
+          uint i =
+              uint(first_y + 17 - horizontal_origin_y) * horizontal_stride +
+              local_position.x;
+          float w = weights[32];
+          vws[1] += w;
+          vs0[1] += horizontal0[i] * w;
+          vs1[1] += horizontal1[i] * w;
+          vs2[1] += horizontal2[i] * w;
+        }
+      } else {
+        for (uint p = 0; p < 2; ++p) {
+          int y = first_y + int(p);
+          if (y >= int(params.height))
+            continue;
+          int first = max(0, y - kRadius),
+              last = min(int(params.height) - 1, y + kRadius);
+          for (int sy = first; sy <= last; ++sy) {
+            float w = weights[sy + kRadius - y];
+            uint i = uint(sy - horizontal_origin_y) * horizontal_stride +
+                     local_position.x;
+            vws[p] += w;
+            vs0[p] += horizontal0[i] * w;
+            vs1[p] += horizontal1[i] * w;
+            vs2[p] += horizontal2[i] * w;
+          }
+        }
+      }
+    }
+    for (uint pixel = 0; pixel < 2; ++pixel) {
+      const uint2 position = uint2(base_x, uint(first_y) + pixel);
+      if (position.x >= params.width || position.y >= params.height)
+        continue;
+      const float low_x = vs0[pixel] / vws[pixel],
+                  low_y = vs1[pixel] / vws[pixel],
+                  low_b = vs2[pixel] / vws[pixel];
+      const uint input_index = position.y * params.input_stride + position.x;
+      const uint output_index = position.y * params.output_stride + position.x;
+      medium0[output_index] = input0[input_index] - low_x;
+      medium1[output_index] = input1[input_index] - low_y;
+      medium2[output_index] = input2[input_index] - low_b;
+      low0[output_index] = low_x * 33.832837186260f;
+      low1[output_index] = low_y * 14.458268100570f;
+      low2[output_index] =
+          unfused_multiply_add(-0.362267051518f, low_y, low_b) *
+          49.87984651440f;
+    }
+
+    if (stripe + 1u < Stripes) {
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+      for (uint index = thread_index; index < 32u * 16u;
+           index += thread_count) {
+        horizontal0[index] = horizontal0[index + 64u * 16u];
+        horizontal1[index] = horizontal1[index + 64u * 16u];
+        horizontal2[index] = horizontal2[index + 64u * 16u];
+      }
+      threadgroup_barrier(mem_flags::mem_threadgroup);
+    }
+  } // stripe
+}
+
+#define GJXL_BUTTERAUGLI_LOW_MEDIUM_VERTICAL(name, outputs, stripes, pixels)   \
+  kernel void name(                                                            \
+                                                                               \
+      device const float *input0 [[buffer(0)]],                                \
+      device const float *input1 [[buffer(1)]],                                \
+      device const float *input2 [[buffer(2)]],                                \
+      device const float *weights [[buffer(3)]],                               \
+      device float *low0 [[buffer(4)]], device float *low1 [[buffer(5)]],      \
+      device float *low2 [[buffer(6)]], device float *medium0 [[buffer(7)]],   \
+      device float *medium1 [[buffer(8)]],                                     \
+      device float *medium2 [[buffer(9)]],                                     \
+      constant FrequencyLowMediumTiledParams &params [[buffer(10)]],           \
+      threadgroup float *scratch [[threadgroup(0)]],                           \
+      uint2 local_position [[thread_position_in_threadgroup]],                 \
+      uint2 group_position [[threadgroup_position_in_grid]],                   \
+      uint2 group_size [[threads_per_threadgroup]]) {                          \
+    ButteraugliLowMediumVertical<outputs, stripes, pixels>(                    \
+        input0, input1, input2, weights, low0, low1, low2, medium0, medium1,   \
+        medium2, params, scratch, local_position, group_position, group_size); \
+  }
+GJXL_BUTTERAUGLI_LOW_MEDIUM_VERTICAL(gjxl_butteraugli_low_medium_shared_f32, 2,
+                                     1, 2)
+
+struct ButteraugliUltraParams {
+  uint width, height, input_stride, output_stride, channel, emit_mask;
+};
+kernel void gjxl_butteraugli_ultra_direct_f32(
+    device const float *input [[buffer(0)]],
+    device const float *weights [[buffer(1)]], device float *high [[buffer(2)]],
+    device float *ultra [[buffer(3)]],
+    constant ButteraugliUltraParams &p [[buffer(4)]],
+    device const float *high_x [[buffer(5)]],
+    device const float *ultra_x [[buffer(6)]], device float *mask [[buffer(7)]],
+    threadgroup float *scratch [[threadgroup(0)]],
+    uint2 local [[thread_position_in_threadgroup]],
+    uint2 group [[threadgroup_position_in_grid]],
+    uint2 group_size [[threads_per_threadgroup]]) {
+  constexpr uint R = 3, W = 16, H = 64, P = 2;
+  const uint thread_index = local.y * group_size.x + local.x,
+             threads = group_size.x * group_size.y;
+  const int gx = int(group.x * W), gy = int(group.y * H);
+  for (uint i = thread_index; i < W * (H + 2 * R); i += threads) {
+    int x = gx + int(i % W), y = gy - int(R) + int(i / W);
+    float sum = 0.0f, ws = 0.0f;
+    if (x < int(p.width) && y >= 0 && y < int(p.height)) {
+      int first = max(0, x - int(R)), last = min(int(p.width) - 1, x + int(R));
+      for (int sx = first; sx <= last; ++sx) {
+        float w = weights[sx + int(R) - x];
+        ws += w;
+        sum += input[uint(y) * p.input_stride + uint(sx)] * w;
+      }
+    }
+    scratch[i] = ws == 0.0f ? 0.0f : sum / ws;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  for (uint pixel = 0; pixel < P; ++pixel) {
+    uint x = uint(gx) + local.x, y = uint(gy) + local.y + pixel * (H / P);
+    if (x >= p.width || y >= p.height)
+      continue;
+    int first = max(0, int(y) - int(R)),
+        last = min(int(p.height) - 1, int(y) + int(R));
+    float sum = 0.0f, ws = 0.0f;
+    for (int sy = first; sy <= last; ++sy) {
+      float w = weights[sy + int(R) - int(y)];
+      ws += w;
+      sum += scratch[uint(sy - gy + int(R)) * W + local.x] * w;
+    }
+    float low_pass = sum / ws;
+    const float original = input[y * p.input_stride + x];
+    const uint oi = y * p.output_stride + x;
+    if (p.channel == 0u) {
+      ultra[oi] = remove_range(original - low_pass, 0.04f);
+      high[oi] = remove_range(low_pass, 1.5f);
+    } else {
+      low_pass = maximum_clamp(low_pass, 28.4691806922f);
+      const float ultra_value =
+          maximum_clamp(original - low_pass, 5.19175294647f) * 2.69313763794f;
+      const float high_value = amplify_range(low_pass * 2.155f, 0.132f);
+      ultra[oi] = ultra_value;
+      high[oi] = high_value;
+      if (p.emit_mask != 0u)
+        mask[oi] = mask_precompute_value(high_x[oi], high_value, ultra_x[oi],
+                                         ultra_value);
+    }
+  }
+}
+
+struct ButteraugliHighParams {
+  uint width, height, input_stride, medium_stride, high_stride, channel;
+};
+kernel void gjxl_butteraugli_high_shared_f32(
+    device const float *input [[buffer(0)]],
+    device const float *weights [[buffer(1)]],
+    device float *medium [[buffer(2)]], device float *high [[buffer(3)]],
+    constant ButteraugliHighParams &p [[buffer(4)]],
+    threadgroup float *scratch [[threadgroup(0)]],
+    uint2 local [[thread_position_in_threadgroup]],
+    uint2 group [[threadgroup_position_in_grid]],
+    uint2 group_size [[threads_per_threadgroup]]) {
+  constexpr uint R = 7, W = 16, H = 64, P = 4;
+  const uint thread_index = local.y * group_size.x + local.x,
+             threads = group_size.x * group_size.y;
+  const int gx = int(group.x * W), gy = int(group.y * H);
+  for (uint i = thread_index; i < W * (H + 2 * R) / 2; i += threads) {
+    uint lx = (i % (W / 2)) * 2, ly = i / (W / 2);
+    int first_x = gx + int(lx), y = gy - int(R) + int(ly);
+    float sum[2] = {0, 0}, ws[2] = {0, 0};
+    if (first_x < int(p.width) && y >= 0 && y < int(p.height)) {
+      if (first_x >= int(R) && first_x + 1 + int(R) < int(p.width)) {
+        {
+          float v =
+              input[uint(y) * p.input_stride + uint(first_x - int(R) + (0))];
+          {
+            float w = weights[(0) - 0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+        }
+        for (int t = 1; t < int(2 * R + 1); ++t) {
+          float v =
+              input[uint(y) * p.input_stride + uint(first_x - int(R) + (t))];
+          {
+            float w = weights[(t)-0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+          {
+            float w = weights[(t)-1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+        }
+        {
+          float v = input[uint(y) * p.input_stride +
+                          uint(first_x - int(R) + (int(2 * R + 1) + 0))];
+          {
+            float w = weights[(int(2 * R + 1) + 0) - 1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+        }
+      } else {
+        int first = max(0, first_x - int(R)),
+            last = min(int(p.width) - 1, first_x + 1 + int(R));
+        for (int x = first; x <= last; ++x) {
+          float v = input[uint(y) * p.input_stride + uint(x)];
+          for (uint k = 0; k < 2; ++k)
+            if (first_x + int(k) < int(p.width) &&
+                x >= first_x + int(k) - int(R) &&
+                x <= first_x + int(k) + int(R)) {
+              float w = weights[x + int(R) - first_x - int(k)];
+              ws[k] += w;
+              sum[k] += v * w;
+            }
+        }
+      }
+    }
+    for (uint k = 0; k < 2; ++k)
+      scratch[ly * W + lx + k] = ws[k] == 0.0f ? 0.0f : sum[k] / ws[k];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const uint x = uint(gx) + local.x;
+  const int first_y = gy + int(local.y * P);
+  float sum[P] = {0.0f}, ws[P] = {0.0f};
+  if (x < p.width) {
+    if (first_y >= int(R) && first_y + int(P) - 1 + int(R) < int(p.height)) {
+      if (P == 2u) {
+        {
+          float v =
+              scratch[uint(first_y - int(R) + (0) - gy + int(R)) * W + local.x];
+          {
+            float w = weights[(0) - 0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+        }
+        for (int t = 1; t < int(2 * R + 1); ++t) {
+          float v =
+              scratch[uint(first_y - int(R) + (t)-gy + int(R)) * W + local.x];
+          {
+            float w = weights[(t)-0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+          {
+            float w = weights[(t)-1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+        }
+        {
+          float v = scratch[uint(first_y - int(R) + (int(2 * R + 1) + 0) - gy +
+                                 int(R)) *
+                                W +
+                            local.x];
+          {
+            float w = weights[(int(2 * R + 1) + 0) - 1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+        }
+      } else {
+        {
+          float v =
+              scratch[uint(first_y - int(R) + (0) - gy + int(R)) * W + local.x];
+          {
+            float w = weights[(0) - 0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+        }
+        {
+          float v =
+              scratch[uint(first_y - int(R) + (1) - gy + int(R)) * W + local.x];
+          {
+            float w = weights[(1) - 0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+          {
+            float w = weights[(1) - 1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+        }
+        {
+          float v =
+              scratch[uint(first_y - int(R) + (2) - gy + int(R)) * W + local.x];
+          {
+            float w = weights[(2) - 0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+          {
+            float w = weights[(2) - 1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+          {
+            float w = weights[(2) - 2];
+            ws[2] += w;
+            sum[2] += v * w;
+          }
+        }
+        for (int t = 3; t < int(2 * R + 1); ++t) {
+          float v =
+              scratch[uint(first_y - int(R) + (t)-gy + int(R)) * W + local.x];
+          {
+            float w = weights[(t)-0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+          {
+            float w = weights[(t)-1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+          {
+            float w = weights[(t)-2];
+            ws[2] += w;
+            sum[2] += v * w;
+          }
+          {
+            float w = weights[(t)-3];
+            ws[3] += w;
+            sum[3] += v * w;
+          }
+        }
+        {
+          float v = scratch[uint(first_y - int(R) + (int(2 * R + 1) + 0) - gy +
+                                 int(R)) *
+                                W +
+                            local.x];
+          {
+            float w = weights[(int(2 * R + 1) + 0) - 1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+          {
+            float w = weights[(int(2 * R + 1) + 0) - 2];
+            ws[2] += w;
+            sum[2] += v * w;
+          }
+          {
+            float w = weights[(int(2 * R + 1) + 0) - 3];
+            ws[3] += w;
+            sum[3] += v * w;
+          }
+        }
+        {
+          float v = scratch[uint(first_y - int(R) + (int(2 * R + 1) + 1) - gy +
+                                 int(R)) *
+                                W +
+                            local.x];
+          {
+            float w = weights[(int(2 * R + 1) + 1) - 2];
+            ws[2] += w;
+            sum[2] += v * w;
+          }
+          {
+            float w = weights[(int(2 * R + 1) + 1) - 3];
+            ws[3] += w;
+            sum[3] += v * w;
+          }
+        }
+        {
+          float v = scratch[uint(first_y - int(R) + (int(2 * R + 1) + 2) - gy +
+                                 int(R)) *
+                                W +
+                            local.x];
+          {
+            float w = weights[(int(2 * R + 1) + 2) - 3];
+            ws[3] += w;
+            sum[3] += v * w;
+          }
+        }
+      }
+    } else {
+      for (uint k = 0; k < P; ++k) {
+        int y = first_y + int(k);
+        if (y >= int(p.height))
+          continue;
+        int first = max(0, y - int(R)),
+            last = min(int(p.height) - 1, y + int(R));
+        for (int sy = first; sy <= last; ++sy) {
+          float w = weights[sy + int(R) - y];
+          ws[k] += w;
+          sum[k] += scratch[uint(sy - gy + int(R)) * W + local.x] * w;
+        }
+      }
+    }
+  }
+  for (uint k = 0; k < P; ++k) {
+    uint y = uint(first_y) + k;
+    if (x >= p.width || y >= p.height)
+      continue;
+    const float low_pass = sum[k] / ws[k];
+    const float original = input[y * p.input_stride + x];
+    high[y * p.high_stride + x] = original - low_pass;
+    medium[y * p.medium_stride + x] = p.channel == 0u
+                                          ? remove_range(low_pass, 0.29f)
+                                          : amplify_range(low_pass, 0.1f);
+  }
+}
+
+template <uint R, uint W, uint H, uint P>
+inline void
+ButteraugliShortReuse(device const float *input, device const float *weights,
+                      device float *output, constant ConvolutionParams &p,
+                      threadgroup float *scratch, uint2 local, uint2 group,
+                      uint2 group_size) {
+  const uint thread_index = local.y * group_size.x + local.x,
+             threads = group_size.x * group_size.y;
+  const int gx = int(group.x * W), gy = int(group.y * H);
+  for (uint i = thread_index; i < W * (H + 2 * R) / 2; i += threads) {
+    uint lx = (i % (W / 2)) * 2, ly = i / (W / 2);
+    int first_x = gx + int(lx), y = gy - int(R) + int(ly);
+    float sum[2] = {0, 0}, ws[2] = {0, 0};
+    if (first_x < int(p.width) && y >= 0 && y < int(p.height)) {
+      if (first_x >= int(R) && first_x + 1 + int(R) < int(p.width)) {
+        {
+          float v =
+              input[uint(y) * p.input_stride + uint(first_x - int(R) + (0))];
+          {
+            float w = weights[(0) - 0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+        }
+        for (int t = 1; t < int(2 * R + 1); ++t) {
+          float v =
+              input[uint(y) * p.input_stride + uint(first_x - int(R) + (t))];
+          {
+            float w = weights[(t)-0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+          {
+            float w = weights[(t)-1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+        }
+        {
+          float v = input[uint(y) * p.input_stride +
+                          uint(first_x - int(R) + (int(2 * R + 1) + 0))];
+          {
+            float w = weights[(int(2 * R + 1) + 0) - 1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+        }
+      } else {
+        int first = max(0, first_x - int(R)),
+            last = min(int(p.width) - 1, first_x + 1 + int(R));
+        for (int x = first; x <= last; ++x) {
+          float v = input[uint(y) * p.input_stride + uint(x)];
+          for (uint k = 0; k < 2; ++k)
+            if (first_x + int(k) < int(p.width) &&
+                x >= first_x + int(k) - int(R) &&
+                x <= first_x + int(k) + int(R)) {
+              float w = weights[x + int(R) - first_x - int(k)];
+              ws[k] += w;
+              sum[k] += v * w;
+            }
+        }
+      }
+    }
+    for (uint k = 0; k < 2; ++k)
+      scratch[ly * W + lx + k] = ws[k] == 0.0f ? 0.0f : sum[k] / ws[k];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const uint x = uint(gx) + local.x;
+  const int first_y = gy + int(local.y * P);
+  float sum[P] = {0.0f}, ws[P] = {0.0f};
+  if (x < p.width) {
+    if (first_y >= int(R) && first_y + int(P) - 1 + int(R) < int(p.height)) {
+      if (P == 2u) {
+        {
+          float v =
+              scratch[uint(first_y - int(R) + (0) - gy + int(R)) * W + local.x];
+          {
+            float w = weights[(0) - 0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+        }
+        for (int t = 1; t < int(2 * R + 1); ++t) {
+          float v =
+              scratch[uint(first_y - int(R) + (t)-gy + int(R)) * W + local.x];
+          {
+            float w = weights[(t)-0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+          {
+            float w = weights[(t)-1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+        }
+        {
+          float v = scratch[uint(first_y - int(R) + (int(2 * R + 1) + 0) - gy +
+                                 int(R)) *
+                                W +
+                            local.x];
+          {
+            float w = weights[(int(2 * R + 1) + 0) - 1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+        }
+      } else {
+        {
+          float v =
+              scratch[uint(first_y - int(R) + (0) - gy + int(R)) * W + local.x];
+          {
+            float w = weights[(0) - 0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+        }
+        {
+          float v =
+              scratch[uint(first_y - int(R) + (1) - gy + int(R)) * W + local.x];
+          {
+            float w = weights[(1) - 0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+          {
+            float w = weights[(1) - 1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+        }
+        {
+          float v =
+              scratch[uint(first_y - int(R) + (2) - gy + int(R)) * W + local.x];
+          {
+            float w = weights[(2) - 0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+          {
+            float w = weights[(2) - 1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+          {
+            float w = weights[(2) - 2];
+            ws[2] += w;
+            sum[2] += v * w;
+          }
+        }
+        for (int t = 3; t < int(2 * R + 1); ++t) {
+          float v =
+              scratch[uint(first_y - int(R) + (t)-gy + int(R)) * W + local.x];
+          {
+            float w = weights[(t)-0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+          {
+            float w = weights[(t)-1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+          {
+            float w = weights[(t)-2];
+            ws[2] += w;
+            sum[2] += v * w;
+          }
+          {
+            float w = weights[(t)-3];
+            ws[3] += w;
+            sum[3] += v * w;
+          }
+        }
+        {
+          float v = scratch[uint(first_y - int(R) + (int(2 * R + 1) + 0) - gy +
+                                 int(R)) *
+                                W +
+                            local.x];
+          {
+            float w = weights[(int(2 * R + 1) + 0) - 1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+          {
+            float w = weights[(int(2 * R + 1) + 0) - 2];
+            ws[2] += w;
+            sum[2] += v * w;
+          }
+          {
+            float w = weights[(int(2 * R + 1) + 0) - 3];
+            ws[3] += w;
+            sum[3] += v * w;
+          }
+        }
+        {
+          float v = scratch[uint(first_y - int(R) + (int(2 * R + 1) + 1) - gy +
+                                 int(R)) *
+                                W +
+                            local.x];
+          {
+            float w = weights[(int(2 * R + 1) + 1) - 2];
+            ws[2] += w;
+            sum[2] += v * w;
+          }
+          {
+            float w = weights[(int(2 * R + 1) + 1) - 3];
+            ws[3] += w;
+            sum[3] += v * w;
+          }
+        }
+        {
+          float v = scratch[uint(first_y - int(R) + (int(2 * R + 1) + 2) - gy +
+                                 int(R)) *
+                                W +
+                            local.x];
+          {
+            float w = weights[(int(2 * R + 1) + 2) - 3];
+            ws[3] += w;
+            sum[3] += v * w;
+          }
+        }
+      }
+    } else {
+      for (uint k = 0; k < P; ++k) {
+        int y = first_y + int(k);
+        if (y >= int(p.height))
+          continue;
+        int first = max(0, y - int(R)),
+            last = min(int(p.height) - 1, y + int(R));
+        for (int sy = first; sy <= last; ++sy) {
+          float w = weights[sy + int(R) - y];
+          ws[k] += w;
+          sum[k] += scratch[uint(sy - gy + int(R)) * W + local.x] * w;
+        }
+      }
+    }
+  }
+  for (uint k = 0; k < P; ++k) {
+    uint y = uint(first_y) + k;
+    if (x < p.width && y < p.height)
+      output[y * p.output_stride + x] = sum[k] / ws[k];
+  }
+}
+#define GJXL_BUTTERAUGLI_SHORT_REUSE(name, r, w, h, p)                         \
+  kernel void name(device const float *input [[buffer(0)]],                    \
+                   device const float *weights [[buffer(1)]],                  \
+                   device float *output [[buffer(2)]],                         \
+                   constant ConvolutionParams &params [[buffer(3)]],           \
+                   threadgroup float *scratch [[threadgroup(0)]],              \
+                   uint2 local [[thread_position_in_threadgroup]],             \
+                   uint2 group [[threadgroup_position_in_grid]],               \
+                   uint2 size [[threads_per_threadgroup]]) {                   \
+    ButteraugliShortReuse<r, w, h, p>(input, weights, output, params, scratch, \
+                                      local, group, size);                     \
+  }
+GJXL_BUTTERAUGLI_SHORT_REUSE(gjxl_butteraugli_mask_shared_f32, 6, 16, 64, 4)
+GJXL_BUTTERAUGLI_SHORT_REUSE(gjxl_butteraugli_medium_b_shared_f32, 7, 16, 64, 4)

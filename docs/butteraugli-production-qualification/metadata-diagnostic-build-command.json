@@ -1,0 +1,31 @@
+{
+  "command": [
+    "/usr/bin/c++",
+    "-O3",
+    "-DNDEBUG",
+    "-std=gnu++20",
+    "-arch",
+    "arm64",
+    "-I/Users/yunhocho/GitHub/gjxl-butteraugli-production-base/src",
+    "-I/Users/yunhocho/GitHub/gjxl-butteraugli-production-base/benchmarks",
+    "-I/Users/yunhocho/GitHub/gjxl-butteraugli-production-base/third_party/metal-cpp",
+    "-DGJXL_METALLIB_PATH=\"/Users/yunhocho/GitHub/gjxl-butteraugli-production-base/build/production/gjxl.metallib\"",
+    "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/metadata-diagnostic.cpp",
+    "/Users/yunhocho/GitHub/gjxl-butteraugli-production-base/build/production/libgjxl_codestream.a",
+    "/Users/yunhocho/GitHub/gjxl-butteraugli-production-base/build/production/libgjxl_metal.a",
+    "/Users/yunhocho/GitHub/gjxl-butteraugli-production-base/build/production/libgjxl_pfm_io.a",
+    "/Users/yunhocho/GitHub/gjxl-butteraugli-production-base/build/production/libgjxl_gpu_butteraugli.a",
+    "/Users/yunhocho/GitHub/gjxl-butteraugli-production-base/build/production/libgjxl_gpu_ops.a",
+    "/Users/yunhocho/GitHub/gjxl-butteraugli-production-base/build/production/libgjxl_gpu.a",
+    "/Users/yunhocho/GitHub/gjxl-butteraugli-production-base/build/production/libgjxl_codec.a",
+    "-framework",
+    "Metal",
+    "-framework",
+    "Foundation",
+    "-framework",
+    "CoreGraphics",
+    "-o",
+    "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/metadata-diagnostic"
+  ],
+  "metal_validation": false
+}

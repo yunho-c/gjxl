@@ -1,0 +1,75 @@
+4K AC scratch mode=0 A=304496640 B=304496640 rate=3110400 device=626786016
+AC callback inputs: three physical failures/recoveries and three terminal underplans checked
+Dispatch-boundary timestamps unavailable; stage mode qualified
+exact loss fusion DCT8 max absolute cost error 0.000244141, max relative error 1.99471e-07
+exact loss fusion DCT16x8 max absolute cost error 0.000488281, max relative error 2.33452e-07
+exact loss fusion DCT8x16 max absolute cost error 0.000732422, max relative error 2.72404e-07
+exact loss fusion DCT16x16 max absolute cost error 0.000488281, max relative error 1.18516e-07
+exact loss fusion DCT32x16 max absolute cost error 0.00146484, max relative error 2.0857e-07
+exact loss fusion DCT16x32 max absolute cost error 0.00244141, max relative error 3.52006e-07
+exact loss fusion DCT32x32 max absolute cost error 0.00195312, max relative error 1.44533e-07
+4K AC scratch mode=1 A=1555200 B=0 rate=3110400 device=19347936
+AC callback inputs: three physical failures/recoveries and three terminal underplans checked
+Dispatch-boundary timestamps unavailable; stage mode qualified
+exact loss fusion DCT8 max absolute cost error 0.000244141, max relative error 1.99471e-07
+exact loss fusion DCT16x8 max absolute cost error 0.000488281, max relative error 2.33452e-07
+exact loss fusion DCT8x16 max absolute cost error 0.000732422, max relative error 2.72404e-07
+exact loss fusion DCT16x16 max absolute cost error 0.000488281, max relative error 1.18516e-07
+exact loss fusion DCT32x16 max absolute cost error 0.00146484, max relative error 2.0857e-07
+exact loss fusion DCT16x32 max absolute cost error 0.00244141, max relative error 3.52006e-07
+exact loss fusion DCT32x32 max absolute cost error 0.00195312, max relative error 1.44533e-07
+AC callback inputs: three physical failures/recoveries and three terminal underplans checked
+Dispatch-boundary timestamps unavailable; stage mode qualified
+scalar matmul DCT8 max absolute cost error 0.000244141, max relative error 1.99471e-07
+scalar matmul DCT16x8 max absolute cost error 0.000488281, max relative error 2.33452e-07
+scalar matmul DCT8x16 max absolute cost error 0.000732422, max relative error 2.72404e-07
+scalar matmul DCT16x16 max absolute cost error 0.000488281, max relative error 1.18516e-07
+scalar matmul DCT32x16 max absolute cost error 0.00146484, max relative error 2.0857e-07
+scalar matmul DCT16x32 max absolute cost error 0.00244141, max relative error 3.52006e-07
+scalar matmul DCT32x32 max absolute cost error 0.00195312, max relative error 1.44533e-07
+AC callback inputs: three physical failures/recoveries and three terminal underplans checked
+Dispatch-boundary timestamps unavailable; stage mode qualified
+simdgroup matmul DCT8 max absolute cost error 0.000244141, max relative error 1.99471e-07
+simdgroup matmul DCT16x8 max absolute cost error 0.000488281, max relative error 2.33452e-07
+simdgroup matmul DCT8x16 max absolute cost error 0.000732422, max relative error 2.72404e-07
+simdgroup matmul DCT16x16 max absolute cost error 0.000488281, max relative error 1.18516e-07
+simdgroup matmul DCT32x16 max absolute cost error 0.00146484, max relative error 2.0857e-07
+simdgroup matmul DCT16x32 max absolute cost error 0.00244141, max relative error 3.52006e-07
+simdgroup matmul DCT32x32 max absolute cost error 0.00195312, max relative error 1.44533e-07
+AC callback inputs: three physical failures/recoveries and three terminal underplans checked
+Dispatch-boundary timestamps unavailable; stage mode qualified
+simdgroup matmul compact AC residual/inverse DCT8 max absolute cost error 0.000244141, max relative error 1.99471e-07
+simdgroup matmul compact AC residual/inverse DCT16x8 max absolute cost error 0.000488281, max relative error 2.33452e-07
+simdgroup matmul compact AC residual/inverse DCT8x16 max absolute cost error 0.000732422, max relative error 2.72404e-07
+simdgroup matmul compact AC residual/inverse DCT16x16 max absolute cost error 0.000488281, max relative error 1.18516e-07
+simdgroup matmul compact AC residual/inverse DCT32x16 max absolute cost error 0.00146484, max relative error 2.0857e-07
+simdgroup matmul compact AC residual/inverse DCT16x32 max absolute cost error 0.00244141, max relative error 3.52006e-07
+simdgroup matmul compact AC residual/inverse DCT32x32 max absolute cost error 0.00195312, max relative error 1.44533e-07
+AC callback inputs: three physical failures/recoveries and three terminal underplans checked
+Dispatch-boundary timestamps unavailable; stage mode qualified
+simdgroup matmul wide AC residual/inverse DCT8 max absolute cost error 0.000244141, max relative error 1.99471e-07
+simdgroup matmul wide AC residual/inverse DCT16x8 max absolute cost error 0.000488281, max relative error 2.33452e-07
+simdgroup matmul wide AC residual/inverse DCT8x16 max absolute cost error 0.000732422, max relative error 2.72404e-07
+simdgroup matmul wide AC residual/inverse DCT16x16 max absolute cost error 0.000488281, max relative error 1.18516e-07
+simdgroup matmul wide AC residual/inverse DCT32x16 max absolute cost error 0.00146484, max relative error 2.0857e-07
+simdgroup matmul wide AC residual/inverse DCT16x32 max absolute cost error 0.00244141, max relative error 3.52006e-07
+simdgroup matmul wide AC residual/inverse DCT32x32 max absolute cost error 0.00195312, max relative error 1.44533e-07
+AC callback inputs: three physical failures/recoveries and three terminal underplans checked
+Dispatch-boundary timestamps unavailable; stage mode qualified
+simdgroup matmul split AC residual/inverse DCT8 max absolute cost error 0.000244141, max relative error 1.99471e-07
+simdgroup matmul split AC residual/inverse DCT16x8 max absolute cost error 0.000488281, max relative error 2.33452e-07
+simdgroup matmul split AC residual/inverse DCT8x16 max absolute cost error 0.000732422, max relative error 2.72404e-07
+simdgroup matmul split AC residual/inverse DCT16x16 max absolute cost error 0.000488281, max relative error 1.18516e-07
+simdgroup matmul split AC residual/inverse DCT32x16 max absolute cost error 0.00146484, max relative error 2.0857e-07
+simdgroup matmul split AC residual/inverse DCT16x32 max absolute cost error 0.00244141, max relative error 3.52006e-07
+simdgroup matmul split AC residual/inverse DCT32x32 max absolute cost error 0.00195312, max relative error 1.44533e-07
+AC callback inputs: three physical failures/recoveries and three terminal underplans checked
+Dispatch-boundary timestamps unavailable; stage mode qualified
+factored radix-2 DCT8 max absolute cost error 0.00012207, max relative error 1.02094e-07
+factored radix-2 DCT16x8 max absolute cost error 0.000732422, max relative error 3.21097e-07
+factored radix-2 DCT8x16 max absolute cost error 0.000732422, max relative error 3.3098e-07
+factored radix-2 DCT16x16 max absolute cost error 0.000488281, max relative error 1.08586e-07
+factored radix-2 DCT32x16 max absolute cost error 0.00195312, max relative error 2.36103e-07
+factored radix-2 DCT16x32 max absolute cost error 0.00146484, max relative error 1.91789e-07
+factored radix-2 DCT32x32 max absolute cost error 0.00292969, max relative error 2.06138e-07
+All Metal AC-strategy candidate tests passed.

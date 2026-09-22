@@ -1,0 +1,122 @@
+[
+  {
+    "label": "baseline",
+    "attempt": 0,
+    "exit": 0,
+    "log": "ac-diagnostic-baseline-00.log"
+  },
+  {
+    "label": "baseline",
+    "attempt": 1,
+    "exit": 0,
+    "log": "ac-diagnostic-baseline-01.log"
+  },
+  {
+    "label": "baseline",
+    "attempt": 2,
+    "exit": 0,
+    "log": "ac-diagnostic-baseline-02.log"
+  },
+  {
+    "label": "baseline",
+    "attempt": 3,
+    "exit": 0,
+    "log": "ac-diagnostic-baseline-03.log"
+  },
+  {
+    "label": "baseline",
+    "attempt": 4,
+    "exit": 0,
+    "log": "ac-diagnostic-baseline-04.log"
+  },
+  {
+    "label": "baseline",
+    "attempt": 5,
+    "exit": 0,
+    "log": "ac-diagnostic-baseline-05.log"
+  },
+  {
+    "label": "baseline",
+    "attempt": 6,
+    "exit": 0,
+    "log": "ac-diagnostic-baseline-06.log"
+  },
+  {
+    "label": "baseline",
+    "attempt": 7,
+    "exit": 0,
+    "log": "ac-diagnostic-baseline-07.log"
+  },
+  {
+    "label": "baseline",
+    "attempt": 8,
+    "exit": 0,
+    "log": "ac-diagnostic-baseline-08.log"
+  },
+  {
+    "label": "baseline",
+    "attempt": 9,
+    "exit": 0,
+    "log": "ac-diagnostic-baseline-09.log"
+  },
+  {
+    "label": "candidate",
+    "attempt": 0,
+    "exit": 0,
+    "log": "ac-diagnostic-candidate-00.log"
+  },
+  {
+    "label": "candidate",
+    "attempt": 1,
+    "exit": 0,
+    "log": "ac-diagnostic-candidate-01.log"
+  },
+  {
+    "label": "candidate",
+    "attempt": 2,
+    "exit": 0,
+    "log": "ac-diagnostic-candidate-02.log"
+  },
+  {
+    "label": "candidate",
+    "attempt": 3,
+    "exit": 0,
+    "log": "ac-diagnostic-candidate-03.log"
+  },
+  {
+    "label": "candidate",
+    "attempt": 4,
+    "exit": 0,
+    "log": "ac-diagnostic-candidate-04.log"
+  },
+  {
+    "label": "candidate",
+    "attempt": 5,
+    "exit": 0,
+    "log": "ac-diagnostic-candidate-05.log"
+  },
+  {
+    "label": "candidate",
+    "attempt": 6,
+    "exit": 0,
+    "log": "ac-diagnostic-candidate-06.log"
+  },
+  {
+    "label": "candidate",
+    "attempt": 7,
+    "exit": 0,
+    "log": "ac-diagnostic-candidate-07.log"
+  },
+  {
+    "label": "candidate",
+    "attempt": 8,
+    "exit": 0,
+    "log": "ac-diagnostic-candidate-08.log"
+  },
+  {
+    "label": "candidate",
+    "attempt": 9,
+    "exit": 0,
+    "log": "ac-diagnostic-candidate-09.log"
+  }
+]

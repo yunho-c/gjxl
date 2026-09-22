@@ -1,0 +1,16 @@
+{
+  "base": "3b0de6d9d47846f6aa13f33ad6cca7e24e52ada6",
+  "files": {
+    "build-command.json": "660c83b58274ed7394e80858e85a5c070c035edbbd116e15ab7e60e4cd0fd061",
+    "gjxl.metallib": "bdb9d781cb907595b9de8aa09543f507dbfb4ec7576437f11c37057951468fe8",
+    "gjxl_encode": "41bf9bf51d6ec0964794abb1cd034b89f0923308155a598d120eb402b21dc896",
+    "encode_probe": "12f941815ee65ec6d0df57b3eb7dae0a27b1f9c4f56d6156c8e3f53b38b8857a",
+    "build.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "sources": {
+    "src/gpu/metal/kernels/butteraugli.metal": "9d661c38a28d2011b2e306caea0b6ad849e6a7809b1e42f37ea7ac6069bca7c5",
+    "src/gpu/metal/metal_butteraugli.cpp": "a5f8264e98dc043446273cb54ec7724f7e72f06918ebefd53036e15ca4bbe3fe",
+    "src/gpu/metal/metal_backend_internal.h": "3c2ce89ada9bf661f467f743f78419c7d352ea56065008380087d3a960e2ac10"
+  },
+  "probe_sha256": "6641021fe10fadf757bce839abfdf82ffc16a404553a1e48888732fc9c0904b4"
+}
