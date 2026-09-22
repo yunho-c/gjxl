@@ -1815,8 +1815,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
     Status status;
     const bool overlap_dc = !exhaustive_representation_search &&
         codestream_internal::active_ac_tokenization_provider != nullptr &&
-        std::getenv("GJXL_EXPERIMENT_TOKEN_OVERLAP") != nullptr &&
-        std::getenv("GJXL_EXPERIMENT_TOKEN_OVERLAP")[0] == '1';
+        codestream_internal::GpuTokenizationOverlapEnabled();
     const auto prepare_dc = [&]() -> Status {
     const ProfileClock::time_point dc_tokenization_begin = ProfileBegin(profile);
     auto& dc_groups = prepared.dc_groups;

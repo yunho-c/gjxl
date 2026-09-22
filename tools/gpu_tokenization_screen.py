@@ -36,6 +36,7 @@ def main():
     binary=run/'capture'
     if not binary.exists():
         shutil.copy2(ROOT/'build/release/tokenization_capture',binary)
+        (run/'source-commit.txt').write_bytes(subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT))
         (run/'source.diff').write_bytes(subprocess.check_output(['git','diff'],cwd=ROOT))
         files=subprocess.check_output(['git','ls-files','--others','--exclude-standard','src','tests','tools'],cwd=ROOT,text=True).splitlines()
         for name in files:
@@ -66,8 +67,9 @@ def main():
          done=out/'complete.json'
          if done.exists():record=json.loads(done.read_text())
          else:
-          env={k:v for k,v in os.environ.items() if not k.startswith('GJXL_EXPERIMENT_')}
+          env={k:v for k,v in os.environ.items() if not k.startswith('GJXL_EXPERIMENT_') and k != 'GJXL_GPU_TOKENIZATION'}
           env['GJXL_EXPERIMENT_DC_WORKERS']='8'
+          env.update(GJXL_EXPERIMENT_TOKEN_COMPACT='0',GJXL_EXPERIMENT_TOKEN_OVERLAP='0',GJXL_EXPERIMENT_TOKEN_SHARDS='4',GJXL_EXPERIMENT_TOKEN_SCALAR_DCT8='0')
           if mode.startswith(('gpu','overlap','fresh','compact','tight','smart','joined')):
            env['GJXL_EXPERIMENT_GPU_TOKENS']='1'
            env['GJXL_EXPERIMENT_TOKEN_SHARDS']=mode.removeprefix('gpu').removeprefix('overlap').removeprefix('fresh').removeprefix('compact').removeprefix('tight').removeprefix('smart').removeprefix('joined')
@@ -77,9 +79,10 @@ def main():
           if mode.startswith(('smart','joined')):env['GJXL_EXPERIMENT_TOKEN_COMPACT']='2'
           if mode.startswith('joined'):env['GJXL_EXPERIMENT_TOKEN_SCALAR_DCT8']='2'
           env.update(variants.get(mode,{}))
+          env.setdefault('GJXL_GPU_TOKENIZATION',env.get('GJXL_EXPERIMENT_GPU_TOKENS','0'))
           if args.diagnostic:env['GJXL_EXPERIMENT_TOKEN_DIAGNOSTIC']='1'
           command=[str(baseline if mode=='base' else binary),'--input',im['input_path'],'--scope','metal-public-workflow','--validation','metal-only','--gpu-aq','fully-resident','--effort',str(effort),'--distance','1.9','--cpu-threads','8','--warmups','1','--samples',str(args.samples),'--gpu-profile','stage','--gpu-profile-output',str(out/'gpu.json')]
-          (out/'command.json').write_text(json.dumps({'argv':command,'environment':{k:v for k,v in env.items() if k.startswith('GJXL_EXPERIMENT_')},'input_sha256':im['input_sha256']},indent=2))
+          (out/'command.json').write_text(json.dumps({'argv':command,'environment':{k:v for k,v in env.items() if k.startswith('GJXL_EXPERIMENT_') or k == 'GJXL_GPU_TOKENIZATION'},'input_sha256':im['input_sha256']},indent=2))
           with (out/'stdout.txt').open('w') as stdout,(out/'stderr.txt').open('w') as stderr:
            subprocess.run(command,env=env,stdout=stdout,stderr=stderr,check=True,timeout=240)
           rows=[r for r in json.loads((out/'paired.json').read_text())['rows'] if r['sample_index']>=0]

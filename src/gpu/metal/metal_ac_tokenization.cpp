@@ -68,7 +68,8 @@ public:
                const SimpleAcNaturalOrders &natural,
                const SimpleBlockContextMap &contexts,
                bool populations) override {
-    diagnostic_ = std::getenv("GJXL_EXPERIMENT_TOKEN_DIAGNOSTIC") != nullptr;
+    diagnostic_ = TokenizationExperimentSetting(
+                      "GJXL_EXPERIMENT_TOKEN_DIAGNOSTIC") != nullptr;
     Stamp(0);
     if (submission_)
       return Status::FailedPrecondition("AC tokenizer already submitted");
@@ -87,20 +88,26 @@ public:
           "Resident AC coefficient buffer is truncated");
     context_count_ = contexts.ac_context_count();
     populations_ = populations;
-    compact_ = false;
-    if (const char *value = std::getenv("GJXL_EXPERIMENT_TOKEN_COMPACT")) {
-      compact_ = value[0] == '1' || value[0] == '2';
-      smart_ = value[0] == '2';
-    }
-    shards_ = 4;
-    if (const char *value = std::getenv("GJXL_EXPERIMENT_TOKEN_SHARDS")) {
+    const unsigned layout = GpuTokenizationCompactLayout();
+    compact_ = layout != 0;
+    smart_ = layout == 2;
+    shards_ = 1;
+    if (const char *value =
+            TokenizationExperimentSetting("GJXL_EXPERIMENT_TOKEN_SHARDS")) {
       const long n = std::strtol(value, nullptr, 10);
       if (n == 1 || n == 2 || n == 4 || n == 8)
         shards_ = static_cast<uint32_t>(n);
     }
-    scalar_dct8_ = std::getenv("GJXL_EXPERIMENT_TOKEN_SCALAR_DCT8") != nullptr;
+    unsigned scalar_mode = 2;
+    if (const char *value = TokenizationExperimentSetting(
+            "GJXL_EXPERIMENT_TOKEN_SCALAR_DCT8")) {
+      if (value[0] >= '0' && value[0] <= '2' && value[1] == '\0')
+        scalar_mode = static_cast<unsigned>(value[0] - '0');
+    }
+    scalar_dct8_ = scalar_mode != 0;
     threads_ = 128;
-    if (const char *value = std::getenv("GJXL_EXPERIMENT_TOKEN_THREADS")) {
+    if (const char *value =
+            TokenizationExperimentSetting("GJXL_EXPERIMENT_TOKEN_THREADS")) {
       const long n = std::strtol(value, nullptr, 10);
       if (n == 64 || n == 128 || n == 256)
         threads_ = static_cast<uint32_t>(n);
@@ -143,7 +150,8 @@ public:
       return status;
 
     cache_ = true;
-    if (const char *value = std::getenv("GJXL_EXPERIMENT_TOKEN_CACHE"))
+    if (const char *value =
+            TokenizationExperimentSetting("GJXL_EXPERIMENT_TOKEN_CACHE"))
       cache_ = value[0] != '0';
     if (cache_)
       status = backend_.AcquireAqScratchArena(
@@ -199,7 +207,8 @@ public:
           std::memory_order_relaxed);
       if (hint == 0)
         hint = static_cast<uint32_t>((max_tokens + 7) / 8);
-      if (const char *forced = std::getenv("GJXL_EXPERIMENT_TOKEN_CAPACITY"))
+      if (const char *forced =
+              TokenizationExperimentSetting("GJXL_EXPERIMENT_TOKEN_CAPACITY"))
         hint = std::max(1ul, std::strtoul(forced, nullptr, 10));
       status = PrepareOutput(
           static_cast<uint32_t>(std::min<size_t>(hint, max_tokens)));
@@ -259,16 +268,15 @@ public:
     }
     // Auto scalar mode is limited to a pure DCT8 frame; mixed strategy screens
     // did not improve. The explicit value 1 retains the mixed-frame ablation.
-    if (const char *scalar = std::getenv("GJXL_EXPERIMENT_TOKEN_SCALAR_DCT8")) {
-      if (scalar[0] == '2' && has_other_)
-        scalar_dct8_ = false;
-    }
+    if (scalar_mode == 2 && has_other_)
+      scalar_dct8_ = false;
     control[control_end_ + 4] = scalar_dct8_;
-    const char *group_mode = std::getenv("GJXL_EXPERIMENT_TOKEN_GROUP_DCT8");
+    const char *group_mode =
+        TokenizationExperimentSetting("GJXL_EXPERIMENT_TOKEN_GROUP_DCT8");
     group_dct8_ = smart_ && !has_other_ && group_mode && group_mode[0] == '1';
     group_threads_ = threads_;
-    if (const char *value =
-            std::getenv("GJXL_EXPERIMENT_TOKEN_GROUP_THREADS")) {
+    if (const char *value = TokenizationExperimentSetting(
+            "GJXL_EXPERIMENT_TOKEN_GROUP_THREADS")) {
       const long n = std::strtol(value, nullptr, 10);
       if (n == 64 || n == 128 || n == 256)
         group_threads_ = uint32_t(n);
@@ -302,8 +310,8 @@ public:
                    anchor_count, context_count_, shards_, capacity, cache_);
     control[3] = tasks_;
     Stamp(2);
-    kernel_profile_ =
-        std::getenv("GJXL_EXPERIMENT_TOKEN_KERNEL_PROFILE") != nullptr;
+    kernel_profile_ = TokenizationExperimentSetting(
+                          "GJXL_EXPERIMENT_TOKEN_KERNEL_PROFILE") != nullptr;
     if (kernel_profile_) {
       const std::array stages = {
           MetalProfiledComputeStage{.stage_id = "token.metadata",
@@ -444,7 +452,8 @@ public:
       reduced.resize(context_count_);
       const auto *hist = Data<uint32_t>(8);
       uint64_t population_tokens = 0;
-      if (std::getenv("GJXL_EXPERIMENT_TOKEN_SPECIALIZED_REDUCE")) {
+      if (TokenizationExperimentSetting(
+              "GJXL_EXPERIMENT_TOKEN_SPECIALIZED_REDUCE")) {
         switch (shards_) {
         case 1:
           population_tokens = ReduceHistograms<1>(hist, &reduced);

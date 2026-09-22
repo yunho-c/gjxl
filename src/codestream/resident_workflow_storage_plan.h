@@ -26,7 +26,7 @@ struct ResidentWorkflowStoragePlan {
   size_t maximum_attempts = 0;
   size_t score_count = 0;
   // Frontend device owner inventory; AC and completed need not overlap.
-  // Experimental token devices are separately included in serializer.working.
+  // Token devices are separately included in serializer.working.
   size_t device_bytes = 0;
   // Host preparation/evaluator/AC/policy and independent completed snapshot.
   HostStorageBound frontend;

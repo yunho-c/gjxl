@@ -386,7 +386,7 @@ bool RunCase(GpuBackend &gpu, ConstImage3FView image,
         reference_options.collect_timing = false;
     // Adaptive token capacity may grow on the first ordinary call. Prime the
     // reference so profiling is compared against the same capacity state.
-    if (ExperimentalGpuTokenizationEnabled()) {
+    if (GpuTokenizationEnabled()) {
       Result priming;
       if (!Ok(Encode(gpu, image, reference_options, &priming)) || !Trim(gpu))
         return false;

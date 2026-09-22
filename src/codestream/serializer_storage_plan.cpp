@@ -374,8 +374,7 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
     plan.maximum_output_bytes =
       std::max(plan.maximum_output_bytes, fallback.maximum_output_bytes);
   }
-#ifdef GJXL_TOKENIZATION_EXPERIMENT
-  if (ExperimentalGpuTokenizationEnabled()) {
+  if (options.gpu_tokenization && !exhaustive) {
     size_t metadata = 262144, output = 256, extra = 0;
     size_t blocks_count = 0;
     if (!blocks.try_area(&blocks_count) ||
@@ -385,15 +384,13 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
         !AddScaled(metadata, 1, &extra) || !AddScaled(output, 1, &extra) ||
         !AddScaled(plan.maximum_ac_tokens, 2, &extra) ||
         !plan.working.Add({extra, extra})) return Overflow();
-    const char* layout=std::getenv("GJXL_EXPERIMENT_TOKEN_COMPACT");
-    if(layout && (layout[0]=='1'||layout[0]=='2')) {
+    if (GpuTokenizationCompactLayout() != 0) {
       plan.token_idle_pool_capacity={metadata,output};
     } else {
       if(!AddScaled(output,1,&metadata)) return Overflow();
       plan.token_idle_pool_capacity={metadata,0};
     }
   }
-#endif
   *out = plan;
   return Status::Ok();
 }

@@ -19,6 +19,9 @@ struct SerializerStorageOptions {
   // current nested DC-measurement workers. This plan does not install a scope.
   size_t cpu_thread_count = 0;
   bool collect_profile = false;
+  // Only the resident Metal workflow supplies a GPU producer. CPU/CUDA and
+  // compatibility serializers must not reserve its device arenas.
+  bool gpu_tokenization = false;
 };
 
 struct SerializerStoragePlan {
@@ -33,7 +36,7 @@ struct SerializerStoragePlan {
   // envelope already includes this output; do not add it twice.
   HostStorageBound output;
   HostStorageBound working;
-  // Experimental Metal token metadata/output arenas, already in working.
+  // Metal token metadata/output arenas, already in working.
   std::array<size_t, 2> token_idle_pool_capacity{};
   bool operator==(const SerializerStoragePlan &) const = default;
 };

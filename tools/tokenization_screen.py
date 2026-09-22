@@ -40,7 +40,8 @@ def main():
                         record = json.loads(done.read_text())
                         assert sha(out / 'reference.jxl') == record['output_sha256']
                     else:
-                        env = {k:v for k,v in os.environ.items() if not k.startswith('GJXL_EXPERIMENT_')}
+                        env = {k:v for k,v in os.environ.items() if not k.startswith('GJXL_EXPERIMENT_') and k != 'GJXL_GPU_TOKENIZATION'}
+                        env['GJXL_GPU_TOKENIZATION']='0'
                         if mode != 'base':
                             env['GJXL_EXPERIMENT_DC_WORKERS'] = mode
                         command = [str(RUN / ('base' if mode == 'base' else 'dc')),
@@ -49,7 +50,7 @@ def main():
                             '--effort', str(effort), '--distance', '1.9', '--cpu-threads', '8',
                             '--warmups', '1', '--samples', '2', '--gpu-profile', 'stage',
                             '--gpu-profile-output', str(out / 'gpu.json')]
-                        (out / 'command.json').write_text(json.dumps({'argv':command,'dc_workers':mode},indent=2))
+                        (out / 'command.json').write_text(json.dumps({'argv':command,'dc_workers':mode,'environment':{k:v for k,v in env.items() if k.startswith('GJXL_EXPERIMENT_') or k == 'GJXL_GPU_TOKENIZATION'}},indent=2))
                         start = time.monotonic()
                         with (out / 'stdout.txt').open('w') as stdout, (out / 'stderr.txt').open('w') as stderr:
                             subprocess.run(command, env=env, stdout=stdout, stderr=stderr, check=True, timeout=180)

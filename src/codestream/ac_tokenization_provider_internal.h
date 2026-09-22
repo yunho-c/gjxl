@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// Experimental producer/consumer seam; model selection and entropy writing stay
+// Resident producer/consumer seam; model selection and entropy writing stay
 // on CPU.
 #pragma once
 #include "codec/vardct_frame_view_internal.h"
@@ -8,6 +8,7 @@
 #include "codestream/coefficient_order.h"
 #include "codestream/entropy_internal.h"
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 
 namespace gjxl {
@@ -42,13 +43,39 @@ public:
 private:
   AcTokenizationProvider *previous_;
 };
-inline bool ExperimentalGpuTokenizationEnabled() {
+// Production defaults match the qualified V7 configuration. Experimental
+// ablations remain build-gated; the stable CPU override takes precedence.
+inline const char *TokenizationExperimentSetting(const char *name) {
 #ifdef GJXL_TOKENIZATION_EXPERIMENT
-  const char *value = std::getenv("GJXL_EXPERIMENT_GPU_TOKENS");
-  return value && value[0] == '1';
+  return std::getenv(name);
 #else
-  return false;
+  (void)name;
+  return nullptr;
 #endif
+}
+inline bool GpuTokenizationEnabled() {
+  if (const char *value = std::getenv("GJXL_GPU_TOKENIZATION")) {
+    if (std::strcmp(value, "0") == 0)
+      return false;
+    if (std::strcmp(value, "1") == 0)
+      return true;
+  }
+  const char *value =
+      TokenizationExperimentSetting("GJXL_EXPERIMENT_GPU_TOKENS");
+  return value == nullptr || std::strcmp(value, "0") != 0;
+}
+inline unsigned GpuTokenizationCompactLayout() {
+  const char *value =
+      TokenizationExperimentSetting("GJXL_EXPERIMENT_TOKEN_COMPACT");
+  if (value != nullptr && value[0] >= '0' && value[0] <= '2' &&
+      value[1] == '\0')
+    return static_cast<unsigned>(value[0] - '0');
+  return 2;
+}
+inline bool GpuTokenizationOverlapEnabled() {
+  const char *value =
+      TokenizationExperimentSetting("GJXL_EXPERIMENT_TOKEN_OVERLAP");
+  return value == nullptr || std::strcmp(value, "0") != 0;
 }
 Status CreateMetalAcTokenizationProvider(
     GpuBackend &backend, const DeviceBuffer &coefficients, size_t offset,

@@ -1,0 +1,9 @@
+Test project /Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/build/release
+    Start 147: resident_workflow_storage_plan
+1/2 Test #147: resident_workflow_storage_plan ...   Passed    8.36 sec
+    Start 154: workflow_admission
+2/2 Test #154: workflow_admission ...............   Passed   24.57 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =  32.93 sec
