@@ -155,6 +155,8 @@ struct ButteraugliDispatchPlan {
 
 /// Production prepared comparisons only: no ForTesting stage capture. Includes
 /// the two-dispatch Malta hardware fallback and geometry-dependent reduction.
+/// This backend-independent bound retains legacy filter dispatch counts; the
+/// qualified shared-load bundle uses fewer dispatches within the same bound.
 /// anchor_count is used only for resident sinks; zero requests no sink bound.
 [[nodiscard]] Status
 ComputeButteraugliDispatchPlan(Extent2D source, size_t anchor_count,

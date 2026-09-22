@@ -250,7 +250,24 @@ enum class MetalAqScratchArena : uint8_t {
   kCount,
 };
 
+// Selected atomically after every pipeline and its dispatch limits qualify.
+// Disabled bundles retain the original psycho-image and resident data layout.
+struct ButteraugliTrafficPipelines {
+  bool enabled = false;
+  NS::SharedPtr<MTL::ComputePipelineState> frequency_low_medium_shared;
+  NS::SharedPtr<MTL::ComputePipelineState> frequency_low_medium_packed_dc;
+  NS::SharedPtr<MTL::ComputePipelineState> medium_b_reuse;
+  NS::SharedPtr<MTL::ComputePipelineState> mask_reuse;
+  NS::SharedPtr<MTL::ComputePipelineState> high_reuse;
+  NS::SharedPtr<MTL::ComputePipelineState> ultra_direct;
+  NS::SharedPtr<MTL::ComputePipelineState> malta_l2;
+  NS::SharedPtr<MTL::ComputePipelineState> final_packed_dc;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_reduction;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_reduction_small;
+};
+
 struct ButteraugliPipelines {
+  ButteraugliTrafficPipelines traffic;
   NS::SharedPtr<MTL::ComputePipelineState> copy;
   NS::SharedPtr<MTL::ComputePipelineState> expand;
   NS::SharedPtr<MTL::ComputePipelineState> subsample;
@@ -490,6 +507,7 @@ private:
   friend class MetalPreparedResidentInput;
   friend class MetalPreparedDeviceButteraugli;
   friend struct MetalCacheAdmissionTestAccess;
+  friend struct MetalButteraugliTrafficTestAccess;
   friend struct MetalDcProcessingTestAccess;
   friend class MetalCompletedVarDctFrame;
   friend Status EmptyMetalAqScratchArenasForTesting(GpuBackend& backend);

@@ -25,18 +25,19 @@
 #include "codec/vardct_frame.h"
 #include "codec/vardct_frame_view_internal.h"
 #include "core/ac_strategy.h"
-#include "core/status.h"
 #include "core/quantizer.h"
+#include "core/status.h"
 #include "gpu/backend.h"
-#include "gpu/metal/metal_aq_evaluation_test.h"
-#include "gpu/metal/metal_aq_evaluation_profile.h"
-#include "gpu/ops/gpu_execution_profile_internal.h"
 #include "gpu/metal/metal_aq_butteraugli_test.h"
+#include "gpu/metal/metal_aq_evaluation_profile.h"
+#include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_aq_postprocess_test.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/metal/metal_butteraugli_test.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/gpu_execution_profile_internal.h"
 #include "gpu/ops/resident_input.h"
+#include "metal_butteraugli_traffic_test_utils.h"
 
 namespace {
 
@@ -2345,8 +2346,9 @@ bool CheckResidentPolicyFailure(ResidentPolicyFailure failure,
   Fixture fixture;
   std::unique_ptr<gjxl::GpuBackend> gpu;
   if (!fixture.Initialize() ||
-      !CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
-                   "resident policy failure backend")) {
+      !CheckStatus(
+          gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &gpu),
+          "resident policy failure backend")) {
     return false;
   }
   const gjxl::Extent2D blocks = fixture.strategies.extent();
@@ -2612,15 +2614,18 @@ bool CheckFailure(gjxl::StatusCode expected, bool submission,
   std::unique_ptr<gjxl::GpuBackend> gpu;
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
   if (!fixture.Initialize() ||
-      !CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
-                   "failure backend") ||
+      !CheckStatus(
+          gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &gpu),
+          "failure backend") ||
       !Prepare(*gpu, fixture.original, fixture.coding, fixture.strategies,
                &prepared) ||
-      !CheckStatus(gjxl::ArmNextMetalSubmissionFailureForTest(
-        *gpu, submission, completion), "AQ failure injection") ||
+      !CheckStatus(gjxl::ArmNextMetalSubmissionFailureForTest(*gpu, submission,
+                                                              completion),
+                   "AQ failure injection") ||
       (readback &&
-       !CheckStatus(gjxl::metal_internal::FailNextMetalAqReadbackForTesting(
-         *prepared), "AQ readback injection"))) {
+       !CheckStatus(
+           gjxl::metal_internal::FailNextMetalAqReadbackForTesting(*prepared),
+           "AQ readback injection"))) {
     return false;
   }
   EvaluationOutputStorage output(fixture.strategies.extent());
@@ -2641,12 +2646,14 @@ bool CheckFinalReadbackFailure() {
   std::unique_ptr<gjxl::GpuBackend> gpu;
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
   if (!fixture.Initialize() ||
-      !CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
-                   "final failure backend") ||
+      !CheckStatus(
+          gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &gpu),
+          "final failure backend") ||
       !Prepare(*gpu, fixture.original, fixture.coding, fixture.strategies,
                &prepared) ||
-      !CheckStatus(gjxl::metal_internal::FailNextMetalAqReadbackForTesting(
-        *prepared), "final readback injection")) {
+      !CheckStatus(
+          gjxl::metal_internal::FailNextMetalAqReadbackForTesting(*prepared),
+          "final readback injection")) {
     return false;
   }
   EvaluationOutputStorage bounded(fixture.strategies.extent());
@@ -2682,8 +2689,9 @@ bool CheckUploadOrNumericFailure(bool upload) {
   std::unique_ptr<gjxl::GpuBackend> gpu;
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
   if (!fixture.Initialize() ||
-      !CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
-                   "operational-boundary backend") ||
+      !CheckStatus(
+          gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &gpu),
+          "operational-boundary backend") ||
       !Prepare(*gpu, fixture.original, fixture.coding, fixture.strategies,
                &prepared)) {
     return false;
@@ -2721,8 +2729,9 @@ bool CheckScratchWorkspaceLeases() {
   Fixture fixture;
   std::unique_ptr<gjxl::GpuBackend> gpu;
   if (!fixture.Initialize() ||
-      !CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
-                   "scratch-lease backend")) {
+      !CheckStatus(
+          gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &gpu),
+          "scratch-lease backend")) {
     return false;
   }
 
@@ -2756,7 +2765,8 @@ bool CheckScratchWorkspaceLeases() {
   }
   std::unique_ptr<gjxl::GpuBackend> oracle_gpu;
   std::unique_ptr<gjxl::PreparedAqEvaluation> oracle_prepared;
-  if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &oracle_gpu),
+  if (!CheckStatus(gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH,
+                                                            &oracle_gpu),
                    "scratch-lease oracle backend") ||
       !Prepare(*oracle_gpu, fixture.original, fixture.coding,
                fixture.strategies, &oracle_prepared)) {
@@ -3482,10 +3492,16 @@ bool CheckResidentInputPreparation(gjxl::GpuBackend& gpu) {
 
 }  // namespace
 
-int main() {
+int main(int argc, char **argv) {
+  if (argc == 2 && std::string_view(argv[1]) == "--legacy-butteraugli") {
+    gjxl::test::force_legacy_butteraugli = true;
+  } else if (argc != 1) {
+    return EXIT_FAILURE;
+  }
   std::unique_ptr<gjxl::GpuBackend> gpu;
-  if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
-                   "Metal AQ backend") ||
+  if (!CheckStatus(
+          gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &gpu),
+          "Metal AQ backend") ||
       !CheckProfilingSessionAggregation() || !CheckCapabilityBoundary() ||
       !CheckInvalidCoefficientDecisionMode(*gpu) ||
       !CheckStrategyGridValidation(*gpu) ||
@@ -3552,7 +3568,8 @@ int main() {
         // Failure tests above create many backends. Refresh this one so its
         // kernel names remain in the bounded diagnostic pipeline registry.
         std::unique_ptr<gjxl::GpuBackend> policy_gpu;
-        if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &policy_gpu),
+        if (!CheckStatus(gjxl::test::CreateButteraugliTestBackend(
+                             GJXL_METALLIB_PATH, &policy_gpu),
                          "filter-config resident backend") ||
             !CheckResidentButteraugliPolicy(*policy_gpu, options))
           return EXIT_FAILURE;

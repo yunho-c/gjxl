@@ -21,6 +21,7 @@
 #include "gpu/metal/metal_butteraugli_test.h"
 #include "gpu/ops/butteraugli.h"
 #include "gpu_test_utils.h"
+#include "metal_butteraugli_traffic_test_utils.h"
 
 namespace {
 
@@ -166,7 +167,8 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
   }
 
   std::unique_ptr<gjxl::GpuBackend> backend;
-  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &backend).ok()) {
+  if (!gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &backend)
+           .ok()) {
     return false;
   }
   DeviceImage device_reference;
@@ -339,7 +341,8 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
   }
 
   std::unique_ptr<gjxl::GpuBackend> backend;
-  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &backend).ok()) {
+  if (!gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &backend)
+           .ok()) {
     return false;
   }
   DeviceImage device_reference;
@@ -471,7 +474,8 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
     double expected_score = 0.0;
   };
   std::unique_ptr<gjxl::GpuBackend> backend;
-  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &backend).ok()) {
+  if (!gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &backend)
+           .ok()) {
     return false;
   }
   const auto compare = [](Case& item, std::vector<float>* map, double* score) {
@@ -567,7 +571,8 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
   const gjxl::Extent2D extent = reference.extent;
 
   std::unique_ptr<gjxl::GpuBackend> backend;
-  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &backend).ok()) {
+  if (!gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &backend)
+           .ok()) {
     return false;
   }
   DeviceImage device_reference;
@@ -646,9 +651,15 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
   std::unique_ptr<gjxl::GpuBackend> backend, oracle;
   gjxl::MetalBackendOptions uncached;
   uncached.butteraugli_cache_bytes = 0;
-  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &backend).ok() ||
-      !gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, uncached, &oracle).ok())
+  if (!gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &backend)
+           .ok() ||
+      !gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, uncached,
+                                                &oracle)
+           .ok())
     return false;
+  // Compare the optimized and original layouts bit-for-bit, while also
+  // exercising independent strides, offsets, option changes and cache reuse.
+  gjxl::metal_internal::MetalButteraugliTrafficTestAccess::Disable(*oracle);
   size_t iteration = 0;
   const auto run = [&](gjxl::Extent2D extent, size_t allocations,
                        bool trim_active = false) {
@@ -691,14 +702,15 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
     return SameBits(maps[0], maps[1]) &&
       std::bit_cast<uint64_t>(scores[0]) == std::bit_cast<uint64_t>(scores[1]);
   };
-  if (!run({32, 32}, 1) || !run({32, 32}, 0) ||
-      !run({31, 31}, 0) || !run({64, 64}, 1) ||
-      !run({3, 7}, 1) || !run({7, 3}, 0) ||
+  if (!run({32, 32}, 1) || !run({32, 32}, 0) || !run({31, 31}, 0) ||
+      !run({64, 64}, 1) || !run({3, 7}, 1) || !run({7, 3}, 0) ||
       !run({9, 13}, 1) || !run({17, 29}, 1) || !run({17, 29}, 0) ||
       !gjxl::EmptyMetalButteraugliCacheForTesting(*backend).ok() ||
       !run({17, 29}, 1) || !backend->TrimPreparationCache().ok() ||
       gjxl::MetalButteraugliCacheBytesForTesting(*backend) != 0 ||
-      !run({17, 29}, 1, true) || !run({17, 29}, 1)) return false;
+      !run({17, 29}, 1, true) || !run({17, 29}, 1) || !run({127, 131}, 1) ||
+      !run({257, 259}, 1))
+    return false;
 
   // Both preparation and comparison failures must drop the acquired lease.
   HostImage reference({17, 29}), distorted({17, 29});
@@ -728,9 +740,12 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
   // A nonzero but insufficient backend budget also bypasses the cache.
   backend.reset();
   uncached.butteraugli_cache_bytes = 1;
-  if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, uncached, &backend).ok() ||
+  if (!gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, uncached,
+                                                &backend)
+           .ok() ||
       !run({17, 29}, 1) || !run({17, 29}, 1) ||
-      gjxl::MetalButteraugliCacheBytesForTesting(*backend) != 0) return false;
+      gjxl::MetalButteraugliCacheBytesForTesting(*backend) != 0)
+    return false;
   return true;
 }
 
@@ -744,11 +759,15 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
   FillFixture(&reference, &distorted, false);
   size_t bytes = 0;
   for (size_t index = 0; index < backends.size(); ++index) {
-    if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &backends[index]).ok() ||
+    if (!gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH,
+                                                  &backends[index])
+             .ok() ||
         !references[index].Prepare(*backends[index], reference.extent, 3) ||
         !references[index].Upload(reference) ||
-        !gjxl::PrepareDeviceButteraugli(*backends[index],
-          {references[index].View(), {}}, &prepared[index]).ok()) return false;
+        !gjxl::PrepareDeviceButteraugli(
+             *backends[index], {references[index].View(), {}}, &prepared[index])
+             .ok())
+      return false;
     bytes = prepared[index]->memory_stats().prepared_allocation_bytes;
   }
   if (bytes * 3 > limit ||
@@ -777,7 +796,12 @@ void FillFixture(HostImage* reference, HostImage* distorted, bool identity) {
 
 }  // namespace
 
-int main() {
+int main(int argc, char **argv) {
+  if (argc == 2 && std::string_view(argv[1]) == "--legacy-butteraugli") {
+    gjxl::test::force_legacy_butteraugli = true;
+  } else if (argc != 1) {
+    return EXIT_FAILURE;
+  }
   if (!CheckCapacityCache() || !CheckProcessCapacityAccounting()) {
     std::cerr << "Metal Butteraugli capacity-cache lifecycle check failed\n";
     return EXIT_FAILURE;

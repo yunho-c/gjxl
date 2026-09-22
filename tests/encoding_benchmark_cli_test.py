@@ -414,9 +414,14 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
             f"frontend.prepare_aq.reference.{scale}.{phase}"
             for scale in ("main", "sub") for phase in psycho_phases + ["mask"]
         ])
+        shared_filters = reference[1]["dispatches"][0]["kernel_id"] == (
+            "gjxl_butteraugli_low_medium_shared_f32")
+        filter_passes = 1 if shared_filters else 2
+        reference_passes = [1, 1, filter_passes, filter_passes,
+                            filter_passes, 1, filter_passes, filter_passes,
+                            2 if shared_filters else 3]
         self.assertEqual([len(stage["dispatches"]) for stage in reference],
-                         [1, 1, 2, 2, 2, 1, 2, 2, 3,
-                          4, 1, 2, 2, 2, 1, 2, 2, 3])
+                         reference_passes + [4] + reference_passes[1:])
         self.assertTrue(all(stage["group_id"] == "frontend.prepare_aq.reference"
                             for stage in reference))
         wall_stages = {
@@ -454,7 +459,8 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                 self.assertEqual([stage["stage_id"] for stage in parts],
                     [f"butteraugli.psycho.{scale}.{phase}" for phase in psycho_phases])
                 self.assertEqual([len(stage["dispatches"]) for stage in parts],
-                    [4 if scale == "sub" else 1, 1, 2, 2, 2, 1, 2, 2])
+                    [4 if scale == "sub" else 1, 1, filter_passes,
+                     filter_passes, filter_passes, 1, filter_passes, filter_passes])
         reconstruction_stages = {
             stage["stage_id"]
             for stage in stages
