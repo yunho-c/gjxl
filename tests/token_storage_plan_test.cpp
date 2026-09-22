@@ -286,7 +286,9 @@ bool CheckGroupClassSum() {
             sizeof(EntropyToken) *
                 (6 * w * h + 2 * ((w + 7) / 8) * ((h + 7) / 8)) +
             dc_groups * sizeof(SimpleDcGroupTokenStreams) +
-            std::min(w, size_t{256}) * std::min(h, size_t{256}) * (sizeof(DcAnchor) + 1);
+            std::min(w, size_t{256}) * std::min(h, size_t{256}) * (sizeof(DcAnchor) + 1) * std::min(size_t{8}, dc_groups) +
+            (dc_groups > 1 ? dc_groups * sizeof(Status) +
+              std::min(size_t{8}, dc_groups) * sizeof(std::thread) : 0);
         const size_t largest_dc_blocks = std::min(w, size_t{256}) * std::min(h, size_t{256});
         const size_t largest_dc_tiles = ((std::min(w, size_t{256}) + 7) / 8) *
                                        ((std::min(h, size_t{256}) + 7) / 8);

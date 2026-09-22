@@ -1,0 +1,24 @@
+{
+  "runner_sha256": "3fcc0499a5c59152c9efcef059c1afd145a573dc02189f195af5c6921a292354",
+  "images": "0,1,2,3,4,5",
+  "efforts": "1",
+  "modes": "release,joined1,group256",
+  "rounds": 5,
+  "samples": 4,
+  "variants": {
+    "release": {
+      "GJXL_EXPERIMENT_PARALLEL_TOKEN_RELEASE": "1"
+    },
+    "group256": {
+      "GJXL_EXPERIMENT_GPU_TOKENS": "1",
+      "GJXL_EXPERIMENT_TOKEN_COMPACT": "2",
+      "GJXL_EXPERIMENT_TOKEN_OVERLAP": "1",
+      "GJXL_EXPERIMENT_TOKEN_SHARDS": "1",
+      "GJXL_EXPERIMENT_TOKEN_SCALAR_DCT8": "2",
+      "GJXL_EXPERIMENT_TOKEN_GROUP_DCT8": "1",
+      "GJXL_EXPERIMENT_TOKEN_GROUP_THREADS": "256"
+    }
+  },
+  "diagnostic": false,
+  "baseline": null
+}

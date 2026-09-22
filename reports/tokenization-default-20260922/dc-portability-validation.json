@@ -1,0 +1,119 @@
+{
+  "parent_commit": "3910e09b45fe48859d73d0724aacbf783d14a0f0",
+  "test_source": "tests/dc_parallel_tokenization_test.cpp",
+  "test_source_sha256": "626665b81dc8b53aa355275417682492c5c2ae1dc4cd283de430b9b760415bd8",
+  "shim_source": "dc-portability-hardware-shim.cpp",
+  "shim_sha256": "7778ecfbbb317decd27855d88f122290fdc8bf8ee5f8ae7c7b29c854c1dcf8b6",
+  "method": "Diagnostic AppleClang link-time override of std::thread::hardware_concurrency; simulates the scheduler query, not separate physical CPUs. No production code changed.",
+  "cwd": "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922",
+  "compile_command": [
+    "/usr/bin/c++",
+    "-O3",
+    "-DNDEBUG",
+    "-std=c++20",
+    "-arch",
+    "arm64",
+    "-Isrc",
+    "-Itests",
+    "tests/dc_parallel_tokenization_test.cpp",
+    "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/build/tokenization-merge-review/hardware_threads_override.cpp",
+    "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/build/tokenization-cpu-default/libgjxl_codestream.a",
+    "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/build/tokenization-cpu-default/libgjxl_gpu_ops.a",
+    "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/build/tokenization-cpu-default/libgjxl_codec.a",
+    "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/build/tokenization-cpu-default/libgjxl_gpu.a",
+    "-o",
+    "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/build/tokenization-merge-review/dc_parallel_small_host_fixed"
+  ],
+  "compile_environment": {
+    "DEVELOPER_DIR": "/Applications/Xcode.app/Contents/Developer"
+  },
+  "fixed_binary_sha256": "6f766fc2f38ccb774044ec26a510a760e4191d0a6c8d4de37f52f77dbdc1c2bf",
+  "before": [
+    {
+      "simulated_hardware_threads": 1,
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "DC launch fault did not propagate\n"
+    },
+    {
+      "simulated_hardware_threads": 2,
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "DC launch fault did not propagate\n"
+    },
+    {
+      "simulated_hardware_threads": 3,
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "DC launch fault did not propagate\n"
+    },
+    {
+      "simulated_hardware_threads": 4,
+      "exit_code": 0,
+      "stdout": "Verified 20 DC cases: exact gradient/weighted streams, finite storage plans, CPU caps, partial launch failure and recovery.\n",
+      "stderr": ""
+    }
+  ],
+  "after": [
+    {
+      "simulated_hardware_threads": 0,
+      "exit_code": 0,
+      "dc_cases": 8,
+      "launch_failure_cases": 0,
+      "stdout": "Verified 8 DC cases (0 launch-failure cases): exact gradient/weighted streams, finite storage plans, CPU caps, partial launch failure and recovery.\n",
+      "stderr": ""
+    },
+    {
+      "simulated_hardware_threads": 1,
+      "exit_code": 0,
+      "dc_cases": 8,
+      "launch_failure_cases": 0,
+      "stdout": "Verified 8 DC cases (0 launch-failure cases): exact gradient/weighted streams, finite storage plans, CPU caps, partial launch failure and recovery.\n",
+      "stderr": ""
+    },
+    {
+      "simulated_hardware_threads": 2,
+      "exit_code": 0,
+      "dc_cases": 12,
+      "launch_failure_cases": 4,
+      "stdout": "Verified 12 DC cases (4 launch-failure cases): exact gradient/weighted streams, finite storage plans, CPU caps, partial launch failure and recovery.\n",
+      "stderr": ""
+    },
+    {
+      "simulated_hardware_threads": 3,
+      "exit_code": 0,
+      "dc_cases": 16,
+      "launch_failure_cases": 8,
+      "stdout": "Verified 16 DC cases (8 launch-failure cases): exact gradient/weighted streams, finite storage plans, CPU caps, partial launch failure and recovery.\n",
+      "stderr": ""
+    },
+    {
+      "simulated_hardware_threads": 4,
+      "exit_code": 0,
+      "dc_cases": 20,
+      "launch_failure_cases": 12,
+      "stdout": "Verified 20 DC cases (12 launch-failure cases): exact gradient/weighted streams, finite storage plans, CPU caps, partial launch failure and recovery.\n",
+      "stderr": ""
+    },
+    {
+      "simulated_hardware_threads": 8,
+      "exit_code": 0,
+      "dc_cases": 20,
+      "launch_failure_cases": 12,
+      "stdout": "Verified 20 DC cases (12 launch-failure cases): exact gradient/weighted streams, finite storage plans, CPU caps, partial launch failure and recovery.\n",
+      "stderr": ""
+    }
+  ],
+  "normal_runs": [
+    {
+      "configuration": "Metal-enabled Release",
+      "log_sha256": "28383c32ec4590ec0582793317378b0270cb95bea3e7cef0a65536eef92e6b25",
+      "log": "Test project /Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/build/release\n    Start 22: dc_parallel_tokenization\n1/1 Test #22: dc_parallel_tokenization .........   Passed    0.29 sec\n\n100% tests passed, 0 tests failed out of 1\n\nTotal Test time (real) =   0.30 sec\n"
+    },
+    {
+      "configuration": "Metal-disabled Release",
+      "log_sha256": "5d430a412ce3cd5775b7d95eb161d03bc5d2b796079d4c368ea7153bea2c4c45",
+      "log": "Test project /Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/build/tokenization-cpu-default\n    Start 19: dc_parallel_tokenization\n1/1 Test #19: dc_parallel_tokenization .........   Passed    0.28 sec\n\n100% tests passed, 0 tests failed out of 1\n\nTotal Test time (real) =   0.29 sec\n"
+    }
+  ]
+}

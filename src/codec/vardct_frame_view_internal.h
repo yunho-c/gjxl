@@ -8,6 +8,8 @@
 #include "codec/vardct_frame.h"
 #include "codec/coefficient_order_population_internal.h"
 
+namespace gjxl { class DeviceBuffer; }
+
 namespace gjxl::vardct_frame_internal {
 
 // Optional, immutable producer cache with the completed frame's lifetime.
@@ -109,6 +111,10 @@ class CompletedVarDctFrame {
  public:
   virtual ~CompletedVarDctFrame() = default;
   [[nodiscard]] virtual VarDctFrameView view() const noexcept = 0;
+  // Optional read-only resident coefficient storage, borrowed for this lease.
+  virtual const DeviceBuffer* resident_ac_buffer(size_t* offset) const noexcept {
+    *offset = 0; return nullptr;
+  }
 };
 
 /// Borrows without validating coefficient values; an invalid owner yields an

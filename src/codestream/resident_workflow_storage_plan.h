@@ -25,7 +25,8 @@ struct ResidentWorkflowStoragePlan {
   size_t blocks = 0;
   size_t maximum_attempts = 0;
   size_t score_count = 0;
-  // Device owner inventory; AC and completed owners need not overlap.
+  // Frontend device owner inventory; AC and completed need not overlap.
+  // Token devices are separately included in serializer.working.
   size_t device_bytes = 0;
   // Host preparation/evaluator/AC/policy and independent completed snapshot.
   HostStorageBound frontend;
@@ -45,10 +46,10 @@ struct ResidentWorkflowStoragePlan {
   HostStorageBound completion_phase;
   HostStorageBound working;
   // Maximum capacity this workflow can leave in each production Metal pool:
-  // resident input, AQ persistent, AQ staging, Butteraugli, completed frame.
+  // resident input, AQ persistent, AQ staging, Butteraugli, token metadata, token output, completed frame.
   // Active work already includes these bytes. A batch must also bound idle
   // pools left by earlier images while different images consume its work slots.
-  std::array<size_t, 5> idle_pool_capacity{};
+  std::array<size_t, 7> idle_pool_capacity{};
   bool operator==(const ResidentWorkflowStoragePlan &) const = default;
 };
 

@@ -1,0 +1,15 @@
+{
+  "runner_sha256": "3fcc0499a5c59152c9efcef059c1afd145a573dc02189f195af5c6921a292354",
+  "images": "0,1,2,3,4,5",
+  "efforts": "1,7,8",
+  "modes": "base,cpu,release,joined1",
+  "rounds": 5,
+  "samples": 4,
+  "variants": {
+    "release": {
+      "GJXL_EXPERIMENT_PARALLEL_TOKEN_RELEASE": "1"
+    }
+  },
+  "diagnostic": false,
+  "baseline": "/Users/yunhocho/GitHub/gjxl-tokenization-base-20260922/build/release/tokenization_capture"
+}

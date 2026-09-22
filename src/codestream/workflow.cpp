@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include "codestream/workflow.h"
+#include "codestream/ac_tokenization_provider_internal.h"
 
 #include <algorithm>
 #include <atomic>
@@ -1071,6 +1072,24 @@ PrepareWorkflow(ConstImage3FView linear_rgb, VarDctEncodingOptions options,
   const auto frame_view = encoding.completed_frame != nullptr
     ? encoding.completed_frame->view()
     : vardct_frame_internal::BorrowFrame(encoding.frame);
+  std::unique_ptr<codestream_internal::AcTokenizationProvider> ac_tokenizer;
+#if defined(GJXL_ENABLE_METAL)
+  if (codestream_internal::GpuTokenizationEnabled() &&
+      (options.gpu_aq_mode == GpuAdaptiveQuantizationMode::kFullyResident ||
+       options.gpu_aq_mode == GpuAdaptiveQuantizationMode::kThroughput) &&
+      options.rate_control_mode != VarDctRateControlMode::kMaximumError &&
+      codestream_options.entropy_behavior != VarDctEntropyBehavior::kMaximumCompression &&
+      selected_gpu != nullptr && selected_gpu->kind() == BackendKind::kMetal &&
+      encoding.completed_frame != nullptr) {
+    size_t coefficient_offset = 0;
+    if (const auto* buffer = encoding.completed_frame->resident_ac_buffer(&coefficient_offset)) {
+      status = codestream_internal::CreateMetalAcTokenizationProvider(
+          *selected_gpu, *buffer, coefficient_offset, &ac_tokenizer);
+      if (!status.ok()) return status;
+    }
+  }
+#endif
+  codestream_internal::AcTokenizationProviderScope token_scope(ac_tokenizer.get());
   status = codestream_internal::EncodeVarDctCodestreamToBuffer(
     frame_view, codestream_options, &candidate,
     profile == nullptr ? nullptr : &candidate_profile.codestream);

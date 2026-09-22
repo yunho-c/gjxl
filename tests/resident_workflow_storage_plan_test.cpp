@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "codestream/dc_context_tree_internal.h"
+#include "codestream/ac_tokenization_provider_internal.h"
 #include "codestream/rate_control_internal.h"
 #include "codestream/resident_workflow_storage_plan.h"
 #include "codestream/workflow_internal.h"
@@ -383,6 +384,13 @@ bool RunCase(GpuBackend &gpu, ConstImage3FView image,
     auto reference_options = o;
     reference_options.collect_gpu_profile = reference_options.collect_profile =
         reference_options.collect_timing = false;
+    // Adaptive token capacity may grow on the first ordinary call. Prime the
+    // reference so profiling is compared against the same capacity state.
+    if (GpuTokenizationEnabled()) {
+      Result priming;
+      if (!Ok(Encode(gpu, image, reference_options, &priming)) || !Trim(gpu))
+        return false;
+    }
     const auto before = gpu.stats().committed_submissions;
     if (!Ok(Encode(gpu, image, reference_options, &oracle)) || !Trim(gpu))
       return false;

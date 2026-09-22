@@ -1,0 +1,313 @@
+{
+  "decoder": "/opt/homebrew/bin/djxl",
+  "decoder_sha256": "d851d989d6d4d0eba628a08d35689e92181718195e72e590f3826c63a7bc2ab4",
+  "version": "djxl v0.12.0 0.12.0 [_NEON_BF16_,NEON] {AppleClang 17.0.0.17000604}\nCopyright (c) the JPEG XL Project\n",
+  "rows": [
+    {
+      "image": "kodak/01",
+      "effort": 1,
+      "argv": [
+        "/opt/homebrew/bin/djxl",
+        "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/r0-kodak/01-e1-base/reference.jxl",
+        "-",
+        "--output_format",
+        "pfm",
+        "--quiet"
+      ],
+      "output_sha256": "86743e1a21d2b4356f7f05b88b67ed99e3cdf007b7fbbeb6efec65a6eeaf2133",
+      "decoded_pfm_sha256": "9707df33fb2b9af51bcab14994b592c4b25dc9e16c7e8e878a7b9740ff853168",
+      "decoded_bytes": 4718607,
+      "width": 768,
+      "height": 512
+    },
+    {
+      "image": "kodak/01",
+      "effort": 7,
+      "argv": [
+        "/opt/homebrew/bin/djxl",
+        "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/r0-kodak/01-e7-base/reference.jxl",
+        "-",
+        "--output_format",
+        "pfm",
+        "--quiet"
+      ],
+      "output_sha256": "e0ba5c0c8d198ac9b81c662580709c89557bb6cd4e64f75643abf1a2bfd6e360",
+      "decoded_pfm_sha256": "cada4b443f335f266a5cd013ab9498810343d902284fec791a8d15e090b8100b",
+      "decoded_bytes": 4718607,
+      "width": 768,
+      "height": 512
+    },
+    {
+      "image": "kodak/01",
+      "effort": 8,
+      "argv": [
+        "/opt/homebrew/bin/djxl",
+        "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/r0-kodak/01-e8-base/reference.jxl",
+        "-",
+        "--output_format",
+        "pfm",
+        "--quiet"
+      ],
+      "output_sha256": "ed719121dc8b4e97227854d53ec50f44bf9f14f32909dd8bea9d214721fa74bb",
+      "decoded_pfm_sha256": "1857dcb06b45f9e86f3a2e269c2aa5fc3aa9e86f804d6faf0c472817ecaeb4cd",
+      "decoded_bytes": 4718607,
+      "width": 768,
+      "height": 512
+    },
+    {
+      "image": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "effort": 1,
+      "argv": [
+        "/opt/homebrew/bin/djxl",
+        "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/r0-clic2024_test/097cb426910ba8ce2525dd8bb7fb1777-e1-base/reference.jxl",
+        "-",
+        "--output_format",
+        "pfm",
+        "--quiet"
+      ],
+      "output_sha256": "d819b41af4e42e463df4ef6e3b70d3e372ab40d995d38505dabfef887d1024ea",
+      "decoded_pfm_sha256": "b135b3152fc0afcaa5c51684af9d69fa3213c37795b4e188e6efff5eb55efeb8",
+      "decoded_bytes": 37036049,
+      "width": 1507,
+      "height": 2048
+    },
+    {
+      "image": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "effort": 7,
+      "argv": [
+        "/opt/homebrew/bin/djxl",
+        "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/r0-clic2024_test/097cb426910ba8ce2525dd8bb7fb1777-e7-base/reference.jxl",
+        "-",
+        "--output_format",
+        "pfm",
+        "--quiet"
+      ],
+      "output_sha256": "f692d5dc12f1b451d7e50524c2f77b61f6f06d03f320b0326ff6401a262107d8",
+      "decoded_pfm_sha256": "8841cb4e6f7ae0376b703c87496d7c633b588629d03cb8e83df5db0107452577",
+      "decoded_bytes": 37036049,
+      "width": 1507,
+      "height": 2048
+    },
+    {
+      "image": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "effort": 8,
+      "argv": [
+        "/opt/homebrew/bin/djxl",
+        "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/r0-clic2024_test/097cb426910ba8ce2525dd8bb7fb1777-e8-base/reference.jxl",
+        "-",
+        "--output_format",
+        "pfm",
+        "--quiet"
+      ],
+      "output_sha256": "6c58f51248f33ae59a0053a438f299f6fcc59e95e1cd100a59ed5d15d60bf761",
+      "decoded_pfm_sha256": "26b6f6efe4c95eb460f538198f567dbf59a922606767dcc171bc1d4f5b8ad896",
+      "decoded_bytes": 37036049,
+      "width": 1507,
+      "height": 2048
+    },
+    {
+      "image": "clic2024_test/5e5ce43575fa67fdc0dd37146d7f479e",
+      "effort": 1,
+      "argv": [
+        "/opt/homebrew/bin/djxl",
+        "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/r0-clic2024_test/5e5ce43575fa67fdc0dd37146d7f479e-e1-base/reference.jxl",
+        "-",
+        "--output_format",
+        "pfm",
+        "--quiet"
+      ],
+      "output_sha256": "c04d36a6f943c8233cb40ca513b4225e9d4998741ae4a3caaf101e644a7862af",
+      "decoded_pfm_sha256": "11c60bf453ea90c87e06154ca469ab35a84016e3f6602dc74fd76c5c2a6b0c9d",
+      "decoded_bytes": 40329233,
+      "width": 2048,
+      "height": 1641
+    },
+    {
+      "image": "clic2024_test/5e5ce43575fa67fdc0dd37146d7f479e",
+      "effort": 7,
+      "argv": [
+        "/opt/homebrew/bin/djxl",
+        "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/r0-clic2024_test/5e5ce43575fa67fdc0dd37146d7f479e-e7-base/reference.jxl",
+        "-",
+        "--output_format",
+        "pfm",
+        "--quiet"
+      ],
+      "output_sha256": "2cc788b07b5e9754bd47ac556354d8c66f39856f81e6f6d7217ac2fe0c41c057",
+      "decoded_pfm_sha256": "3667066b5baad2c5ded8a48358c93fbbfb40097e0b51ed9a6488faa102d18c94",
+      "decoded_bytes": 40329233,
+      "width": 2048,
+      "height": 1641
+    },
+    {
+      "image": "clic2024_test/5e5ce43575fa67fdc0dd37146d7f479e",
+      "effort": 8,
+      "argv": [
+        "/opt/homebrew/bin/djxl",
+        "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/r0-clic2024_test/5e5ce43575fa67fdc0dd37146d7f479e-e8-base/reference.jxl",
+        "-",
+        "--output_format",
+        "pfm",
+        "--quiet"
+      ],
+      "output_sha256": "270b891197278f18d60324f5f300be23cf9d1395c981662c09f688562a67f3e9",
+      "decoded_pfm_sha256": "48e5aead197008271614945c83822c3728d542603455dbfb9b9e5e6010635edc",
+      "decoded_bytes": 40329233,
+      "width": 2048,
+      "height": 1641
+    },
+    {
+      "image": "unsplash/campus_interior/12mp",
+      "effort": 1,
+      "argv": [
+        "/opt/homebrew/bin/djxl",
+        "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/r0-unsplash/campus_interior/12mp-e1-base/reference.jxl",
+        "-",
+        "--output_format",
+        "pfm",
+        "--quiet"
+      ],
+      "output_sha256": "f1fd09f24bb39cc9268c892402cebe7809e8ca37cf23c4ad4c95d10f14801332",
+      "decoded_pfm_sha256": "0f746d92665510a7b8485b37da021a291d236a55e06dc2cbe19c9f16abec2d3a",
+      "decoded_bytes": 143990129,
+      "width": 4249,
+      "height": 2824
+    },
+    {
+      "image": "unsplash/campus_interior/12mp",
+      "effort": 7,
+      "argv": [
+        "/opt/homebrew/bin/djxl",
+        "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/r0-unsplash/campus_interior/12mp-e7-base/reference.jxl",
+        "-",
+        "--output_format",
+        "pfm",
+        "--quiet"
+      ],
+      "output_sha256": "2067768508c0ddd82d77f1ea9842a5d527c9aacb6ee14ede8a90dcd0315f4498",
+      "decoded_pfm_sha256": "8de0ac7a4a4eedd339729f95b16a8a7efdfcd2c9ab4db73fc4e24ee2b1e50700",
+      "decoded_bytes": 143990129,
+      "width": 4249,
+      "height": 2824
+    },
+    {
+      "image": "unsplash/campus_interior/12mp",
+      "effort": 8,
+      "argv": [
+        "/opt/homebrew/bin/djxl",
+        "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/r0-unsplash/campus_interior/12mp-e8-base/reference.jxl",
+        "-",
+        "--output_format",
+        "pfm",
+        "--quiet"
+      ],
+      "output_sha256": "16895d44b1eb4ee0a0b6d389e5c1a5653be1af523a6a36c1328e0734d4c4c16d",
+      "decoded_pfm_sha256": "2d40144f99f09ce279409fb062395a38b252d91cdff1de57b123e0aa1a164ab3",
+      "decoded_bytes": 143990129,
+      "width": 4249,
+      "height": 2824
+    },
+    {
+      "image": "unsplash/alpine_lake/24mp",
+      "effort": 1,
+      "argv": [
+        "/opt/homebrew/bin/djxl",
+        "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/r0-unsplash/alpine_lake/24mp-e1-base/reference.jxl",
+        "-",
+        "--output_format",
+        "pfm",
+        "--quiet"
+      ],
+      "output_sha256": "4b7a7657e635867d0cdfc9edd7c17a25d76dbaa56e6556f98c2fbeaed0d7bbc8",
+      "decoded_pfm_sha256": "f5d2b3dbab1a427ee6866552b82dbf7b7ecf44576cb4c319b9171aa9eede3307",
+      "decoded_bytes": 288000017,
+      "width": 6000,
+      "height": 4000
+    },
+    {
+      "image": "unsplash/alpine_lake/24mp",
+      "effort": 7,
+      "argv": [
+        "/opt/homebrew/bin/djxl",
+        "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/r0-unsplash/alpine_lake/24mp-e7-base/reference.jxl",
+        "-",
+        "--output_format",
+        "pfm",
+        "--quiet"
+      ],
+      "output_sha256": "4999c11b51d99c8aa108b4b1c331dc100fb662ee79100127184b83a84877562b",
+      "decoded_pfm_sha256": "975b2baf0699a566930a17a63e291736360c0c570c785fe4a39baab5b3149b73",
+      "decoded_bytes": 288000017,
+      "width": 6000,
+      "height": 4000
+    },
+    {
+      "image": "unsplash/alpine_lake/24mp",
+      "effort": 8,
+      "argv": [
+        "/opt/homebrew/bin/djxl",
+        "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/r0-unsplash/alpine_lake/24mp-e8-base/reference.jxl",
+        "-",
+        "--output_format",
+        "pfm",
+        "--quiet"
+      ],
+      "output_sha256": "fc2edd75fc2dc39f31942ea4faa5b735dfa8e31cba1e506d62ed933f777f37da",
+      "decoded_pfm_sha256": "c3a9dcca00b3317c0c3dd4ce205874b8124d55b1d60aeb19eb523acb2402c853",
+      "decoded_bytes": 288000017,
+      "width": 6000,
+      "height": 4000
+    },
+    {
+      "image": "unsplash/forest_stream/48mp",
+      "effort": 1,
+      "argv": [
+        "/opt/homebrew/bin/djxl",
+        "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/r0-unsplash/forest_stream/48mp-e1-base/reference.jxl",
+        "-",
+        "--output_format",
+        "pfm",
+        "--quiet"
+      ],
+      "output_sha256": "a87efdc3f7ec6523eb227dd967e87669c50c91d1630263990e2d23ad86ae41e8",
+      "decoded_pfm_sha256": "3ee440e93067e7b6162cd09948790d21c8047660d4482d183c4461839a654bf2",
+      "decoded_bytes": 576001529,
+      "width": 8089,
+      "height": 5934
+    },
+    {
+      "image": "unsplash/forest_stream/48mp",
+      "effort": 7,
+      "argv": [
+        "/opt/homebrew/bin/djxl",
+        "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/r0-unsplash/forest_stream/48mp-e7-base/reference.jxl",
+        "-",
+        "--output_format",
+        "pfm",
+        "--quiet"
+      ],
+      "output_sha256": "f8b332ee8ecfef8080ed936e6bd07d5d5928b001653cfa0c58d3bba214fbb2e5",
+      "decoded_pfm_sha256": "13cf653a2428444ae0059892065570f6c72e5cf1d1f234e8bee8577654c9ebfc",
+      "decoded_bytes": 576001529,
+      "width": 8089,
+      "height": 5934
+    },
+    {
+      "image": "unsplash/forest_stream/48mp",
+      "effort": 8,
+      "argv": [
+        "/opt/homebrew/bin/djxl",
+        "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/r0-unsplash/forest_stream/48mp-e8-base/reference.jxl",
+        "-",
+        "--output_format",
+        "pfm",
+        "--quiet"
+      ],
+      "output_sha256": "8b24c052131afe1fec13a6dcaad70bbf94959af37b4c3186c0f4926935ef4485",
+      "decoded_pfm_sha256": "d4d7064ea6cd39a8369353a4c0a9a4e4b425ee45309ac4eb64ca4173d7186b9e",
+      "decoded_bytes": 576001529,
+      "width": 8089,
+      "height": 5934
+    }
+  ]
+}

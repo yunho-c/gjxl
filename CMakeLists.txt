@@ -9,6 +9,11 @@ project(
   LANGUAGES C CXX
 )
 
+option(GJXL_BUILD_TOKENIZATION_EXPERIMENT "Enable diagnostic tokenization controls" OFF)
+if(GJXL_BUILD_TOKENIZATION_EXPERIMENT)
+  add_compile_definitions(GJXL_TOKENIZATION_EXPERIMENT=1)
+endif()
+
 option(GJXL_BUILD_FRONTIER_EXPERIMENT "Build the isolated frontier-DP experiment and capture hook" OFF)
 
 include(CMakePackageConfigHelpers)
@@ -962,6 +967,7 @@ add_custom_command(
     "${GJXL_AQ_RECONSTRUCTION_METAL_SOURCE}"
     "${GJXL_AQ_QUANTIZATION_HEADER}"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/dc_processing.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/ac_tokenization.metal"
 
   COMMENT
     "Compiling Metal AQ reconstruction shaders"
@@ -1168,6 +1174,7 @@ add_library(
 
   src/gpu/metal/metal_cpp_impl.cpp
   src/gpu/metal/metal_ac_strategy.cpp
+  src/gpu/metal/metal_ac_tokenization.cpp
   src/gpu/metal/metal_backend.cpp
   src/gpu/metal/metal_embedded_library.cpp
   src/gpu/metal/metal_aq_butteraugli.cpp
@@ -1571,6 +1578,10 @@ if(GJXL_BUILD_TESTS)
   add_executable(gjxl_coefficient_order_test tests/coefficient_order_test.cpp)
   target_link_libraries(gjxl_coefficient_order_test PRIVATE gjxl_codestream)
   add_test(NAME coefficient_order COMMAND gjxl_coefficient_order_test)
+
+  add_executable(gjxl_dc_parallel_tokenization_test tests/dc_parallel_tokenization_test.cpp)
+  target_link_libraries(gjxl_dc_parallel_tokenization_test PRIVATE gjxl_codestream)
+  add_test(NAME dc_parallel_tokenization COMMAND gjxl_dc_parallel_tokenization_test)
 
   add_executable(gjxl_ac_direct_tokenization_test tests/ac_direct_tokenization_test.cpp)
   target_link_libraries(gjxl_ac_direct_tokenization_test PRIVATE gjxl_codestream)
@@ -3423,6 +3434,24 @@ if(GJXL_BUILD_TESTS)
   set_tests_properties(metal_quantizer_selection PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
 
   add_executable(gjxl_metal_submission_storage_plan_test tests/metal_submission_storage_plan_test.cpp)
+  add_executable(gjxl_metal_ac_tokenization_test tests/metal_ac_tokenization_test.cpp)
+  target_link_libraries(gjxl_metal_ac_tokenization_test PRIVATE gjxl_codestream gjxl_metal)
+  target_compile_definitions(gjxl_metal_ac_tokenization_test PRIVATE GJXL_METALLIB_PATH="${GJXL_METALLIB}")
+  add_dependencies(gjxl_metal_ac_tokenization_test gjxl_metal_shaders)
+  add_test(NAME metal_ac_tokenization COMMAND gjxl_metal_ac_tokenization_test)
+
+  add_executable(gjxl_gpu_tokenization_default_test tests/gpu_tokenization_default_test.cpp)
+  target_link_libraries(gjxl_gpu_tokenization_default_test PRIVATE gjxl_codestream gjxl_metal)
+  add_test(NAME gpu_tokenization_default COMMAND gjxl_gpu_tokenization_default_test)
+  if(GJXL_BUILD_TOKENIZATION_EXPERIMENT)
+    add_executable(gjxl_metal_ac_tokenization_failure_test tests/metal_ac_tokenization_failure_test.cpp)
+    target_link_libraries(gjxl_metal_ac_tokenization_failure_test PRIVATE gjxl_codestream gjxl_metal)
+    target_include_directories(gjxl_metal_ac_tokenization_failure_test SYSTEM PRIVATE third_party/metal-cpp)
+    target_compile_definitions(gjxl_metal_ac_tokenization_failure_test PRIVATE GJXL_METALLIB_PATH="${GJXL_METALLIB}")
+    add_dependencies(gjxl_metal_ac_tokenization_failure_test gjxl_metal_shaders)
+    add_test(NAME metal_ac_tokenization_failure COMMAND gjxl_metal_ac_tokenization_failure_test)
+  endif()
+
   add_executable(gjxl_metal_dc_processing_test tests/metal_dc_processing_test.cpp)
   target_link_libraries(gjxl_metal_dc_processing_test PRIVATE gjxl_metal gjxl_codec)
   target_include_directories(gjxl_metal_dc_processing_test SYSTEM PRIVATE third_party/metal-cpp)

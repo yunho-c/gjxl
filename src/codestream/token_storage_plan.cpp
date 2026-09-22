@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <thread>
 
 #include "codec/vardct_frame.h"
 #include "codestream/ac_group.h"
@@ -104,10 +105,15 @@ Status ComputeTokenizationStoragePlan(Extent2D blocks,
                                           &maximum_dc, options.dc_prediction);
   if (!status.ok())
     return status;
-  // DC tokenization is serial; all group outputs survive into entropy coding.
-  if (!plan.dc.Add(maximum_dc.scratch) ||
+  // Independent DC groups run concurrently; every output survives to entropy coding.
+  const size_t dc_workers = std::min(options.workers, plan.dc_group_count);
+  if (!plan.dc.Add(maximum_dc.scratch, dc_workers) ||
       !plan.dc.AddVector<SimpleDcGroupTokenStreams>(plan.dc_group_count,
                                                     kFreshExact))
+    return Overflow();
+  if (dc_workers > 1 &&
+      (!plan.dc.AddVector<Status>(plan.dc_group_count, kFreshExact) ||
+       !plan.dc.AddVector<std::thread>(dc_workers, kFreshExact)))
     return Overflow();
 
   size_t variants = 0, template_tasks = 0, context_tasks = 0;

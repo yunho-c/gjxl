@@ -1,0 +1,12 @@
+{
+  "run": "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-batch",
+  "images": "1,4,5",
+  "efforts": "1,7",
+  "batches": "1,4",
+  "rounds": 3,
+  "samples": 5,
+  "modes": "base,release,joined",
+  "cpu": 8,
+  "memory_gib": 36,
+  "runner_sha256": "718cbefa52146a61ee9594859cffee58b659ca282d14b6d6233c9dcc6217ec59"
+}

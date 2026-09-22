@@ -1,0 +1,9 @@
+Test project /Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/build/tokenization-cpu-default
+    Start 24: serializer_storage_plan
+1/2 Test #24: serializer_storage_plan ..........   Passed   46.66 sec
+    Start 84: cpu_workflow_storage_plan
+2/2 Test #84: cpu_workflow_storage_plan ........   Passed   27.10 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =  73.77 sec

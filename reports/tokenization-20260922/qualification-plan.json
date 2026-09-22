@@ -1,0 +1,34 @@
+{
+  "profile": {
+    "images": "0,1,2,3,4,5",
+    "efforts": "1,7,8",
+    "modes": "base,cpu,release,joined1",
+    "rounds": 5,
+    "ordinary_samples_per_process": 4,
+    "profiled_samples_per_process": 4,
+    "cpu_thread_limit": 8,
+    "distance": 1.9
+  },
+  "batch": {
+    "images": "1,4,5",
+    "efforts": "1,7",
+    "modes": "base,release,joined",
+    "batches": "1,4",
+    "rounds": 3,
+    "samples_per_process": 5,
+    "aggregate_cpu_participant_limit": 8,
+    "per_image_cpu_thread_limit": 8,
+    "managed_memory_limit": 38654705664,
+    "distance": 1.9,
+    "memory_note": "Same 36 GiB execution-domain budget for every variant; record in-flight plan. A 24 GiB pilot rejected 48MP admission. Unrestricted 48MP/e7 B4 pilot incurred paging."
+  },
+  "selected_gpu_configuration": {
+    "layout": "guarded compact with a capacity hint and checked overflow retry",
+    "overlap_dc": true,
+    "scalar_emit": "pure DCT8 frames only",
+    "histogram_shards": 1,
+    "threads_per_threadgroup": 128,
+    "specialized_host_reduction": false
+  },
+  "validation": "Exact bytes within every capture and across variants/rounds/batches; independent djxl decode of each unique profile reference; measured memory/CPU caps; swap/page-out counters retained for batch runs."
+}

@@ -2630,3 +2630,5 @@ kernel void gjxl_aq_count_coefficient_zeros(
     }
   }
 }
+
+#include "ac_tokenization.metal"

@@ -1,0 +1,20 @@
+diff --git a/src/gpu/metal/metal_submission.cpp b/src/gpu/metal/metal_submission.cpp
+index 043bf39..8dbb7cd 100644
+--- a/src/gpu/metal/metal_submission.cpp
++++ b/src/gpu/metal/metal_submission.cpp
+@@ -399,6 +399,7 @@ void RegisterMetalComputePipeline(
+     destination = &g_pipeline_registry[
+       g_next_pipeline_registry_victim++ % g_pipeline_registry.size()];
+   }
++  if (g_next_pipeline_registry_victim && std::getenv("GJXL_PROFILE_REGISTRY_DIAGNOSTIC")) std::fprintf(stderr, "REGISTRY_EVICTIONS=%zu\n", g_next_pipeline_registry_victim);
+   destination->pipeline = pipeline;
+   destination->kernel_id_size = kernel_id.size();
+   kernel_id.copy(destination->kernel_id.data(), kernel_id.size());
+@@ -418,6 +419,7 @@ void RecordMetalComputePipelineState(MTL::ComputePipelineState* pipeline) {
+       active->current_kernel_id.data());
+     break;
+   }
++  if (!active->current_kernel_id_size && std::getenv("GJXL_PROFILE_REGISTRY_DIAGNOSTIC")) std::fprintf(stderr, "REGISTRY_MISS evictions=%zu label=%s\n", g_next_pipeline_registry_victim, pipeline->label() ? pipeline->label()->utf8String() : "null");
+ }
+ 
+ Status GetMetalSubmissionGpuDuration(

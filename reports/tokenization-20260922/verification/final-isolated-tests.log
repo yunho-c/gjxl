@@ -1,0 +1,9 @@
+Test project /Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/build/release
+    Start 127: metal_aq_evaluation
+1/2 Test #127: metal_aq_evaluation ..............   Passed    2.29 sec
+    Start 132: metal_ac_strategy
+2/2 Test #132: metal_ac_strategy ................   Passed    0.40 sec
+
+100% tests passed, 0 tests failed out of 2
+
+Total Test time (real) =   2.69 sec

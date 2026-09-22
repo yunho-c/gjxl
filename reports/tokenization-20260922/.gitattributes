@@ -1,0 +1,3 @@
+# Preserve raw CMake captures and unified-diff context lines verbatim.
+verification/*CMakeCache.txt whitespace=-blank-at-eof
+verification/registry-diagnostic.patch whitespace=-blank-at-eol

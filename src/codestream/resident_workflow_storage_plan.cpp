@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include "codestream/resident_workflow_storage_plan.h"
+#include "codestream/ac_tokenization_provider_internal.h"
 
 #include "codestream/workflow_publication_storage_plan.h"
 
@@ -261,8 +262,7 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
         completed_cache_bytes = completed_cache_limit;
     }
   }
-  p.idle_pool_capacity = {input.capacity_bytes, aq.persistent_bytes,
-                          aq.staging_bytes, butter.capacity_bytes, completed_cache_bytes};
+
   frontend_storage_internal::ColorCorrelationStoragePlan cfl;
   status = frontend_storage_internal::ComputeColorCorrelationStoragePlan(
       coding, frontend_storage_internal::ColorCorrelationStorageMode::kCopy,
@@ -319,10 +319,15 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
                   .dc_prediction = e.dc_prediction,
                   .dc_uint_search = UseDcUintSearch(e)},
        .cpu_thread_count = e.cpu_thread_count,
-       .collect_profile = o.collect_profile || o.collect_gpu_profile},
+       .collect_profile = o.collect_profile || o.collect_gpu_profile,
+       .gpu_tokenization = GpuTokenizationEnabled()},
       &p.serializer);
   if (!status.ok())
     return status;
+  p.idle_pool_capacity = {input.capacity_bytes, aq.persistent_bytes,
+                          aq.staging_bytes, butter.capacity_bytes,
+                          p.serializer.token_idle_pool_capacity[0],
+                          p.serializer.token_idle_pool_capacity[1], completed_cache_bytes};
   WorkflowPublicationStoragePlan publication;
   status = ComputeWorkflowPublicationStoragePlan(
       p.serializer.output, p.score_count, p.maximum_attempts, search,

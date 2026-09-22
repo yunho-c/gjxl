@@ -1,0 +1,26 @@
+Test project /Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/build/release
+    Start  22: dc_parallel_tokenization
+1/9 Test  #22: dc_parallel_tokenization ...............   Passed    0.10 sec
+    Start  54: worker_launch_failure_metal_sections
+2/9 Test  #54: worker_launch_failure_metal_sections ...   Passed    0.35 sec
+    Start 136: metal_completed_frame
+3/9 Test #136: metal_completed_frame ..................   Passed    1.27 sec
+    Start 142: metal_ac_tokenization
+4/9 Test #142: metal_ac_tokenization ..................   Passed    3.47 sec
+    Start 143: metal_ac_tokenization_failure
+5/9 Test #143: metal_ac_tokenization_failure ..........   Passed    0.07 sec
+    Start 147: resident_workflow_storage_plan
+6/9 Test #147: resident_workflow_storage_plan .........   Passed    6.92 sec
+    Start 152: metal_cache_admission
+7/9 Test #152: metal_cache_admission ..................   Passed    0.23 sec
+    Start 153: workflow_storage_plan
+8/9 Test #153: workflow_storage_plan ..................   Passed    0.37 sec
+    Start 154: workflow_admission
+9/9 Test #154: workflow_admission .....................   Passed   17.47 sec
+
+100% tests passed, 0 tests failed out of 9
+
+Label Time Summary:
+worker-launch-metal    =   0.35 sec*proc (1 test)
+
+Total Test time (real) =  30.25 sec

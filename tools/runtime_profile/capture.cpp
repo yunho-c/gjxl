@@ -32,6 +32,10 @@ int main(int argc, char** argv) try {
     .gpu_aq_mode = GpuAdaptiveQuantizationMode::kFullyResident};
   std::vector<uint8_t> expected;
   VarDctEncodingSummary expected_summary;
+  // Prime all variants equally before pinning steady submission structure.
+  // The adaptive token arena may grow on its first input without changing bytes.
+  RequireStatus("Ordinary priming", EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+      image.ConstView(), encoding_options, gpu.get(), true, &expected, &expected_summary));
   const auto before = gpu->stats().committed_submissions;
   RequireStatus("Ordinary reference", EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
       image.ConstView(), encoding_options, gpu.get(), true, &expected, &expected_summary));

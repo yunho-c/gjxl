@@ -23,6 +23,7 @@
 #include "codec/codestream.h"
 #include "codec/vardct_frame_view_internal.h"
 #include "codestream/ac_group.h"
+#include "codestream/ac_tokenization_provider_internal.h"
 #include "codestream/ans_internal.h"
 #include "codestream/bit_writer.h"
 #include "codestream/block_context_map.h"
@@ -35,7 +36,7 @@
 #include "codestream/sections.h"
 #include "codestream/serializer_storage_plan.h"
 #include "core/thread_budget.h"
-#include "core/parallel_work_internal.h"
+#include "codestream/parallel_sections_internal.h"
 
 namespace gjxl {
 using codestream_internal::Storage;
@@ -106,64 +107,7 @@ Status WriteValidatedTokenStream(
     EntropyTokenStreamView::Interleaved(tokens), code, writer);
 }
 
-template <typename Function>
-Status RunParallelSections(size_t count, Function&& function) {
-  const auto invoke = [&](size_t index, size_t worker_index) -> Status {
-    if constexpr (std::is_invocable_r_v<
-                    Status, Function&, size_t, size_t>) {
-      return function(index, worker_index);
-    } else {
-      return function(index);
-    }
-  };
-  if (count == 0) return Status::Ok();
-  if (thread_budget_internal::InExplicitParallelScope()) {
-    for (size_t index = 0; index < count; ++index) {
-      Status status = invoke(index, 0);
-      if (!status.ok()) return status;
-    }
-    return Status::Ok();
-  }
-  const size_t hardware_workers = std::max<size_t>(
-    std::thread::hardware_concurrency(), 1);
-  const size_t automatic_worker_count = std::min(
-    count, std::min(kMaximumSectionWorkers, hardware_workers));
-  const size_t cpu_thread_count =
-    thread_budget_internal::CpuThreadCount();
-  auto* const participant_tracker =
-    thread_budget_internal::ParticipantTracker();
-  const auto resource_context = resource_budget_internal::CurrentResourceContext();
-  thread_budget_internal::CpuWorkerGroup cpu_workers(cpu_thread_count == 0
-    ? automatic_worker_count
-    : std::min(automatic_worker_count, cpu_thread_count));
-  const size_t participant_count = cpu_workers.participants();
-  if (participant_count == 1) {
-    thread_budget_internal::ParallelScope scope(
-      cpu_thread_count, participant_tracker, resource_context, &cpu_workers);
-    for (size_t index = 0; index < count; ++index) {
-      Status status = invoke(index, 0);
-      if (!status.ok()) return status;
-    }
-    return Status::Ok();
-  }
-
-  const size_t spawned_worker_count = cpu_thread_count == 0 && !cpu_workers.enabled()
-    ? participant_count
-    : participant_count - 1;
-  constexpr thread_budget_internal::ParallelWorkErrors errors{
-    .allocation = "Codestream assembly allocation failed",
-    .unexpected = "Codestream section worker failed unexpectedly",
-    .length_code = StatusCode::kOutOfMemory,
-    .length = "Codestream assembly allocation failed",
-    .launch_allocation = "Codestream assembly allocation failed",
-    .launch_action = thread_budget_internal::LaunchFailureAction::kReturnError,
-    .launch = "Unable to start codestream section workers",
-  };
-  return thread_budget_internal::RunParallelWork<Storage>(
-    count, cpu_workers, spawned_worker_count,
-    thread_budget_internal::WorkerLaunchSite::kSerializerSections, errors,
-    invoke);
-}
+using codestream_internal::RunParallelSections;
 
 Status WriteDcGroupSection(
   const SimpleDcGroupTokenStreams& group,
@@ -257,6 +201,31 @@ struct PreparedVarDctRepresentation {
   Storage<EntropyToken> order_tokens;
   Storage<AcEncodingCandidate> candidates;
   std::array<Storage<SimpleAcGroupTokenTemplate>, 2> order_templates;
+};
+
+// Experimental control: isolate the cost of serial destruction of large CPU
+// token buffers. Cleanup is best-effort and cannot change publication/status.
+struct ParallelTokenCleanup {
+  PreparedVarDctRepresentation& prepared;
+  ~ParallelTokenCleanup() noexcept {
+#ifdef GJXL_TOKENIZATION_EXPERIMENT
+    const char* enabled=std::getenv("GJXL_EXPERIMENT_PARALLEL_TOKEN_RELEASE");
+    if(!enabled || enabled[0]!='1') return;
+    for(auto& candidate:prepared.candidates) {
+      auto& groups=candidate.direct_groups;
+      if(groups.empty()) continue;
+      try {
+        (void)RunParallelSections(groups.size(),[&](size_t i) {
+          groups[i]=codestream_internal::SimpleAcGroupTokenData{};
+          return Status::Ok();
+        });
+      } catch(...) {
+        // Normal destruction below finishes any slots not reached after a
+        // failed worker launch or allocation. Started workers were joined.
+      }
+    }
+#endif
+  }
 };
 
 struct RepresentationPhaseTimes {
@@ -1841,7 +1810,13 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
     options.entropy_behavior == VarDctEntropyBehavior::kRateOptimized;
   try {
     PreparedVarDctRepresentation prepared;
+    ParallelTokenCleanup token_cleanup{prepared};
     if (rate_optimized) options.entropy_behavior = VarDctEntropyBehavior::kBalanced;
+    Status status;
+    const bool overlap_dc = !exhaustive_representation_search &&
+        codestream_internal::active_ac_tokenization_provider != nullptr &&
+        codestream_internal::GpuTokenizationOverlapEnabled();
+    const auto prepare_dc = [&]() -> Status {
     const ProfileClock::time_point dc_tokenization_begin = ProfileBegin(profile);
     auto& dc_groups = prepared.dc_groups;
     Status status = codestream_internal::TokenizeSimpleDcGroupsForEncoder(
@@ -1877,6 +1852,13 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
     for (SimpleDcGroupTokenStreams& group : dc_groups) {
       dc_streams.push_back(std::move(group.dc_tokens));
       dc_streams.push_back(std::move(group.ac_metadata_tokens));
+    }
+
+      return Status::Ok();
+    };
+    if (!overlap_dc) {
+      status = prepare_dc();
+      if (!status.ok()) return status;
     }
 
     const ProfileClock::time_point ac_tokenization_begin = ProfileBegin(profile);
@@ -1970,9 +1952,24 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
         &prepared_natural_orders);
       if (!status.ok()) return status;
       AcEncodingCandidate& candidate = candidates.front();
-      candidate.direct_groups.resize(ac_group_count);
       const bool collect_fixed_populations =
         options.entropy_behavior == VarDctEntropyBehavior::kBalanced;
+      if (auto* provider = codestream_internal::active_ac_tokenization_provider) {
+        status = provider->Begin(frame, has_custom_orders ? custom_orders : natural_orders,
+            prepared_natural_orders, candidate.block_context_map, collect_fixed_populations);
+        if (!status.ok()) return status;
+        if (overlap_dc) {
+          status = prepare_dc();
+          if (!status.ok()) return status;
+        }
+        status = provider->Finish(&candidate.streams, &candidate.fixed_context_populations);
+        if (!status.ok()) return status;
+        if (profile != nullptr) {
+          for (auto stream : candidate.streams) candidate_profile.coefficient_token_count += stream.size();
+          candidate_profile.coefficient_tokenization_pass_count = 1;
+        }
+      } else {
+      candidate.direct_groups.resize(ac_group_count);
       std::array<codestream_internal::SimpleAcTokenizationScratch,
                  kMaximumSectionWorkers> tokenization_scratch;
       Storage<uint64_t> coefficient_tokenization_work(
@@ -2034,6 +2031,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
           candidate_profile.coefficient_tokenization_work_nanoseconds += work;
         }
         candidate_profile.coefficient_tokenization_pass_count = 1;
+      }
       }
     } else {
       const size_t order_template_count = has_custom_orders ? 2 : 1;
@@ -2168,6 +2166,12 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
     ProfileEnd(
       profile, ac_tokenization_begin,
       &candidate_profile.ac_tokenization_nanoseconds);
+    // Attribute the interval running CPU DC to DC even when GPU AC overlaps.
+    // The remaining AC wall interval is preparation plus the exposed wait.
+    if (profile != nullptr && overlap_dc) {
+      candidate_profile.ac_tokenization_nanoseconds -=
+          candidate_profile.dc_tokenization_nanoseconds;
+    }
     if (candidates.empty() || candidates.front().streams.empty()) {
       return Status::Internal("Validated frame produced no AC candidates");
     }
