@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <optional>
 #include <utility>
 
@@ -17,11 +18,15 @@ namespace gjxl::codestream_internal {
 /// Normal option/geometry validation followed by existing backend qualification
 /// and complete planning. No managed backing is allocated. Automatic exact
 /// searches may initialize Metal earlier, but never change candidate selection.
+/// When non-null, backend_selection_nanoseconds accumulates the selection call
+/// within this plan, including production backend initialization. No clocks are
+/// read for a null accumulator. Failure leaves the accumulator unchanged.
 [[nodiscard]] Status PlanWorkflowAdmission(Extent2D source, const WorkflowStorageOptions &options,
                                            GpuBackend *supplied_backend,
                                            bool supplied_backend_is_qualified,
                                            bool resolve_production_backend,
-                                           WorkflowStoragePlan *out);
+                                           WorkflowStoragePlan *out,
+                                           uint64_t *backend_selection_nanoseconds = nullptr);
 
 class WorkflowAdmission {
 public:

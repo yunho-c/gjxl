@@ -190,6 +190,9 @@ struct VarDctEncodingProfile {
   uint64_t input_matrix_scale_stats_nanoseconds = 0;
   uint64_t input_resident_preparation_nanoseconds = 0;
   uint64_t input_quantization_preparation_nanoseconds = 0;
+  /// Backend selection during this encode's admission planning and attempts,
+  /// including production initialization when performed by those calls. Outer
+  /// batch/C adapter planning before this encode remains outside this profile.
   uint64_t backend_selection_nanoseconds = 0;
   uint64_t quantization_pipeline_nanoseconds = 0;
   uint64_t codestream_encoding_nanoseconds = 0;
