@@ -72,12 +72,12 @@ ELIMINATED_WORK_PHASES = {
 
 AC_CANDIDATE_KERNEL_SUFFIX = {
     "dct8": "local",
-    "dct16": "parallel",
-    "dct16x8": "parallel",
+    "dct16": "factored",
+    "dct16x8": "factored",
     "dct8x16": "parallel",
-    "dct32x16": "local",
-    "dct16x32": "local",
-    "dct32": "local",
+    "dct32x16": "factored",
+    "dct16x32": "factored",
+    "dct32": "factored",
 }
 
 
@@ -544,7 +544,8 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
             }
             candidate_kernel = next((kernel for kernel in kernel_ids
                                      if kernel.endswith(("_candidate_loss_parallel",
-                                                         "_candidate_loss_local"))), None)
+                                                         "_candidate_loss_local",
+                                                         "_candidate_loss_factored"))), None)
             if candidate_kernel:
                 shape = stage["stage_id"].removeprefix("frontend.ac_strategy.")
                 self.assertIn(shape, AC_CANDIDATE_KERNEL_SUFFIX)
@@ -664,7 +665,8 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                     }
                     candidate_kernel = next((kernel for kernel in kernel_ids
                         if kernel.endswith(("_candidate_loss_parallel",
-                                            "_candidate_loss_local"))), None)
+                                            "_candidate_loss_local",
+                                            "_candidate_loss_factored"))), None)
                     if candidate_kernel:
                         self.assertEqual(mode, "fused-tuned")
                         shape = stage["stage_id"].removeprefix("frontend.ac_strategy.")

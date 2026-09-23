@@ -23,6 +23,22 @@ struct Params {
   float loss, zeros, delta;
 };
 static_assert(sizeof(Params) == 64 && sizeof(Candidate) == 24);
+// Match the production fused candidate dispatch widths. This diagnostic still
+// requires bitwise agreement; a changed-arithmetic versus split comparison may
+// correctly fail that check, but must use a valid launch configuration.
+unsigned CandidateThreads(unsigned rows, unsigned columns) {
+  if (rows == 16 && (columns == 8 || columns == 16)) return 96;
+  if (rows == 32 && columns == 16) return 192;
+  return rows / 8 * 96;
+}
+
+std::string CandidateKernel(const std::string& prefix, unsigned rows,
+                            unsigned columns) {
+  if (rows != 8) return prefix + "_candidate_loss_factored";
+  return prefix + (columns == 8 ? "_candidate_loss_local" :
+                                  "_candidate_loss_parallel");
+}
+
 struct Fixture {
   Params p;
   // X, Y, B, candidates, quant, matrices, mask, norm/cost, loss, rate,
@@ -128,7 +144,8 @@ struct Fixture {
         bind(e.get(), i, i);
       e->setBytes(&p, sizeof(p), 10);
       e->dispatchThreadgroups(MTL::Size(p.candidates, 1, 1),
-                              MTL::Size(workers * 3, 1, 1));
+                              MTL::Size(CandidateThreads(p.transform_height,
+                                                        p.transform_width), 1, 1));
     }
     e->endEncoding();
     command->commit();
@@ -316,19 +333,18 @@ int main(int argc, char **argv) try {
     std::optional<Kernel> previous;
     if (fused_baseline)
       previous.emplace(device.get(), argv[1],
-                       (prefix + "_candidate_loss_parallel").c_str());
+                       CandidateKernel(prefix, rows, cols).c_str());
     Kernel fused(device.get(), argv[2],
-                 (prefix + (local_candidates ? "_candidate_loss_local" :
-                            "_candidate_loss_parallel")).c_str());
+                 CandidateKernel(prefix, rows, cols).c_str());
     Check(fused.pipeline->threadExecutionWidth() == 32 &&
-          fused.pipeline->maxTotalThreadsPerThreadgroup() >= rows / 8 * 96 &&
+          fused.pipeline->maxTotalThreadsPerThreadgroup() >= CandidateThreads(rows, cols) &&
           fused.pipeline->staticThreadgroupMemoryLength() <= device->maxThreadgroupMemoryLength(),
           "Fused candidate launch exceeds device/pipeline limits");
     Kernel finish_base(device.get(), argv[1],
                        "gjxl_ac_strategy_cost_from_loss");
     Kernel finish_new(device.get(), argv[2], "gjxl_ac_strategy_cost_from_loss");
     std::cout << "{\"rows\":" << rows << ",\"columns\":" << cols
-              << ",\"threads\":" << rows / 8 * 96;
+              << ",\"threads\":" << CandidateThreads(rows, cols);
     if (previous)
       std::cout << ",\"baseline_threadgroup_bytes\":"
                 << previous->pipeline->staticThreadgroupMemoryLength();
