@@ -1,9 +1,10 @@
 # CUDA catch-up: reviewable checkpoint
 
-This branch adds an **opt-in CUDA GPU AC tokenizer** and a separately qualified
-backend-selection profiling correction to upstream `715f033`. It does not
-enable GPU tokenization by default. The code commits reproduce previously
-qualified source checkpoints; assembling this branch did not change their code.
+This branch adds **production-default CUDA direct short filters**, an **opt-in
+CUDA GPU AC tokenizer**, and a separately qualified backend-selection profiling
+correction to upstream `715f033`. GPU tokenization remains opt-in. The short-filter
+decision and its separate performance qualification are recorded in
+[the production adoption notes](cuda-direct-short-production.md).
 
 | Commit | Change |
 | --- | --- |
@@ -12,10 +13,15 @@ qualified source checkpoints; assembling this branch did not change their code.
 
 The first commit's Git tree is `1102ee7387f6e2f263738d17705f8d46ff938043`.
 The combined code checkpoint's tree is `a0f381a3b654d7c72d4c8e9bce09f54fb6dc7adc`.
-Both unchanged upstream submodule references are retained. Later documentation
-changes describe the results without changing those qualified implementations.
+Both unchanged upstream submodule references are retained. These tree identities
+describe the tokenizer/profiling checkpoint before short-filter adoption.
 
 ## Selection and behavior
+
+Normal CUDA Butteraugli preparation uses the fixed 32-row direct short filters
+without an environment selector. CPU-order/exact-coefficient preparation retains
+the legacy filters. Alternate 16/64-row schedules are test-only and disabled by
+default. The following selectors apply only to the optional AC tokenizer.
 
 Add `-DGJXL_BUILD_CUDA_RESIDENT_TOKEN_EXPERIMENT=ON` to an existing supported
 CUDA configuration (`GJXL_ENABLE_CUDA=ON`). The experiment's CMake default is OFF.
@@ -61,6 +67,11 @@ and the CTest results are retained with the workflow artifacts. These checks use
 the workflow's Windows SM86/CUDA 11.8 runner; they are correctness checks, not a
 performance gate or automatic PR coverage.
 
+The default build also runs the direct-short and tall-shape CTests. Its guarded
+short-filter fixtures run under all four Compute Sanitizer modes, with completion
+markers and retained logs. Tokenizer tests exercise composition with the default
+short filters; they do not establish a combined performance benefit.
+
 ## Qualification and measured benefit
 
 Evidence uses the RTX 3060 Laptop (6 GiB, SM86), CUDA 11.8, MSVC 14.37 and Release
@@ -91,10 +102,11 @@ identical raw executable bytes in all 245 functions of their 13 common GPU
 modules; the provider adds only its tokenizer module.
 
 First-call, small-input, disabled-path and policy observations prevent a global
-default. Controls are not subtracted, long first calls are not trimmed, and no
-image-size threshold has been fitted. The intervals describe source variation
-in this study, not other machines or sessions. The numbers above precede the
-separate admission-profile correction and do not establish its latency impact.
+tokenizer default. Controls are not subtracted, long first calls are not trimmed,
+and no image-size threshold has been fitted. The intervals describe source
+variation in this study, not other machines or sessions. The numbers above
+precede the separate admission-profile correction and short-filter adoption;
+they do not establish the latency of the combined changes.
 
 Qualified tokenizer archive SHA-256:
 `199c692da5718fb9f7a4411f1b3dae75a1710858469c9f6bdb4befe8d61ef4a3`.
@@ -121,7 +133,8 @@ integration. Kernel-only savings are insufficient for adoption.
 | GPU AC tokens and CPU DC overlap | Added here, opt-in; broad warm gains with unresolved default boundaries. |
 | Metal token execution policy | The CUDA checkpoint follows one histogram shard, 128-thread emission, scalar pure-DCT8 and warp mixed transforms. Extra shards/group fusion are Metal experiments. |
 | Small-field quantizer and resident AC/AQ initialization/handoff | Tested; native/synchronization gains did not meet complete-encode acceptance. Excluded. |
-| Butteraugli scratch borrowing, traffic fusion and direct short filters | Tested with qualified lifetimes/numerics; mixed or insufficient whole-encode results. Excluded. |
+| Butteraugli direct short filters | Adopted as the fixed 32-row production default after further startup, warm-encode and batch qualification; legacy CPU-order fallback retained. |
+| Butteraugli scratch borrowing and traffic fusion | Tested with qualified lifetimes/numerics; mixed or insufficient whole-encode results. Excluded. |
 | Device-only frames and direct final coefficient output | Qualified prototypes, kept separate. Startup/policy concerns and interrupted memory-pressure screens prevent performance acceptance. |
 | Private-cache OOM reclamation | Correctness and changing-size tests pass; controlled ordinary performance remains mixed. Kept separate. |
 | Metal shared mapped output and Apple SIMD/threadgroup choices | Hardware-specific; CUDA retains explicit discrete-GPU transport and measured NVIDIA layouts. |
@@ -132,8 +145,8 @@ processes / 269 calls matched prior outputs, but incomplete rounds establish
 neither a speed nor a memory advantage. Its failed study remains intact and is
 not represented by this branch's performance results.
 
-This checkpoint supplies a useful new CUDA capability and preserves the tested
-exclusions. It does **not** establish production optimization parity or a safe
-platform-wide default. Other GPU architectures/native Linux performance are
-unmeasured by this laptop evidence. The older development-plan documents are
+This checkpoint supplies a new CUDA capability and adopts the qualified short
+filters. It does **not** establish complete production optimization parity or a
+platform-wide tokenizer default. Other GPU architectures/native Linux performance
+are unmeasured by this laptop evidence. The older development-plan documents are
 historical protocols; this document describes the current integrated behavior.

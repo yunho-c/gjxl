@@ -228,6 +228,55 @@
     "added_modules": 1
   },
   "default_enabled": false,
+  "default_enabled_scope": "CUDA GPU AC tokenizer",
+  "direct_short_filters": {
+    "default_enabled": true,
+    "production_tile_rows": 32,
+    "cpu_order_legacy_fallback": true,
+    "alternate_test_schedules_default_enabled": false,
+    "qualification_base": "715f033acc90495237562068a5f4e7db7cd3b024",
+    "workspace": "gjxl-cuda-metal-catchup/build/short-production-side-r1",
+    "files": {
+      "DECISION.md": "5bd72a54a963cd59117a9aaa7cbfeb71dc86ade095debaffc27113da7d657a87",
+      "REPORT.md": "9bab151df2911e815b235cfafe9629d479e5813c383c33997ae00303d62aa035",
+      "review.json": "55e14240ba71830bf3a2db4af107adc439821ec0f4028b568765348d0e35c18d",
+      "supplement-review.json": "22d998c0bf39ad9b6c7f16c3bd22ec9b1ad96db838d3d4f2beb064a35b559751",
+      "native-results.json": "cff9c742ebe98356cee8363878d35b5c980d9c6a71b7f1acf14c3070cb1c4ae2",
+      "native-identity.json": "02ce83d0161ad295b38be43464b3b2ae5235eace4f8c2b032a9484f8c658bbb8",
+      "build-flags-proof.json": "32a33591934d261587e8034b8ed9f6685e301e73db67c82b3c07bd24b525c730",
+      "production-candidate.patch": "354fb63095b32dbe776284ddaceccba08011d22076c7c0696f95563442add60c"
+    },
+    "successful_complete_encodes": 13376,
+    "independently_decoded_cases": 96,
+    "matched_baseline_candidate_oom_processes": 32,
+    "qualified_ctests": 19,
+    "qualified_sanitizer_modes": 4,
+    "performance_scope": "Short filters compared with upstream main; does not measure composition with the optional GPU AC tokenizer",
+    "integration": {
+      "utc": "2026-09-23T15:35:21.445052+00:00",
+      "base_commit": "02705120242bbc235ec6ab87f92e2a5d6e5d5145",
+      "workspace": "gjxl-cuda-catchup-review/build/short-default-adoption-r1",
+      "files": {
+        "validate.py": "7b5e696e3c5644c122584bcc999c4bafc18b5e75054e1c160e7b04192063b71c",
+        "source-identity.json": "3a966b77c6c763bce7aea5bbed1f71d4c01c4081b56a703f99ff020eff38148f",
+        "results.json": "86f10ce87f12243690d28e4ea84c01498eb1bd8a105b76d1d5196d670684ec45",
+        "default-ctest.xml": "fd9cf55a02124e64081d9ce70a4642c5ea8f248953512bd99bf69e561ba4b06c",
+        "tokens-ctest.xml": "35a2950a554e688655da90e24fb37dfc2c732eacc33b9da710448b7555736a96"
+      },
+      "default_ctests": 23,
+      "tokenizer_composition_ctests": 6,
+      "short_filter_sanitizer_modes": [
+        "memcheck",
+        "racecheck",
+        "synccheck",
+        "initcheck"
+      ],
+      "tokenizer_sanitizer_runs": 4,
+      "short_gpu_function_bodies_identical_to_qualification_in_both_builds": 97,
+      "source_unchanged_through_validation": true,
+      "combined_performance_measured": false
+    }
+  },
   "production_parity_claim": false,
-  "limitation": "Evidence describes qualified snapshots. Documentation packaging adds no runtime qualification or latency measurement; the profiling correction has diagnostic evidence, not an old/new performance comparison."
+  "limitation": "Evidence describes separately qualified snapshots. The profiling correction has diagnostic evidence, not an old/new performance comparison. Short-filter adoption has separate qualification; combined tokenizer/short-filter latency is unmeasured."
 }

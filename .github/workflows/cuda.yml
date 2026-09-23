@@ -45,6 +45,16 @@ jobs:
         run: ./build/cuda-ci/gjxl_cuda_backend_test.exe
       - name: Test native libraries
         run: ctest --test-dir build/cuda-ci --output-on-failure --parallel 1
+      - name: Check production short filters
+        run: |
+          foreach ($check in @('memcheck', 'racecheck', 'synccheck', 'initcheck')) {
+            $log = "$env:GITHUB_WORKSPACE/build/cuda-ci/short-filters-$check.log"
+            & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool $check --error-exitcode 86 "$env:GITHUB_WORKSPACE/build/cuda-ci/gjxl_cuda_direct_short_test.exe" --sanitizer 2>&1 | Tee-Object -FilePath $log
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $output = Get-Content -LiteralPath $log -Raw
+            $summary = if ($check -eq 'racecheck') { 'RACECHECK SUMMARY: 0 hazards' } else { 'ERROR SUMMARY: 0 errors' }
+            if ($output -notmatch 'Verified 45 direct short fixtures and 24 prepared legacy/fused pairs with guarded A/B/A reuse; rejected=29' -or $output -notmatch $summary) { throw "Instrumented short filters/$check did not complete" }
+          }
       - name: Check DC memory accesses
         run: |
           & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool memcheck --error-exitcode 86 "$env:GITHUB_WORKSPACE/build/cuda-ci/gjxl_cuda_dc_processing_test.exe" --report "$env:GITHUB_WORKSPACE/build/cuda-ci/dc-memcheck-complete.txt"
@@ -101,6 +111,7 @@ jobs:
           path: |
             build/cuda-ci/Testing/Temporary/
             build/cuda-ci/*-complete.txt
+            build/cuda-ci/short-filters-*.log
             build/cuda-ci-tokens/Testing/Temporary/
             build/cuda-ci-tokens/token-tests.xml
             build/cuda-ci-tokens/token-*.log

@@ -63,6 +63,9 @@ option(
 option(GJXL_CUDA_COMPACT_AC
   "Experimental native narrow AC readback for the resident CUDA policy" OFF)
 
+option(GJXL_CUDA_SHORT_FILTER_TEST_SCHEDULES
+  "Build alternate CUDA short-filter schedules for differential tests" OFF)
+
 if(GJXL_ENABLE_METAL)
   if(NOT APPLE)
     message(FATAL_ERROR "GJXL_ENABLE_METAL requires an Apple platform")
@@ -636,6 +639,10 @@ if(GJXL_ENABLE_CUDA)
 
   if(GJXL_CUDA_COMPACT_AC)
     target_compile_definitions(gjxl_cuda PRIVATE GJXL_CUDA_COMPACT_AC=1)
+  endif()
+
+  if(GJXL_CUDA_SHORT_FILTER_TEST_SCHEDULES)
+    target_compile_definitions(gjxl_cuda PRIVATE GJXL_CUDA_SHORT_FILTER_TEST_SCHEDULES=1)
   endif()
 
   set_target_properties(
@@ -3028,6 +3035,13 @@ if(GJXL_BUILD_TESTS)
     add_test(NAME cuda_opsin COMMAND gjxl_cuda_opsin_test)
     add_test(NAME cuda_opsin_tall COMMAND gjxl_cuda_opsin_test --tall-only)
     set_tests_properties(cuda_opsin cuda_opsin_tall PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_direct_short_test tests/cuda_direct_short_test.cpp)
+    target_link_libraries(gjxl_cuda_direct_short_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_direct_short_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_direct_short COMMAND gjxl_cuda_direct_short_test)
+    add_test(NAME cuda_direct_short_tall COMMAND gjxl_cuda_direct_short_test --tall-only)
+    set_tests_properties(cuda_direct_short cuda_direct_short_tall PROPERTIES SKIP_RETURN_CODE 77)
 
     add_executable(gjxl_cuda_low_medium_test tests/cuda_low_medium_test.cpp)
     target_link_libraries(gjxl_cuda_low_medium_test PRIVATE gjxl_cuda)

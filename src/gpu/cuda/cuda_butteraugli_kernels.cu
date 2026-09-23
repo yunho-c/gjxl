@@ -1251,6 +1251,194 @@ __device__ float AmplifyRange(float value, float width) {
                           : value + value;
 }
 
+// Both directional sums retain ascending tap order and rounded float division.
+// Inputs remain read-only until every block has finished its halo loads.
+template <unsigned TileHeight, unsigned Channel>
+__global__ void DirectShortFilterKernel(CudaButteraugliDirectShortPlan plan) {
+  constexpr unsigned Width = 32, Taps = Channel < 3 ? 15 : 7;
+  constexpr unsigned Radius = Taps / 2;
+  __shared__ float horizontal[Width * (TileHeight + 2 * Radius)];
+  __shared__ float kernel[Taps];
+  __shared__ float normalization;
+  const uint32_t columns = (plan.width + Width - 1) / Width;
+  const uint32_t origin_x = (blockIdx.x % columns) * Width;
+  const uint32_t origin_y = (blockIdx.x / columns) * TileHeight;
+  if (threadIdx.x < Taps) kernel[threadIdx.x] = plan.weights[threadIdx.x];
+  if (threadIdx.x == 0) {
+    float sum = 0.0f;
+    for (unsigned tap = 0; tap < Taps; ++tap) sum += plan.weights[tap];
+    normalization = sum;
+  }
+  __syncthreads();
+  for (unsigned pair = threadIdx.x;
+       pair < (Width / 2) * (TileHeight + 2 * Radius); pair += blockDim.x) {
+    const unsigned local_x = 2 * (pair % (Width / 2));
+    const unsigned local_y = pair / (Width / 2);
+    const uint32_t x = origin_x + local_x;
+    const int y =
+        static_cast<int>(origin_y + local_y) - static_cast<int>(Radius);
+    float sum[2] = {}, weight_sum[2] = {};
+    const bool valid =
+        x < plan.width && y >= 0 && y < static_cast<int>(plan.height);
+    if (valid) {
+      const bool interior = x >= Radius && x + 1 + Radius < plan.width;
+      if (interior) {
+        weight_sum[0] = weight_sum[1] = normalization;
+#pragma unroll
+        for (unsigned input_col = 0; input_col < Taps + 1; ++input_col) {
+          const float value =
+              plan.input[static_cast<size_t>(y) * plan.input_stride + x +
+                         input_col - Radius];
+#pragma unroll
+          for (unsigned col = 0; col < 2; ++col)
+            if (input_col >= col && input_col < col + Taps)
+              sum[col] += value * kernel[input_col - col];
+        }
+      } else {
+#pragma unroll
+        for (unsigned input_col = 0; input_col < Taps + 1; ++input_col) {
+          const int source_x = static_cast<int>(x) +
+                               static_cast<int>(input_col) -
+                               static_cast<int>(Radius);
+          if (source_x >= 0 && source_x < static_cast<int>(plan.width)) {
+            const float value =
+                plan.input[static_cast<size_t>(y) * plan.input_stride +
+                           static_cast<unsigned>(source_x)];
+#pragma unroll
+            for (unsigned col = 0; col < 2; ++col) {
+              if (input_col >= col && input_col < col + Taps) {
+                const float weight = kernel[input_col - col];
+                sum[col] += value * weight;
+                weight_sum[col] += weight;
+              }
+            }
+          }
+        }
+      }
+    }
+#pragma unroll
+    for (unsigned col = 0; col < 2; ++col)
+      horizontal[local_y * Width + local_x + col] =
+          valid && x + col < plan.width ? sum[col] / weight_sum[col] : 0.0f;
+  }
+  __syncthreads();
+  const unsigned local_x = threadIdx.x % Width;
+  const uint32_t x = origin_x + local_x;
+  // All lanes have reached the publication barrier. No later collective exists.
+  if (x >= plan.width) return;
+  for (unsigned pair_row = threadIdx.x / Width; pair_row < TileHeight / 2;
+       pair_row += blockDim.x / Width) {
+    const unsigned local_y = 2 * pair_row;
+    const uint32_t y = origin_y + local_y;
+    if (y >= plan.height) continue;
+    float sum[2] = {}, weight_sum[2] = {};
+    const bool interior = y >= Radius && y + 1 + Radius < plan.height;
+    if (interior) {
+      weight_sum[0] = weight_sum[1] = normalization;
+#pragma unroll
+      for (unsigned input_row = 0; input_row < Taps + 1; ++input_row) {
+        const float value = horizontal[(local_y + input_row) * Width + local_x];
+#pragma unroll
+        for (unsigned row = 0; row < 2; ++row)
+          if (input_row >= row && input_row < row + Taps)
+            sum[row] += value * kernel[input_row - row];
+      }
+    } else {
+#pragma unroll
+      for (unsigned input_row = 0; input_row < Taps + 1; ++input_row) {
+        const int source_y = static_cast<int>(y) + static_cast<int>(input_row) -
+                             static_cast<int>(Radius);
+        if (source_y >= 0 && source_y < static_cast<int>(plan.height)) {
+          const float value =
+              horizontal[(local_y + input_row) * Width + local_x];
+#pragma unroll
+          for (unsigned row = 0; row < 2; ++row) {
+            if (input_row >= row && input_row < row + Taps) {
+              const float weight = kernel[input_row - row];
+              sum[row] += value * weight;
+              weight_sum[row] += weight;
+            }
+          }
+        }
+      }
+    }
+#pragma unroll
+    for (unsigned row = 0; row < 2; ++row) {
+      if (y + row >= plan.height) continue;
+      const size_t input_index =
+          static_cast<size_t>(y + row) * plan.input_stride + x;
+      const size_t low_index =
+          static_cast<size_t>(y + row) * plan.low_stride + x;
+      const size_t high_index =
+          static_cast<size_t>(y + row) * plan.high_stride + x;
+      float low_pass = sum[row] / weight_sum[row];
+      const float original = plan.input[input_index];
+      if constexpr (Channel < 2) {
+        plan.high[high_index] = original - low_pass;
+        plan.low[low_index] = Channel == 0 ? RemoveRange(low_pass, 0.29f)
+                                           : AmplifyRange(low_pass, 0.1f);
+      } else if constexpr (Channel == 2) {
+        plan.low[low_index] = low_pass;
+      } else if constexpr (Channel == 3) {
+        plan.high[high_index] = RemoveRange(original - low_pass, 0.04f);
+        plan.low[low_index] = RemoveRange(low_pass, 1.5f);
+      } else {
+        low_pass = MaximumClamp(low_pass, 28.4691806922f);
+        plan.high[high_index] =
+            MaximumClamp(original - low_pass, 5.19175294647f) * 2.69313763794f;
+        plan.low[low_index] = AmplifyRange(low_pass * 2.155f, 0.132f);
+      }
+    }
+  }
+}
+
+// Independently retained FrequencySplitKernel arithmetic, with distinct low
+// output and a materialized blur input. No direct-kernel store helper is shared.
+__global__ void DirectShortReferenceSplitKernel(
+    CudaButteraugliDirectShortPlan plan, const float* blurred) {
+  const size_t index =
+      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (index >= static_cast<size_t>(plan.width) * plan.height) return;
+  const uint32_t y = static_cast<uint32_t>(index / plan.width);
+  const uint32_t x =
+      static_cast<uint32_t>(index - static_cast<size_t>(y) * plan.width);
+  float low_pass = blurred[index];
+  const float original =
+      plan.input[static_cast<size_t>(y) * plan.input_stride + x];
+  const size_t low_index = static_cast<size_t>(y) * plan.low_stride + x;
+  const size_t output_index = static_cast<size_t>(y) * plan.high_stride + x;
+  if (plan.channel < 2) {
+    plan.high[output_index] = original - low_pass;
+    plan.low[low_index] = plan.channel == 0 ? RemoveRange(low_pass, 0.29f)
+                                            : AmplifyRange(low_pass, 0.1f);
+  } else if (plan.channel == 2) {
+    plan.low[low_index] = low_pass;
+  } else if (plan.channel == 3) {
+    plan.high[output_index] = RemoveRange(original - low_pass, 0.04f);
+    plan.low[low_index] = RemoveRange(low_pass, 1.5f);
+  } else {
+    low_pass = MaximumClamp(low_pass, 28.4691806922f);
+    plan.high[output_index] =
+        MaximumClamp(original - low_pass, 5.19175294647f) * 2.69313763794f;
+    plan.low[low_index] = AmplifyRange(low_pass * 2.155f, 0.132f);
+  }
+}
+
+__global__ void PublishShortHighKernel(const float* input_x,
+                                       const float* input_y, float* output_x,
+                                       float* output_y, PlaneParams params) {
+  const size_t index =
+      static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+  if (index >= static_cast<size_t>(params.width) * params.height) return;
+  const uint32_t y = static_cast<uint32_t>(index / params.width);
+  const uint32_t x =
+      static_cast<uint32_t>(index - static_cast<size_t>(y) * params.width);
+  const size_t input = static_cast<size_t>(y) * params.input_stride + x;
+  const size_t output = static_cast<size_t>(y) * params.output_stride + x;
+  output_x[output] = input_x[input];
+  output_y[output] = input_y[input];
+}
+
 __global__ void FrequencySplitKernel(float* input, const float* blurred,
                                      float* output, FrequencyParams params) {
   const size_t index =
@@ -2697,12 +2885,123 @@ template <unsigned int KernelSize, bool ReferenceHorizontal = false>
   }
 }
 
+[[nodiscard]] cudaError_t LaunchDirectShortPsycho(
+    const CudaButteraugliPlan& plan, std::array<const float*, 3> input,
+    std::array<uint32_t, 3> input_stride,
+    const std::array<float*, kCudaButteraugliPsychoPlaneCount>& psycho,
+    uint32_t psycho_stride, uint32_t width, uint32_t height,
+    cudaStream_t stream) {
+  // Logical psycho planes and fixed work planes are disjoint even for a packed
+  // reference subscale. All transient outputs use psycho_stride; the larger
+  // work allocations need not retain their usual working-width pitch here.
+#if defined(GJXL_CUDA_SHORT_FILTER_TEST_SCHEDULES)
+  const unsigned tile = plan.direct_short == 16   ? 16
+                        : plan.direct_short == 64 ? 64
+                                                  : 32;
+#else
+  constexpr unsigned tile = 32;
+#endif
+  CudaButteraugliOpsinPlan opsin;
+  opsin.input = input;
+  opsin.input_stride = input_stride;
+  opsin.weights = plan.kernels[0];
+  opsin.width = width;
+  opsin.height = height;
+  opsin.output_stride = psycho_stride;
+  opsin.intensity_target = plan.intensity_target;
+  for (size_t c = 0; c < 3; ++c) {
+    opsin.intermediate[c] = plan.planes[kImage + c];
+    opsin.output[c] = psycho[7 + c];
+  }
+  cudaError_t error = LaunchCudaButteraugliOpsin(opsin, stream);
+  if (error != cudaSuccess) return error;
+
+  CudaButteraugliLowMediumPlan low_medium;
+  for (size_t c = 0; c < 3; ++c) {
+    low_medium.input[c] = psycho[7 + c];
+    low_medium.intermediate[c] = psycho[3 + c];
+    low_medium.low[c] = psycho[c];
+    low_medium.medium[c] = plan.planes[kImage + c];
+  }
+  low_medium.device_weights = plan.kernels[1];
+  low_medium.weights = plan.low_medium_weights;
+  low_medium.width = width;
+  low_medium.height = height;
+  low_medium.input_stride = psycho_stride;
+  low_medium.output_stride = psycho_stride;
+  error = LaunchCudaButteraugliLowMedium(low_medium, stream);
+  if (error != cudaSuccess) return error;
+
+  for (unsigned channel = 0; channel < 2; ++channel) {
+    const CudaButteraugliDirectShortPlan direct{plan.planes[kImage + channel],
+                                                plan.kernels[2],
+                                                psycho[3 + channel],
+                                                psycho[6 + channel],
+                                                width,
+                                                height,
+                                                psycho_stride,
+                                                psycho_stride,
+                                                psycho_stride,
+                                                channel};
+    error = LaunchCudaButteraugliDirectShortForTesting(direct, tile, stream);
+    if (error != cudaSuccess) return error;
+  }
+  const CudaButteraugliDirectShortPlan blue{plan.planes[kImage + 2],
+                                            plan.kernels[2],
+                                            psycho[5],
+                                            nullptr,
+                                            width,
+                                            height,
+                                            psycho_stride,
+                                            psycho_stride,
+                                            0,
+                                            2};
+  error = LaunchCudaButteraugliDirectShortForTesting(blue, tile, stream);
+  if (error != cudaSuccess) return error;
+
+  const PlaneParams suppress{width, height, psycho_stride, psycho_stride};
+  if (CudaKernelProfileScope profile{
+          "SuppressXKernel", PlaneBlocks(width, height), kPlaneThreads, stream};
+      profile) {
+    SuppressXKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0, stream>>>(
+        psycho[6], psycho[7], suppress);
+  }
+  error = CheckLaunch();
+  if (error != cudaSuccess) return error;
+  for (unsigned channel = 0; channel < 2; ++channel) {
+    const CudaButteraugliDirectShortPlan direct{
+        psycho[6 + channel], plan.kernels[3], plan.planes[kImage + channel],
+        psycho[8 + channel], width,           height,
+        psycho_stride,       psycho_stride,   psycho_stride,
+        channel + 3};
+    error = LaunchCudaButteraugliDirectShortForTesting(direct, tile, stream);
+    if (error != cudaSuccess) return error;
+  }
+  // Restore the ordinary immutable psycho layout before W21/W22 become Malta
+  // accumulators. This also completes reference subscale preparation, whose
+  // caller does not immediately construct a mask.
+  if (CudaKernelProfileScope profile{"PublishShortHighKernel",
+                                     PlaneBlocks(width, height), kPlaneThreads,
+                                     stream};
+      profile) {
+    PublishShortHighKernel<<<PlaneBlocks(width, height), kPlaneThreads, 0,
+                             stream>>>(plan.planes[kImage],
+                                       plan.planes[kImage + 1], psycho[6],
+                                       psycho[7], suppress);
+  }
+  return CheckLaunch();
+}
+
 [[nodiscard]] cudaError_t LaunchPsycho(
     const CudaButteraugliPlan& plan, std::array<const float*, 3> input,
     std::array<uint32_t, 3> input_stride,
     const std::array<float*, kCudaButteraugliPsychoPlaneCount>& psycho,
     uint32_t psycho_stride, uint32_t width, uint32_t height,
     cudaStream_t stream) {
+  if (plan.direct_short != 0 && plan.cpu_order == 0)
+    return LaunchDirectShortPsycho(plan, input, input_stride, psycho,
+                                   psycho_stride, width, height, stream);
+
   CudaButteraugliOpsinPlan opsin;
   opsin.cpu_order = plan.cpu_order;
   opsin.input = input;
@@ -3302,6 +3601,141 @@ cudaError_t LaunchCudaButteraugliErosionFinalForTesting(
   auto separate = plan;
   separate.mask = erosion_scratch;
   return LaunchL2FinalForTest(separate, false, stream);
+}
+
+namespace {
+bool ValidDirectShort(const CudaButteraugliDirectShortPlan& plan,
+                      float* horizontal, float* blurred, bool reference) {
+  if (plan.channel > 4 || plan.width > 0x7fffff7fu ||
+      plan.height > 0x7fffff7fu || plan.input_stride < plan.width ||
+      plan.low_stride < plan.width ||
+      (plan.channel != 2 && plan.high_stride < plan.width) ||
+      (uint64_t{plan.width} * plan.height + kPlaneThreads - 1) / kPlaneThreads >
+          0x7fffffffu)
+    return false;
+  uintptr_t starts[6], ends[6];
+  unsigned count = 0;
+  const auto add = [&](const float* pointer, uint64_t elements) {
+    if (pointer == nullptr || elements > UINTPTR_MAX / sizeof(float))
+      return false;
+    const uintptr_t start = reinterpret_cast<uintptr_t>(pointer);
+    const uintptr_t bytes = static_cast<uintptr_t>(elements * sizeof(float));
+    if (start > UINTPTR_MAX - bytes) return false;
+    const uintptr_t end = start + bytes;
+    for (unsigned i = 0; i < count; ++i)
+      if (start < ends[i] && starts[i] < end) return false;
+    starts[count] = start;
+    ends[count++] = end;
+    return true;
+  };
+  const auto extent = [&](uint32_t stride) {
+    return uint64_t{plan.height - 1} * stride + plan.width;
+  };
+  if (!add(plan.input, extent(plan.input_stride)) ||
+      !add(plan.weights, plan.channel < 3 ? 15 : 7) ||
+      !add(plan.low, extent(plan.low_stride)) ||
+      (plan.channel != 2 && !add(plan.high, extent(plan.high_stride))))
+    return false;
+  return !reference || (add(horizontal, uint64_t{plan.width} * plan.height) &&
+                        add(blurred, uint64_t{plan.width} * plan.height));
+}
+
+template <unsigned TileHeight, unsigned Channel>
+cudaError_t LaunchDirectShort(const CudaButteraugliDirectShortPlan& plan,
+                              unsigned blocks, cudaStream_t stream) {
+  if (CudaKernelProfileScope profile{
+          "DirectShortFilterKernel<TileHeight,Channel>", blocks, kPlaneThreads,
+          stream};
+      profile) {
+    DirectShortFilterKernel<TileHeight, Channel>
+        <<<blocks, kPlaneThreads, 0, stream>>>(plan);
+  }
+  return CheckLaunch();
+}
+
+template <unsigned TileHeight>
+cudaError_t LaunchDirectShortChannel(const CudaButteraugliDirectShortPlan& plan,
+                                     cudaStream_t stream) {
+  const uint64_t blocks =
+      ((uint64_t{plan.width} + 31) / 32) *
+      ((uint64_t{plan.height} + TileHeight - 1) / TileHeight);
+  if (blocks > 0x7fffffffu) return cudaErrorInvalidValue;
+  const unsigned grid = static_cast<unsigned>(blocks);
+  switch (plan.channel) {
+    case 0:
+      return LaunchDirectShort<TileHeight, 0>(plan, grid, stream);
+    case 1:
+      return LaunchDirectShort<TileHeight, 1>(plan, grid, stream);
+    case 2:
+      return LaunchDirectShort<TileHeight, 2>(plan, grid, stream);
+    case 3:
+      return LaunchDirectShort<TileHeight, 3>(plan, grid, stream);
+    default:
+      return LaunchDirectShort<TileHeight, 4>(plan, grid, stream);
+  }
+}
+}  // namespace
+
+bool CudaButteraugliDirectShortTestSchedulesAvailable() noexcept {
+#if defined(GJXL_CUDA_SHORT_FILTER_TEST_SCHEDULES)
+  return true;
+#else
+  return false;
+#endif
+}
+
+cudaError_t LaunchCudaButteraugliDirectShortForTesting(
+    const CudaButteraugliDirectShortPlan& plan, unsigned tile_height,
+    cudaStream_t stream) {
+  if (tile_height != 16 && tile_height != 32 && tile_height != 64)
+    return cudaErrorInvalidValue;
+#if !defined(GJXL_CUDA_SHORT_FILTER_TEST_SCHEDULES)
+  if (tile_height != 32) return cudaErrorInvalidValue;
+#endif
+  if (plan.width == 0 || plan.height == 0) return cudaSuccess;
+  if (!ValidDirectShort(plan, nullptr, nullptr, false))
+    return cudaErrorInvalidValue;
+  switch (tile_height) {
+#if defined(GJXL_CUDA_SHORT_FILTER_TEST_SCHEDULES)
+    case 16:
+      return LaunchDirectShortChannel<16>(plan, stream);
+    case 64:
+      return LaunchDirectShortChannel<64>(plan, stream);
+#endif
+    default:
+      return LaunchDirectShortChannel<32>(plan, stream);
+  }
+}
+
+cudaError_t LaunchCudaButteraugliDirectShort(
+    const CudaButteraugliDirectShortPlan& plan, cudaStream_t stream) {
+  return LaunchCudaButteraugliDirectShortForTesting(plan, 32, stream);
+}
+
+cudaError_t LaunchCudaButteraugliDirectShortReferenceForTesting(
+    const CudaButteraugliDirectShortPlan& plan, float* horizontal,
+    float* blurred, cudaStream_t stream) {
+  if (plan.width == 0 || plan.height == 0) return cudaSuccess;
+  if (!ValidDirectShort(plan, horizontal, blurred, true))
+    return cudaErrorInvalidValue;
+  const cudaError_t error =
+      plan.channel < 3
+          ? LaunchBlur<15, true>(plan.input, plan.input_stride, plan.weights,
+                                 horizontal, blurred, plan.width, plan.width,
+                                 plan.height, stream)
+          : LaunchBlur<7, true>(plan.input, plan.input_stride, plan.weights,
+                                horizontal, blurred, plan.width, plan.width,
+                                plan.height, stream);
+  if (error != cudaSuccess) return error;
+  if (CudaKernelProfileScope profile{"DirectShortReferenceSplitKernel",
+                                     PlaneBlocks(plan.width, plan.height),
+                                     kPlaneThreads, stream};
+      profile) {
+    DirectShortReferenceSplitKernel<<<PlaneBlocks(plan.width, plan.height),
+                                      kPlaneThreads, 0, stream>>>(plan,
+                                                                  blurred);
+  }
+  return CheckLaunch();
 }
 
 cudaError_t LaunchCudaButteraugliBlurAndSplit(

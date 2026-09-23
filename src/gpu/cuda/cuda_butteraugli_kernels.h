@@ -49,6 +49,10 @@ struct CudaButteraugliPlan {
   CudaButteraugliLowMediumWeights low_medium_weights{};
   // Scalar CPU convolution order, used only by exact-coefficient AQ.
   uint32_t cpu_order = 0;
+  // Production direct high/B/ultra filters with disjoint transient storage.
+  // Nonzero selects the 32-row path; CPU-order mode retains the legacy path.
+  // Test builds may force 16/64-row schedules; zero selects the legacy oracle.
+  uint32_t direct_short = 1;
 };
 
 // One scaled Malta response, including the caller's initialization/addition
@@ -107,6 +111,41 @@ struct CudaButteraugliFrequencyParams {
   // Scalar CPU convolution order, used only by exact-coefficient AQ.
   uint32_t cpu_order = 0;
 };
+
+// Two directional blurs and the frequency split, using a shared horizontal
+// intermediate. All used input/weight/output spans must be disjoint. Channel 2
+// is a 15-tap B-medium blur with no high output; other channels match the
+// existing split channels 0/1/3/4. Inputs are immutable, pitches independent.
+struct CudaButteraugliDirectShortPlan {
+  const float* input = nullptr;
+  const float* weights = nullptr;
+  float* low = nullptr;
+  float* high = nullptr;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  uint32_t input_stride = 0;
+  uint32_t low_stride = 0;
+  uint32_t high_stride = 0;
+  uint32_t channel = 0;
+};
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliDirectShort(
+    const CudaButteraugliDirectShortPlan& plan, cudaStream_t stream);
+
+// Alternate schedules require GJXL_CUDA_SHORT_FILTER_TEST_SCHEDULES. The
+// ordinary 32-row schedule and the independent oracle are always available.
+[[nodiscard]] bool CudaButteraugliDirectShortTestSchedulesAvailable() noexcept;
+
+[[nodiscard]] cudaError_t LaunchCudaButteraugliDirectShortForTesting(
+    const CudaButteraugliDirectShortPlan& plan, unsigned tile_height,
+    cudaStream_t stream);
+
+// Independent oracle materializes both original directional blur results.
+// Its two scratch buffers contain width*height floats and must be disjoint
+// from all used plan spans and each other.
+[[nodiscard]] cudaError_t LaunchCudaButteraugliDirectShortReferenceForTesting(
+    const CudaButteraugliDirectShortPlan& plan, float* horizontal,
+    float* blurred, cudaStream_t stream);
 
 [[nodiscard]] cudaError_t LaunchCudaButteraugliBlurAndSplit(
     float* input, const float* weights, float* intermediate, float* output,
