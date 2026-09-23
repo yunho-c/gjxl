@@ -276,21 +276,24 @@ Status CreateAcStrategyPipelines(
     }
   }
 
-  // Fused candidates keep X/Y/B local. Select each optional pipeline
-  // independently so unsupported shapes retain the split implementation.
+  // Fused candidates keep X/Y/B local; five shapes use qualified FP32
+  // factored arithmetic. Widths must match their per-channel worker counts.
+  // Distinct factored names keep older libraries on their existing fallback.
+  // Select each optional pipeline independently so unsupported shapes retain
+  // the split implementation.
   constexpr struct {
     AcStrategyType strategy;
     const char* kernel;
     NS::UInteger threads;
   } kCandidateLossKernels[] = {
     {AcStrategyType::kDct8, "gjxl_ac_strategy_dct8_candidate_loss_local", 96},
-    {AcStrategyType::kDct32x16, "gjxl_ac_strategy_dct32x16_candidate_loss_local", 384},
-    {AcStrategyType::kDct16x32, "gjxl_ac_strategy_dct16x32_candidate_loss_local", 192},
-    {AcStrategyType::kDct32x32, "gjxl_ac_strategy_dct32_candidate_loss_local", 384},
+    {AcStrategyType::kDct32x16, "gjxl_ac_strategy_dct32x16_candidate_loss_factored", 192},
+    {AcStrategyType::kDct16x32, "gjxl_ac_strategy_dct16x32_candidate_loss_factored", 192},
+    {AcStrategyType::kDct32x32, "gjxl_ac_strategy_dct32_candidate_loss_factored", 384},
     {AcStrategyType::kDct16x16,
-     "gjxl_ac_strategy_dct16_candidate_loss_parallel", 192},
+     "gjxl_ac_strategy_dct16_candidate_loss_factored", 96},
     {AcStrategyType::kDct16x8,
-     "gjxl_ac_strategy_dct16x8_candidate_loss_parallel", 192},
+     "gjxl_ac_strategy_dct16x8_candidate_loss_factored", 96},
     {AcStrategyType::kDct8x16,
      "gjxl_ac_strategy_dct8x16_candidate_loss_parallel", 96},
   };

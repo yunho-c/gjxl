@@ -311,19 +311,19 @@ bool CheckSubmissionStorage(gjxl::GpuBackend& gpu,
             expected_kernel = "gjxl_ac_strategy_dct8_candidate_loss_local";
             break;
           case AcStrategyType::kDct32x16:
-            expected_kernel = "gjxl_ac_strategy_dct32x16_candidate_loss_local";
+            expected_kernel = "gjxl_ac_strategy_dct32x16_candidate_loss_factored";
             break;
           case AcStrategyType::kDct16x32:
-            expected_kernel = "gjxl_ac_strategy_dct16x32_candidate_loss_local";
+            expected_kernel = "gjxl_ac_strategy_dct16x32_candidate_loss_factored";
             break;
           case AcStrategyType::kDct32x32:
-            expected_kernel = "gjxl_ac_strategy_dct32_candidate_loss_local";
+            expected_kernel = "gjxl_ac_strategy_dct32_candidate_loss_factored";
             break;
           case AcStrategyType::kDct16x16:
-            expected_kernel = "gjxl_ac_strategy_dct16_candidate_loss_parallel";
+            expected_kernel = "gjxl_ac_strategy_dct16_candidate_loss_factored";
             break;
           case AcStrategyType::kDct16x8:
-            expected_kernel = "gjxl_ac_strategy_dct16x8_candidate_loss_parallel";
+            expected_kernel = "gjxl_ac_strategy_dct16x8_candidate_loss_factored";
             break;
           case AcStrategyType::kDct8x16:
             expected_kernel = "gjxl_ac_strategy_dct8x16_candidate_loss_parallel";
@@ -1253,15 +1253,20 @@ bool CheckValidation() {
 }
 
 #ifndef GJXL_TEST_CUDA
-bool CheckLossFusionExact(const Fixture& fixture) {
-  std::array<std::vector<float>, 2> costs;
+bool CheckLossFusionContracts(const Fixture& fixture) {
+  // Wide and compact retain the same arithmetic. The tuned candidate path
+  // uses qualified factored arithmetic and must instead repeat its own bits.
+  // RunStrategyCase keeps the existing CPU-reference bounds for all four runs.
+  std::array<std::vector<float>, 4> costs;
   const std::array modes = {gjxl::MetalAcResidualInverseMode::kFusedWide,
+                           gjxl::MetalAcResidualInverseMode::kFusedCompact,
+                           gjxl::MetalAcResidualInverseMode::kFusedTuned,
                            gjxl::MetalAcResidualInverseMode::kFusedTuned};
   for (size_t index = 0; index < modes.size(); ++index) {
     std::unique_ptr<gjxl::GpuBackend> gpu;
     if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH,
           OptionsFor(gjxl::MetalDctImplementation::kSimdgroupMatmul, modes[index]),
-          &gpu), "Create exact loss-fusion comparison backend")) return false;
+          &gpu), "Create loss-fusion contract backend")) return false;
     gjxl::ac_strategy_search_internal::StoragePlan plan;
     if (!gjxl::ac_strategy_search_internal::ComputeStoragePlan(
           {3840, 2160}, true, &plan, gpu.get()).ok()) return false;
@@ -1269,16 +1274,22 @@ bool CheckLossFusionExact(const Fixture& fixture) {
               << " B=" << plan.maximum_scratch_b_bytes << " rate=" << plan.maximum_rate_bytes
               << " device=" << plan.device_bytes << '\n';
     for (auto strategy : kStrategies) {
-      if (!RunStrategyCase(*gpu, "exact loss fusion", strategy, fixture,
+      if (!RunStrategyCase(*gpu, "loss fusion contract", strategy, fixture,
                            &costs[index])) return false;
     }
   }
-  if (costs[0].size() != costs[1].size()) return false;
-  for (size_t index = 0; index < costs[0].size(); ++index) {
-    if (std::bit_cast<uint32_t>(costs[0][index]) !=
-        std::bit_cast<uint32_t>(costs[1][index])) {
-      std::cerr << "Loss fusion changes cost bits at " << index << '\n';
-      return false;
+  for (size_t first : {size_t{0}, size_t{2}}) {
+    const auto& reference = costs[first];
+    const auto& comparison = costs[first + 1];
+    if (reference.size() != comparison.size()) return false;
+    for (size_t index = 0; index < reference.size(); ++index) {
+      if (std::bit_cast<uint32_t>(reference[index]) !=
+          std::bit_cast<uint32_t>(comparison[index])) {
+        std::cerr << (first == 0 ? "Wide/compact loss fusion changes cost bits at "
+                                : "Tuned loss fusion is not repeatable at ")
+                  << index << '\n';
+        return false;
+      }
     }
   }
   return true;
@@ -1305,7 +1316,7 @@ int main() {
   }
   std::cout << "All CUDA AC-strategy candidate tests passed.\n";
 #else
-  if (!CheckValidation() || !CheckLossFusionExact(fixture) ||
+  if (!CheckValidation() || !CheckLossFusionContracts(fixture) ||
       !CheckImplementation(
         gjxl::MetalDctImplementation::kScalarMatmul,
         "scalar matmul",

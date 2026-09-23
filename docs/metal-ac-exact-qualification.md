@@ -1,6 +1,10 @@
-# Exact-output Metal AC default
+# Exact-output Metal AC baseline
 
-The ordinary Metal candidate kernels now use the qualified `selected-specloss-all` bundle. The existing Apple GPU family 9, 32-lane SIMD, thread-count and threadgroup-memory checks select these kernels; optional-pipeline failure retains the existing fallback. Automatic CPU/Metal backend-selection policy still applies. Select `--backend metal` to exercise the Metal path at distances such as 0.1 where automatic selection uses CPU.
+This records the exact-output default adopted at `81a675c`, before the
+[changed-arithmetic AC integration](metal-ac-changed-qualification.md). Its
+measurements remain the baseline qualification for that later work.
+
+At that revision, the ordinary Metal candidate kernels used the qualified `selected-specloss-all` bundle. The existing Apple GPU family 9, 32-lane SIMD, thread-count and threadgroup-memory checks select these kernels; optional-pipeline failure retains the existing fallback. Automatic CPU/Metal backend-selection policy still applies. Select `--backend metal` to exercise the Metal path at distances such as 0.1 where automatic selection uses CPU.
 
 Five candidate shapes (8×8, 8×16, 16×16, 16×32 and 32×32) reuse their transform arena and halve magnitude scratch. The 16×8 and 32×16 shapes retain their previous scratch arrangement. All seven specialize loss indexing to their known dimensions. The original reduction tree and explicit FP32 magnitude rounding are preserved. In-place transforms share the existing DCT templates through a compile-time mode; barriers separate input reads from aliased stores, and inverse dispatch assertions require every participating SIMD group to own a row tile. Public API and kernel names are stable.
 
