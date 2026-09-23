@@ -50,6 +50,17 @@ stage. It does not claim a complete trace of token-kernel execution. The second
 commit corrects attribution of backend selection during admission; it is not
 a speed optimization and does not explain occasional long first invocations.
 
+## Ongoing qualification
+
+The manually dispatched [CUDA qualification workflow](../.github/workflows/cuda.yml)
+retains the default build and adds a separate experimental build. That build runs
+all six tokenizer CTests: kernel token oracles, coefficient ownership, provider
+retries, workflow selection, profiling and concurrent batches. Provider and batch
+smoke cases also run under Compute Sanitizer memcheck and initcheck. Their logs
+and the CTest results are retained with the workflow artifacts. These checks use
+the workflow's Windows SM86/CUDA 11.8 runner; they are correctness checks, not a
+performance gate or automatic PR coverage.
+
 ## Qualification and measured benefit
 
 Evidence uses the RTX 3060 Laptop (6 GiB, SM86), CUDA 11.8, MSVC 14.37 and Release

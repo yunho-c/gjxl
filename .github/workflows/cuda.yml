@@ -65,6 +65,25 @@ jobs:
           & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool memcheck --error-exitcode 86 "$env:GITHUB_WORKSPACE/build/cuda-ci/gjxl_cuda_exact_arithmetic_test.exe" --quick "$env:GITHUB_WORKSPACE/build/cuda-ci/exact-arithmetic-memcheck-complete.txt"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ((Get-Content build/cuda-ci/exact-arithmetic-memcheck-complete.txt -Raw).Trim() -ne 'PASS CUDA exact arithmetic') { throw 'Instrumented exact arithmetic test did not complete' }
+      # Keep the default build above, and separately compile the opt-in provider.
+      # Tests select the provider internally and exercise the CPU override too.
+      - name: Configure opt-in CUDA tokenization
+        run: cmake -S . -B build/cuda-ci-tokens -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_ENABLE_METAL=OFF -DGJXL_ENABLE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=86 -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=OFF -DGJXL_BUILD_CUDA_RESIDENT_TOKEN_EXPERIMENT=ON
+      - name: Build opt-in CUDA tokenization tests
+        run: cmake --build build/cuda-ci-tokens --parallel 4 --target gjxl_cuda_ac_tokenization_test gjxl_cuda_token_coefficients_test gjxl_cuda_token_provider_test gjxl_cuda_token_workflow_test gjxl_cuda_token_profile_test gjxl_cuda_token_batch_test
+      - name: Test opt-in CUDA tokenization
+        run: ctest --test-dir build/cuda-ci-tokens --output-on-failure --parallel 1 --no-tests=error -R '^cuda_(ac_tokenization|token_(coefficients|provider|workflow|profile|batch))$' --output-junit token-tests.xml
+      - name: Check CUDA token ownership and initialization
+        run: |
+          foreach ($fixture in @('provider', 'batch')) {
+            foreach ($check in @('memcheck', 'initcheck')) {
+              $log = "$env:GITHUB_WORKSPACE/build/cuda-ci-tokens/token-$fixture-$check.log"
+              & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool $check --error-exitcode 86 "$env:GITHUB_WORKSPACE/build/cuda-ci-tokens/gjxl_cuda_token_${fixture}_test.exe" --smoke 2>&1 | Tee-Object -FilePath $log
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+              $output = Get-Content -LiteralPath $log -Raw
+              if ($output -notmatch 'Verified [1-9][0-9]* CUDA' -or $output -notmatch 'ERROR SUMMARY: 0 errors') { throw "Instrumented token $fixture/$check did not complete" }
+            }
+          }
       - name: Test CUDA Rust bindings
         working-directory: rust
         run: cargo test --workspace --features cuda
@@ -82,3 +101,6 @@ jobs:
           path: |
             build/cuda-ci/Testing/Temporary/
             build/cuda-ci/*-complete.txt
+            build/cuda-ci-tokens/Testing/Temporary/
+            build/cuda-ci-tokens/token-tests.xml
+            build/cuda-ci-tokens/token-*.log
