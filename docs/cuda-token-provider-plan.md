@@ -1,5 +1,8 @@
 # Opt-in CUDA resident token provider
 
+Historical development protocol. See the [current checkpoint](cuda-metal-catchup.md)
+for integrated behavior, selection flags, completed qualification and limitations.
+
 Base 715f033; preserve the independently qualified owner and kernel worktrees.
 This worktree combines their reviewed source with a real Begin/Finish provider.
 It is built with GJXL_BUILD_CUDA_RESIDENT_TOKEN_EXPERIMENT and selected only by

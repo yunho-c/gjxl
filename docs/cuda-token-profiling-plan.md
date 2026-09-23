@@ -1,5 +1,8 @@
 # CUDA token profiling parity
 
+Historical development protocol. See the [current checkpoint](cuda-metal-catchup.md)
+for integrated behavior, selection flags, completed qualification and limitations.
+
 This isolated candidate starts from all 1,272 source files in the qualified
 `gjxl-cuda-token-provider/build/provider-native-r4/source.zip` snapshot.
 The resident token experiment stays build-time and runtime opt-in. Its existing

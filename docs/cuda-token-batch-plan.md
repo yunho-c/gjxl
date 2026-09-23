@@ -1,5 +1,8 @@
 # CUDA token batch qualification
 
+Historical development protocol. See the [current checkpoint](cuda-metal-catchup.md)
+for integrated behavior, selection flags, completed qualification and limitations.
+
 This candidate reproduces the 1,274 source files in the reviewed profiling
 snapshot, `gjxl-cuda-token-profiling/build/profile-native-r1/source.zip`, then
 adds only a batch fixture, its build target, and this protocol. Production

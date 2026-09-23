@@ -1,0 +1,233 @@
+{
+  "utc": "2026-09-23T10:48:16.429216+00:00",
+  "base": "715f033acc90495237562068a5f4e7db7cd3b024",
+  "code_commits": [
+    "5129f5a99fd4fc75c0c67d2326f86d8b2b20fe3c",
+    "f698cdc603435d806d99f875cbbbc8bb4c7f6589"
+  ],
+  "qualified_source_archives": [
+    "199c692da5718fb9f7a4411f1b3dae75a1710858469c9f6bdb4befe8d61ef4a3",
+    "dc7d34d0b1236e56d7efa0aa5ad53c8e4bbbf81cd9c968a2847453c0f3d5c056"
+  ],
+  "source_tree_review": {
+    "path": "build/cuda-catchup-review-integration-r1/review.json",
+    "sha256": "75225da49e6e37df8fbbf9af9df9561fb9571b7252377973614e12a100c31c02"
+  },
+  "platform": "RTX 3060 Laptop 6 GiB, SM86, CUDA 11.8, MSVC 14.37, Windows Release",
+  "reviews": [
+    {
+      "scope": "profiling correctness",
+      "review": "build/assembly/token-profile-native-review.json",
+      "review_sha256": "45b2cc64d81a8b868e9401d963f3fc96be08b1df55a38ae60cff22b9f7df9f9f",
+      "workspace": "gjxl-cuda-token-profiling/build/profile-native-r1",
+      "rechecked_files": 55,
+      "summary": {
+        "ctests": 16,
+        "sanitizer_runs": 24
+      }
+    },
+    {
+      "scope": "batch correctness",
+      "review": "build/assembly/token-batch-native-review.json",
+      "review_sha256": "bb7045aa78762e4584dc9e00ca638f67541d38bfe6f4a3bc48caeb6067c96391",
+      "workspace": "gjxl-cuda-token-batch/build/batch-native-r1",
+      "rechecked_files": 23,
+      "summary": {
+        "ctests": 2,
+        "sanitizer_runs": 8,
+        "mixed_size_batches": 72,
+        "batch_policies": 12
+      }
+    },
+    {
+      "scope": "concurrent memory correctness",
+      "review": "build/assembly/token-batch-concurrent-sanitizers-review.json",
+      "review_sha256": "1ae1c890e0dcb13783e1275b77c72113ab4a33fcdc414a661ba9603a4ead3fd7",
+      "workspace": "gjxl-cuda-metal-catchup/build/token-batch-concurrent-sanitizers-r1",
+      "rechecked_files": 12,
+      "summary": {
+        "sanitizer_runs": 4,
+        "mixed_size_batches": 144
+      }
+    },
+    {
+      "scope": "natural-source ordinary timing",
+      "review": "build/assembly/token-provider-natural-confirmation-review.json",
+      "review_sha256": "68506987491c363ad2c5c80788ab6e67bbc20cd1135bda526a95b210ae1a7232",
+      "workspace": "gjxl-cuda-metal-catchup/build/token-provider-natural-confirmation-r1",
+      "rechecked_files": 1740,
+      "summary": {
+        "pairs": 864,
+        "raw_processes": 1728,
+        "candidate_pairs": 432,
+        "control_pairs": 432,
+        "new_decoder_cases": 90,
+        "reused_decoder_cases": 24,
+        "finite_new_decoded_samples": 790714368,
+        "finite_reused_decoded_samples": 874601766
+      }
+    },
+    {
+      "scope": "admission-profile correction correctness",
+      "review": "build/assembly/token-profile-admission-native-review.json",
+      "review_sha256": "d24016312b1b005573ea4aee261e0243f7548e834af7cc0b49d025191be4f3c1",
+      "workspace": "gjxl-cuda-token-profile-admission/build/profile-admission-native-r2",
+      "rechecked_files": 9,
+      "summary": {
+        "ctests": 16
+      }
+    },
+    {
+      "scope": "admission-profile attribution diagnostic",
+      "review": "build/assembly/token-admission-timing-diagnostic-review.json",
+      "review_sha256": "b6f0440c552b6bb18967ab35edad3e711e04221bb648d86492774f9e22132891",
+      "workspace": "gjxl-cuda-metal-catchup/build/token-admission-timing-diagnostic-r1",
+      "rechecked_files": 83,
+      "summary": {
+        "pairs": 36,
+        "processes": 72,
+        "encodes": 216,
+        "reused_decoder_cases": 9,
+        "diagnostic_only": true
+      }
+    }
+  ],
+  "primary_source_bootstrap": [
+    {
+      "effort": 1,
+      "variant": "provider",
+      "sources": 30,
+      "replicates": 10000,
+      "scope": "Percentile bootstrap over source-level log ratios; not a model of machine-to-machine or session uncertainty",
+      "ns": {
+        "ratio": 0.9236209897695635,
+        "percentile_95": [
+          0.9068792104884119,
+          0.9406952743557871
+        ]
+      },
+      "first_ns": {
+        "ratio": 1.0100506253005306,
+        "percentile_95": [
+          0.9951264848094711,
+          1.0264371624215156
+        ]
+      }
+    },
+    {
+      "effort": 1,
+      "variant": "control",
+      "sources": 30,
+      "replicates": 10000,
+      "scope": "Percentile bootstrap over source-level log ratios; not a model of machine-to-machine or session uncertainty",
+      "ns": {
+        "ratio": 1.006691226527325,
+        "percentile_95": [
+          0.9935358525113901,
+          1.020544358622142
+        ]
+      },
+      "first_ns": {
+        "ratio": 1.0203849815128436,
+        "percentile_95": [
+          1.0050823971391167,
+          1.0374000364884137
+        ]
+      }
+    },
+    {
+      "effort": 5,
+      "variant": "provider",
+      "sources": 30,
+      "replicates": 10000,
+      "scope": "Percentile bootstrap over source-level log ratios; not a model of machine-to-machine or session uncertainty",
+      "ns": {
+        "ratio": 0.9324881199152069,
+        "percentile_95": [
+          0.9237203971399353,
+          0.9408433834569045
+        ]
+      },
+      "first_ns": {
+        "ratio": 1.0100468951567196,
+        "percentile_95": [
+          0.9958547170541245,
+          1.0246586665511077
+        ]
+      }
+    },
+    {
+      "effort": 5,
+      "variant": "control",
+      "sources": 30,
+      "replicates": 10000,
+      "scope": "Percentile bootstrap over source-level log ratios; not a model of machine-to-machine or session uncertainty",
+      "ns": {
+        "ratio": 1.0049837351134425,
+        "percentile_95": [
+          0.9958220954782901,
+          1.0140387605718544
+        ]
+      },
+      "first_ns": {
+        "ratio": 1.0009491701349222,
+        "percentile_95": [
+          0.9908317852430044,
+          1.0121856202348862
+        ]
+      }
+    },
+    {
+      "effort": 8,
+      "variant": "provider",
+      "sources": 30,
+      "replicates": 10000,
+      "scope": "Percentile bootstrap over source-level log ratios; not a model of machine-to-machine or session uncertainty",
+      "ns": {
+        "ratio": 0.9786012955002593,
+        "percentile_95": [
+          0.9728260696029811,
+          0.9843575351527861
+        ]
+      },
+      "first_ns": {
+        "ratio": 1.0011006161203766,
+        "percentile_95": [
+          0.9875095901497254,
+          1.0144827710250262
+        ]
+      }
+    },
+    {
+      "effort": 8,
+      "variant": "control",
+      "sources": 30,
+      "replicates": 10000,
+      "scope": "Percentile bootstrap over source-level log ratios; not a model of machine-to-machine or session uncertainty",
+      "ns": {
+        "ratio": 0.9983392002609486,
+        "percentile_95": [
+          0.9896053497129196,
+          1.0075650102661042
+        ]
+      },
+      "first_ns": {
+        "ratio": 0.993806381931372,
+        "percentile_95": [
+          0.9824565922053693,
+          1.0053850853276458
+        ]
+      }
+    }
+  ],
+  "gpu_code": {
+    "review": "build/token-provider-common-gpu-audit-r1/code-review.json",
+    "sha256": "99570f8eb92a5989c7d77f019d19bcae79a8e1c071c153b2ee9471ac1bb17703",
+    "common_modules": 13,
+    "raw_identical_executable_sections": 245,
+    "added_modules": 1
+  },
+  "default_enabled": false,
+  "production_parity_claim": false,
+  "limitation": "Evidence describes qualified snapshots. Documentation packaging adds no runtime qualification or latency measurement; the profiling correction has diagnostic evidence, not an old/new performance comparison."
+}

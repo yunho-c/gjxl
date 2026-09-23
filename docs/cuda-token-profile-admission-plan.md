@@ -1,5 +1,8 @@
 # Account for admission-time backend selection
 
+Historical development protocol. See the [current checkpoint](cuda-metal-catchup.md)
+for integrated behavior, selection flags, completed qualification and limitations.
+
 This candidate starts from the exact qualified 1,276-file split-provider archive
 (715f033, SHA256 199c692da5718fb9f7a4411f1b3dae75a1710858469c9f6bdb4befe8d61ef4a3).
 The closed production-adapter diagnostic showed that backend_selection_nanoseconds
