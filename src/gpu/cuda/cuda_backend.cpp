@@ -797,7 +797,7 @@ Status CudaBackend::SubmitCompute(
     ? CudaProfileCapture::Current(*this) : nullptr;
   if (capture != nullptr) {
     mode = capture->mode();
-    stage_id = capture->operation();
+    if (stage_id.empty()) stage_id = capture->operation();
   }
   const bool profiling = mode == GpuProfilingMode::kStage || mode == GpuProfilingMode::kDispatch;
   if ((mode != GpuProfilingMode::kDisabled && !profiling) ||

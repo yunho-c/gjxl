@@ -39,6 +39,7 @@
 #include "gpu/cuda/cuda_backend_internal.h"
 #include "gpu/cuda/cuda_butteraugli_internal.h"
 #include "gpu/cuda/cuda_storage_plan.h"
+#include "gpu/cuda/cuda_tokenization_request.h"
 #include "gpu/cuda/cuda_coefficient_order_kernels.h"
 #include "gpu/cuda/cuda_compact_ac_kernels.h"
 #include "gpu/cuda/cuda_sparse_ac_kernels.h"
@@ -51,13 +52,20 @@ namespace gjxl::cuda_internal {
 using resource_budget_internal::ManagedVector;
 namespace {
 
-// CUDA already reads final AC into native compact/sparse owning storage.
-// Move that owner into the lease so serialization borrows without expansion,
-// and the completed result never retains an evaluator, stream, or device pool.
+// CUDA reads final AC into native compact/sparse owning storage. The private
+// token handoff additionally owns an independent packed device allocation;
+// neither representation retains the evaluator or its staging arena.
 class CudaCompletedVarDctFrame final
     : public vardct_frame_internal::CompletedVarDctFrame {
  public:
   VarDctEncoderFrame frame;
+#ifdef GJXL_CUDA_RESIDENT_TOKEN_EXPERIMENT
+  std::unique_ptr<DeviceBuffer> token_coefficients;
+  const DeviceBuffer* resident_ac_buffer(size_t* offset) const noexcept override {
+    if (offset != nullptr) *offset = 0;
+    return token_coefficients.get();
+  }
+#endif
   vardct_frame_internal::VarDctFrameView view() const noexcept override {
     return vardct_frame_internal::BorrowFrame(frame);
   }
@@ -1281,6 +1289,15 @@ class CudaPreparedResidentAqEvaluation final
       if (status.ok()) {
         status = Quantizer::Create(candidate_params, &candidate_quantizer);
       }
+      // Copy before sparse assembly: the compact-width sparse path can reuse
+      // the int32 reconstruction plane as its payload destination.
+#ifdef GJXL_CUDA_RESIDENT_TOKEN_EXPERIMENT
+      if (status.ok() && candidate_completed != nullptr &&
+          retain_completed_token_coefficients) {
+        status = CopyCompletedTokenCoefficients(
+            &candidate_completed->token_coefficients);
+      }
+#endif
       if (status.ok())
         status = AssembleFrame(candidate_quantizer, &candidate_frame);
       if (!status.ok()) return Invalidate(status);
@@ -2441,6 +2458,45 @@ class CudaPreparedResidentAqEvaluation final
     population_ready_ = true;
     return Status::Ok();
   }
+
+#ifdef GJXL_CUDA_RESIDENT_TOKEN_EXPERIMENT
+  struct CompletedTokenCopy {
+    const void* source;
+    void* destination;
+    size_t bytes;
+  };
+  static cudaError_t EncodeCompletedTokenCopy(CudaBackend& backend,
+                                             const void* opaque) {
+    const auto& copy = *static_cast<const CompletedTokenCopy*>(opaque);
+    return cudaMemcpyAsync(copy.destination, copy.source, copy.bytes,
+                           cudaMemcpyDeviceToDevice, backend.state_->stream);
+  }
+  Status CopyCompletedTokenCoefficients(std::unique_ptr<DeviceBuffer>* out) {
+    const resource_budget_internal::ManagedHostScope resources(
+        resource_budget_internal::ResourceClass::kCompletedFrame);
+    if (coefficient_count_ > std::numeric_limits<size_t>::max() / sizeof(int32_t))
+      return Status::InvalidArgument("CUDA completed token coefficients overflow");
+    const size_t bytes = coefficient_count_ * sizeof(int32_t);
+    std::unique_ptr<DeviceBuffer> candidate;
+    Status status = backend_->Allocate(bytes, &candidate);
+    if (!status.ok()) return status;
+    const CompletedTokenCopy copy{
+        Pointer<const int32_t>(reconstruction_coefficients_device_),
+        CudaBackend::AsCudaBuffer(*candidate)->pointer(), bytes};
+    std::unique_ptr<GpuSubmission> submission;
+    status = backend_->SubmitCompute(
+        &EncodeCompletedTokenCopy, &copy, &submission,
+        gpu_profile_internal::GpuProfilingMode::kDisabled,
+        "aq.completed_token_copy");
+    if (!status.ok()) return status;
+    if (submission == nullptr)
+      return Status::Internal("CUDA completed token copy returned no submission");
+    status = submission->Wait();
+    if (!status.ok()) return status;
+    *out = std::move(candidate);
+    return Status::Ok();
+  }
+#endif
 
   Status AssembleFrame(const Quantizer& quantizer, VarDctEncoderFrame* frame) {
     if (compact_active_ && (compact_flags_ & 1u) == 0)

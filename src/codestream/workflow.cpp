@@ -3,6 +3,11 @@
 
 #include "codestream/workflow.h"
 #include "codestream/ac_tokenization_provider_internal.h"
+#include "codestream/cuda_tokenization_policy.h"
+#if defined(GJXL_ENABLE_CUDA) && defined(GJXL_CUDA_RESIDENT_TOKEN_EXPERIMENT)
+#include "gpu/cuda/cuda_ac_tokenization.h"
+#include "gpu/cuda/cuda_tokenization_request.h"
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -940,6 +945,12 @@ PrepareWorkflow(ConstImage3FView linear_rgb, VarDctEncodingOptions options,
   }
   const WorkflowClock::time_point pipeline_begin = ProfileBegin(profile);
   EncodingArtifacts encoding;
+#if defined(GJXL_ENABLE_CUDA) && defined(GJXL_CUDA_RESIDENT_TOKEN_EXPERIMENT)
+  const bool cuda_tokens = selected_gpu != nullptr &&
+      selected_gpu->kind() == BackendKind::kCuda &&
+      codestream_internal::UseCudaGpuTokenization(options);
+  const cuda_internal::CudaTokenCoefficientScope token_coefficient_scope(cuda_tokens);
+#endif
   if (!prepared.backend_preselected && selected_accelerator &&
       (options.gpu_aq_mode ==
          GpuAdaptiveQuantizationMode::kFullyResident ||
@@ -1084,6 +1095,16 @@ PrepareWorkflow(ConstImage3FView linear_rgb, VarDctEncodingOptions options,
     size_t coefficient_offset = 0;
     if (const auto* buffer = encoding.completed_frame->resident_ac_buffer(&coefficient_offset)) {
       status = codestream_internal::CreateMetalAcTokenizationProvider(
+          *selected_gpu, *buffer, coefficient_offset, &ac_tokenizer);
+      if (!status.ok()) return status;
+    }
+  }
+#endif
+#if defined(GJXL_ENABLE_CUDA) && defined(GJXL_CUDA_RESIDENT_TOKEN_EXPERIMENT)
+  if (cuda_tokens && encoding.completed_frame != nullptr) {
+    size_t coefficient_offset = 0;
+    if (const auto* buffer = encoding.completed_frame->resident_ac_buffer(&coefficient_offset)) {
+      status = cuda_internal::CreateCudaAcTokenizationProvider(
           *selected_gpu, *buffer, coefficient_offset, &ac_tokenizer);
       if (!status.ok()) return status;
     }

@@ -136,7 +136,9 @@ void Cases(GpuBackend& gpu) {
                 !actual.gpu.submissions.empty(), "CUDA profile exceeded its planned graph");
               size_t dispatches = 0;
               for (const auto& s : actual.gpu.submissions) {
-                Require(s.stages.size() == 1 && !s.stages[0].dispatches.empty() &&
+                Require(s.stages.size() == 1 &&
+                  (!s.stages[0].dispatches.empty() ||
+                   s.stages[0].stage_id == "aq.completed_token_copy") &&
                   s.submission_id.size() <= plan.profile_shape.maximum_id_length &&
                   s.stages[0].stage_id.size() <= plan.profile_shape.maximum_id_length,
                   "CUDA submission profile exceeded its planned shape");
