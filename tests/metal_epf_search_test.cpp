@@ -282,6 +282,16 @@ bool CheckEvaluation(GpuBackend& backend, bool gaborish, uint32_t passes,
 }
 
 bool CheckResidentPolicy(GpuBackend& backend) {
+  auto* submission_profiler =
+      dynamic_cast<gpu_profile_internal::GpuSubmissionProfiler*>(&backend);
+  const auto capabilities = submission_profiler == nullptr
+      ? gpu_profile_internal::GpuProfilingCapabilities{}
+      : submission_profiler->QueryGpuProfilingCapabilities();
+  const bool stage_profiling =
+      capabilities.timestamp_counter && capabilities.stage_boundary;
+  if (!stage_profiling) {
+    std::cout << "Skipping EPF timestamp parity: stage sampling is unavailable\n";
+  }
   Fixture f;
   if (!f.Initialize(true, 3)) return false;
   std::array<float, 24> initial;
@@ -363,7 +373,7 @@ bool CheckResidentPolicy(GpuBackend& backend) {
         neutral_frames[case_index] = std::move(scored);
         neutral_scores[case_index] = std::move(scores);
       }
-      if (search && iterations <= 1) {
+      if (search && iterations <= 1 && stage_profiling) {
         auto* profiler = dynamic_cast<gpu_profile_internal::PreparedAqEvaluationProfiler*>(
             prepared.get());
         if (!Check(profiler != nullptr, "Resident profiler is missing")) return false;
