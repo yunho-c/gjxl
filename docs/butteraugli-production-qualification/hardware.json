@@ -1,0 +1,12 @@
+{
+  "chip": "Apple M4 Pro",
+  "gpu_cores": 20,
+  "cpu_cores": 14,
+  "memory_gb": 48,
+  "model": "Mac16,7",
+  "os": "ProductName:\t\tmacOS\nProductVersion:\t\t15.6\nBuildVersion:\t\t24G84\n",
+  "xcode": "Xcode 26.3\nBuild version 17C529\n",
+  "clang": "Apple clang version 17.0.0 (clang-1700.6.4.2)\nTarget: arm64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin\n",
+  "metal_cpp": "27c4382b7151d55a51692cdcb27aaa98752240de",
+  "timing_env": {}
+}

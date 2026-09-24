@@ -1,0 +1,12 @@
+{
+  "hardware": "Apple M4 Pro\n51539607552\n14",
+  "os": "ProductName:\t\tmacOS\nProductVersion:\t\t15.6\nBuildVersion:\t\t24G84",
+  "compiler": "Apple clang version 17.0.0 (clang-1700.6.4.2)\nTarget: arm64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin",
+  "xcode": "Xcode 26.3\nBuild version 17C529",
+  "base_commit": "7659cac8d933a9f6d41f1155503c7ca99fc46e6c",
+  "candidate_branch": "perf/gpu-tokenization-20260922",
+  "candidate": "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922",
+  "baseline": "/Users/yunhocho/GitHub/gjxl-tokenization-base-20260922",
+  "date": "2026-09-22",
+  "protocol": "Q80 / distance1.9; ordinary complete call with eight CPU participants. Priming call, reference, one warmup per mode, paired ordinary/profiled samples. Exact bytes across implementations."
+}

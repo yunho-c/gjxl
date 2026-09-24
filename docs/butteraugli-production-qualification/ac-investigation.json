@@ -1,0 +1,16 @@
+{
+  "observation": "one metal_ac_strategy failure in the post-metadata full suite; passed the earlier two full-suite runs",
+  "cause": "unresolved; not classified as baseline-inherited",
+  "source_change": false,
+  "original_binary_repeats": {
+    "baseline_passes": 20,
+    "candidate_passes": 20,
+    "failures": 0
+  },
+  "instrumented_repeats": {
+    "baseline_passes": 10,
+    "candidate_passes": 10,
+    "failures": 0
+  },
+  "followup": "one final full-suite run; preserve incident and all repeat results"
+}

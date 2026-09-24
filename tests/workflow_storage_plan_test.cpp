@@ -56,16 +56,16 @@ WorkflowStorageOptions Options(size_t mode) {
   o.route =
       mode == 0 ? WorkflowStorageRoute::kCpu : WorkflowStorageRoute::kMetal;
   if (mode == 2)
-    o.encoding.metal_aq_mode = GpuAdaptiveQuantizationMode::kExactCoefficients;
+    o.encoding.gpu_aq_mode = GpuAdaptiveQuantizationMode::kExactCoefficients;
   if (mode == 3)
-    o.encoding.metal_aq_mode = GpuAdaptiveQuantizationMode::kMaximumThroughput;
+    o.encoding.gpu_aq_mode = GpuAdaptiveQuantizationMode::kMaximumThroughput;
   if (mode == 4) {
     o.encoding.rate_control_mode = VarDctRateControlMode::kMaximumError;
     o.encoding.maximum_error = {0.05f, 0.05f, 0.05f};
   }
   if (mode == 5) {
     o.encoding.backend = VarDctBackendPreference::kAutomatic;
-    o.encoding.metal_aq_mode = GpuAdaptiveQuantizationMode::kExactCoefficients;
+    o.encoding.gpu_aq_mode = GpuAdaptiveQuantizationMode::kExactCoefficients;
     o.encoding.rate_control_mode = VarDctRateControlMode::kTargetBytes;
     o.encoding.target_bytes = 1;
     o.encoding.target_size_maximum_attempts = 64;
@@ -312,7 +312,7 @@ bool CheckCompletedCacheBounds() {
                          GpuAdaptiveQuantizationMode::kThroughput}) {
         auto options = Options(1);
         options.encoding.effort = effort;
-        options.encoding.metal_aq_mode = mode;
+        options.encoding.gpu_aq_mode = mode;
         WorkflowStoragePlan plan;
         if (!Ok(ComputeWorkflowStoragePlan(test.source, options, &plan)) ||
             !Check(plan.idle_pool_capacity.back() ==
@@ -341,15 +341,15 @@ bool CheckCompletedCacheBounds() {
     for (size_t i = 0; i < maxima.size(); ++i)
       maxima[i] = std::max(maxima[i], plan.idle_pool_capacity[i]);
   }
-  size_t four_pools = 0;
-  for (size_t i = 0; i < 4; ++i) four_pools += maxima[i];
+  size_t other_pools = 0;
+  for (size_t i = 0; i + 1 < maxima.size(); ++i) other_pools += maxima[i];
   BatchWorkflowStoragePlan full, limited;
   if (!Ok(batch.Finish(3, 0, &full)) ||
-      !Check(full.idle_pools.peak_bytes == four_pools + 102 * mib,
+      !Check(full.idle_pools.peak_bytes == other_pools + 102 * mib,
              "Batch did not reserve exactly one maximum completed-frame cache") ||
-      !Ok(batch.Finish(3, full.minimum_required_bytes + four_pools, &limited)) ||
+      !Ok(batch.Finish(3, full.minimum_required_bytes + other_pools, &limited)) ||
       !Check(limited.trim_after_each_image && limited.idle_pools.peak_bytes == 0,
-             "A budget for only four pools incorrectly kept the completed cache") ||
+             "A budget excluding the completed-frame pool incorrectly kept its cache") ||
       !Ok(batch.Finish(3, full.minimum_required_bytes + full.idle_pools.peak_bytes, &limited)) ||
       !Check(!limited.trim_after_each_image && limited.in_flight == 1 &&
                  limited.idle_pools == full.idle_pools,

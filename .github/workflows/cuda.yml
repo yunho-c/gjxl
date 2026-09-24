@@ -1,0 +1,84 @@
+name: CUDA Qualification
+
+# Run on a repository-managed GPU machine, not a hosted CPU runner. Dispatch
+# labels select the available machine; the audited configuration is SM86/11.8.
+on:
+  workflow_dispatch:
+    inputs:
+      runner_labels:
+        description: JSON labels for the Windows x64 CUDA runner
+        required: true
+        default: '["self-hosted", "Windows", "X64", "cuda"]'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ fromJSON(inputs.runner_labels) }}
+    timeout-minutes: 90
+    env:
+      CUDA_PATH: C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.8
+      CUDACXX: C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v11.8/bin/nvcc.exe
+      CMAKE_GENERATOR: Ninja
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/setup-native-toolchain
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Report CUDA hardware and compiler
+        run: |
+          nvidia-smi
+          & "$env:CUDACXX" --version
+          "$env:CUDA_PATH/bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+      - name: Configure
+        run: cmake -S . -B build/cuda-ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DGJXL_ENABLE_METAL=OFF -DGJXL_ENABLE_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=86 -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON
+      - name: Build
+        run: cmake --build build/cuda-ci --parallel 4
+      - name: Require a working CUDA backend
+        run: ./build/cuda-ci/gjxl_cuda_backend_test.exe
+      - name: Test native libraries
+        run: ctest --test-dir build/cuda-ci --output-on-failure --parallel 1
+      - name: Check DC memory accesses
+        run: |
+          & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool memcheck --error-exitcode 86 "$env:GITHUB_WORKSPACE/build/cuda-ci/gjxl_cuda_dc_processing_test.exe" --report "$env:GITHUB_WORKSPACE/build/cuda-ci/dc-memcheck-complete.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-Content build/cuda-ci/dc-memcheck-complete.txt -Raw).Trim() -ne 'PASS cases=378') { throw 'Instrumented DC test did not complete' }
+      - name: Check DC synchronization
+        run: |
+          & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool racecheck --error-exitcode 86 "$env:GITHUB_WORKSPACE/build/cuda-ci/gjxl_cuda_dc_processing_test.exe" --quick --report "$env:GITHUB_WORKSPACE/build/cuda-ci/dc-racecheck-complete.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-Content build/cuda-ci/dc-racecheck-complete.txt -Raw).Trim() -ne 'PASS cases=18') { throw 'Instrumented DC test did not complete' }
+      - name: Check profiling lifetimes and recovery
+        run: |
+          & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool memcheck --error-exitcode 86 "$env:GITHUB_WORKSPACE/build/cuda-ci/gjxl_cuda_profiling_test.exe" "$env:GITHUB_WORKSPACE/build/cuda-ci/profile-memcheck-complete.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-Content build/cuda-ci/profile-memcheck-complete.txt -Raw).Trim() -ne 'PASS CUDA stage/dispatch profiling checks') { throw 'Instrumented profiling test did not complete' }
+      - name: Check exact arithmetic memory accesses
+        run: |
+          & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool memcheck --error-exitcode 86 "$env:GITHUB_WORKSPACE/build/cuda-ci/gjxl_cuda_exact_arithmetic_test.exe" --quick "$env:GITHUB_WORKSPACE/build/cuda-ci/exact-arithmetic-memcheck-complete.txt"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ((Get-Content build/cuda-ci/exact-arithmetic-memcheck-complete.txt -Raw).Trim() -ne 'PASS CUDA exact arithmetic') { throw 'Instrumented exact arithmetic test did not complete' }
+      - name: Test CUDA Rust bindings
+        working-directory: rust
+        run: cargo test --workspace --features cuda
+      - name: Check CUDA Rust incremental rebuilds
+        working-directory: rust
+        run: python check_native_rebuild.py --features cuda
+      - name: Lint CUDA Rust bindings
+        working-directory: rust
+        run: cargo clippy --workspace --all-targets --features cuda -- -D warnings
+      - name: Retain test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cuda-qualification
+          path: |
+            build/cuda-ci/Testing/Temporary/
+            build/cuda-ci/*-complete.txt

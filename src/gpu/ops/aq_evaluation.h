@@ -116,6 +116,10 @@ struct ResidentAcStrategyInputs {
   ConstDevicePlaneView quant_field;
   /// Empty when omit_initial_search_data was selected at preparation.
   ConstDevicePlaneView pixel_mask;
+  /// Optional resident initial CfL maps. When both are present, candidate
+  /// evaluation does not require a host ColorCorrelationMap.
+  ConstDevicePlaneView y_to_x;
+  ConstDevicePlaneView y_to_b;
 };
 
 struct AqEvaluationInput {
@@ -179,6 +183,11 @@ struct AqResidentButteraugliPolicyInput {
   /// bound construction inside this unprofiled submission. Host lower/upper bounds are
   /// ignored. Requires SupportsResidentPolicyInitialization().
   bool adjust_initial_field = false;
+  /// Derives invariant CfL from this policy's device-adjusted initial field.
+  /// Requires adjust_initial_field. The explicit snapshot established by
+  /// PrepareInvariantColorCorrelationResident is otherwise preserved.
+  bool derive_color_correlation = false;
+  uint32_t color_correlation_iterations = 0;
 };
 
 struct AqResidentButteraugliPolicyOutput {

@@ -1,0 +1,8 @@
+[
+  "ctest",
+  "--test-dir",
+  "/Users/yunhocho/GitHub/gjxl-butteraugli-production/build/production",
+  "-R",
+  "^(metal_butteraugli|metal_butteraugli_legacy|metal_aq_evaluation|metal_aq_evaluation_legacy|adaptive_quantization_gpu_policy|metal_butteraugli_operation_contract|resident_workflow_storage_plan|resident_workflow_legacy_dc_tree|metal_cache_admission)$",
+  "--output-on-failure"
+]

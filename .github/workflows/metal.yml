@@ -1,0 +1,33 @@
+name: Physical Metal Qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_labels:
+        description: JSON labels for an existing physical Apple Silicon runner
+        required: true
+        default: '["self-hosted", "macOS", "ARM64", "metal"]'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ fromJSON(inputs.runner_labels) }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: ./.github/actions/setup-native-toolchain
+      - name: Qualify physical Metal execution and timestamps
+        shell: bash
+        run: bash tools/resident_qualification/qualify_metal_integration.sh
+      - name: Retain hardware, profiles and runtime evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: physical-metal-qualification
+          path: |
+            build/metal-integration-qualification/evidence/
+            build/metal-integration-qualification/Testing/Temporary/

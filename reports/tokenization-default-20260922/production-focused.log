@@ -1,0 +1,17 @@
+Test project /Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/build/release
+    Start 142: metal_ac_tokenization
+1/6 Test #142: metal_ac_tokenization ............   Passed    5.09 sec
+    Start 143: gpu_tokenization_default
+2/6 Test #143: gpu_tokenization_default .........   Passed    0.92 sec
+    Start 147: resident_workflow_storage_plan
+3/6 Test #147: resident_workflow_storage_plan ...   Passed    9.94 sec
+    Start 152: metal_cache_admission
+4/6 Test #152: metal_cache_admission ............   Passed    0.52 sec
+    Start 153: workflow_storage_plan
+5/6 Test #153: workflow_storage_plan ............   Passed    0.73 sec
+    Start 154: workflow_admission
+6/6 Test #154: workflow_admission ...............   Passed   29.40 sec
+
+100% tests passed, 0 tests failed out of 6
+
+Total Test time (real) =  46.60 sec

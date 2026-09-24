@@ -63,6 +63,7 @@ set(GJXL_PUBLIC_CXX_HEADERS
   codestream/workflow.h
 
   gpu/backend.h
+  gpu/cuda/cuda_backend.h
   gpu/buffer.h
   gpu/image.h
   gpu/scratch.h
@@ -75,6 +76,7 @@ set(GJXL_PUBLIC_CXX_HEADERS
   gpu/ops/aq_evaluation.h
   gpu/ops/butteraugli.h
   gpu/ops/gaborish.h
+  gpu/ops/input_preparation.h
   gpu/ops/primitives.h
   gpu/ops/quantization_pipeline.h
   gpu/ops/resident_input.h
@@ -92,6 +94,8 @@ set(GJXL_INSTALLED_SUPPORT_HEADERS
   core/resource_budget.h
   core/resource_context.h
   # Owning image/frame/serializer types and adaptive-quantization outputs.
+  core/overwrite_array.h
+  codec/sparse_coefficients.h
   core/managed_allocator.h
   core/publication_output.h
   core/publication_vector.h

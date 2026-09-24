@@ -1,0 +1,7 @@
+{
+  "src/gpu/metal/kernels/butteraugli.metal": true,
+  "src/gpu/metal/metal_butteraugli.cpp": true,
+  "src/gpu/metal/metal_backend_internal.h": true,
+  "gjxl_encode": true,
+  "gjxl.metallib": true
+}

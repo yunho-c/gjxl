@@ -22,19 +22,22 @@ namespace gjxl {
 inline constexpr size_t kMaximumCpuThreadCount = 256;
 
 enum class VarDctBackendPreference {
-  /// Uses qualified Metal only within the validated quality interval and above
-  /// the measured geometry floor. Availability failures before pipeline
-  /// execution fall back to CPU; runtime errors do not.
+  /// Uses a qualified GPU backend only within its validated operating window.
+  /// Availability failures before pipeline execution fall back to CPU;
+  /// runtime errors do not. CUDA remains opt-in until separately qualified.
   kAutomatic,
   /// Always uses the CPU reference pipeline.
   kCpu,
   /// Requires Metal regardless of automatic device, quality, and size gates.
   kMetal,
+  /// Requires CUDA regardless of automatic device, quality, and size gates.
+  kCuda,
 };
 
 enum class VarDctExecutionBackend {
   kCpu,
   kMetal,
+  kCuda,
 };
 
 enum class VarDctRateControlMode {
@@ -80,7 +83,8 @@ struct VarDctEncodingOptions {
   /// quantization is prediction-aware. Native context-map compression is
   /// automatic at every effort.
   int32_t effort = 7;
-  /// Enables final EPF sharpness search at efforts 6-10 and distance >= 0.5.
+  /// Enables final EPF sharpness search on CPU and Metal at efforts 6-10
+  /// and distance >= 0.5. CUDA retains its fixed-sharpness policy.
   /// AQ iterations continue to use neutral sharpness 4. Maximum-error and
   /// explicit maximum-throughput modes retain their separate filtering policy.
   /// Disable to measure the fixed-sharpness baseline without changing AQ.
@@ -116,16 +120,16 @@ struct VarDctEncodingOptions {
   TargetSizeSelectionPolicy target_size_selection =
     TargetSizeSelectionPolicy::kLargestAtOrBelow;
   VarDctBackendPreference backend = VarDctBackendPreference::kAutomatic;
-  /// Selects the Metal AQ implementation. Fully resident is the encoding
+  /// Selects the GPU AQ implementation. Fully resident is the encoding
   /// default and may change encoder decisions relative to exact coefficients.
-  /// Throughput policies require an explicitly forced Metal backend.
+  /// Throughput policies require an explicitly forced GPU backend.
   /// Maximum-throughput mode omits perceptual diagnostics, so its reported
   /// score history is empty. This field is ignored when CPU execution is
   /// selected.
-  GpuAdaptiveQuantizationMode metal_aq_mode =
+  GpuAdaptiveQuantizationMode gpu_aq_mode =
     GpuAdaptiveQuantizationMode::kFullyResident;
   /// Requests a perceptual evaluation of the final encoded field. Resident
-  /// Metal encoding skips this diagnostic-only pass by default; CPU and exact
+  /// GPU encoding skips this diagnostic-only pass by default; CPU and exact
   /// coefficient workflows already produce the final score as part of their
   /// ordinary policy evaluation.
   /// Resident encoding with zero AQ updates otherwise performs no perceptual
@@ -201,8 +205,8 @@ struct VarDctEncodingSummary {
   /// the encoded frame. Earlier entries may still be present when false.
   bool final_butteraugli_score_evaluated = false;
   VarDctExecutionBackend execution_backend = VarDctExecutionBackend::kCpu;
-  /// Reports the requested mode when `execution_backend` is Metal.
-  GpuAdaptiveQuantizationMode metal_aq_mode =
+  /// Reports the requested mode when `execution_backend` is a GPU backend.
+  GpuAdaptiveQuantizationMode gpu_aq_mode =
     GpuAdaptiveQuantizationMode::kFullyResident;
 
   VarDctDcPrediction dc_prediction = kDefaultDcPrediction;
@@ -261,9 +265,9 @@ struct VarDctEncodingTiming {
   std::vector<uint8_t>* codestream,
   VarDctEncodingSummary* summary = nullptr);
 
-/// Releases idle AQ/resident-input, Butteraugli, and completed-frame capacity on the process-wide Metal
-/// backend shared by single-image, batch and C API encoders. Does not initialize
-/// Metal or wait for active encodes. Active leases acquired before
+/// Releases idle managed GPU backing, including AQ/resident-input, Butteraugli,
+/// and completed-frame caches used by single-image, batch and C API encoders.
+/// Does not initialize a backend or wait for active encodes. Active leases acquired before
 /// the trim cannot repopulate these caches;
 /// subsequent encodes may cache again. Call when an application becomes idle.
 [[nodiscard]] Status TrimVarDctPreparationCache();

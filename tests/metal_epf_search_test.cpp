@@ -413,7 +413,7 @@ bool CheckWorkflow(GpuBackend& backend) {
       options.backend = path == 0 ? VarDctBackendPreference::kCpu
                                    : VarDctBackendPreference::kMetal;
       options.cpu_thread_count = 1;
-      options.metal_aq_mode = path == 1 ? GpuAdaptiveQuantizationMode::kExactCoefficients
+      options.gpu_aq_mode = path == 1 ? GpuAdaptiveQuantizationMode::kExactCoefficients
                                        : GpuAdaptiveQuantizationMode::kFullyResident;
       options.collect_final_butteraugli_score = true;
       std::array<std::vector<uint8_t>, 2> bytes;

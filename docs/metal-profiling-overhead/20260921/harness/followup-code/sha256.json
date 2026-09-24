@@ -1,0 +1,15 @@
+{
+  "followup-code/probe": "cb2dbb205d0fd15ac6e2283ab3aa34ac0617c46cdc0179c764c6839d70d74a77",
+  "followup-code/probe.cpp": "0ac9b0d874be64a777ac34df1d4c7ab8331f80e91782611877203923bec77d58",
+  "followup-code/run.py": "94fc638600e37a7c5de7bde6e2d69c23cb8861e522aae3b7f23371724990ebc7",
+  "followup-code/metal_submission.cpp": "5de0556d71849b0227dc0a9953ac51c88e40ae3cfbff3810859c867109292a01",
+  "followup-code/include/gpu/metal/overhead_control.h": "879d2e07e65762274a9de139bff9fc292faf02874db15d6ddfb5729c3c731e99",
+  "followup-code/libgjxl_metal.a": "018c298148f136230789dc16d2e28e31e12bfb2bf5d16b06b6d9cba80e223efd",
+  "ablation-build/libgjxl_codestream.a": "5b85bf31a9673ea93d1dbc6fcb800e24996402a13a9fd983d35a6c380f677ac1",
+  "ablation-build/libgjxl_gpu.a": "db274a84a66cecec970304fb2a746b504ea8419d9cea4cb858503b957bf88641",
+  "ablation-build/libgjxl_gpu_ops.a": "45c83e5237199dd6ed9832bd15598e01b3d5c773381ee2a7ef85f9055274dd50",
+  "ablation-build/libgjxl_codec.a": "2cdb2f2574ef1b6409ffa8b4ec7feb899b009a90adeb8289600576ed0bb6dead",
+  "ablation-build/libgjxl_gpu_butteraugli.a": "df57e32046dfc2c2681dfa7472ec25ef0e9a00f1ae10933c4d8fca5e932d3c7b",
+  "ablation-build/libgjxl_pfm_io.a": "b580fddcaf4a8036b3309ed98cbd4ee68607dfaf6f23ffd2a9072638ff0371ef",
+  "ablation-build/libgjxl_metal.a": "b1f1bd47b0375d580536b905bb861a567d2f43f9709d36c2b291a71286c9794e"
+}

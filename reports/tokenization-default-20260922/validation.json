@@ -1,0 +1,79 @@
+{
+  "date_utc": "2026-09-22T14:49:19.126549+00:00",
+  "parent_commit": "7a53e1a80c064e782f803904c67eeb0681e0a940",
+  "branch": "perf/gpu-tokenization",
+  "machine": "Apple M4 Pro, macOS 15.6, Xcode 26.3",
+  "builds": {
+    "release": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "GJXL_ENABLE_METAL": "ON",
+      "GJXL_BUILD_TOKENIZATION_EXPERIMENT": "OFF"
+    },
+    "tokenization-cpu-default": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "GJXL_ENABLE_METAL": "OFF",
+      "GJXL_BUILD_TOKENIZATION_EXPERIMENT": "OFF"
+    },
+    "tokenization-experiment-default": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "GJXL_ENABLE_METAL": "ON",
+      "GJXL_BUILD_TOKENIZATION_EXPERIMENT": "ON"
+    }
+  },
+  "checks": [
+    {
+      "log": "production-full.log",
+      "passed": 159,
+      "failed": 0,
+      "sha256": "080318d11655085d80d408adc86c6c791a48efec6f9bb5397387321aa73c1e39"
+    },
+    {
+      "log": "production-focused.log",
+      "passed": 6,
+      "failed": 0,
+      "sha256": "ba6c9901b12fdb12d911f7c556b5f03b55f29784ca9ce3332271ac91545292d2"
+    },
+    {
+      "log": "cpu-tests.log",
+      "passed": 2,
+      "failed": 0,
+      "sha256": "c0b9534bb0c6472dff2f3137d6dea944adb337fbf5968ff209615ca0ef3576ce"
+    },
+    {
+      "log": "experiment-tests.log",
+      "passed": 3,
+      "failed": 0,
+      "sha256": "92ddc444198101f27af894241fe8cb01ab607a14b2f0f0b4d346b4bc260210b1"
+    },
+    {
+      "log": "cpu-override-tests.log",
+      "passed": 2,
+      "failed": 0,
+      "sha256": "05db0cae7ac300f344af58ae8750726b3770fbb795914195b24089bc7a287d2d"
+    }
+  ],
+  "source_sha256": {
+    "CMakeLists.txt": "0d360e3bd5bf3124912a1f6c4ecfb99ec29cdad44076d8deee5df61afe39e9d8",
+    "docs/gpu-tokenization.md": "f12e79f2c7dcd6c093b8eb0e69fc6270c50396169c6ba50351ebef9016e8e032",
+    "src/codestream/ac_tokenization_provider_internal.h": "ba0c2a7307c0aa307c2e65ab943119a7715d6388a7c56340cd5bdbf39d261b93",
+    "src/codestream/encoder.cpp": "e5bb3cae5c2b5c23f195e55f73a8129ea17795559aef81cb3e94a6aaf103dea3",
+    "src/codestream/resident_workflow_storage_plan.cpp": "87ca5a397bc4595cd5299bee6c7eea096a3532bb0d20bb6941c2f74f2a9bc1b1",
+    "src/codestream/resident_workflow_storage_plan.h": "6b0d290aa998145a76fed7c60573dce26f72cd62e9eda8caa78381998a2eb533",
+    "src/codestream/serializer_storage_plan.cpp": "073e93cb338393d906849e8317144199399f328c95682bdc61fcb308b5a816e2",
+    "src/codestream/serializer_storage_plan.h": "b38411888411fb7ae850d307faf9f7d0f2b7d3f6363cedb8a8203ec84ce1401b",
+    "src/codestream/workflow.cpp": "fc6b93e656742b8296d37ea747a8104f41929f914d5228b87f90599e3667acbf",
+    "src/gpu/metal/metal_ac_tokenization.cpp": "3575556c2e49f491edf405a664bc65131b97db157f21cccf5c2b9f6d8aab4624",
+    "tests/gpu_tokenization_default_test.cpp": "40f1248350903ee3a4517da8c6ecc9a910f54fe631cacbfadba56fcbe3cb4b1e",
+    "tests/resident_workflow_storage_plan_test.cpp": "3b7c0f23abdeea34177719f4a7c32671f692f2b92eca63e903a6bb35603c1a4a",
+    "tools/gpu_tokenization_screen.py": "da704a79ab9477f32758f9a5eba8e678182f12ee2187e46411cbed5d57ef5ca6",
+    "tools/tokenization_batch_screen.py": "40625b843bf06d23290e9bbb65d766f75cdb061f0b8688a94757d60810e0afa5",
+    "tools/tokenization_screen.py": "1099b0d715ab24bfc70a5c833f4846171aabce25c41cf7ad7befcf9951dfc689"
+  },
+  "notes": [
+    "Production/focused/experimental runs cleared inherited GJXL_EXPERIMENT_* and GJXL_GPU_TOKENIZATION.",
+    "CPU override admission run set GJXL_GPU_TOKENIZATION=0.",
+    "The CPU-only serializer and CPU-workflow tests run without Metal compiled in.",
+    "No new performance cohort was collected; test durations are not benchmark measurements.",
+    "Original checkout preserved; local branch renamed without remote changes."
+  ]
+}

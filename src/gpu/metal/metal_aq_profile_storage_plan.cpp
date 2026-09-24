@@ -33,10 +33,16 @@ constexpr size_t MaximumAqIdLength() {
                            AqReconstructionCoefficientProfileStageId(strategy),
                            AqReconstructionScatterProfileStageId(strategy),
                            AqForwardCoefficientProfileStageId(strategy),
-                           AqFinalFrameProfileStageId(strategy)})
+                           AqFinalFrameProfileStageId(strategy),
+                           AcStrategyProfileStageId(strategy)})
       length = std::max(length, std::string_view(id).size());
   }
   for (std::string_view id : {"aq.reconstruction",
+                              "frontend.ac_strategy.select",
+                              "frontend.ac_strategy.metadata",
+                              "frontend.quant_adjustment",
+                              "aq.strategy_dispatch",
+                              "aq.policy_bounds",
                               "aq.reconstruction.reset",
                               "aq.reconstruction.quantizer",
                               "aq.reconstruction.final_cfl",
@@ -179,11 +185,17 @@ ComputeResidentAqProfileStoragePlan(Extent2D source, Extent2D coding,
   Status status = Geometry(source, coding, &blocks);
   if (!status.ok())
     return status;
-  const size_t families = std::min(blocks, kSupportedAqStrategies.size());
+  // Indirect dispatch encodes every family, including GPU-empty families.
+  const size_t families = policy.device_strategy_dispatch
+      ? kSupportedAqStrategies.size()
+      : std::min(blocks, kSupportedAqStrategies.size());
   ButteraugliDispatchPlan butter;
-  status = ComputeButteraugliDispatchPlan(source, blocks, families, &butter);
+  status = ComputeButteraugliDispatchPlan(
+      source, blocks, std::min(blocks, families), &butter);
   if (!status.ok())
     return status;
+  if (butter.multiscale) butter.resident_comparison +=
+      families - std::min(blocks, families);
   if ((policy.iterations != 0 || policy.evaluate_final_field) &&
       policy.butteraugli_sinks != butter.multiscale)
     return Status::InvalidArgument(
@@ -195,8 +207,9 @@ ComputeResidentAqProfileStoragePlan(Extent2D source, Extent2D coding,
   // Reserve the 20-dispatch parallel quantizer bound even when a small field
   // uses two dispatches. Reset + quantizer + four per-family coefficient/inverse/
   // scatter dispatches + filters + Opsin-to-linear + perceptual work + update.
-  // First use also gathers/transforms each family, computes final CfL and
-  // initializes the policy. Counting all first-use work bounds cached runs too.
+  // First use also selects a quantizer for the retained invariant CfL field,
+  // gathers/transforms each family, computes final CfL and initializes the
+  // policy. Counting all first-use work bounds cached runs too.
   const size_t dc_dispatches = 2 * size_t(policy.deferred_dc) +
     size_t(policy.adaptive_dc_smoothing) +
     size_t(policy.deferred_dc || policy.adaptive_dc_smoothing) * families;
@@ -205,7 +218,7 @@ ComputeResidentAqProfileStoragePlan(Extent2D source, Extent2D coding,
                            (butter.multiscale ? butter.resident_comparison
                                               : butter.comparison + families);
   p.maximum_dispatches =
-      p.metadata.score_count * per_score + 2 * families + 2 +
+      p.metadata.score_count * per_score + 20 + 2 * families + 2 +
       size_t(!policy.evaluate_final_field) * (20 + 2 * families + 2 * size_t(policy.deferred_dc));
   // Completed output counts coefficient zeros once per family after the
   // final integer stores, including when there are no scored passes.
@@ -218,6 +231,12 @@ ComputeResidentAqProfileStoragePlan(Extent2D source, Extent2D coding,
     if (!policy.evaluate_final_field)
       p.maximum_dispatches += 1 + 2 * families + dc_dispatches;
   }
+  // At most five kernels per candidate family, selection, reconstruction
+  // reset, seven metadata kernels, and metadata-error import.
+  p.maximum_dispatches += size_t(policy.resident_strategy_metadata) *
+                              (5 * kSupportedAqStrategies.size() + 10) +
+                          size_t(policy.device_strategy_dispatch) +
+                          size_t(policy.adjust_initial_field) * (families + 4);
   p.maximum_id_length = MaximumAqIdLength();
   status = gpu_profile_internal::ComputeSubmissionProfileStoragePlan(
       {p.metadata.stage_capacity, p.maximum_dispatches, p.maximum_id_length,
@@ -234,6 +253,15 @@ ComputeResidentAqProfileStoragePlan(Extent2D source, Extent2D coding,
   if (!status.ok())
     return status;
   p.working = p.metadata.input;
+  if (policy.device_strategy_dispatch) {
+    resource_budget_internal::HostStorageBound indirect;
+    status = ComputeMetalIndirectProfileStorageBound(p.maximum_dispatches, &indirect);
+    if (!status.ok()) return status;
+    // Arguments are retained alongside the original graph, including while
+    // the completed snapshot is copied. They are not part of published output.
+    if (!p.graph.recorded.Add(indirect) || !p.graph.resolution.Add(indirect))
+      return Status::OutOfMemory("Indirect profile storage bound overflows");
+  }
   if (!p.working.Add(p.graph.recorded))
     return Status::OutOfMemory("Resident AQ profile bound overflows");
   p.working.peak_bytes =

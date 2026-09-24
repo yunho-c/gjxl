@@ -98,7 +98,8 @@ struct TokenizationStoragePlan {
 /// population reduction, and tokenizer worker scratch. Includes outer token
 /// containers and maximum simultaneous order/map variants; does NOT include
 /// frame backing, coefficient-order search/tokens, block-map/candidate objects,
-/// borrowed stream tables, dispatch/status/profile arrays, entropy or writers.
+/// borrowed stream tables, AC dispatch/status/profile arrays, entropy or writers.
+/// Includes the DC group dispatcher and its simultaneous worker scratch.
 /// This component is not whole-serializer/workflow admission. Four rectangular
 /// group classes are summed, without iterating over the image's group count.
 [[nodiscard]] Status

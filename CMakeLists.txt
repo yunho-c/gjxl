@@ -9,31 +9,15 @@ project(
   LANGUAGES C CXX
 )
 
+option(GJXL_BUILD_TOKENIZATION_EXPERIMENT "Enable diagnostic tokenization controls" OFF)
+if(GJXL_BUILD_TOKENIZATION_EXPERIMENT)
+  add_compile_definitions(GJXL_TOKENIZATION_EXPERIMENT=1)
+endif()
+
 option(GJXL_BUILD_FRONTIER_EXPERIMENT "Build the isolated frontier-DP experiment and capture hook" OFF)
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
-
-# TEMP
-if(NOT APPLE)
-  message(FATAL_ERROR
-    "gjxl currently requires macOS")
-endif()
-
-enable_language(OBJCXX)
-
-# Default to C++20; honor an explicitly selected, audited C++23 mode. Check
-# exactly the modes used by implementation targets, including Objective-C++.
-if(NOT DEFINED CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 20)
-endif()
-if(NOT DEFINED CMAKE_OBJCXX_STANDARD)
-  set(CMAKE_OBJCXX_STANDARD "${CMAKE_CXX_STANDARD}")
-endif()
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
-include(cmake/CheckStorageToolchain.cmake)
-gjxl_check_storage_toolchain("${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 option(
   GJXL_BUILD_TESTS
@@ -58,6 +42,50 @@ option(
   "Emit line tables, recorded sources, and a flat symbol companion for Metal shaders"
   OFF
 )
+
+option(
+  GJXL_ENABLE_METAL
+  "Build the Metal GPU backend"
+  ${APPLE}
+)
+
+option(
+  GJXL_ENABLE_CUDA
+  "Build the CUDA GPU backend"
+  OFF
+)
+
+option(GJXL_CUDA_COMPACT_AC
+  "Experimental native narrow AC readback for the resident CUDA policy" OFF)
+
+if(GJXL_ENABLE_METAL)
+  if(NOT APPLE)
+    message(FATAL_ERROR "GJXL_ENABLE_METAL requires an Apple platform")
+  endif()
+  enable_language(OBJCXX)
+elseif(GJXL_ENABLE_METAL_PROFILING)
+  message(FATAL_ERROR
+    "GJXL_ENABLE_METAL_PROFILING requires GJXL_ENABLE_METAL")
+endif()
+
+if(GJXL_ENABLE_CUDA)
+  enable_language(CUDA)
+  find_package(CUDAToolkit REQUIRED)
+endif()
+
+# Check every enabled host C++ toolchain before building codec storage.
+if(NOT DEFINED CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 20)
+endif()
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+if(GJXL_ENABLE_METAL)
+  if(NOT DEFINED CMAKE_OBJCXX_STANDARD)
+    set(CMAKE_OBJCXX_STANDARD "${CMAKE_CXX_STANDARD}")
+  endif()
+  set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
+endif()
+include(cmake/CheckStorageToolchain.cmake)
+gjxl_check_storage_toolchain("${CMAKE_CURRENT_SOURCE_DIR}/src")
 
 if(GJXL_ENABLE_LIBJXL_REFERENCE AND
    (GJXL_BUILD_TESTS OR GJXL_BUILD_BENCHMARKS))
@@ -226,6 +254,17 @@ target_compile_features(
     cxx_std_20
 )
 
+# Some external build drivers replace CMAKE_CXX_FLAGS instead of appending to
+# them. Keep exception unwinding explicit for MSVC because GJXL's public error
+# boundary relies on C++ exceptions being caught before they cross the C API.
+if(MSVC)
+  target_compile_options(
+    gjxl_core
+    INTERFACE
+      $<$<COMPILE_LANGUAGE:CXX>:/EHsc>
+  )
+endif()
+
 target_include_directories(
   gjxl_core
   INTERFACE
@@ -300,9 +339,7 @@ add_library(
   src/codestream/headers.cpp
   src/codestream/huffman.cpp
   src/codestream/rate_control.cpp
-  src/codestream/resident_workflow_storage_plan.cpp
   src/codestream/cpu_workflow_storage_plan.cpp
-  src/codestream/compatibility_workflow_storage_plan.cpp
   src/codestream/workflow_storage_plan.cpp
   src/codestream/sections.cpp
   src/codestream/token_storage_plan.cpp
@@ -310,6 +347,12 @@ add_library(
   src/codestream/serializer_storage_plan.cpp
   src/codestream/workflow.cpp
 )
+
+if(GJXL_ENABLE_METAL)
+  target_sources(gjxl_codestream PRIVATE
+    src/codestream/resident_workflow_storage_plan.cpp
+    src/codestream/compatibility_workflow_storage_plan.cpp)
+endif()
 
 add_library(gjxl::codestream ALIAS gjxl_codestream)
 
@@ -371,14 +414,18 @@ target_include_directories(
     "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 
-target_compile_options(
-  gjxl_c
-  PRIVATE
-    -Wall
-    -Wextra
-    -Wpedantic
-    -Werror
-)
+if(MSVC)
+  target_compile_options(gjxl_c PRIVATE /W4 /WX)
+else()
+  target_compile_options(
+    gjxl_c
+    PRIVATE
+      -Wall
+      -Wextra
+      -Wpedantic
+      -Werror
+  )
+endif()
 
 target_link_libraries(
   gjxl_c
@@ -528,6 +575,104 @@ target_link_libraries(
     gjxl_codec
     gjxl_gpu
 )
+
+target_link_libraries(
+  gjxl_codestream
+  PUBLIC
+    gjxl_gpu_ops
+)
+
+install(
+  TARGETS
+    gjxl_gpu
+    gjxl_gpu_butteraugli
+    gjxl_gpu_ops
+  EXPORT gjxlTargets
+  ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+)
+
+
+if(GJXL_ENABLE_CUDA)
+  target_sources(gjxl_codestream PRIVATE src/codestream/cuda_workflow_storage_plan.cpp)
+  add_library(
+    gjxl_cuda
+    STATIC
+
+    src/gpu/cuda/cuda_backend.cpp
+    src/gpu/cuda/cuda_profiling.cpp
+    src/gpu/cuda/cuda_ac_strategy.cpp
+    src/gpu/cuda/cuda_ac_strategy_kernels.cu
+    src/gpu/cuda/cuda_ac_group_kernels.cu
+    src/gpu/cuda/cuda_compact_ac_kernels.cu
+    src/gpu/cuda/cuda_sparse_ac_kernels.cu
+    src/gpu/cuda/cuda_direct_ac_pack_kernels.cu
+    src/gpu/cuda/cuda_coefficient_order_kernels.cu
+    src/gpu/cuda/cuda_aq.cpp
+    src/gpu/cuda/cuda_aq_kernels.cu
+    src/gpu/cuda/cuda_aq_exact.cpp
+    src/gpu/cuda/cuda_aq_exact_kernels.cu
+    src/gpu/cuda/cuda_aq_cpu_order_kernels.cu
+    src/gpu/cuda/cuda_aq_butteraugli_kernels.cu
+    src/gpu/cuda/cuda_input_preparation.cpp
+    src/gpu/cuda/cuda_aq_resident.cpp
+    src/gpu/cuda/cuda_dc_processing_kernels.cu
+    src/gpu/cuda/cuda_aq_resident_kernels.cu
+    src/gpu/cuda/cuda_butteraugli.cpp
+    src/gpu/cuda/cuda_butteraugli_kernels.cu
+    src/gpu/cuda/cuda_kernels.cu
+    src/gpu/cuda/cuda_primitives.cpp
+  )
+
+  add_library(gjxl::cuda ALIAS gjxl_cuda)
+
+  if(GJXL_CUDA_COMPACT_AC)
+    target_compile_definitions(gjxl_cuda PRIVATE GJXL_CUDA_COMPACT_AC=1)
+  endif()
+
+  set_target_properties(
+    gjxl_cuda
+    PROPERTIES
+      EXPORT_NAME cuda
+      CUDA_STANDARD 17
+      CUDA_STANDARD_REQUIRED YES
+      CUDA_EXTENSIONS NO
+  )
+
+  target_compile_features(
+    gjxl_cuda
+    PRIVATE
+      cxx_std_20
+  )
+
+  target_link_libraries(
+    gjxl_cuda
+    PUBLIC
+      gjxl_gpu_butteraugli
+      gjxl_gpu_ops
+    PRIVATE
+      CUDA::cudart
+  )
+
+  target_link_libraries(
+    gjxl_codestream
+    PUBLIC
+      gjxl_cuda
+  )
+
+  target_compile_definitions(
+    gjxl_codestream
+    PRIVATE
+      GJXL_ENABLE_CUDA=1
+  )
+
+  install(
+    TARGETS gjxl_cuda
+    EXPORT gjxlTargets
+    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+  )
+endif()
+
+if(GJXL_ENABLE_METAL)
 
 # metal-cpp
 add_library(
@@ -823,6 +968,7 @@ add_custom_command(
     "${GJXL_AQ_RECONSTRUCTION_METAL_SOURCE}"
     "${GJXL_AQ_QUANTIZATION_HEADER}"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/dc_processing.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/ac_tokenization.metal"
 
   COMMENT
     "Compiling Metal AQ reconstruction shaders"
@@ -1029,6 +1175,7 @@ add_library(
 
   src/gpu/metal/metal_cpp_impl.cpp
   src/gpu/metal/metal_ac_strategy.cpp
+  src/gpu/metal/metal_ac_tokenization.cpp
   src/gpu/metal/metal_backend.cpp
   src/gpu/metal/metal_embedded_library.cpp
   src/gpu/metal/metal_aq_butteraugli.cpp
@@ -1086,9 +1233,6 @@ target_link_libraries(
 
 install(
   TARGETS
-    gjxl_gpu
-    gjxl_gpu_butteraugli
-    gjxl_gpu_ops
     gjxl_metal
   EXPORT gjxlTargets
   ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
@@ -1099,6 +1243,14 @@ target_compile_features(
   PRIVATE
     cxx_std_20
 )
+
+target_compile_definitions(
+  gjxl_codestream
+  PRIVATE
+    GJXL_ENABLE_METAL=1
+)
+
+endif()
 
 if(GJXL_BUILD_TESTS)
 
@@ -1135,6 +1287,7 @@ if(GJXL_BUILD_TESTS)
       --cmake "${CMAKE_COMMAND}")
   set_tests_properties(storage_toolchain PROPERTIES TIMEOUT 90)
 
+  if(GJXL_ENABLE_METAL)
   add_test(NAME metal_build_graph
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/metal_build_graph_test.py"
       --source "${CMAKE_CURRENT_SOURCE_DIR}")
@@ -1152,6 +1305,7 @@ if(GJXL_BUILD_TESTS)
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/metal_profile_test.py"
   )
   set_tests_properties(metal_profile_driver PROPERTIES LABELS cli)
+  endif()
 
   find_program(GJXL_IMAGEMAGICK_EXECUTABLE NAMES magick)
   if(GJXL_IMAGEMAGICK_EXECUTABLE)
@@ -1175,6 +1329,9 @@ if(GJXL_BUILD_TESTS)
     tests/codestream_conformance_test.cpp
   )
 
+  target_compile_definitions(gjxl_codestream_conformance_test PRIVATE
+    GJXL_TEST_HAS_METAL=$<BOOL:${GJXL_ENABLE_METAL}>)
+
   target_link_libraries(
     gjxl_codestream_conformance_test
     PRIVATE
@@ -1189,6 +1346,28 @@ if(GJXL_BUILD_TESTS)
     GJXL_PINNED_LIBJXL_BUILD
     "${CMAKE_CURRENT_BINARY_DIR}/pinned-libjxl"
   )
+  set(GJXL_PINNED_DECODER_COMPILER_ARGUMENTS)
+  if(WIN32)
+    # The pinned libjxl revision references an MSVC overflow intrinsic that is
+    # absent from some otherwise supported VS 2022 toolsets. clang-cl uses the
+    # revision's builtin-overflow path and remains ABI-compatible with MSVC.
+    find_program(GJXL_PINNED_CLANG_CL clang-cl)
+    if(GJXL_PINNED_CLANG_CL)
+      set(GJXL_PINNED_LIBJXL_BUILD
+          "${CMAKE_CURRENT_BINARY_DIR}/pinned-libjxl-clang")
+      list(APPEND GJXL_PINNED_DECODER_COMPILER_ARGUMENTS
+        "-DGJXL_C_COMPILER=${GJXL_PINNED_CLANG_CL}"
+        "-DGJXL_CXX_COMPILER=${GJXL_PINNED_CLANG_CL}")
+    endif()
+  endif()
+  set(
+    GJXL_PINNED_DJXL
+    "${GJXL_PINNED_LIBJXL_BUILD}/tools/djxl${CMAKE_EXECUTABLE_SUFFIX}"
+  )
+  set(
+    GJXL_PINNED_JXLINFO
+    "${GJXL_PINNED_LIBJXL_BUILD}/tools/jxlinfo${CMAKE_EXECUTABLE_SUFFIX}"
+  )
 
   add_custom_target(
     gjxl_pinned_decoder
@@ -1198,6 +1377,8 @@ if(GJXL_BUILD_TESTS)
       "-DGJXL_LIBJXL_BUILD=${GJXL_PINNED_LIBJXL_BUILD}"
       "-DGJXL_LIBJXL_REVISION=${GJXL_PINNED_LIBJXL_REVISION}"
       "-DGJXL_GENERATOR=${CMAKE_GENERATOR}"
+      "-DGJXL_EXECUTABLE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
+      ${GJXL_PINNED_DECODER_COMPILER_ARGUMENTS}
       -P
       "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BuildPinnedDjxl.cmake"
     COMMENT
@@ -1209,8 +1390,8 @@ if(GJXL_BUILD_TESTS)
     codestream-conformance
     COMMAND
       gjxl_codestream_conformance_test
-      --decoder "${GJXL_PINNED_LIBJXL_BUILD}/tools/djxl"
-      --info "${GJXL_PINNED_LIBJXL_BUILD}/tools/jxlinfo"
+      --decoder "${GJXL_PINNED_DJXL}"
+      --info "${GJXL_PINNED_JXLINFO}"
       --encoder $<TARGET_FILE:gjxl_encode>
       --sample "${CMAKE_CURRENT_SOURCE_DIR}/testdata/codestream_sample.pfm"
       --artifacts
@@ -1291,6 +1472,7 @@ if(GJXL_BUILD_TESTS)
     COMMAND gjxl_bit_writer_test
   )
 
+
   add_executable(
     gjxl_entropy_test
     tests/entropy_test.cpp
@@ -1329,6 +1511,9 @@ if(GJXL_BUILD_TESTS)
     target_link_libraries(gjxl_context_map_test PRIVATE hwy)
   endif()
   add_test(NAME context_map COMMAND gjxl_context_map_test)
+  add_executable(gjxl_ans_reverse_bits_test tests/ans_reverse_bits_test.cpp)
+  target_link_libraries(gjxl_ans_reverse_bits_test PRIVATE gjxl_codestream)
+  add_test(NAME ans_reverse_bits COMMAND gjxl_ans_reverse_bits_test)
 
   add_executable(
     gjxl_sections_test
@@ -1395,6 +1580,10 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_coefficient_order_test PRIVATE gjxl_codestream)
   add_test(NAME coefficient_order COMMAND gjxl_coefficient_order_test)
 
+  add_executable(gjxl_dc_parallel_tokenization_test tests/dc_parallel_tokenization_test.cpp)
+  target_link_libraries(gjxl_dc_parallel_tokenization_test PRIVATE gjxl_codestream)
+  add_test(NAME dc_parallel_tokenization COMMAND gjxl_dc_parallel_tokenization_test)
+
   add_executable(gjxl_ac_direct_tokenization_test tests/ac_direct_tokenization_test.cpp)
   target_link_libraries(gjxl_ac_direct_tokenization_test PRIVATE gjxl_codestream)
   add_test(NAME ac_direct_tokenization COMMAND gjxl_ac_direct_tokenization_test)
@@ -1417,6 +1606,52 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_serializer_storage_plan_test PRIVATE gjxl_codestream)
   add_test(NAME serializer_storage_plan COMMAND gjxl_serializer_storage_plan_test)
   set_tests_properties(serializer_storage_plan PROPERTIES TIMEOUT 300)
+
+  add_executable(
+    gjxl_ac_section_validation_test
+    tests/ac_section_validation_test.cpp
+  )
+
+  target_link_libraries(
+    gjxl_ac_section_validation_test
+    PRIVATE
+      gjxl_codestream
+  )
+
+  add_test(
+    NAME ac_section_validation
+    COMMAND gjxl_ac_section_validation_test
+  )
+
+
+  add_executable(gjxl_compact_vardct_frame_test tests/compact_vardct_frame_test.cpp)
+  target_link_libraries(gjxl_compact_vardct_frame_test PRIVATE gjxl_codestream)
+  add_test(NAME compact_vardct_frame COMMAND gjxl_compact_vardct_frame_test)
+
+  add_executable(gjxl_compact_frame_allocation_test tests/compact_frame_allocation_test.cpp)
+  target_link_libraries(gjxl_compact_frame_allocation_test PRIVATE gjxl_codestream)
+  add_test(NAME compact_frame_allocation COMMAND gjxl_compact_frame_allocation_test)
+
+  add_executable(gjxl_frame_validation_test tests/frame_validation_test.cpp)
+  target_link_libraries(gjxl_frame_validation_test PRIVATE gjxl_codestream)
+  add_test(NAME frame_validation COMMAND gjxl_frame_validation_test)
+
+  add_executable(gjxl_sparse_coefficients_test tests/sparse_coefficients_test.cpp)
+  target_link_libraries(gjxl_sparse_coefficients_test PRIVATE gjxl_codestream)
+  add_test(NAME sparse_coefficients COMMAND gjxl_sparse_coefficients_test)
+
+  add_executable(gjxl_sparse_vardct_frame_test tests/sparse_vardct_frame_test.cpp)
+  target_link_libraries(gjxl_sparse_vardct_frame_test PRIVATE gjxl_codestream)
+  add_test(NAME sparse_vardct_frame COMMAND gjxl_sparse_vardct_frame_test)
+
+  add_executable(gjxl_sparse_frame_allocation_test tests/sparse_frame_allocation_test.cpp)
+  target_link_libraries(gjxl_sparse_frame_allocation_test PRIVATE gjxl_codestream)
+  add_test(NAME sparse_frame_allocation COMMAND gjxl_sparse_frame_allocation_test)
+
+  add_executable(gjxl_quantization_storage_test tests/quantization_storage_test.cpp)
+  target_link_libraries(gjxl_quantization_storage_test PRIVATE gjxl_codec)
+  add_test(NAME quantization_storage COMMAND gjxl_quantization_storage_test)
+
 
   add_executable(
     gjxl_block_context_map_test
@@ -1461,6 +1696,12 @@ if(GJXL_BUILD_TESTS)
       gjxl_codestream
   )
 
+  target_compile_definitions(
+    gjxl_codestream_workflow_test
+    PRIVATE
+      GJXL_TEST_HAS_METAL=$<BOOL:${GJXL_ENABLE_METAL}>
+  )
+
   add_test(
     NAME codestream_workflow
     COMMAND gjxl_codestream_workflow_test
@@ -1477,6 +1718,12 @@ if(GJXL_BUILD_TESTS)
       gjxl_codestream
   )
 
+  target_compile_definitions(
+    gjxl_codestream_batch_workflow_test
+    PRIVATE
+      GJXL_TEST_HAS_CUDA=$<BOOL:${GJXL_ENABLE_CUDA}>
+  )
+
   add_test(
     NAME codestream_batch_workflow
     COMMAND gjxl_codestream_batch_workflow_test
@@ -1484,15 +1731,21 @@ if(GJXL_BUILD_TESTS)
 
   add_executable(gjxl_batch_lifecycle_test tests/batch_lifecycle_test.cpp)
   target_link_libraries(gjxl_batch_lifecycle_test PRIVATE gjxl_codestream)
+  if(GJXL_ENABLE_METAL)
   add_test(NAME batch_lifecycle COMMAND gjxl_batch_lifecycle_test)
+  set_tests_properties(batch_lifecycle PROPERTIES TIMEOUT 120)
+  endif()
   add_test(NAME batch_lifecycle_cpu COMMAND gjxl_batch_lifecycle_test --cpu-only)
-  set_tests_properties(batch_lifecycle batch_lifecycle_cpu PROPERTIES TIMEOUT 120)
+  set_tests_properties(batch_lifecycle_cpu PROPERTIES TIMEOUT 120)
 
   add_executable(gjxl_batch_scheduling_test tests/batch_scheduling_test.cpp)
   target_link_libraries(gjxl_batch_scheduling_test PRIVATE gjxl_codestream)
+  if(GJXL_ENABLE_METAL)
   add_test(NAME batch_scheduling COMMAND gjxl_batch_scheduling_test)
+  set_tests_properties(batch_scheduling PROPERTIES TIMEOUT 120)
+  endif()
   add_test(NAME batch_scheduling_cpu COMMAND gjxl_batch_scheduling_test --cpu-only)
-  set_tests_properties(batch_scheduling batch_scheduling_cpu PROPERTIES TIMEOUT 120)
+  set_tests_properties(batch_scheduling_cpu PROPERTIES TIMEOUT 120)
 
   add_executable(gjxl_parallel_work_test tests/parallel_work_test.cpp)
   target_link_libraries(gjxl_parallel_work_test PRIVATE gjxl_core)
@@ -1513,9 +1766,11 @@ if(GJXL_BUILD_TESTS)
   foreach(group startup forward cpu_color cpu_aq cpu_orders cpu_sections cpu_drains)
     gjxl_add_worker_launch_failure_test(${group} cpu)
   endforeach()
+  if(GJXL_ENABLE_METAL)
   foreach(group metal_forward metal_orders metal_sections metal_drains)
     gjxl_add_worker_launch_failure_test(${group} metal)
   endforeach()
+  endif()
 
   add_executable(
     gjxl_rate_control_search_test
@@ -1549,6 +1804,7 @@ if(GJXL_BUILD_TESTS)
       "-DGJXL_ENCODER=$<TARGET_FILE:gjxl_encode>"
       "-DGJXL_SAMPLE=${CMAKE_CURRENT_SOURCE_DIR}/testdata/codestream_sample.pfm"
       "-DGJXL_TEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/codestream-cli-test"
+      "-DGJXL_HAS_METAL=${GJXL_ENABLE_METAL}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/RunCodestreamCliTest.cmake"
   )
 
@@ -1595,14 +1851,18 @@ if(GJXL_BUILD_TESTS)
       c_std_11
   )
 
-  target_compile_options(
-    gjxl_c_api_test
-    PRIVATE
-      -Wall
-      -Wextra
-      -Wpedantic
-      -Werror
-  )
+  if(MSVC)
+    target_compile_options(gjxl_c_api_test PRIVATE /W4 /WX /wd4127)
+  else()
+    target_compile_options(
+      gjxl_c_api_test
+      PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Werror
+    )
+  endif()
 
   target_link_libraries(
     gjxl_c_api_test
@@ -1626,14 +1886,18 @@ if(GJXL_BUILD_TESTS)
       cxx_std_20
   )
 
-  target_compile_options(
-    gjxl_c_api_cpp_test
-    PRIVATE
-      -Wall
-      -Wextra
-      -Wpedantic
-      -Werror
-  )
+  if(MSVC)
+    target_compile_options(gjxl_c_api_cpp_test PRIVATE /W4 /WX)
+  else()
+    target_compile_options(
+      gjxl_c_api_cpp_test
+      PRIVATE
+        -Wall
+        -Wextra
+        -Wpedantic
+        -Werror
+    )
+  endif()
 
   target_link_libraries(
     gjxl_c_api_cpp_test
@@ -1756,9 +2020,12 @@ if(GJXL_BUILD_TESTS)
 
   add_executable(gjxl_workflow_cpu_coordination_test tests/workflow_cpu_coordination_test.cpp)
   target_link_libraries(gjxl_workflow_cpu_coordination_test PRIVATE gjxl_c gjxl_codestream)
+  if(GJXL_ENABLE_METAL)
   add_test(NAME workflow_cpu_coordination COMMAND gjxl_workflow_cpu_coordination_test)
+  set_tests_properties(workflow_cpu_coordination PROPERTIES TIMEOUT 120)
+  endif()
   add_test(NAME workflow_cpu_coordination_cpu COMMAND gjxl_workflow_cpu_coordination_test --cpu-only)
-  set_tests_properties(workflow_cpu_coordination workflow_cpu_coordination_cpu PROPERTIES TIMEOUT 120)
+  set_tests_properties(workflow_cpu_coordination_cpu PROPERTIES TIMEOUT 120)
 
   add_executable(gjxl_managed_allocator_test tests/managed_allocator_test.cpp)
   target_link_libraries(gjxl_managed_allocator_test PRIVATE gjxl_codestream)
@@ -1988,11 +2255,20 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_dc_processing_test PRIVATE gjxl_codec)
   add_test(NAME dc_processing COMMAND gjxl_dc_processing_test)
 
+  add_executable(gjxl_cpu_workflow_storage_plan_test tests/cpu_workflow_storage_plan_test.cpp)
+  target_link_libraries(gjxl_cpu_workflow_storage_plan_test PRIVATE gjxl_codestream)
+  add_test(NAME cpu_workflow_storage_plan COMMAND gjxl_cpu_workflow_storage_plan_test)
+  set_tests_properties(cpu_workflow_storage_plan PROPERTIES TIMEOUT 300)
+
   # Ordinary workflow tests exercise the adaptive default; retain full-tree
   # resource and allocation-failure coverage as explicit legacy-policy runs.
   add_test(NAME cpu_workflow_legacy_dc_tree COMMAND gjxl_cpu_workflow_storage_plan_test --legacy-dc-tree)
+  if(GJXL_ENABLE_METAL)
   add_test(NAME resident_workflow_legacy_dc_tree COMMAND gjxl_resident_workflow_storage_plan_test --legacy-dc-tree)
+  endif()
+  if(GJXL_ENABLE_METAL)
   add_test(NAME compatibility_workflow_legacy_dc_tree COMMAND gjxl_compatibility_workflow_storage_plan_test --legacy-dc-tree)
+  endif()
   add_executable(gjxl_dc_context_tree_test tests/dc_context_tree_test.cpp)
   target_link_libraries(gjxl_dc_context_tree_test PRIVATE gjxl_codestream)
   add_test(NAME dc_context_tree COMMAND gjxl_dc_context_tree_test)
@@ -2116,12 +2392,20 @@ if(GJXL_BUILD_TESTS)
   add_executable(gjxl_low_effort_strategy_policy_test
     tests/low_effort_strategy_policy_test.cpp)
   target_link_libraries(gjxl_low_effort_strategy_policy_test PRIVATE gjxl_codestream)
+  target_compile_definitions(gjxl_low_effort_strategy_policy_test PRIVATE
+    GJXL_TEST_HAS_METAL=$<BOOL:${GJXL_ENABLE_METAL}>)
   add_test(NAME low_effort_strategy_policy COMMAND gjxl_low_effort_strategy_policy_test)
 
   add_executable(gjxl_dc_policy_test tests/dc_policy_test.cpp)
   target_link_libraries(gjxl_dc_policy_test PRIVATE gjxl_codestream)
+  target_compile_definitions(gjxl_dc_policy_test PRIVATE
+    GJXL_TEST_HAS_METAL=$<BOOL:${GJXL_ENABLE_METAL}>)
   target_include_directories(gjxl_dc_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
   add_test(NAME dc_policy COMMAND gjxl_dc_policy_test)
+  if(GJXL_ENABLE_CUDA)
+    add_test(NAME cuda_dc_policy COMMAND gjxl_dc_policy_test --cuda)
+    set_tests_properties(cuda_dc_policy PROPERTIES SKIP_RETURN_CODE 77)
+  endif()
 
   add_executable(
     gjxl_gaborish_test
@@ -2195,6 +2479,10 @@ if(GJXL_BUILD_TESTS)
     gjxl_vardct_frame_test
     tests/vardct_frame_test.cpp
   )
+
+  add_executable(gjxl_overwrite_array_test tests/overwrite_array_test.cpp)
+  target_link_libraries(gjxl_overwrite_array_test PRIVATE gjxl_codec)
+  add_test(NAME overwrite_array COMMAND gjxl_overwrite_array_test)
 
   target_link_libraries(
     gjxl_vardct_frame_test
@@ -2450,6 +2738,14 @@ if(GJXL_BUILD_TESTS)
   add_test(NAME profile_storage_plan COMMAND gjxl_profile_storage_plan_test)
   set_tests_properties(profile_storage_plan PROPERTIES TIMEOUT 180)
 
+  add_executable(gjxl_gpu_profile_json_test tests/gpu_profile_json_test.cpp)
+  target_link_libraries(gjxl_gpu_profile_json_test PRIVATE gjxl_gpu_ops)
+  add_test(NAME gpu_profile_json
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/gpu_profile_json_test.py"
+      "$<TARGET_FILE:gjxl_gpu_profile_json_test>")
+  set_tests_properties(gpu_profile_json PROPERTIES TIMEOUT 30)
+
+  if(GJXL_ENABLE_METAL)
   add_executable(gjxl_profile_storage_plan_metal_test tests/profile_storage_plan_test.cpp)
   target_link_libraries(gjxl_profile_storage_plan_metal_test PRIVATE gjxl_gpu_ops gjxl_metal)
   target_compile_definitions(gjxl_profile_storage_plan_metal_test PRIVATE
@@ -2457,6 +2753,309 @@ if(GJXL_BUILD_TESTS)
   add_dependencies(gjxl_profile_storage_plan_metal_test gjxl_metal_shaders)
   add_test(NAME metal_profile_storage_plan COMMAND gjxl_profile_storage_plan_metal_test)
   set_tests_properties(metal_profile_storage_plan PROPERTIES TIMEOUT 180)
+  endif()
+  if(GJXL_ENABLE_CUDA)
+    add_executable(
+      gjxl_cuda_backend_test
+      tests/cuda_backend_test.cpp
+      tests/dct_reference.cpp
+    )
+
+    target_link_libraries(
+      gjxl_cuda_backend_test
+      PRIVATE
+        gjxl_cuda
+    )
+
+    target_include_directories(
+      gjxl_cuda_backend_test
+      PRIVATE
+        ${CUDAToolkit_INCLUDE_DIRS}
+    )
+
+    add_test(
+      NAME cuda_backend
+      COMMAND gjxl_cuda_backend_test
+    )
+    set_tests_properties(cuda_backend PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_exact_arithmetic_test tests/cuda_exact_arithmetic_test.cpp)
+    target_link_libraries(gjxl_cuda_exact_arithmetic_test PRIVATE
+      gjxl_codestream gjxl_cuda gjxl_pfm_io CUDA::cudart)
+    target_compile_definitions(gjxl_cuda_exact_arithmetic_test PRIVATE
+      GJXL_SAMPLE_PFM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/testdata/codestream_sample.pfm")
+    add_test(NAME cuda_exact_arithmetic COMMAND gjxl_cuda_exact_arithmetic_test)
+    set_tests_properties(cuda_exact_arithmetic PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_profiling_test tests/cuda_profiling_test.cpp)
+    target_link_libraries(gjxl_cuda_profiling_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_profiling_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_profiling COMMAND gjxl_cuda_profiling_test)
+    set_tests_properties(cuda_profiling PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(NAME cuda_aq_profile COMMAND gjxl_cuda_aq_test --profile-only)
+    set_tests_properties(cuda_aq_profile PROPERTIES SKIP_RETURN_CODE 77)
+    add_executable(gjxl_cuda_workflow_profile_test tests/cuda_workflow_profile_test.cpp)
+    target_link_libraries(gjxl_cuda_workflow_profile_test PRIVATE gjxl_codestream gjxl_cuda)
+    add_test(NAME cuda_workflow_profile COMMAND gjxl_cuda_workflow_profile_test)
+    set_tests_properties(cuda_workflow_profile PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 180)
+
+    add_executable(
+      gjxl_gpu_primitives_cuda_test
+      tests/gpu_primitives_metal_test.cpp
+    )
+
+    target_compile_definitions(
+      gjxl_gpu_primitives_cuda_test
+      PRIVATE
+        GJXL_TEST_CUDA=1
+    )
+
+    target_link_libraries(
+      gjxl_gpu_primitives_cuda_test
+      PRIVATE
+        gjxl_codec
+        gjxl_cuda
+    )
+
+    add_test(
+      NAME cuda_gpu_primitives
+      COMMAND gjxl_gpu_primitives_cuda_test
+    )
+    set_tests_properties(cuda_gpu_primitives PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(
+      gjxl_cuda_aq_test
+      tests/cuda_aq_test.cpp
+    )
+
+    target_link_libraries(
+      gjxl_cuda_aq_test
+      PRIVATE
+        gjxl_codestream
+        gjxl_cuda
+    )
+
+    add_test(
+      NAME cuda_aq
+      COMMAND gjxl_cuda_aq_test
+    )
+    target_include_directories(gjxl_cuda_aq_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    set_tests_properties(cuda_aq PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_quantization_adjustment_test
+      tests/cuda_quantization_adjustment_test.cpp)
+    target_link_libraries(gjxl_cuda_quantization_adjustment_test PRIVATE gjxl_codec gjxl_cuda)
+    target_include_directories(gjxl_cuda_quantization_adjustment_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_quantization_adjustment COMMAND gjxl_cuda_quantization_adjustment_test)
+    set_tests_properties(cuda_quantization_adjustment PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_resident_dct_test tests/cuda_resident_dct_test.cpp)
+    target_link_libraries(gjxl_cuda_resident_dct_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_resident_dct_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_resident_dct COMMAND gjxl_cuda_resident_dct_test)
+    set_tests_properties(cuda_resident_dct PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_resident_coefficients_test
+      tests/cuda_resident_coefficients_test.cpp)
+    target_link_libraries(gjxl_cuda_resident_coefficients_test PRIVATE gjxl_codec gjxl_cuda)
+    target_include_directories(gjxl_cuda_resident_coefficients_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_resident_coefficients COMMAND gjxl_cuda_resident_coefficients_test)
+    set_tests_properties(cuda_resident_coefficients PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_epf_test tests/cuda_epf_test.cpp)
+    target_link_libraries(gjxl_cuda_epf_test PRIVATE gjxl_codec gjxl_cuda)
+    target_include_directories(gjxl_cuda_epf_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_epf COMMAND gjxl_cuda_epf_test)
+    set_tests_properties(cuda_epf PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_epf_color_test tests/cuda_epf_color_test.cpp)
+    target_link_libraries(gjxl_cuda_epf_color_test PRIVATE gjxl_codec gjxl_cuda)
+    target_include_directories(gjxl_cuda_epf_color_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_epf_color COMMAND gjxl_cuda_epf_color_test)
+    set_tests_properties(cuda_epf_color PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_gaborish_epf_test tests/cuda_gaborish_epf_test.cpp)
+    target_link_libraries(gjxl_cuda_gaborish_epf_test PRIVATE gjxl_codec gjxl_cuda)
+    target_include_directories(gjxl_cuda_gaborish_epf_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_gaborish_epf COMMAND gjxl_cuda_gaborish_epf_test)
+    set_tests_properties(cuda_gaborish_epf PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(
+      gjxl_ac_strategy_cuda_test
+      tests/ac_strategy_metal_test.cpp
+    )
+
+    target_compile_definitions(
+      gjxl_ac_strategy_cuda_test
+      PRIVATE
+        GJXL_TEST_CUDA=1
+    )
+
+    target_link_libraries(
+      gjxl_ac_strategy_cuda_test
+      PRIVATE
+        gjxl_codec
+        gjxl_cuda
+    )
+
+    add_test(
+      NAME cuda_ac_strategy
+      COMMAND gjxl_ac_strategy_cuda_test
+    )
+    set_tests_properties(cuda_ac_strategy PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_ac_strategy_cuda_search_test
+      tests/ac_strategy_gpu_search_test.cpp)
+    target_compile_definitions(gjxl_ac_strategy_cuda_search_test PRIVATE
+      GJXL_TEST_CUDA=1)
+    target_link_libraries(gjxl_ac_strategy_cuda_search_test PRIVATE
+      gjxl_gpu_ops gjxl_cuda)
+    add_test(NAME cuda_ac_strategy_search COMMAND gjxl_ac_strategy_cuda_search_test)
+    set_tests_properties(cuda_ac_strategy_search PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_fused_ac_strategy_test
+      tests/cuda_fused_ac_strategy_test.cpp)
+    target_link_libraries(gjxl_cuda_fused_ac_strategy_test PRIVATE gjxl_codec gjxl_cuda)
+    target_include_directories(gjxl_cuda_fused_ac_strategy_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_fused_ac_strategy COMMAND gjxl_cuda_fused_ac_strategy_test)
+    set_tests_properties(cuda_fused_ac_strategy PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_memory_pool_test tests/cuda_memory_pool_test.cpp)
+    target_link_libraries(gjxl_cuda_memory_pool_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_memory_pool_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_memory_pool COMMAND gjxl_cuda_memory_pool_test)
+    set_tests_properties(cuda_memory_pool PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_ac_packing_test tests/cuda_ac_packing_test.cpp)
+    target_link_libraries(gjxl_cuda_ac_packing_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_ac_packing_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_ac_packing COMMAND gjxl_cuda_ac_packing_test)
+    set_tests_properties(cuda_ac_packing PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_compact_ac_test tests/cuda_compact_ac_test.cpp)
+    target_link_libraries(gjxl_cuda_compact_ac_test PRIVATE gjxl_cuda CUDA::cudart)
+    add_test(NAME cuda_compact_ac COMMAND gjxl_cuda_compact_ac_test)
+    set_tests_properties(cuda_compact_ac PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_sparse_resident_test tests/cuda_sparse_resident_test.cpp)
+    target_link_libraries(gjxl_cuda_sparse_resident_test PRIVATE gjxl_codestream gjxl_cuda)
+    add_test(NAME cuda_sparse_resident COMMAND gjxl_cuda_sparse_resident_test)
+    set_tests_properties(cuda_sparse_resident PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_direct_ac_pack_test tests/cuda_direct_ac_pack_test.cpp)
+    target_link_libraries(gjxl_cuda_direct_ac_pack_test PRIVATE gjxl_cuda CUDA::cudart)
+    add_test(NAME cuda_direct_ac_pack COMMAND gjxl_cuda_direct_ac_pack_test)
+    set_tests_properties(cuda_direct_ac_pack PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_compose_maximum_test tests/cuda_compose_maximum_test.cu)
+    set_target_properties(gjxl_cuda_compose_maximum_test PROPERTIES
+      CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED YES CUDA_EXTENSIONS NO)
+    target_link_libraries(gjxl_cuda_compose_maximum_test PRIVATE gjxl_cuda CUDA::cudart)
+    add_test(NAME cuda_compose_maximum COMMAND gjxl_cuda_compose_maximum_test)
+    set_tests_properties(cuda_compose_maximum PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_aq_compose_reduction_test tests/cuda_aq_compose_reduction_test.cu)
+    set_target_properties(gjxl_cuda_aq_compose_reduction_test PROPERTIES
+      CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED YES CUDA_EXTENSIONS NO)
+    target_link_libraries(gjxl_cuda_aq_compose_reduction_test PRIVATE gjxl_cuda CUDA::cudart)
+    add_test(NAME cuda_aq_compose_reduction COMMAND gjxl_cuda_aq_compose_reduction_test)
+    set_tests_properties(cuda_aq_compose_reduction PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_opsin_test tests/cuda_opsin_test.cpp)
+    add_executable(gjxl_cuda_resident_input_test tests/cuda_resident_input_test.cpp)
+    add_executable(gjxl_cuda_resource_test tests/cuda_resource_test.cpp)
+    add_executable(gjxl_cuda_dc_processing_test tests/cuda_dc_processing_test.cpp)
+    add_executable(gjxl_cuda_compatibility_storage_plan_test tests/cuda_compatibility_storage_plan_test.cpp)
+    add_test(NAME cuda_workflow_admission COMMAND gjxl_workflow_admission_test --cuda)
+    set_tests_properties(cuda_workflow_admission PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 300)
+    target_link_libraries(gjxl_cuda_compatibility_storage_plan_test PRIVATE gjxl_codestream gjxl_cuda)
+    add_test(NAME cuda_compatibility_storage_plan COMMAND gjxl_cuda_compatibility_storage_plan_test)
+    set_tests_properties(cuda_compatibility_storage_plan PROPERTIES SKIP_RETURN_CODE 77)
+    target_link_libraries(gjxl_cuda_dc_processing_test PRIVATE gjxl_cuda CUDA::cudart)
+    add_test(NAME cuda_dc_processing COMMAND gjxl_cuda_dc_processing_test)
+    set_tests_properties(cuda_dc_processing PROPERTIES SKIP_RETURN_CODE 77)
+    add_executable(gjxl_cuda_resident_storage_plan_test tests/cuda_resident_storage_plan_test.cpp)
+    target_link_libraries(gjxl_cuda_resident_storage_plan_test PRIVATE gjxl_codestream gjxl_cuda)
+    add_test(NAME cuda_resident_storage_plan COMMAND gjxl_cuda_resident_storage_plan_test)
+    set_tests_properties(cuda_resident_storage_plan PROPERTIES SKIP_RETURN_CODE 77)
+    target_include_directories(gjxl_cuda_resource_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    target_link_libraries(gjxl_cuda_resource_test PRIVATE gjxl_cuda)
+    add_test(NAME cuda_resource COMMAND gjxl_cuda_resource_test)
+    set_tests_properties(cuda_resource PROPERTIES SKIP_RETURN_CODE 77)
+    add_executable(gjxl_cuda_low_effort_test tests/cuda_low_effort_test.cpp)
+    target_link_libraries(gjxl_cuda_low_effort_test PRIVATE gjxl_codestream gjxl_cuda)
+    add_test(NAME cuda_low_effort COMMAND gjxl_cuda_low_effort_test)
+    set_tests_properties(cuda_low_effort PROPERTIES SKIP_RETURN_CODE 77)
+    target_link_libraries(gjxl_cuda_resident_input_test PRIVATE gjxl_cuda)
+    add_test(NAME cuda_resident_input COMMAND gjxl_cuda_resident_input_test)
+    set_tests_properties(cuda_resident_input PROPERTIES SKIP_RETURN_CODE 77)
+    target_link_libraries(gjxl_cuda_opsin_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_opsin_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_opsin COMMAND gjxl_cuda_opsin_test)
+    add_test(NAME cuda_opsin_tall COMMAND gjxl_cuda_opsin_test --tall-only)
+    set_tests_properties(cuda_opsin cuda_opsin_tall PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_low_medium_test tests/cuda_low_medium_test.cpp)
+    target_link_libraries(gjxl_cuda_low_medium_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_low_medium_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_low_medium COMMAND gjxl_cuda_low_medium_test)
+    add_test(NAME cuda_low_medium_tall COMMAND gjxl_cuda_low_medium_test --tall-only)
+    add_test(NAME cuda_low_medium_policy COMMAND gjxl_cuda_low_medium_test --policy-only)
+    add_test(NAME cuda_low_medium_ownership COMMAND gjxl_cuda_low_medium_test --ownership-only)
+    set_tests_properties(cuda_low_medium cuda_low_medium_tall cuda_low_medium_policy
+                        cuda_low_medium_ownership PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_l2_final_test tests/cuda_l2_final_test.cpp)
+    target_link_libraries(gjxl_cuda_l2_final_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_l2_final_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_l2_final COMMAND gjxl_cuda_l2_final_test)
+    set_tests_properties(cuda_l2_final PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_final_cfl_test tests/cuda_final_cfl_test.cpp)
+    target_link_libraries(gjxl_cuda_final_cfl_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_final_cfl_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_final_cfl COMMAND gjxl_cuda_final_cfl_test)
+    set_tests_properties(cuda_final_cfl PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_initial_cfl_test tests/cuda_initial_cfl_test.cpp)
+    target_link_libraries(gjxl_cuda_initial_cfl_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_initial_cfl_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_initial_cfl COMMAND gjxl_cuda_initial_cfl_test)
+    set_tests_properties(cuda_initial_cfl PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_frequency_split_test tests/cuda_frequency_split_test.cpp)
+    target_link_libraries(gjxl_cuda_frequency_split_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_frequency_split_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_frequency_split COMMAND gjxl_cuda_frequency_split_test)
+    set_tests_properties(cuda_frequency_split PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_malta_test tests/cuda_malta_test.cpp)
+    target_link_libraries(gjxl_cuda_malta_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_malta_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_malta COMMAND gjxl_cuda_malta_test)
+    add_test(NAME cuda_malta_tall COMMAND gjxl_cuda_malta_test --tall-only)
+    set_tests_properties(cuda_malta cuda_malta_tall PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(
+      gjxl_cuda_butteraugli_test
+      tests/cuda_butteraugli_test.cpp
+    )
+
+    target_link_libraries(
+      gjxl_cuda_butteraugli_test
+      PRIVATE
+        gjxl_codec
+        gjxl_cuda
+    )
+
+    add_test(
+      NAME cuda_butteraugli
+      COMMAND gjxl_cuda_butteraugli_test
+    )
+    set_tests_properties(cuda_butteraugli PROPERTIES SKIP_RETURN_CODE 77)
+  endif()
+
+  if(GJXL_ENABLE_METAL)
 
   add_executable(
     gjxl_gpu_primitives_metal_test
@@ -2847,6 +3446,24 @@ if(GJXL_BUILD_TESTS)
   set_tests_properties(metal_quantizer_selection PROPERTIES TIMEOUT 180 SKIP_RETURN_CODE 77)
 
   add_executable(gjxl_metal_submission_storage_plan_test tests/metal_submission_storage_plan_test.cpp)
+  add_executable(gjxl_metal_ac_tokenization_test tests/metal_ac_tokenization_test.cpp)
+  target_link_libraries(gjxl_metal_ac_tokenization_test PRIVATE gjxl_codestream gjxl_metal)
+  target_compile_definitions(gjxl_metal_ac_tokenization_test PRIVATE GJXL_METALLIB_PATH="${GJXL_METALLIB}")
+  add_dependencies(gjxl_metal_ac_tokenization_test gjxl_metal_shaders)
+  add_test(NAME metal_ac_tokenization COMMAND gjxl_metal_ac_tokenization_test)
+
+  add_executable(gjxl_gpu_tokenization_default_test tests/gpu_tokenization_default_test.cpp)
+  target_link_libraries(gjxl_gpu_tokenization_default_test PRIVATE gjxl_codestream gjxl_metal)
+  add_test(NAME gpu_tokenization_default COMMAND gjxl_gpu_tokenization_default_test)
+  if(GJXL_BUILD_TOKENIZATION_EXPERIMENT)
+    add_executable(gjxl_metal_ac_tokenization_failure_test tests/metal_ac_tokenization_failure_test.cpp)
+    target_link_libraries(gjxl_metal_ac_tokenization_failure_test PRIVATE gjxl_codestream gjxl_metal)
+    target_include_directories(gjxl_metal_ac_tokenization_failure_test SYSTEM PRIVATE third_party/metal-cpp)
+    target_compile_definitions(gjxl_metal_ac_tokenization_failure_test PRIVATE GJXL_METALLIB_PATH="${GJXL_METALLIB}")
+    add_dependencies(gjxl_metal_ac_tokenization_failure_test gjxl_metal_shaders)
+    add_test(NAME metal_ac_tokenization_failure COMMAND gjxl_metal_ac_tokenization_failure_test)
+  endif()
+
   add_executable(gjxl_metal_dc_processing_test tests/metal_dc_processing_test.cpp)
   target_link_libraries(gjxl_metal_dc_processing_test PRIVATE gjxl_metal gjxl_codec)
   target_include_directories(gjxl_metal_dc_processing_test SYSTEM PRIVATE third_party/metal-cpp)
@@ -2872,10 +3489,7 @@ if(GJXL_BUILD_TESTS)
   add_test(NAME resident_workflow_storage_plan COMMAND gjxl_resident_workflow_storage_plan_test)
   set_tests_properties(resident_workflow_storage_plan PROPERTIES TIMEOUT 240)
 
-  add_executable(gjxl_cpu_workflow_storage_plan_test tests/cpu_workflow_storage_plan_test.cpp)
-  target_link_libraries(gjxl_cpu_workflow_storage_plan_test PRIVATE gjxl_codestream gjxl_metal)
-  add_test(NAME cpu_workflow_storage_plan COMMAND gjxl_cpu_workflow_storage_plan_test)
-  set_tests_properties(cpu_workflow_storage_plan PROPERTIES TIMEOUT 300)
+
 
   add_executable(gjxl_compatibility_workflow_storage_plan_test tests/compatibility_workflow_storage_plan_test.cpp)
   target_link_libraries(gjxl_compatibility_workflow_storage_plan_test PRIVATE gjxl_codestream gjxl_metal)
@@ -2885,6 +3499,19 @@ if(GJXL_BUILD_TESTS)
   add_test(NAME compatibility_workflow_storage_plan COMMAND gjxl_compatibility_workflow_storage_plan_test)
   set_tests_properties(compatibility_workflow_storage_plan PROPERTIES TIMEOUT 300)
 
+  # Exercise the original fallback layout on the same physical device, including
+  # the resident AQ path, without exposing a production tuning switch.
+  foreach(target gjxl_metal_butteraugli_test gjxl_metal_aq_evaluation_test
+                 gjxl_metal_aq_host_storage_plan_test)
+    target_include_directories(${target} SYSTEM PRIVATE third_party/metal-cpp)
+  endforeach()
+  add_test(NAME metal_butteraugli_legacy
+    COMMAND gjxl_metal_butteraugli_test --legacy-butteraugli)
+  add_test(NAME metal_aq_evaluation_legacy
+    COMMAND gjxl_metal_aq_evaluation_test --legacy-butteraugli)
+  add_test(NAME metal_aq_host_storage_plan_legacy
+    COMMAND gjxl_metal_aq_host_storage_plan_test --legacy-butteraugli)
+
   add_executable(gjxl_metal_cache_admission_test tests/metal_cache_admission_test.cpp)
   target_link_libraries(gjxl_metal_cache_admission_test PRIVATE gjxl_metal)
   target_include_directories(gjxl_metal_cache_admission_test SYSTEM PRIVATE third_party/metal-cpp)
@@ -2892,17 +3519,21 @@ if(GJXL_BUILD_TESTS)
     GJXL_METALLIB_PATH="${GJXL_METALLIB}")
   add_dependencies(gjxl_metal_cache_admission_test gjxl_metal_shaders)
   add_test(NAME metal_cache_admission COMMAND gjxl_metal_cache_admission_test)
-  set_tests_properties(metal_cache_admission PROPERTIES TIMEOUT 60)
+  # This test creates many complete backends/pipelines. Hosted virtual Metal
+  # devices can take over a minute; each admission wait still has a 5 s bound.
+  set_tests_properties(metal_cache_admission PROPERTIES TIMEOUT 180)
 
   add_executable(gjxl_workflow_storage_plan_test tests/workflow_storage_plan_test.cpp)
   target_link_libraries(gjxl_workflow_storage_plan_test PRIVATE gjxl_c gjxl_codestream gjxl_metal)
   add_test(NAME workflow_storage_plan COMMAND gjxl_workflow_storage_plan_test)
   set_tests_properties(workflow_storage_plan PROPERTIES TIMEOUT 180)
 
-  add_executable(gjxl_workflow_admission_test tests/workflow_admission_test.cpp)
-  target_link_libraries(gjxl_workflow_admission_test PRIVATE gjxl_c gjxl_codestream gjxl_metal)
   add_test(NAME workflow_admission COMMAND gjxl_workflow_admission_test)
   set_tests_properties(workflow_admission PROPERTIES TIMEOUT 180)
+  endif()
+
+  add_executable(gjxl_workflow_admission_test tests/workflow_admission_test.cpp)
+  target_link_libraries(gjxl_workflow_admission_test PRIVATE gjxl_c gjxl_codestream)
   add_test(NAME workflow_admission_cpu COMMAND gjxl_workflow_admission_test --cpu-only)
   set_tests_properties(workflow_admission_cpu PROPERTIES TIMEOUT 180)
 
@@ -2914,9 +3545,25 @@ if(GJXL_BUILD_TESTS)
       "-DGJXL_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
       "-DGJXL_TEST_CONFIG=$<CONFIG>"
       "-DGJXL_INSTALL_INCLUDEDIR=${CMAKE_INSTALL_INCLUDEDIR}"
+      "-DGJXL_TEST_GENERATOR=${CMAKE_GENERATOR}"
+      "-DGJXL_TEST_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+      "-DGJXL_TEST_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+      "-DGJXL_TEST_GENERATOR_INSTANCE=${CMAKE_GENERATOR_INSTANCE}"
+      "-DGJXL_TEST_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}"
+      "-DGJXL_TEST_COMPILER_ID=${CMAKE_CXX_COMPILER_ID}"
+      "-DGJXL_TEST_C_COMPILER=${CMAKE_C_COMPILER}"
+      "-DGJXL_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+      "-DGJXL_TEST_RC_COMPILER=${CMAKE_RC_COMPILER}"
+      "-DGJXL_TEST_MT=${CMAKE_MT}"
+      "-DGJXL_TEST_CUDA_TOOLKIT_ROOT=${CUDAToolkit_ROOT}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_installed_consumer.cmake"
   )
-  set_tests_properties(codec_install_consumer PROPERTIES TIMEOUT 180)
+  # The fixture itself builds four compilation jobs and compiles every installed
+  # header separately in two language modes. Do not oversubscribe it via CTest.
+  set_tests_properties(codec_install_consumer PROPERTIES TIMEOUT 180 PROCESSORS 4)
+  if(MSVC)
+    set_tests_properties(codec_install_consumer PROPERTIES TIMEOUT 600)
+  endif()
 endif()
 
 if(GJXL_BUILD_BENCHMARKS)
@@ -2932,30 +3579,86 @@ if(GJXL_BUILD_BENCHMARKS)
       gjxl_pfm_io
   )
 
-  add_executable(
-    gjxl_metal_butteraugli_benchmark
-    benchmarks/metal_butteraugli_benchmark.cpp
-  )
+  if(GJXL_ENABLE_CUDA)
+    add_executable(gjxl_cuda_qualification tools/resident_qualification/driver.cpp)
+    target_compile_definitions(gjxl_cuda_qualification PRIVATE
+      GJXL_FINAL_SCHEDULER GJXL_CUDA_QUALIFICATION)
+    target_link_libraries(gjxl_cuda_qualification PRIVATE
+      gjxl_codestream gjxl_cuda gjxl_pfm_io CUDA::cudart)
+    if(WIN32)
+      target_link_libraries(gjxl_cuda_qualification PRIVATE Psapi)
+    endif()
 
-  target_link_libraries(
-    gjxl_metal_butteraugli_benchmark
-    PRIVATE
-      gjxl_codec
-      gjxl_butteraugli_fixtures
-      gjxl_metal
-  )
+    add_executable(
+      gjxl_cuda_encoding_benchmark
+      benchmarks/cuda_encoding_benchmark.cpp
+    )
 
-  target_compile_definitions(
-    gjxl_metal_butteraugli_benchmark
-    PRIVATE
-      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
-      GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
-  )
+    target_link_libraries(
+      gjxl_cuda_encoding_benchmark
+      PRIVATE
+        gjxl_codestream
+        gjxl_cuda
+        gjxl_pfm_io
+        CUDA::cudart
+    )
 
-  add_dependencies(
-    gjxl_metal_butteraugli_benchmark
-    gjxl_metal_shaders
-  )
+    if(GJXL_BUILD_TESTS)
+      add_test(
+        NAME cuda_encoding_benchmark_cli
+        COMMAND
+          gjxl_cuda_encoding_benchmark
+          --workload synthetic_128x96
+          --gpu-aq maximum-throughput
+          --gpu-only
+          --warmups 0
+          --samples 1
+      )
+      set_tests_properties(
+        cuda_encoding_benchmark_cli
+        PROPERTIES
+          LABELS "benchmark;cli;cuda"
+          SKIP_RETURN_CODE 77
+      )
+      add_test(NAME cuda_profile_benchmark_cli
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/cuda_profile_benchmark_cli_test.py"
+          "$<TARGET_FILE:gjxl_cuda_encoding_benchmark>")
+      set_tests_properties(cuda_profile_benchmark_cli PROPERTIES
+        LABELS "benchmark;cli;cuda" SKIP_RETURN_CODE 77 TIMEOUT 240)
+    endif()
+  endif()
+
+  if(GJXL_ENABLE_METAL)
+    add_executable(gjxl_metal_qualification tools/resident_qualification/driver.cpp)
+    target_compile_definitions(gjxl_metal_qualification PRIVATE GJXL_FINAL_SCHEDULER)
+    target_link_libraries(gjxl_metal_qualification PRIVATE
+      gjxl_codestream gjxl_metal gjxl_pfm_io)
+
+    add_executable(
+      gjxl_metal_butteraugli_benchmark
+      benchmarks/metal_butteraugli_benchmark.cpp
+    )
+
+    target_link_libraries(
+      gjxl_metal_butteraugli_benchmark
+      PRIVATE
+        gjxl_codec
+        gjxl_butteraugli_fixtures
+        gjxl_metal
+    )
+
+    target_compile_definitions(
+      gjxl_metal_butteraugli_benchmark
+      PRIVATE
+        GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+        GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+    )
+
+    add_dependencies(
+      gjxl_metal_butteraugli_benchmark
+      gjxl_metal_shaders
+    )
+  endif()
 
   if(GJXL_ENABLE_LIBJXL_REFERENCE)
     add_executable(
@@ -2978,6 +3681,7 @@ if(GJXL_BUILD_BENCHMARKS)
     )
   endif()
 
+  if(GJXL_ENABLE_METAL)
   execute_process(COMMAND git rev-parse HEAD
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     OUTPUT_VARIABLE GJXL_QUALITY_REVISION OUTPUT_STRIP_TRAILING_WHITESPACE
@@ -3014,43 +3718,44 @@ if(GJXL_BUILD_BENCHMARKS)
     set_tests_properties(quality_benchmark_cli PROPERTIES LABELS "benchmark;cli;metal")
   endif()
 
-  add_executable(
-    gjxl_encoding_benchmark
-    benchmarks/encoding_benchmark.cpp
-  )
-
-  target_link_libraries(
-    gjxl_encoding_benchmark
-    PRIVATE
-      gjxl_codestream
-      gjxl_metal
-      gjxl_pfm_io
-  )
-
-  target_compile_definitions(
-    gjxl_encoding_benchmark
-    PRIVATE
-      GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
-  )
-
-  add_dependencies(
-    gjxl_encoding_benchmark
-    gjxl_embedded_metal_shaders
-  )
-
-  if(GJXL_BUILD_TESTS)
-    add_test(
-      NAME encoding_benchmark_cli
-      COMMAND
-        "${Python3_EXECUTABLE}"
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/encoding_benchmark_cli_test.py"
-        --benchmark $<TARGET_FILE:gjxl_encoding_benchmark>
-        --metallib "${GJXL_METALLIB}"
+    add_executable(
+      gjxl_encoding_benchmark
+      benchmarks/encoding_benchmark.cpp
     )
-    set_tests_properties(
-      encoding_benchmark_cli
-      PROPERTIES LABELS "benchmark;cli;metal"
+
+    target_link_libraries(
+      gjxl_encoding_benchmark
+      PRIVATE
+        gjxl_codestream
+        gjxl_metal
+        gjxl_pfm_io
     )
+
+    target_compile_definitions(
+      gjxl_encoding_benchmark
+      PRIVATE
+        GJXL_FLOWER_PPM_PATH="${CMAKE_CURRENT_SOURCE_DIR}/third_party/libjxl/testdata/jxl/flower/flower_small.rgb.depth8.ppm"
+    )
+
+    add_dependencies(
+      gjxl_encoding_benchmark
+      gjxl_embedded_metal_shaders
+    )
+
+    if(GJXL_BUILD_TESTS)
+      add_test(
+        NAME encoding_benchmark_cli
+        COMMAND
+          "${Python3_EXECUTABLE}"
+          "${CMAKE_CURRENT_SOURCE_DIR}/tests/encoding_benchmark_cli_test.py"
+          --benchmark $<TARGET_FILE:gjxl_encoding_benchmark>
+          --metallib "${GJXL_METALLIB}"
+      )
+      set_tests_properties(
+        encoding_benchmark_cli
+        PROPERTIES LABELS "benchmark;cli;metal"
+      )
+    endif()
   endif()
 
   add_executable(
@@ -3064,9 +3769,10 @@ if(GJXL_BUILD_BENCHMARKS)
       COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/image_batch_benchmark_cli_test.py"
         --benchmark $<TARGET_FILE:gjxl_image_batch_benchmark>
+        --default-backend $<IF:$<BOOL:${GJXL_ENABLE_METAL}>,metal,cpu>
     )
     set_tests_properties(
-      image_batch_benchmark_cli PROPERTIES LABELS "benchmark;cli;metal"
+      image_batch_benchmark_cli PROPERTIES LABELS "benchmark;cli"
     )
   endif()
 
@@ -3077,15 +3783,22 @@ if(GJXL_BUILD_BENCHMARKS)
       gjxl_pfm_io
   )
 
-  add_dependencies(
+  target_compile_definitions(
     gjxl_image_batch_benchmark
-    gjxl_embedded_metal_shaders
+    PRIVATE
+      GJXL_BENCHMARK_HAS_METAL=$<BOOL:${GJXL_ENABLE_METAL}>
   )
 
-  add_executable(
-    gjxl_dct_benchmark
-    benchmarks/dct_benchmark.cpp
-  )
+  if(GJXL_ENABLE_METAL)
+    add_dependencies(
+      gjxl_image_batch_benchmark
+      gjxl_embedded_metal_shaders
+    )
+
+    add_executable(
+      gjxl_dct_benchmark
+      benchmarks/dct_benchmark.cpp
+    )
 
   add_executable(gjxl_metal_coefficient_probe benchmarks/metal_coefficient_probe.cpp)
   target_link_libraries(gjxl_metal_coefficient_probe PRIVATE gjxl_metal)
@@ -3111,68 +3824,70 @@ if(GJXL_BUILD_BENCHMARKS)
   target_link_libraries(gjxl_metal_ac_candidate_probe PRIVATE gjxl_metal)
   target_include_directories(gjxl_metal_ac_candidate_probe PRIVATE third_party/metal-cpp)
 
-  target_link_libraries(
-    gjxl_dct_benchmark
-    PRIVATE
-      gjxl_metal
-  )
 
-  target_compile_definitions(
-    gjxl_dct_benchmark
-    PRIVATE
-      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
-  )
+    target_link_libraries(
+      gjxl_dct_benchmark
+      PRIVATE
+        gjxl_metal
+    )
 
-  add_dependencies(
-    gjxl_dct_benchmark
-    gjxl_metal_shaders
-  )
+    target_compile_definitions(
+      gjxl_dct_benchmark
+      PRIVATE
+        GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+    )
 
-  add_executable(
-    gjxl_ac_strategy_benchmark
-    benchmarks/ac_strategy_benchmark.cpp
-  )
+    add_dependencies(
+      gjxl_dct_benchmark
+      gjxl_metal_shaders
+    )
 
-  target_link_libraries(
-    gjxl_ac_strategy_benchmark
-    PRIVATE
-      gjxl_codec
-      gjxl_metal
-  )
+    add_executable(
+      gjxl_ac_strategy_benchmark
+      benchmarks/ac_strategy_benchmark.cpp
+    )
 
-  target_compile_definitions(
-    gjxl_ac_strategy_benchmark
-    PRIVATE
-      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
-  )
+    target_link_libraries(
+      gjxl_ac_strategy_benchmark
+      PRIVATE
+        gjxl_codec
+        gjxl_metal
+    )
 
-  add_dependencies(
-    gjxl_ac_strategy_benchmark
-    gjxl_metal_shaders
-  )
+    target_compile_definitions(
+      gjxl_ac_strategy_benchmark
+      PRIVATE
+        GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+    )
 
-  add_executable(
-    gjxl_ac_strategy_search_benchmark
-    benchmarks/ac_strategy_search_benchmark.cpp
-  )
+    add_dependencies(
+      gjxl_ac_strategy_benchmark
+      gjxl_metal_shaders
+    )
 
-  target_link_libraries(
-    gjxl_ac_strategy_search_benchmark
-    PRIVATE
-      gjxl_gpu_ops
-      gjxl_metal
-  )
+    add_executable(
+      gjxl_ac_strategy_search_benchmark
+      benchmarks/ac_strategy_search_benchmark.cpp
+    )
 
-  target_compile_definitions(
-    gjxl_ac_strategy_search_benchmark
-    PRIVATE
-      GJXL_METALLIB_PATH="${GJXL_METALLIB}"
-  )
+    target_link_libraries(
+      gjxl_ac_strategy_search_benchmark
+      PRIVATE
+        gjxl_gpu_ops
+        gjxl_metal
+    )
 
-  add_dependencies(
-    gjxl_ac_strategy_search_benchmark
-    gjxl_metal_shaders
-  )
+    target_compile_definitions(
+      gjxl_ac_strategy_search_benchmark
+      PRIVATE
+        GJXL_METALLIB_PATH="${GJXL_METALLIB}"
+    )
+
+    add_dependencies(
+      gjxl_ac_strategy_search_benchmark
+      gjxl_metal_shaders
+    )
+  endif()
 
 endif()
 

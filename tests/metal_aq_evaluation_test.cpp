@@ -25,18 +25,19 @@
 #include "codec/vardct_frame.h"
 #include "codec/vardct_frame_view_internal.h"
 #include "core/ac_strategy.h"
-#include "core/status.h"
 #include "core/quantizer.h"
+#include "core/status.h"
 #include "gpu/backend.h"
-#include "gpu/metal/metal_aq_evaluation_test.h"
-#include "gpu/metal/metal_aq_evaluation_profile.h"
-#include "gpu/ops/gpu_execution_profile_internal.h"
 #include "gpu/metal/metal_aq_butteraugli_test.h"
+#include "gpu/metal/metal_aq_evaluation_profile.h"
+#include "gpu/metal/metal_aq_evaluation_test.h"
 #include "gpu/metal/metal_aq_postprocess_test.h"
 #include "gpu/metal/metal_backend.h"
 #include "gpu/metal/metal_butteraugli_test.h"
 #include "gpu/ops/aq_evaluation.h"
+#include "gpu/ops/gpu_execution_profile_internal.h"
 #include "gpu/ops/resident_input.h"
+#include "metal_butteraugli_traffic_test_utils.h"
 
 namespace {
 
@@ -54,6 +55,14 @@ struct MemoryObservation {
 };
 
 std::vector<MemoryObservation> g_memory_observations;
+
+bool SupportsStageProfiling(gjxl::GpuBackend& gpu) {
+  const auto* profiler = dynamic_cast<
+    gjxl::gpu_profile_internal::GpuSubmissionProfiler*>(&gpu);
+  if (profiler == nullptr) return false;
+  const auto capabilities = profiler->QueryGpuProfilingCapabilities();
+  return capabilities.timestamp_counter && capabilities.stage_boundary;
+}
 
 bool CheckStatus(gjxl::Status status, std::string_view operation) {
   if (status.ok()) return true;
@@ -151,13 +160,13 @@ bool MakeMixedStrategies(gjxl::AcStrategyGrid* strategies) {
       !CheckStatus(strategies->Set(
         4, 0, gjxl::AcStrategyType::kDct32x16), "DCT32x16 placement") ||
       !CheckStatus(strategies->Set(
-        6, 0, gjxl::AcStrategyType::kDct16x32), "DCT16x32 placement") ||
+        4, 4, gjxl::AcStrategyType::kDct16x32), "DCT16x32 placement") ||
       !CheckStatus(strategies->Set(
-        10, 0, gjxl::AcStrategyType::kDct16x16), "DCT16x16 placement") ||
+        8, 0, gjxl::AcStrategyType::kDct16x16), "DCT16x16 placement") ||
       !CheckStatus(strategies->Set(
-        6, 2, gjxl::AcStrategyType::kDct16x8), "DCT16x8 placement") ||
+        10, 0, gjxl::AcStrategyType::kDct16x8), "DCT16x8 placement") ||
       !CheckStatus(strategies->Set(
-        7, 2, gjxl::AcStrategyType::kDct8x16), "DCT8x16 placement")) {
+        10, 2, gjxl::AcStrategyType::kDct8x16), "DCT8x16 placement")) {
     return false;
   }
   strategies->fill_empty_dct8();
@@ -1507,6 +1516,25 @@ bool CheckResidentButteraugliPolicy(
     std::cerr << "Metal resident policy profiler is unavailable\n";
     return false;
   }
+  if (!SupportsStageProfiling(gpu)) {
+    std::vector<double> scores{-91.0};
+    gjxl::gpu_profile_internal::GpuExecutionProfile profile;
+    profile.wall_stages.push_back({.stage_id = "sentinel"});
+    const auto expected = profile;
+    const auto before = gpu.stats().committed_submissions;
+    if (!ExpectCode(profiler->EvaluateResidentButteraugliPolicyProfiled(
+          {.adjusted_initial_quant_field = {initial.data(), blocks, blocks.width},
+           .quant_dc = setup.quant_dc, .butteraugli_target = kTarget,
+           .lower_bound = setup.lower_bound, .upper_bound = setup.upper_bound,
+           .iterations = kIterations},
+          {.score_history = &scores},
+          gjxl::gpu_profile_internal::GpuProfilingMode::kStage, &profile),
+          gjxl::StatusCode::kUnavailable, "unsupported resident policy profile") ||
+        scores != std::vector<double>{-91.0} || profile != expected ||
+        gpu.stats().committed_submissions != before) return false;
+    std::cout << "Resident policy timestamp checks skipped: counters unavailable\n";
+    return true;
+  }
   std::vector<float> profiled_quant(stride * blocks.height, kPoison);
   std::vector<float> profiled_block(stride * blocks.height, kPoison);
   std::vector<double> profiled_scores;
@@ -1679,11 +1707,30 @@ bool CheckResidentButteraugliPolicy(
           {.score_history = &final_cfl_scores},
           gjxl::gpu_profile_internal::GpuProfilingMode::kStage,
           &final_cfl_profile),
-          "resident final CfL profile") ||
+          "resident final CfL profile")) {
+    return false;
+  }
+  // CfL adds one invariant-field quantizer and one CfL dispatch to the
+  // ordinary reconstruction work. Match the selected device path: two
+  // dispatches for small fields, or twenty for the parallel fallback.
+  size_t quantizer_dispatches = 0;
+  if (final_cfl_profile.submissions.size() == 1) {
+    for (const auto& stage : final_cfl_profile.submissions[0].stages) {
+      if (stage.stage_id == "aq.reconstruction.quantizer" &&
+          stage.iteration == 1) {
+        quantizer_dispatches = stage.dispatches.size();
+      }
+      if (stage.dispatches.empty()) {
+        std::cerr << "Resident final CfL profile contains an empty stage\n";
+        return false;
+      }
+    }
+  }
+  if ((quantizer_dispatches != 2 && quantizer_dispatches != 20) ||
       !CheckResidentForwardDispatches(
           final_cfl_profile, kIterations + 1,
           ResidentForwardDispatchPattern::kFirstIterationOnly,
-          "resident final CfL profile", 1)) {
+          "resident final CfL profile", quantizer_dispatches + 1)) {
     return false;
   }
   size_t final_cfl_dispatches = 0;
@@ -1846,6 +1893,19 @@ bool CheckResidentPolicyInitialization(gjxl::GpuBackend &gpu) {
     };
     std::vector<double> expected_scores, actual_scores;
     gjxl::VarDctEncoderFrame expected_frame, actual_frame;
+    // Alternate supplied CfL, an explicitly retained quantizer snapshot and
+    // CfL derived from the fused policy's adjusted field. Reuse the evaluator
+    // across transitions to catch stale preparation flags as well.
+    const uint32_t cfl_iterations = trial % 2 == 0 ? 0u : 8u;
+    if (trial % 3 == 0) {
+      if (!CheckStatus(prepared->SetInvariantColorCorrelation(
+              fixture.input.View().y_to_x, fixture.input.View().y_to_b),
+              "supplied initialization CfL")) return false;
+    } else if (!CheckStatus(prepared->PrepareInvariantColorCorrelationResident(
+                corrected, setup.quant_dc, cfl_iterations),
+                "serial initialization CfL snapshot")) {
+      return false;
+    }
     if (!CheckStatus(
             prepared->EvaluateResidentButteraugliPolicy(
                 input, {.quant_field = {expected.data(), blocks, blocks.width},
@@ -1856,6 +1916,12 @@ bool CheckResidentPolicyInitialization(gjxl::GpuBackend &gpu) {
     input.adjusted_initial_quant_field = raw;
     input.lower_bound = input.upper_bound = kPoison; // Must be ignored.
     input.adjust_initial_field = true;
+    input.derive_color_correlation = trial % 3 == 2;
+    input.color_correlation_iterations = cfl_iterations;
+    if (trial % 3 == 1 &&
+        !CheckStatus(prepared->PrepareInvariantColorCorrelationResident(
+            corrected, setup.quant_dc, cfl_iterations),
+            "fused initialization explicit CfL snapshot")) return false;
     const auto before = gpu.stats();
     if (!CheckStatus(
             prepared->EvaluateResidentButteraugliPolicy(
@@ -2060,29 +2126,33 @@ bool CheckResidentPolicyMaterialization(gjxl::GpuBackend& gpu) {
   auto* profiler = dynamic_cast<
     gjxl::gpu_profile_internal::PreparedAqEvaluationProfiler*>(
       prepared.get());
-  std::vector<double> profiled_scores;
-  gjxl::VarDctEncoderFrame profiled_frame;
-  gjxl::gpu_profile_internal::GpuExecutionProfile handoff_profile;
-  if (profiler == nullptr ||
-      !CheckStatus(profiler->EvaluateResidentButteraugliPolicyProfiled(
-        input,
-        {.score_history = &profiled_scores, .frame = &profiled_frame},
-        gjxl::gpu_profile_internal::GpuProfilingMode::kStage,
-        &handoff_profile), "profiled resident frame handoff") ||
-      profiled_scores != lean_scores ||
-      !QuantizedCoefficientsEqual(profiled_frame, lean_frame) ||
-      handoff_profile.wall_stages.size() != 2 ||
-      handoff_profile.wall_stages[0].stage_id !=
-        "resident.frame_mapping" ||
-      handoff_profile.wall_stages[0].kind !=
-        gjxl::gpu_profile_internal::GpuWallStageKind::kReadback ||
-      handoff_profile.wall_stages[1].stage_id !=
-        "resident.frame_assembly" ||
-      handoff_profile.wall_stages[1].kind !=
-        gjxl::gpu_profile_internal::GpuWallStageKind::kHost ||
-      handoff_profile.wall_stages[1].wall_nanoseconds == 0) {
-    std::cerr << "Profiled resident frame handoff differs\n";
-    return false;
+  if (SupportsStageProfiling(gpu)) {
+    std::vector<double> profiled_scores;
+    gjxl::VarDctEncoderFrame profiled_frame;
+    gjxl::gpu_profile_internal::GpuExecutionProfile handoff_profile;
+    if (profiler == nullptr ||
+        !CheckStatus(profiler->EvaluateResidentButteraugliPolicyProfiled(
+          input,
+          {.score_history = &profiled_scores, .frame = &profiled_frame},
+          gjxl::gpu_profile_internal::GpuProfilingMode::kStage,
+          &handoff_profile), "profiled resident frame handoff") ||
+        profiled_scores != lean_scores ||
+        !QuantizedCoefficientsEqual(profiled_frame, lean_frame) ||
+        handoff_profile.wall_stages.size() != 2 ||
+        handoff_profile.wall_stages[0].stage_id !=
+          "resident.frame_mapping" ||
+        handoff_profile.wall_stages[0].kind !=
+          gjxl::gpu_profile_internal::GpuWallStageKind::kReadback ||
+        handoff_profile.wall_stages[1].stage_id !=
+          "resident.frame_assembly" ||
+        handoff_profile.wall_stages[1].kind !=
+          gjxl::gpu_profile_internal::GpuWallStageKind::kHost ||
+        handoff_profile.wall_stages[1].wall_nanoseconds == 0) {
+      std::cerr << "Profiled resident frame handoff differs\n";
+      return false;
+    }
+  } else {
+    std::cout << "Resident handoff timestamp checks skipped: counters unavailable\n";
   }
 
   HostImage failed_reconstruction(
@@ -2168,6 +2238,10 @@ bool CheckEvaluationFreePolicy(gjxl::GpuBackend& gpu) {
   // Both first-use execution modes must construct forward coefficients and
   // final CfL; a reused evaluator must produce exactly the same integers.
   for (int mode = 0; mode < 3; ++mode) {
+    if (mode == 2 && !SupportsStageProfiling(gpu)) {
+      std::cout << "Zero-update timestamp checks skipped: counters unavailable\n";
+      continue;
+    }
     auto options = MakeOptions();
     options.evaluation_free = mode != 0;
     input.evaluate_final_field = !options.evaluation_free;
@@ -2227,12 +2301,20 @@ bool CheckEvaluationFreePolicy(gjxl::GpuBackend& gpu) {
               std::cerr << "Evaluation stage in zero-update profile: " << stage.stage_id << '\n';
               return false;
             }
+            if (stage.dispatches.empty()) {
+              std::cerr << "Empty stage in zero-update profile: "
+                        << stage.stage_id << '\n';
+              return false;
+            }
             reset |= stage.stage_id == "aq.final_frame.reset";
             quantizer |= stage.stage_id == "aq.final_frame.quantizer";
             final_cfl |= stage.stage_id == "aq.final_frame.final_cfl";
           }
         }
-        if (!reset || !quantizer || final_cfl != (pass == 0)) return false;
+        // First-use CfL includes both quantizer selections. Only reused
+        // execution has a separate final-frame quantizer stage.
+        if (!reset || quantizer != (pass != 0) || final_cfl != (pass == 0))
+          return false;
       }
     }
     if (mode != 0) {
@@ -2264,8 +2346,9 @@ bool CheckResidentPolicyFailure(ResidentPolicyFailure failure,
   Fixture fixture;
   std::unique_ptr<gjxl::GpuBackend> gpu;
   if (!fixture.Initialize() ||
-      !CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
-                   "resident policy failure backend")) {
+      !CheckStatus(
+          gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &gpu),
+          "resident policy failure backend")) {
     return false;
   }
   const gjxl::Extent2D blocks = fixture.strategies.extent();
@@ -2531,15 +2614,18 @@ bool CheckFailure(gjxl::StatusCode expected, bool submission,
   std::unique_ptr<gjxl::GpuBackend> gpu;
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
   if (!fixture.Initialize() ||
-      !CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
-                   "failure backend") ||
+      !CheckStatus(
+          gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &gpu),
+          "failure backend") ||
       !Prepare(*gpu, fixture.original, fixture.coding, fixture.strategies,
                &prepared) ||
-      !CheckStatus(gjxl::ArmNextMetalSubmissionFailureForTest(
-        *gpu, submission, completion), "AQ failure injection") ||
+      !CheckStatus(gjxl::ArmNextMetalSubmissionFailureForTest(*gpu, submission,
+                                                              completion),
+                   "AQ failure injection") ||
       (readback &&
-       !CheckStatus(gjxl::metal_internal::FailNextMetalAqReadbackForTesting(
-         *prepared), "AQ readback injection"))) {
+       !CheckStatus(
+           gjxl::metal_internal::FailNextMetalAqReadbackForTesting(*prepared),
+           "AQ readback injection"))) {
     return false;
   }
   EvaluationOutputStorage output(fixture.strategies.extent());
@@ -2560,12 +2646,14 @@ bool CheckFinalReadbackFailure() {
   std::unique_ptr<gjxl::GpuBackend> gpu;
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
   if (!fixture.Initialize() ||
-      !CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
-                   "final failure backend") ||
+      !CheckStatus(
+          gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &gpu),
+          "final failure backend") ||
       !Prepare(*gpu, fixture.original, fixture.coding, fixture.strategies,
                &prepared) ||
-      !CheckStatus(gjxl::metal_internal::FailNextMetalAqReadbackForTesting(
-        *prepared), "final readback injection")) {
+      !CheckStatus(
+          gjxl::metal_internal::FailNextMetalAqReadbackForTesting(*prepared),
+          "final readback injection")) {
     return false;
   }
   EvaluationOutputStorage bounded(fixture.strategies.extent());
@@ -2601,8 +2689,9 @@ bool CheckUploadOrNumericFailure(bool upload) {
   std::unique_ptr<gjxl::GpuBackend> gpu;
   std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
   if (!fixture.Initialize() ||
-      !CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
-                   "operational-boundary backend") ||
+      !CheckStatus(
+          gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &gpu),
+          "operational-boundary backend") ||
       !Prepare(*gpu, fixture.original, fixture.coding, fixture.strategies,
                &prepared)) {
     return false;
@@ -2640,8 +2729,9 @@ bool CheckScratchWorkspaceLeases() {
   Fixture fixture;
   std::unique_ptr<gjxl::GpuBackend> gpu;
   if (!fixture.Initialize() ||
-      !CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
-                   "scratch-lease backend")) {
+      !CheckStatus(
+          gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &gpu),
+          "scratch-lease backend")) {
     return false;
   }
 
@@ -2675,7 +2765,8 @@ bool CheckScratchWorkspaceLeases() {
   }
   std::unique_ptr<gjxl::GpuBackend> oracle_gpu;
   std::unique_ptr<gjxl::PreparedAqEvaluation> oracle_prepared;
-  if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &oracle_gpu),
+  if (!CheckStatus(gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH,
+                                                            &oracle_gpu),
                    "scratch-lease oracle backend") ||
       !Prepare(*oracle_gpu, fixture.original, fixture.coding,
                fixture.strategies, &oracle_prepared)) {
@@ -2927,6 +3018,71 @@ bool CheckInvalidCoefficientDecisionMode(gjxl::GpuBackend& gpu) {
       &prepared), gjxl::StatusCode::kInvalidArgument,
       "invalid coefficient decision mode") &&
     prepared == nullptr;
+}
+
+bool CheckStrategyGridValidation(gjxl::GpuBackend& gpu) {
+  Fixture fixture;
+  if (!fixture.Initialize()) return false;
+  const gjxl::Extent2D blocks = fixture.strategies.extent();
+  const std::vector<uint8_t> sharpness(
+    blocks.width * blocks.height, 4);
+  gjxl::AcStrategyGrid crossing;
+  if (!CheckStatus(gjxl::AcStrategyGrid::Create(blocks, &crossing),
+                   "crossing Metal strategy-grid creation") ||
+      !CheckStatus(crossing.Set(
+        7, 0, gjxl::AcStrategyType::kDct16x16),
+        "crossing Metal strategy placement")) {
+    return false;
+  }
+  crossing.fill_empty_dct8();
+  const auto preparation = [&](const gjxl::AcStrategyGrid& strategies) {
+    return gjxl::AqEvaluationPreparation{
+      .original_linear_rgb = fixture.original.View(),
+      .coding_opsin = fixture.coding.View(),
+      .strategies = &strategies,
+      .epf_sharpness = {sharpness.data(), blocks, blocks.width},
+      .options = MakeOptions(),
+      .resident_quantization = true,
+      .coefficient_decision_mode =
+        gjxl::AcCoefficientDecisionMode::kAdjustedSharedQuant,
+    };
+  };
+
+  const gjxl::GpuBackendStats before_prepare = gpu.stats();
+  std::unique_ptr<gjxl::PreparedAqEvaluation> rejected;
+  const gjxl::Status rejected_prepare =
+    gjxl::PrepareAqEvaluation(gpu, preparation(crossing), &rejected);
+  const gjxl::GpuBackendStats after_prepare = gpu.stats();
+  if (!ExpectCode(rejected_prepare, gjxl::StatusCode::kInvalidArgument,
+                  "crossing Metal strategy preparation") ||
+      rejected != nullptr ||
+      after_prepare.successful_allocations !=
+        before_prepare.successful_allocations ||
+      after_prepare.committed_submissions !=
+        before_prepare.committed_submissions) {
+    return false;
+  }
+
+  std::unique_ptr<gjxl::PreparedAqEvaluation> prepared;
+  if (!CheckStatus(gjxl::PrepareAqEvaluation(
+        gpu, preparation(fixture.strategies), &prepared),
+        "valid Metal resident strategy preparation")) {
+    return false;
+  }
+  const gjxl::GpuBackendStats before_reconfigure = gpu.stats();
+  const gjxl::Status rejected_reconfigure = prepared->Reconfigure(
+    crossing, {sharpness.data(), blocks, blocks.width});
+  const gjxl::GpuBackendStats after_reconfigure = gpu.stats();
+  return ExpectCode(
+           rejected_reconfigure, gjxl::StatusCode::kInvalidArgument,
+           "crossing Metal strategy reconfiguration") &&
+    after_reconfigure.successful_allocations ==
+      before_reconfigure.successful_allocations &&
+    after_reconfigure.committed_submissions ==
+      before_reconfigure.committed_submissions &&
+    CheckStatus(prepared->Reconfigure(
+      fixture.strategies, {sharpness.data(), blocks, blocks.width}),
+      "reuse Metal resident state after rejected strategy reconfiguration");
 }
 
 bool CheckPublicPreparationRejectsNonFiniteImages(gjxl::GpuBackend& gpu) {
@@ -3336,12 +3492,19 @@ bool CheckResidentInputPreparation(gjxl::GpuBackend& gpu) {
 
 }  // namespace
 
-int main() {
+int main(int argc, char **argv) {
+  if (argc == 2 && std::string_view(argv[1]) == "--legacy-butteraugli") {
+    gjxl::test::force_legacy_butteraugli = true;
+  } else if (argc != 1) {
+    return EXIT_FAILURE;
+  }
   std::unique_ptr<gjxl::GpuBackend> gpu;
-  if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
-                   "Metal AQ backend") ||
+  if (!CheckStatus(
+          gjxl::test::CreateButteraugliTestBackend(GJXL_METALLIB_PATH, &gpu),
+          "Metal AQ backend") ||
       !CheckProfilingSessionAggregation() || !CheckCapabilityBoundary() ||
       !CheckInvalidCoefficientDecisionMode(*gpu) ||
+      !CheckStrategyGridValidation(*gpu) ||
       !CheckPublicPreparationRejectsNonFiniteImages(*gpu) ||
       !CheckResidentInputPreparation(*gpu) || !CheckDeferredFrontend(*gpu) ||
       !CheckDeferredFrontend(*gpu, true) || !CheckReductionCorpus(*gpu) ||
@@ -3405,7 +3568,8 @@ int main() {
         // Failure tests above create many backends. Refresh this one so its
         // kernel names remain in the bounded diagnostic pipeline registry.
         std::unique_ptr<gjxl::GpuBackend> policy_gpu;
-        if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &policy_gpu),
+        if (!CheckStatus(gjxl::test::CreateButteraugliTestBackend(
+                             GJXL_METALLIB_PATH, &policy_gpu),
                          "filter-config resident backend") ||
             !CheckResidentButteraugliPolicy(*policy_gpu, options))
           return EXIT_FAILURE;

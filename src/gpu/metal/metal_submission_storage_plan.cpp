@@ -31,12 +31,12 @@ Status ComputeAcSubmissionStoragePlan(const AcSubmissionStorageOptions &o,
                                                                  kFreshExact))
     return Overflow();
   if (o.profiling && o.nonempty_batches != 0) {
-    p.stage_capacity = o.nonempty_batches;
+    p.stage_capacity = o.nonempty_batches + size_t(o.device_selection);
     // Gather + forward transform + residual + inverse transform + final cost.
     // Each fused pair can reduce this count by one, never increase it.
-    if (o.nonempty_batches > std::numeric_limits<size_t>::max() / 5)
+    if (o.nonempty_batches > (std::numeric_limits<size_t>::max() - 1) / 5)
       return Overflow();
-    p.maximum_dispatches = 5 * o.nonempty_batches;
+    p.maximum_dispatches = 5 * o.nonempty_batches + size_t(o.device_selection);
     if (!p.input.AddVector<MetalBackend::AcStrategyProfileContext>(
             p.stage_capacity, kFreshExact) ||
         !p.input.AddVector<MetalProfiledComputeStage>(p.stage_capacity,
@@ -103,6 +103,12 @@ Status ComputeResidentAqProfileInputStoragePlan(
     // prepares final CfL before the final coefficient pass.
     p.stage_capacity += 2 + kSupportedAqStrategies.size();
   }
+  // Candidate families, greedy selection and metadata precede the AQ loop in
+  // the same submission. Indirect arguments and policy bounds stay on device.
+  p.stage_capacity += size_t(o.resident_strategy_metadata) *
+                          (kSupportedAqStrategies.size() + 2) +
+                      size_t(o.device_strategy_dispatch) +
+                      2 * size_t(o.adjust_initial_field);
   if (!p.input
            .AddVector<MetalPreparedAqEvaluation::ResidentProfileStageContext>(
                p.stage_capacity, kFreshExact) ||
@@ -110,6 +116,16 @@ Status ComputeResidentAqProfileInputStoragePlan(
                                                     kFreshExact))
     return Overflow();
   *out = p;
+  return Status::Ok();
+}
+
+Status ComputeMetalIndirectProfileStorageBound(
+    size_t dispatches, resource_budget_internal::HostStorageBound* out) {
+  if (out == nullptr) return Status::InvalidArgument("Indirect profile bound is null");
+  resource_budget_internal::HostStorageBound bound;
+  if (!bound.AddVector<MetalIndirectDispatchRecord>(dispatches, kGrowing))
+    return Overflow();
+  *out = bound;
   return Status::Ok();
 }
 

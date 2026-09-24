@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include "codestream/serializer_storage_plan.h"
+#include "codestream/ac_tokenization_provider_internal.h"
 
 #include <algorithm>
 #include <array>
@@ -372,6 +373,23 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
     plan.output = Either(plan.output, fallback.output);
     plan.maximum_output_bytes =
       std::max(plan.maximum_output_bytes, fallback.maximum_output_bytes);
+  }
+  if (options.gpu_tokenization && !exhaustive) {
+    size_t metadata = 262144, output = 256, extra = 0;
+    size_t blocks_count = 0;
+    if (!blocks.try_area(&blocks_count) ||
+        !AddScaled(plan.maximum_ac_tokens, 6, &output) ||
+        !AddScaled(blocks_count, 80, &metadata) ||
+        !AddScaled(maps.maximum_ac_contexts, 4096, &metadata) ||
+        !AddScaled(metadata, 1, &extra) || !AddScaled(output, 1, &extra) ||
+        !AddScaled(plan.maximum_ac_tokens, 2, &extra) ||
+        !plan.working.Add({extra, extra})) return Overflow();
+    if (GpuTokenizationCompactLayout() != 0) {
+      plan.token_idle_pool_capacity={metadata,output};
+    } else {
+      if(!AddScaled(output,1,&metadata)) return Overflow();
+      plan.token_idle_pool_capacity={metadata,0};
+    }
   }
   *out = plan;
   return Status::Ok();

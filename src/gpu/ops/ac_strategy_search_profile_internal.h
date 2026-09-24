@@ -8,6 +8,11 @@
 
 namespace gjxl::gpu_profile_internal {
 
+[[nodiscard]] inline bool SupportsProfiledAcStrategySelection(GpuBackend& gpu) {
+  const auto* profiler = dynamic_cast<GpuAcStrategyEvaluationProfiler*>(&gpu);
+  return profiler != nullptr && profiler->SupportsDeviceSelectionProfiling();
+}
+
 [[nodiscard]] Status FindAcStrategyGridGpuResidentProfiled(
   GpuBackend& gpu,
   ConstImage3FView opsin,

@@ -22,9 +22,9 @@ struct MetalCompatibilityWorkflowStoragePlan {
   HostStorageBound output;
   HostStorageBound working;
   // Same order as ResidentWorkflowStoragePlan: input, persistent, staging,
-  // Butteraugli, completed frame (unused on compatibility routes). This is a
+  // Butteraugli, token metadata, token output, completed frame (unused on compatibility routes). This is a
   // pool-capacity bound, not additional active backing.
-  std::array<size_t, 5> idle_pool_capacity{};
+  std::array<size_t, 7> idle_pool_capacity{};
   bool
   operator==(const MetalCompatibilityWorkflowStoragePlan &) const = default;
 };

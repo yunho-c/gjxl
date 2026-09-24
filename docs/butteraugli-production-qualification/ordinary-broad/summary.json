@@ -1,0 +1,74 @@
+{
+  "alpine24-e7": {
+    "complete_call_ms": {
+      "median_change_percent": -12.202610132959801,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 464.77625,
+      "candidate_ms": 408.195125
+    }
+  },
+  "forest48-e10": {
+    "complete_call_ms": {
+      "median_change_percent": -11.09113113439808,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 1892.033125,
+      "candidate_ms": 1682.18525
+    }
+  },
+  "campus12-e7": {
+    "complete_call_ms": {
+      "median_change_percent": -11.18469736917489,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 261.248708,
+      "candidate_ms": 231.210666
+    }
+  },
+  "alpine12-e10-d08": {
+    "complete_call_ms": {
+      "median_change_percent": -9.612533598240447,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 514.681542,
+      "candidate_ms": 466.810625
+    }
+  },
+  "forest24-e7-d08": {
+    "complete_call_ms": {
+      "median_change_percent": -12.150183684403725,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 528.578083,
+      "candidate_ms": 464.354875
+    }
+  },
+  "campus48-e10-d08": {
+    "complete_call_ms": {
+      "median_change_percent": -9.184788861521865,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 2077.844167,
+      "candidate_ms": 1881.266917
+    }
+  },
+  "kodak01-e7": {
+    "complete_call_ms": {
+      "median_change_percent": -0.5759451014031081,
+      "wins": 2,
+      "pairs": 3,
+      "baseline_ms": 16.464875,
+      "candidate_ms": 16.227
+    }
+  },
+  "kodak17-e10-d08": {
+    "complete_call_ms": {
+      "median_change_percent": -2.5804492246499944,
+      "wins": 3,
+      "pairs": 3,
+      "baseline_ms": 32.676791,
+      "candidate_ms": 32.067625
+    }
+  }
+}

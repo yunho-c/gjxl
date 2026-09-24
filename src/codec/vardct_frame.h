@@ -6,16 +6,20 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <span>
+#include <variant>
 #include <vector>
 
 #include "core/managed_allocator.h"
 #include "codec/chroma_from_luma.h"
 #include "codec/codestream.h"
 #include "codec/dc_quantization.h"
+#include "codec/sparse_coefficients.h"
 #include "core/ac_strategy.h"
 #include "core/frame_geometry.h"
 #include "core/image.h"
+#include "core/overwrite_array.h"
 #include "core/quantizer.h"
 #include "core/status.h"
 
@@ -34,7 +38,22 @@ enum class AcCoefficientDecisionMode {
 namespace vardct_frame_internal {
 class VarDctFrameView;
 [[nodiscard]] VarDctFrameView BorrowFrame(const VarDctEncoderFrame&) noexcept;
-struct QuantizedFrameAssemblyInput;
+struct CoefficientOrderPopulation;
+[[nodiscard]] const CoefficientOrderPopulation* GetCoefficientOrderPopulation(
+  const VarDctEncoderFrame&) noexcept;
+struct AcStorageInfo {
+  size_t coefficient_bytes = 4;
+  size_t native_bytes = 0;
+  bool sparse = false;
+};
+[[nodiscard]] AcStorageInfo
+GetAcStorageInfo(const VarDctEncoderFrame &) noexcept;
+template <typename T> struct QuantizedFrameAssemblyInputT;
+using QuantizedFrameAssemblyInput = QuantizedFrameAssemblyInputT<int32_t>;
+template <typename T>
+[[nodiscard]] Status
+AssembleVarDctEncoderFrameImpl(QuantizedFrameAssemblyInputT<T>,
+                               VarDctEncoderFrame *);
 [[nodiscard]] Status ReplaceEpfSharpness(VarDctEncoderFrame&, ConstPlaneU8View);
 [[nodiscard]] Status AssembleVarDctEncoderFrame(
   QuantizedFrameAssemblyInput,
@@ -71,23 +90,41 @@ struct PreparedForwardDctCoefficients;
 }  // namespace prepared_coefficients_internal
 
 /// Read-only view of one fixed-capacity VarDCT AC group.
-struct VarDctAcGroupView {
+template <typename T> struct VarDctAcGroupViewT {
   size_t block_x = 0;
   size_t block_y = 0;
   Extent2D block_extent;
   size_t used_coefficient_count = 0;
-  std::array<std::span<const int32_t>, 3> coefficients;
+  std::array<std::span<const T>, 3> coefficients;
 };
+using VarDctAcGroupView = VarDctAcGroupViewT<int32_t>;
+template <typename T> struct VarDctSparseAcGroupViewT {
+  size_t block_x = 0;
+  size_t block_y = 0;
+  Extent2D block_extent;
+  size_t used_coefficient_count = 0;
+  std::array<SparseCoefficientSpan<T>, 3> coefficients;
+};
+using VarDctNativeAcGroupView =
+    std::variant<VarDctAcGroupViewT<int8_t>, VarDctAcGroupViewT<int16_t>,
+                 VarDctAcGroupView, VarDctSparseAcGroupViewT<int8_t>,
+                 VarDctSparseAcGroupViewT<int16_t>, VarDctSparseAcGroupViewT<int32_t>>;
 
 /// Owns the native GJXL handoff from VarDCT analysis to entropy coding.
 ///
-/// AC coefficients use one fixed 65536-element row per group and channel.
-/// Complete transforms are appended in row-major anchor order; unused edge-
-/// group tails are zero. Quantized DC is authoritative; `dc()` is the
+/// Dense AC coefficients use fixed 65536-element rows with zero edge tails.
+/// Sparse AC storage contains only active logical coefficients and nonzero
+/// payloads. Both append complete transforms in row-major anchor order.
+/// Quantized DC is authoritative; `dc()` is the
 /// decoder-equivalent dequantized cache used by reconstruction and AQ.
 class VarDctEncoderFrame {
 public:
   VarDctEncoderFrame() = default;
+  VarDctEncoderFrame(const VarDctEncoderFrame&) = default;
+  VarDctEncoderFrame(VarDctEncoderFrame&&) noexcept = default;
+  // Publish the complete copy atomically, including its validation provenance.
+  VarDctEncoderFrame& operator=(const VarDctEncoderFrame&);
+  VarDctEncoderFrame& operator=(VarDctEncoderFrame&&) noexcept = default;
 
   [[nodiscard]] bool valid() const;
 
@@ -129,9 +166,17 @@ public:
     return group_used_coefficient_count_.size();
   }
 
+  /// Typed dense int32 query. Rejects narrow or sparse groups; it never
+  /// expands storage. General consumers must use GetNativeAcGroup.
   [[nodiscard]] Status GetAcGroup(
     size_t group_index,
     VarDctAcGroupView* out) const;
+
+  /// Native signed storage; dispatch once per group, not per coefficient.
+  /// Frame copies deep-copy the authoritative owner. No dense compatibility
+  /// cache is maintained; const access is allocation-free.
+  [[nodiscard]] Status GetNativeAcGroup(size_t group_index,
+                                        VarDctNativeAcGroupView *out) const;
 
 private:
   friend Status vardct_frame_internal::ReplaceEpfSharpness(
@@ -139,6 +184,11 @@ private:
   friend vardct_frame_internal::VarDctFrameView
     vardct_frame_internal::BorrowFrame(const VarDctEncoderFrame&) noexcept;
 
+  friend vardct_frame_internal::AcStorageInfo
+  vardct_frame_internal::GetAcStorageInfo(const VarDctEncoderFrame &) noexcept;
+  friend const vardct_frame_internal::CoefficientOrderPopulation*
+    vardct_frame_internal::GetCoefficientOrderPopulation(
+      const VarDctEncoderFrame&) noexcept;
   friend Status ComputeQuantizedCoefficients(
     ConstImage3FView,
     VarDctFrameInput,
@@ -166,6 +216,10 @@ private:
   friend Status vardct_frame_internal::AssembleVarDctEncoderFrame(
     vardct_frame_internal::QuantizedFrameAssemblyInput,
     VarDctEncoderFrame*);
+  template <typename T>
+  friend Status vardct_frame_internal::AssembleVarDctEncoderFrameImpl(
+      vardct_frame_internal::QuantizedFrameAssemblyInputT<T>,
+      VarDctEncoderFrame *);
 
   [[nodiscard]] size_t AcGroupChannelOffset(
     size_t group_index,
@@ -182,7 +236,20 @@ private:
   std::array<resource_budget_internal::ManagedVector<float>, 3> dc_;
   Extent2D ac_group_extent_;
   resource_budget_internal::ManagedVector<size_t> group_used_coefficient_count_;
-  resource_budget_internal::ManagedVector<int32_t> ac_coefficients_;
+  OverwriteArray<int32_t> ac_coefficients_;
+  OverwriteArray<int8_t> ac_coefficients_i8_;
+  OverwriteArray<int16_t> ac_coefficients_i16_;
+  std::variant<std::monostate,
+    vardct_frame_internal::SparseAcStorage<int8_t>,
+    vardct_frame_internal::SparseAcStorage<int16_t>,
+    vardct_frame_internal::SparseAcStorage<int32_t>> sparse_ac_;
+  resource_budget_internal::ManagedVector<size_t> sparse_group_offsets_;
+  // Producers establish dense zero tails or exhaustively validate sparse
+  // payloads before publication. Const queries never rescan immutable AC data.
+  bool ac_validated_ = false;
+  // Immutable and frame-owned: copies may share counts, never mutable input.
+  std::shared_ptr<const vardct_frame_internal::CoefficientOrderPopulation>
+    coefficient_order_population_;
 };
 
 }  // namespace gjxl

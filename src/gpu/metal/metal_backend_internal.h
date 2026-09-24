@@ -93,6 +93,19 @@ void RegisterMetalComputePipeline(
 
 void RecordMetalComputePipelineState(MTL::ComputePipelineState* pipeline);
 
+void DispatchMetalIndirectThreadgroups(
+    MTL::ComputeCommandEncoder* encoder, MTL::Buffer* arguments,
+    NS::UInteger offset, MTL::Size threads_per_threadgroup);
+
+// Retain shared arguments until profile resolution, after command completion.
+// This never inserts a transfer or a synchronization into device execution.
+struct MetalIndirectDispatchRecord {
+  NS::SharedPtr<MTL::Buffer> arguments;
+  size_t offset = 0;
+  size_t stage = 0;
+  size_t dispatch = 0;
+};
+
 enum class TransformDirection {
   kForward,
   kInverse,
@@ -237,10 +250,29 @@ enum class MetalAqScratchArena : uint8_t {
   kPersistent,
   kStaging,
   kResidentInput,
+  kAcTokenization,
+  kAcTokenOutput,
   kCount,
 };
 
+// Selected atomically after every pipeline and its dispatch limits qualify.
+// Disabled bundles retain the original psycho-image and resident data layout.
+struct ButteraugliTrafficPipelines {
+  bool enabled = false;
+  NS::SharedPtr<MTL::ComputePipelineState> frequency_low_medium_shared;
+  NS::SharedPtr<MTL::ComputePipelineState> frequency_low_medium_packed_dc;
+  NS::SharedPtr<MTL::ComputePipelineState> medium_b_reuse;
+  NS::SharedPtr<MTL::ComputePipelineState> mask_reuse;
+  NS::SharedPtr<MTL::ComputePipelineState> high_reuse;
+  NS::SharedPtr<MTL::ComputePipelineState> ultra_direct;
+  NS::SharedPtr<MTL::ComputePipelineState> malta_l2;
+  NS::SharedPtr<MTL::ComputePipelineState> final_packed_dc;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_reduction;
+  NS::SharedPtr<MTL::ComputePipelineState> resident_reduction_small;
+};
+
 struct ButteraugliPipelines {
+  ButteraugliTrafficPipelines traffic;
   NS::SharedPtr<MTL::ComputePipelineState> copy;
   NS::SharedPtr<MTL::ComputePipelineState> expand;
   NS::SharedPtr<MTL::ComputePipelineState> subsample;
@@ -408,6 +440,14 @@ public:
     gpu_profile_internal::GpuProfilingMode mode,
     std::unique_ptr<GpuSubmission>* submission) override;
 
+  bool SupportsDeviceSelectionProfiling() const noexcept override { return true; }
+
+  Status EvaluateAndSelectAcStrategyCandidateBatchesProfiled(
+    std::span<const AcStrategyCandidateBatch> batches,
+    AcStrategyDeviceSelection selection,
+    gpu_profile_internal::GpuProfilingMode mode,
+    std::unique_ptr<GpuSubmission>* submission) override;
+
   [[nodiscard]] gpu_profile_internal::GpuProfilingCapabilities
   QueryGpuProfilingCapabilities() const override;
 
@@ -465,6 +505,7 @@ public:
   }
 
 private:
+  friend class MetalAcTokenizer;
   friend Status ComputeAcSubmissionStoragePlan(
     const AcSubmissionStorageOptions&, AcSubmissionStoragePlan*);
   friend class MetalPreparedAqEvaluation;
@@ -472,6 +513,7 @@ private:
   friend class MetalPreparedResidentInput;
   friend class MetalPreparedDeviceButteraugli;
   friend struct MetalCacheAdmissionTestAccess;
+  friend struct MetalButteraugliTrafficTestAccess;
   friend struct MetalDcProcessingTestAccess;
   friend class MetalCompletedVarDctFrame;
   friend Status EmptyMetalAqScratchArenasForTesting(GpuBackend& backend);
@@ -559,6 +601,12 @@ private:
     MetalBuffer* scratch_b = nullptr;
     MetalBuffer* rate_scratch = nullptr;
     MetalBuffer* costs = nullptr;
+    size_t matrices_offset_bytes = 0;
+    size_t candidates_offset_bytes = 0;
+    size_t scratch_a_offset_bytes = 0;
+    size_t scratch_b_offset_bytes = 0;
+    size_t rate_scratch_offset_bytes = 0;
+    size_t costs_offset_bytes = 0;
     const TransformPipeline* forward = nullptr;
     const TransformPipeline* inverse = nullptr;
     MetalAcStrategyBatchParams params{};
@@ -570,6 +618,7 @@ private:
     std::span<const ValidatedAcStrategyBatch> batches;
     struct Selection {
       std::array<const MetalBuffer*, 7> costs{};
+      std::array<size_t, 7> cost_offsets{};
       MetalBuffer* output = nullptr;
       size_t offset_bytes = 0;
       struct Params {
@@ -597,12 +646,14 @@ private:
   Status RequireMetalBuffer(
     const DeviceBuffer* buffer,
     size_t required_bytes,
+    size_t offset_bytes,
     std::string_view role,
     const MetalBuffer** out) const;
 
   Status RequireMetalBuffer(
     DeviceBuffer* buffer,
     size_t required_bytes,
+    size_t offset_bytes,
     std::string_view role,
     MetalBuffer** out) const;
 
@@ -745,6 +796,9 @@ private:
   NS::SharedPtr<MTL::Device> device_;
   NS::SharedPtr<MTL::CommandQueue> command_queue_;
   NS::SharedPtr<MTL::Library> library_;
+  std::mutex ac_tokenization_mutex_;
+  std::atomic<uint32_t> ac_tokenization_capacity_hint_{0};
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>,6> ac_tokenization_pipelines_;
   NS::SharedPtr<MTL::Buffer> dct_basis_buffer_;
   TransformPipelineRegistry transform_pipelines_;
   AcStrategyPipelines ac_strategy_pipelines_;

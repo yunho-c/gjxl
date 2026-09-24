@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="(empty)"
+	tests="3"
+	failures="0"
+	disabled="0"
+	skipped="0"
+	hostname=""
+	time="26"
+	timestamp="2026-09-21T23:06:18"
+	>
+	<testcase name="metal_aq_host_storage_plan" classname="metal_aq_host_storage_plan" time="11.3695" status="run">
+		<properties/>
+		<system-out>2026-09-21 23:06:18.647 gjxl_metal_aq_host_storage_plan_test[52202:339966258] Metal API Validation Enabled
+2026-09-21 23:06:18.648 gjxl_metal_aq_host_storage_plan_test[52202:339966258] Metal GPU Validation Enabled
+AQ host plan formula cases: 2592
+Auxiliary profiles: 6 reference/adjustment; 60 initial-quantization cases
+AQ callback inputs: two physical failures and one typed underplan, with recovery
+Resident AQ profile input/first-use/exact cases: 436
+Dispatch-boundary timestamps unavailable; stage mode qualified
+AQ runtime 1x1 mode 0
+AQ runtime 1x1 mode 1
+AQ runtime 1x1 mode 2
+AQ runtime 1x1 mode 3
+AQ runtime 1x1 mode 4
+AQ runtime 1x1 mode 5
+AQ runtime 1x1 mode 6
+AQ runtime 8x8 mode 0
+AQ runtime 8x8 mode 1
+AQ runtime 8x8 mode 2
+AQ runtime 8x8 mode 3
+AQ runtime 8x8 mode 4
+AQ runtime 8x8 mode 5
+AQ runtime 8x8 mode 6
+AQ runtime 17x9 mode 0
+AQ runtime 17x9 mode 1
+AQ runtime 17x9 mode 2
+AQ runtime 17x9 mode 3
+AQ runtime 17x9 mode 4
+AQ runtime 17x9 mode 5
+AQ runtime 17x9 mode 6
+AQ runtime 65x63 mode 0
+AQ runtime 65...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+	<testcase name="metal_aq_host_storage_plan_legacy" classname="metal_aq_host_storage_plan_legacy" time="10.601" status="run">
+		<properties/>
+		<system-out>2026-09-21 23:06:29.864 gjxl_metal_aq_host_storage_plan_test[52590:339966999] Metal API Validation Enabled
+2026-09-21 23:06:29.864 gjxl_metal_aq_host_storage_plan_test[52590:339966999] Metal GPU Validation Enabled
+AQ host plan formula cases: 2592
+Auxiliary profiles: 6 reference/adjustment; 60 initial-quantization cases
+AQ callback inputs: two physical failures and one typed underplan, with recovery
+Resident AQ profile input/first-use/exact cases: 436
+Dispatch-boundary timestamps unavailable; stage mode qualified
+AQ runtime 1x1 mode 0
+AQ runtime 1x1 mode 1
+AQ runtime 1x1 mode 2
+AQ runtime 1x1 mode 3
+AQ runtime 1x1 mode 4
+AQ runtime 1x1 mode 5
+AQ runtime 1x1 mode 6
+AQ runtime 8x8 mode 0
+AQ runtime 8x8 mode 1
+AQ runtime 8x8 mode 2
+AQ runtime 8x8 mode 3
+AQ runtime 8x8 mode 4
+AQ runtime 8x8 mode 5
+AQ runtime 8x8 mode 6
+AQ runtime 17x9 mode 0
+AQ runtime 17x9 mode 1
+AQ runtime 17x9 mode 2
+AQ runtime 17x9 mode 3
+AQ runtime 17x9 mode 4
+AQ runtime 17x9 mode 5
+AQ runtime 17x9 mode 6
+AQ runtime 65x63 mode 0
+AQ runtime 65...
+[This part of the test output was removed since it exceeds the threshold of 1024 bytes.]
+</system-out>
+	</testcase>
+	<testcase name="encoding_benchmark_cli" classname="encoding_benchmark_cli" time="4.18959" status="run">
+		<properties>
+			<property name="cmake_labels" value="benchmark;cli;metal"/>
+		</properties>
+		<system-out>.............
+----------------------------------------------------------------------
+Ran 13 tests in 4.126s
+
+OK
+</system-out>
+	</testcase>
+</testsuite>

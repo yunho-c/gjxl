@@ -48,11 +48,16 @@ struct CommandLineOptions {
   size_t samples = 3;
   size_t warmups = 1;
   float butteraugli_target = 1.2f;
+#if GJXL_BENCHMARK_HAS_METAL
   gjxl::VarDctBackendPreference backend =
     gjxl::VarDctBackendPreference::kMetal;
-  gjxl::GpuAdaptiveQuantizationMode metal_aq_mode =
+#else
+  gjxl::VarDctBackendPreference backend =
+    gjxl::VarDctBackendPreference::kCpu;
+#endif
+  gjxl::GpuAdaptiveQuantizationMode gpu_aq_mode =
     gjxl::GpuAdaptiveQuantizationMode::kFullyResident;
-  bool metal_aq_explicit = false;
+  bool gpu_aq_explicit = false;
 };
 
 struct WorkloadSpec {
@@ -209,10 +214,13 @@ struct BenchmarkRow {
   if (text == "metal") {
     return gjxl::VarDctBackendPreference::kMetal;
   }
+  if (text == "cuda") {
+    return gjxl::VarDctBackendPreference::kCuda;
+  }
   throw std::runtime_error("Unknown backend: " + std::string(text));
 }
 
-[[nodiscard]] gjxl::GpuAdaptiveQuantizationMode ParseMetalAqMode(
+[[nodiscard]] gjxl::GpuAdaptiveQuantizationMode ParseGpuAqMode(
   std::string_view text) {
 
   if (text == "exact-coefficients") {
@@ -228,7 +236,7 @@ struct BenchmarkRow {
     return gjxl::GpuAdaptiveQuantizationMode::kMaximumThroughput;
   }
   throw std::runtime_error(
-    "Unknown Metal AQ mode: " + std::string(text));
+    "Unknown GPU AQ mode: " + std::string(text));
 }
 
 [[nodiscard]] std::string_view BackendName(
@@ -241,11 +249,13 @@ struct BenchmarkRow {
       return "cpu";
     case gjxl::VarDctBackendPreference::kMetal:
       return "metal";
+    case gjxl::VarDctBackendPreference::kCuda:
+      return "cuda";
   }
   return "invalid";
 }
 
-[[nodiscard]] std::string_view MetalAqModeName(
+[[nodiscard]] std::string_view GpuAqModeName(
   gjxl::GpuAdaptiveQuantizationMode mode) {
 
   switch (mode) {
@@ -267,8 +277,8 @@ void PrintUsage(std::string_view executable) {
     << " [--workload all|synthetic-large|thumbnail_64x64|small_256x192|"
        "medium_512x384|1080p|4k|synthetic-12mp|synthetic-24mp|synthetic-48mp]"
        " [--batch-sizes auto|1,2,4,8] [--samples N] [--warmups N]"
-       " [--distance VALUE] [--backend auto|cpu|metal]"
-       " [--metal-aq exact-coefficients|fully-resident|throughput|"
+       " [--distance VALUE] [--backend auto|cpu|metal|cuda]"
+       " [--gpu-aq exact-coefficients|fully-resident|throughput|"
        "maximum-throughput] [--input FILE.pfm|DIRECTORY]..."
        " [--raw-samples NEW.csv] [--dry-run | --export-inputs NEW_DIRECTORY]\n"
        "all selects synthetic workloads through 4K; synthetic-large selects 12/24/48 MP.\n"
@@ -281,7 +291,7 @@ void PrintUsage(std::string_view executable) {
        "without encoding. Neither accepts --input or --raw-samples.\n"
        "Inputs replace synthetic workloads; directories select sorted PFMs "
        "without recursion. Input dimensions are preserved.\n"
-       "Defaults: Metal, fully-resident, effort 7, automatic per-image CPU "
+       "Defaults: Metal when built, otherwise CPU; fully-resident, effort 7, automatic per-image CPU "
        "threads.\n";
 }
 
@@ -323,9 +333,9 @@ void PrintUsage(std::string_view executable) {
         ParsePositiveFloat(value(argument), "Distance");
     } else if (argument == "--backend") {
       options.backend = ParseBackend(value(argument));
-    } else if (argument == "--metal-aq") {
-      options.metal_aq_mode = ParseMetalAqMode(value(argument));
-      options.metal_aq_explicit = true;
+    } else if (argument == "--gpu-aq" || argument == "--metal-aq") {
+      options.gpu_aq_mode = ParseGpuAqMode(value(argument));
+      options.gpu_aq_explicit = true;
     } else if (argument == "--help") {
       PrintUsage(argv[0]);
       std::exit(EXIT_SUCCESS);
@@ -346,14 +356,15 @@ void PrintUsage(std::string_view executable) {
       "Use --dry-run or --export-inputs with synthetic workloads only, "
       "without --input or --raw-samples");
   }
-  if (options.backend != gjxl::VarDctBackendPreference::kMetal) {
-    if (!options.metal_aq_explicit) {
-      options.metal_aq_mode =
+  if (options.backend != gjxl::VarDctBackendPreference::kMetal &&
+      options.backend != gjxl::VarDctBackendPreference::kCuda) {
+    if (!options.gpu_aq_explicit) {
+      options.gpu_aq_mode =
         gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients;
-    } else if (options.metal_aq_mode !=
+    } else if (options.gpu_aq_mode !=
                gjxl::GpuAdaptiveQuantizationMode::kExactCoefficients) {
       throw std::runtime_error(
-        "Experimental Metal AQ modes require --backend metal");
+        "Experimental GPU AQ modes require a forced GPU backend");
     }
   }
   if (options.inputs.empty() && options.workload != "all" &&
@@ -535,7 +546,7 @@ void ExportInputs(
         .butteraugli_target = options.butteraugli_target,
         .effort = kEffort,
         .backend = options.backend,
-        .metal_aq_mode = options.metal_aq_mode,
+        .gpu_aq_mode = options.gpu_aq_mode,
       },
     });
 
@@ -609,7 +620,7 @@ void ExportInputs(
                    << (batch_first ? "batch-first" : "serial-first") << ','
                    << BackendName(options.backend) << ','
                    << (metal ? "metal" : "cpu") << ','
-                   << (metal ? MetalAqModeName(options.metal_aq_mode) : "n/a") << ','
+                   << (metal ? GpuAqModeName(options.gpu_aq_mode) : "n/a") << ','
                    << std::setprecision(std::numeric_limits<float>::max_digits10)
                    << options.butteraugli_target << ',' << kEffort
                    << ",automatic_per_image,linear_rgb_to_in_memory_codestream,"
@@ -716,7 +727,7 @@ int main(int argc, char** argv) {
     }
     std::cout << "image batch benchmark backend="
               << BackendName(options.backend)
-              << " metal_aq=" << MetalAqModeName(options.metal_aq_mode)
+              << " gpu_aq=" << GpuAqModeName(options.gpu_aq_mode)
               << " distance=" << options.butteraugli_target
               << " samples=" << options.samples
               << " warmups=" << options.warmups << '\n';
@@ -739,7 +750,7 @@ int main(int argc, char** argv) {
         .butteraugli_target = options.butteraugli_target,
         .effort = kEffort,
         .backend = options.backend,
-        .metal_aq_mode = options.metal_aq_mode,
+        .gpu_aq_mode = options.gpu_aq_mode,
       };
       std::vector<uint8_t> reference_codestream;
       gjxl::VarDctEncodingSummary reference_summary;

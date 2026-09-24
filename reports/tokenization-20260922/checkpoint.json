@@ -1,0 +1,20 @@
+{
+  "implementation_commit": "59d976152937a5a2e171c87be83254569273a3c9",
+  "parent_commit": "7659cac8d933a9f6d41f1155503c7ca99fc46e6c",
+  "qualified_source_matches_commit": true,
+  "source_comparison": "Tracked diff and all 11 new source/test/tool files were byte-compared with group-final-profile/source.diff and new-sources before commit.",
+  "full_ctest": {
+    "passed": 159,
+    "failed": 0,
+    "log": "group-final-default-tests.log"
+  },
+  "focused_ctest": {
+    "passed": 9,
+    "failed": 0,
+    "log": "group-final-focused-tests.log"
+  },
+  "validation": "Retained evidence was rechecked; no new benchmark or test collection was needed because source was unchanged.",
+  "gpu_default_enabled": false,
+  "pushed": false,
+  "merged": false
+}

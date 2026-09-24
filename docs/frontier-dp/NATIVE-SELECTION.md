@@ -1,5 +1,8 @@
 # Native GPU greedy selection checkpoint
 
+This is a historical checkpoint. Current combined ACS/AQ and profiling behavior
+are described in [resident profiling](../metal-resident-profiling.md).
+
 The ordinary resident Metal search now scores and selects in one submission.
 The selector reads the seven existing candidate cost buffers directly, computes
 partial-tile offsets from the shared enumeration, and writes a compact strategy

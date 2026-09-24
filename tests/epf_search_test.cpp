@@ -16,6 +16,7 @@
 #include "codec/loop_filter.h"
 #include "codec/reconstruction.h"
 #include "core/image_buffer.h"
+#include "codestream/workflow_internal.h"
 
 namespace {
 using namespace gjxl;
@@ -342,9 +343,33 @@ bool CheckCpuPolicy() {
   }
   return true;
 }
+bool CheckBackendPolicy() {
+  for (const auto backend : {VarDctBackendPreference::kCpu,
+                             VarDctBackendPreference::kMetal,
+                             VarDctBackendPreference::kCuda,
+                             VarDctBackendPreference::kAutomatic}) {
+    for (int32_t effort = 1; effort <= 10; ++effort) {
+      VarDctEncodingOptions options;
+      options.backend = backend;
+      options.effort = effort;
+      const bool expected = backend != VarDctBackendPreference::kCuda && effort >= 6;
+      if (codestream_internal::UseEpfSharpnessSearch(options) != expected) return false;
+      options.adaptive_epf_sharpness = false;
+      if (codestream_internal::UseEpfSharpnessSearch(options)) return false;
+      options.adaptive_epf_sharpness = true;
+      options.gpu_aq_mode = GpuAdaptiveQuantizationMode::kMaximumThroughput;
+      if (codestream_internal::UseEpfSharpnessSearch(options)) return false;
+      options.gpu_aq_mode = GpuAdaptiveQuantizationMode::kFullyResident;
+      options.rate_control_mode = VarDctRateControlMode::kMaximumError;
+      if (codestream_internal::UseEpfSharpnessSearch(options)) return false;
+    }
+  }
+  return true;
+}
 }  // namespace
 
 int main() {
+  if (!CheckBackendPolicy()) { std::cerr << "EPF backend policy failed\n"; return EXIT_FAILURE; }
   if (!CheckSelector()) { std::cerr << "EPF selector oracle failed\n"; return EXIT_FAILURE; }
   if (!CheckBlockError()) { std::cerr << "EPF block-error check failed\n"; return EXIT_FAILURE; }
   if (!CheckGlobalCandidateSearch()) { std::cerr << "EPF candidate search failed\n"; return EXIT_FAILURE; }

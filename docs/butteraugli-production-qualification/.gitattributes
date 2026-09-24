@@ -1,0 +1,2 @@
+# Preserve exact bytes and original whitespace in archived evidence.
+* -text -whitespace

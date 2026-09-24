@@ -33,16 +33,16 @@ Status ComputeMetalCompatibilityWorkflowStoragePlan(
     MetalCompatibilityWorkflowStoragePlan *out) {
   const auto &e = o.encoding;
   const bool exact =
-      e.metal_aq_mode == GpuAdaptiveQuantizationMode::kExactCoefficients;
+      e.gpu_aq_mode == GpuAdaptiveQuantizationMode::kExactCoefficients;
   const bool frame_only =
-      e.metal_aq_mode == GpuAdaptiveQuantizationMode::kMaximumThroughput;
+      e.gpu_aq_mode == GpuAdaptiveQuantizationMode::kMaximumThroughput;
   const bool maximum =
       e.rate_control_mode == VarDctRateControlMode::kMaximumError;
   const bool resident = !exact && !frame_only;
   if (out == nullptr || e.backend != VarDctBackendPreference::kMetal ||
       (resident &&
-       ((e.metal_aq_mode != GpuAdaptiveQuantizationMode::kFullyResident &&
-         e.metal_aq_mode != GpuAdaptiveQuantizationMode::kThroughput) ||
+       ((e.gpu_aq_mode != GpuAdaptiveQuantizationMode::kFullyResident &&
+         e.gpu_aq_mode != GpuAdaptiveQuantizationMode::kThroughput) ||
         !maximum)) ||
       (frame_only && maximum) ||
       ((frame_only || maximum) &&
@@ -267,7 +267,7 @@ ComputeAutomaticExactSearchStoragePlan(Extent2D source,
                                        AutomaticExactSearchStoragePlan *out) {
   if (out == nullptr ||
       o.encoding.backend != VarDctBackendPreference::kAutomatic ||
-      o.encoding.metal_aq_mode !=
+      o.encoding.gpu_aq_mode !=
           GpuAdaptiveQuantizationMode::kExactCoefficients ||
       !IsSearch(o.encoding.rate_control_mode))
     return Status::InvalidArgument("Unsupported automatic exact search shape");

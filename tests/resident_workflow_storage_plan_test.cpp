@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "codestream/dc_context_tree_internal.h"
+#include "codestream/ac_tokenization_provider_internal.h"
 #include "codestream/rate_control_internal.h"
 #include "codestream/resident_workflow_storage_plan.h"
 #include "codestream/workflow_internal.h"
@@ -95,8 +96,8 @@ bool CheckPlans() {
                        p.output.peak_bytes <= p.working.peak_bytes &&
                        p.profile_shape.submissions ==
                            (o.collect_gpu_profile
-                              ? (p.score_count == 0 ? 4u : 5u) -
-                                    size_t(UseFixedDct8Strategy(o.encoding))
+                              ? (p.score_count == 0 ? 2u : 3u) +
+                                    size_t(!UseFixedDct8Strategy(o.encoding))
                               : 0) &&
                        p.profile_shape.wall_stages ==
                            (o.collect_gpu_profile
@@ -158,7 +159,7 @@ bool CheckPlans() {
       invalid.encoding.backend = VarDctBackendPreference::kAutomatic;
       break;
     case 2:
-      invalid.encoding.metal_aq_mode =
+      invalid.encoding.gpu_aq_mode =
           GpuAdaptiveQuantizationMode::kExactCoefficients;
       break;
     case 3:
@@ -180,7 +181,7 @@ bool CheckPlans() {
       invalid.encoding.cpu_thread_count = 257;
       break;
     case 9:
-      invalid.encoding.metal_aq_mode =
+      invalid.encoding.gpu_aq_mode =
           GpuAdaptiveQuantizationMode::kMaximumThroughput;
       break;
     }
@@ -265,7 +266,7 @@ bool CheckProfile(const GpuExecutionProfile &profile,
     }
   }
   const bool valid = profile.wall_stages.size() <= plan.profile_shape.wall_stages &&
-                   profile.submissions.size() ==
+                   profile.submissions.size() <=
                        plan.profile_shape.submissions &&
                    stages <= plan.profile_shape.stages &&
                    dispatches <= plan.profile_shape.dispatches;
@@ -364,11 +365,13 @@ private:
 };
 
 bool RunCase(GpuBackend &gpu, ConstImage3FView image,
-             const ResidentWorkflowStorageOptions &o) {
+             const ResidentWorkflowStorageOptions &o,
+             bool supports_combined = true) {
   ResidentWorkflowStoragePlan plan;
   if (!Ok(ComputeResidentWorkflowStoragePlan(image.extent(), o, &plan)))
     return false;
   Result oracle;
+  uint64_t oracle_submissions = 0;
   {
     // Reference uses an unlimited domain and ample manually reserved credit;
     // the candidate's bound is never derived from an observed peak.
@@ -381,8 +384,17 @@ bool RunCase(GpuBackend &gpu, ConstImage3FView image,
     auto reference_options = o;
     reference_options.collect_gpu_profile = reference_options.collect_profile =
         reference_options.collect_timing = false;
+    // Adaptive token capacity may grow on the first ordinary call. Prime the
+    // reference so profiling is compared against the same capacity state.
+    if (GpuTokenizationEnabled()) {
+      Result priming;
+      if (!Ok(Encode(gpu, image, reference_options, &priming)) || !Trim(gpu))
+        return false;
+    }
+    const auto before = gpu.stats().committed_submissions;
     if (!Ok(Encode(gpu, image, reference_options, &oracle)) || !Trim(gpu))
       return false;
+    oracle_submissions = gpu.stats().committed_submissions - before;
     job.Reset();
     if (!Empty(budget))
       return false;
@@ -396,6 +408,7 @@ bool RunCase(GpuBackend &gpu, ConstImage3FView image,
     ResourceContextScope context({&job, ResourceClass::kPreparation});
     LifetimeTrace trace{budget, {}};
     ScopedLifetimeTrace observe(trace);
+    const auto before = gpu.stats().committed_submissions;
     const Status status = Encode(gpu, image, o, &measured);
     if (!Ok(status)) {
       std::cerr << "Shape " << image.width() << 'x' << image.height()
@@ -417,6 +430,44 @@ bool RunCase(GpuBackend &gpu, ConstImage3FView image,
       return false;
     if (o.collect_gpu_profile && !CheckProfile(measured.gpu_profile, plan))
       return false;
+    if (o.collect_gpu_profile) {
+      if (!Check(gpu.stats().committed_submissions - before == oracle_submissions,
+                 "GPU profiling changed the production submission count"))
+        return false;
+      const bool gpu_selection = !UseFixedDct8Strategy(o.encoding) &&
+                                 !UseDenseDct32Search(o.encoding);
+      const bool combined = gpu_selection && supports_combined;
+      bool selection = false, metadata = false, indirect = false, bounds = false;
+      bool nonempty_indirect = false;
+      for (const auto& submission : measured.gpu_profile.submissions) {
+        if (!Check(submission.submission_id != "frontend.quant_adjustment" &&
+                       (!combined || submission.submission_id != "frontend.ac_strategy"),
+                   "Profiling split a fused production submission")) return false;
+        for (const auto& stage : submission.stages) {
+          selection |= stage.stage_id == "frontend.ac_strategy.select";
+          metadata |= stage.stage_id == "frontend.ac_strategy.metadata";
+          bounds |= stage.stage_id == "aq.policy_bounds";
+          if (!stage.timestamp_valid &&
+              !Check(stage.gpu_nanoseconds == 0 && !stage.dispatches.empty() &&
+                         std::ranges::all_of(stage.dispatches, [](const auto& dispatch) {
+                           return dispatch.kind == GpuDispatchKind::kIndirectThreadgroups &&
+                               (!dispatch.grid.width || !dispatch.grid.height || !dispatch.grid.depth);
+                         }),
+                     "Unmeasured stage is not a verified empty indirect stage")) return false;
+          for (const auto& dispatch : stage.dispatches) {
+            if (dispatch.kind != GpuDispatchKind::kIndirectThreadgroups) continue;
+            indirect = true;
+            nonempty_indirect |= dispatch.grid.width && dispatch.grid.height && dispatch.grid.depth;
+            if (!Check(dispatch.grid.depth == 1,
+                       "Indirect profile did not resolve completed grid dimensions")) return false;
+          }
+        }
+      }
+      if (!Check(selection == gpu_selection && metadata == combined &&
+                     indirect == combined && nonempty_indirect == combined && bounds,
+                 "Profile lost production selection, indirect dispatch or bounds"))
+        return false;
+    }
     if (o.collect_timing &&
         !Check(measured.timing.attempts.size() ==
                        measured.summary.encode_attempt_count &&
@@ -444,7 +495,7 @@ bool CheckRuntime(GpuBackend &gpu) {
                                 {89, 57},
                                 {257, 257}}) {
     auto image = MakeImage(extent);
-    for (int effort : {1, 4, 7, 9, 10}) {
+    for (int effort : {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}) {
       for (bool final : {false, true}) {
         ResidentWorkflowStorageOptions o;
         o.encoding.backend = VarDctBackendPreference::kMetal;
@@ -520,7 +571,7 @@ bool CheckRuntime(GpuBackend &gpu) {
     for (bool search : {false, true}) {
       ResidentWorkflowStorageOptions o;
       o.encoding.backend = VarDctBackendPreference::kMetal;
-      o.encoding.metal_aq_mode = mode;
+      o.encoding.gpu_aq_mode = mode;
       o.encoding.effort = 10;
       o.encoding.cpu_thread_count = 1;
       if (search) {
@@ -542,7 +593,7 @@ bool CheckRuntime(GpuBackend &gpu) {
     if (flags & 1)
       o.encoding.density_mode = VarDctDensityMode::kHighDensity;
     else
-      o.encoding.metal_aq_mode = GpuAdaptiveQuantizationMode::kThroughput;
+      o.encoding.gpu_aq_mode = GpuAdaptiveQuantizationMode::kThroughput;
     o.collect_timing = bool(flags & 2);
     o.collect_profile = !o.collect_timing;
     if (!RunCase(gpu, image.const_view(), o))
@@ -582,6 +633,20 @@ bool CheckRuntime(GpuBackend &gpu) {
   if (!profile_available)
     std::cout << "Stage-boundary profiling unavailable; not qualified\n";
   return true;
+}
+
+bool CheckGenericBackendFallback() {
+  std::unique_ptr<GpuBackend> gpu;
+  if (!Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &gpu))) return false;
+  const auto caps = dynamic_cast<GpuSubmissionProfiler&>(*gpu)
+                        .QueryGpuProfilingCapabilities();
+  if (!caps.timestamp_counter || !caps.stage_boundary) return true;
+  auto image = MakeImage({65, 63});
+  ResidentWorkflowStorageOptions options;
+  options.encoding.backend = VarDctBackendPreference::kMetal;
+  options.encoding.effort = 7;
+  options.collect_profile = options.collect_gpu_profile = true;
+  return RunCase(*gpu, image.const_view(), options, false);
 }
 
 bool CheckAdmissionFailure(GpuBackend &gpu) {
@@ -759,9 +824,20 @@ int main(int argc, char **argv) {
   if (argc == 2 && std::string_view(argv[1]) == "--plans-only")
     return EXIT_SUCCESS;
   std::unique_ptr<GpuBackend> gpu;
-  if (!Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &gpu)) ||
+  // Match the public production backend's direct-image transform selection.
+  const auto dct = MetalDctImplementation::kSimdgroupMatmul;
+  const MetalBackendOptions backend_options{
+      .forward_dct8 = dct, .inverse_dct8 = dct,
+      .forward_dct16x16 = dct, .inverse_dct16x16 = dct,
+      .forward_dct32x32 = dct, .inverse_dct32x32 = dct,
+      .forward_dct16x8 = dct, .inverse_dct16x8 = dct,
+      .forward_dct8x16 = dct, .inverse_dct8x16 = dct,
+      .forward_dct32x16 = dct, .inverse_dct32x16 = dct,
+      .forward_dct16x32 = dct, .inverse_dct16x32 = dct};
+  if (!Ok(CreateMetalBackend(GJXL_METALLIB_PATH, backend_options, &gpu)) ||
       !Ok(EnsureProductionMetalBackendAvailable()) || !CheckRuntime(*gpu) ||
-      !CheckAdmissionFailure(*gpu) || !CheckRetainedOutput())
+      !CheckAdmissionFailure(*gpu) || !CheckRetainedOutput() ||
+      !CheckGenericBackendFallback())
     return EXIT_FAILURE;
   gpu.reset();
   return Empty(DefaultResourceBudget()) &&

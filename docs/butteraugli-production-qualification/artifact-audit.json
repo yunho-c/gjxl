@@ -1,0 +1,42 @@
+{
+  "cohorts": [
+    {
+      "cohort": "ordinary-confirmation",
+      "pairs": 28,
+      "summary_sha256": "e22d42a5d85ac150d0c17726ff33613915b465bb3e8ca4219cb9e53a7f3b016d",
+      "profile": false
+    },
+    {
+      "cohort": "ordinary-broad",
+      "pairs": 24,
+      "summary_sha256": "658afeb69c1538f7e42da49a7f218755eb054ed989f4cc3f33f8bc6398a10a8d",
+      "profile": false
+    },
+    {
+      "cohort": "unchanged-control",
+      "pairs": 14,
+      "summary_sha256": "45edcc671c06614a6bdb51608a6549a9da8ad4297bd0952ed3fefd29fcd917a4",
+      "profile": false
+    },
+    {
+      "cohort": "stage-attribution",
+      "pairs": 6,
+      "summary_sha256": "5a5a2a70473fd7f1df95abfcd420f5507068bc6190f7aa73a0ac3bfe4a14d7ac",
+      "profile": true
+    }
+  ],
+  "external_root": "/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921",
+  "raw_case_file_hash_checks": 876,
+  "candidate_only_profiled_kernel_ids": [
+    "gjxl_butteraugli_final_packed_dc_f32",
+    "gjxl_butteraugli_high_shared_f32",
+    "gjxl_butteraugli_low_medium_packed_dc_f32",
+    "gjxl_butteraugli_low_medium_shared_f32",
+    "gjxl_butteraugli_malta_l2_f32",
+    "gjxl_butteraugli_mask_shared_f32",
+    "gjxl_butteraugli_medium_b_shared_f32",
+    "gjxl_butteraugli_packed_dc_reduce_f32",
+    "gjxl_butteraugli_packed_dc_reduce_w64_simd",
+    "gjxl_butteraugli_ultra_direct_f32"
+  ]
+}

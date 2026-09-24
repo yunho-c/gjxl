@@ -226,7 +226,7 @@ bool Oracle() {
 bool UnderplanOracle(bool require_typed = false) {
   Fixture f({263, 263});
   thread_budget_internal::EncodeScope threads(2);
-  for (size_t op : {0ul, 1ul, 2ul, 3ul, 4ul, 10ul}) {
+  for (size_t op : {size_t{0}, size_t{1}, size_t{2}, size_t{3}, size_t{4}, size_t{10}}) {
     // The direct padded path has no managed allocations when run serially.
     if (op == 2 && std::thread::hardware_concurrency() < 2)
       continue;
@@ -299,7 +299,7 @@ bool PurePlans() {
                    {15, 15},
                    {263, 263},
                    {3840, 2160},
-                   {1ul << 24, 1}}) {
+                   {size_t{1} << 24, 1}}) {
       NativeButteraugliStoragePlan native;
       if (!Ok(ComputeNativeButteraugliStoragePlan(e, &native)))
         return false;
@@ -320,14 +320,14 @@ bool PurePlans() {
                      native.one_shot.peak_bytes == one_retained + 44 * m,
                  "Native Butteraugli owner formula differs"))
         return false;
-      for (size_t threads : {0ul, 1ul, 2ul, 12ul, SIZE_MAX}) {
+      for (size_t threads : {size_t{0}, size_t{1}, size_t{2}, size_t{12}, SIZE_MAX}) {
         ColorTransformStoragePlan color;
         if (!Ok(ComputeColorTransformStoragePlan(e, e, false, threads, &color)))
           return false;
         const size_t p =
             n < 65536 ? 1
                       : std::min(e.height,
-                                 threads == 0 ? 12 : std::min(threads, 12ul));
+                                 threads == 0 ? 12 : std::min(threads, size_t{12}));
         if (!Check(color.maximum_participants == p &&
                        color.working.peak_bytes ==
                            12 * n + (p > 1 ? e.height * sizeof(Status) +
@@ -423,7 +423,7 @@ bool RuntimeCases() {
                "Prepared and one-shot native outputs differ"))
       return false;
     for (size_t op = 0; op < kOperations; ++op)
-      for (size_t threads : {1ul, 2ul, 12ul, 0ul}) {
+      for (size_t threads : {size_t{1}, size_t{2}, size_t{12}, size_t{0}}) {
         if (op >= 3 && threads != 1)
           continue;
         HostStorageBound work;

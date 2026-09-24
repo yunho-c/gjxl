@@ -116,7 +116,7 @@ bool Counts() {
                                  .ok() &&
                              p.maximum_dispatches ==
                                  (iterations + size_t(final)) * per_score +
-                                     2 * families + 2 +
+                                     20 + 2 * families + 2 +
                                      size_t(!final) * (20 + 2 * families) + families &&
                              p.working.peak_bytes >=
                                  p.metadata.input.peak_bytes +
@@ -137,7 +137,7 @@ bool Counts() {
                    huge, huge, {4, true, true, true, 3},
                    AqProfileFrameOutput::kCompleted, &largest)
                        .ok() &&
-                   largest.maximum_dispatches == 643 &&
+                   largest.maximum_dispatches == 663 &&
                    ComputeAqAuxiliaryProfileStoragePlan(
                        {huge, huge, true, true, true, true}, &initial)
                        .ok() &&
@@ -252,6 +252,26 @@ bool SplitDcDispatches() {
   }
   return true;
 }
+bool CombinedPrefixCounts() {
+  for (const Extent2D extent : {Extent2D{1, 1}, {8, 8}, {64, 64}}) {
+    const Extent2D coding{(extent.width + 7) / 8 * 8,
+                          (extent.height + 7) / 8 * 8};
+    ResidentAqProfileInputOptions policy{
+        .evaluate_final_field = false,
+        .device_strategy_dispatch = true};
+    ResidentAqProfileStoragePlan dispatch, prefix;
+    if (!ComputeResidentAqProfileStoragePlan(extent, coding, policy,
+          AqProfileFrameOutput::kCompleted, &dispatch).ok()) return false;
+    policy.resident_strategy_metadata = true;
+    policy.adjust_initial_field = true;
+    if (!Check(ComputeResidentAqProfileStoragePlan(extent, coding, policy,
+                   AqProfileFrameOutput::kCompleted, &prefix).ok() &&
+                   prefix.metadata.stage_capacity == dispatch.metadata.stage_capacity + 11 &&
+                   prefix.maximum_dispatches == dispatch.maximum_dispatches + 56,
+               "Combined prefix or GPU-empty family storage is not bounded")) return false;
+  }
+  return true;
+}
 } // namespace
 
-int main() { return Counts() && SplitDcDispatches() && Failures() ? EXIT_SUCCESS : EXIT_FAILURE; }
+int main() { return Counts() && SplitDcDispatches() && CombinedPrefixCounts() && Failures() ? EXIT_SUCCESS : EXIT_FAILURE; }

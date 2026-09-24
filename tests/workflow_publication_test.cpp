@@ -39,7 +39,7 @@ struct Fixture {
   Image3FBuffer linear;
   VarDctEncodingOptions options{
     .butteraugli_target = 1.0f, .effort = 1,
-    .backend = VarDctBackendPreference::kCpu, .cpu_thread_count = 1};
+    .cpu_thread_count = 1, .backend = VarDctBackendPreference::kCpu};
   bool Init() {
     for (size_t i = 0; i < packed.size(); ++i) packed[i] = 37 + i % 183;
     return Ok(c_api_internal::ConvertPackedSrgbToLinearRgb(

@@ -22,6 +22,10 @@
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/primitives.h"
 
+namespace gjxl::aq_evaluation_internal {
+struct ResidentEncodingPolicySetup;
+}
+
 namespace gjxl::gpu_profile_internal {
 
 template <typename T>
@@ -48,6 +52,9 @@ struct GpuProfilingCapabilities {
 enum class GpuDispatchKind : uint8_t {
   kThreads,
   kThreadgroups,
+  // GPU-generated arguments. grid is resolved from shared arguments only
+  // after completion; profiling never replaces the indirect dispatch.
+  kIndirectThreadgroups,
 };
 
 struct GpuExtent3D {
@@ -67,6 +74,7 @@ struct GpuDispatchProfile {
   uint64_t begin_timestamp = 0;
   uint64_t end_timestamp = 0;
   uint64_t gpu_nanoseconds = 0;
+  bool timestamp_valid = false;
 
   bool operator==(const GpuDispatchProfile&) const = default;
 };
@@ -79,6 +87,8 @@ struct GpuStageProfile {
   uint64_t begin_timestamp = 0;
   uint64_t end_timestamp = 0;
   uint64_t gpu_nanoseconds = 0;
+  // False for a verified empty indirect stage, or before timestamp resolution.
+  bool timestamp_valid = false;
   ProfileStorage<GpuDispatchProfile> dispatches;
 
   bool operator==(const GpuStageProfile&) const = default;
@@ -294,6 +304,22 @@ public:
     GpuExecutionProfile* profile) = 0;
 };
 
+/// Optional diagnostics for the encoding-only resident frontend. These methods
+/// preserve device-owned initial fields and policy setup without requiring
+/// their diagnostic host materialization.
+class PreparedAqEncodingProfiler {
+public:
+  virtual ~PreparedAqEncodingProfiler() = default;
+  [[nodiscard]] virtual Status ComputeInitialQuantizationForEncodingProfiled(
+    InitialQuantizationOptions options, GpuProfilingMode mode,
+    GpuExecutionProfile* profile) = 0;
+  [[nodiscard]] virtual Status PrepareResidentEncodingPolicyProfiled(
+    float butteraugli_target,
+    aq_evaluation_internal::ResidentEncodingPolicySetup* setup,
+    uint32_t nonlinear_iterations, GpuProfilingMode mode,
+    GpuExecutionProfile* profile) = 0;
+};
+
 /// Optional diagnostic interface for prepared AQ construction. This captures
 /// GPU work performed while building persistent reference state.
 class GpuAqEvaluationProfiler {
@@ -311,6 +337,17 @@ public:
 class GpuAcStrategyEvaluationProfiler {
 public:
   virtual ~GpuAcStrategyEvaluationProfiler() = default;
+
+  [[nodiscard]] virtual bool SupportsDeviceSelectionProfiling() const noexcept {
+    return false;
+  }
+
+  [[nodiscard]] virtual Status EvaluateAndSelectAcStrategyCandidateBatchesProfiled(
+    std::span<const AcStrategyCandidateBatch>,
+    AcStrategyDeviceSelection, GpuProfilingMode,
+    std::unique_ptr<GpuSubmission>*) {
+    return Status::Unavailable("Device AC selection profiling is unavailable");
+  }
 
   [[nodiscard]] virtual Status EvaluateAcStrategyCandidateBatchesProfiled(
     std::span<const AcStrategyCandidateBatch> batches,

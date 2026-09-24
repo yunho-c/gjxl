@@ -1,0 +1,29 @@
+{
+  "at": "2026-09-22T03:13:01.498389+00:00",
+  "checks": [
+    {
+      "name": "imazen26-1029-planter-4k",
+      "width": 3840,
+      "height": 2160,
+      "nonfinite": 0,
+      "decoded_sha256": "b9a4cc8fe007c464dbf559f5415fa488ffe06b9c7c61dd68c8827e49b2b71c47",
+      "both_decodes_byte_equal": true
+    },
+    {
+      "name": "kodak-kodim17",
+      "width": 512,
+      "height": 768,
+      "nonfinite": 0,
+      "decoded_sha256": "1c13fa707611003114a97bed54afc88aa2e6271de9112254fa635368eed5c4bc",
+      "both_decodes_byte_equal": true
+    },
+    {
+      "name": "padded-stress-4k",
+      "width": 3839,
+      "height": 2159,
+      "nonfinite": 0,
+      "decoded_sha256": "0317ddbd651ffa94f980ea38c32dbcb714f6a3a4e1c424f35a052909107af55b",
+      "both_decodes_byte_equal": true
+    }
+  ]
+}

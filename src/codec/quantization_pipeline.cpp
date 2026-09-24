@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <new>
+#include <ranges>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -23,6 +24,7 @@
 #include "core/geometry.h"
 #include "core/image_buffer.h"
 #include "core/image_ops.h"
+#include "gpu/buffer.h"
 
 namespace gjxl {
 namespace {
@@ -99,8 +101,7 @@ Status ValidatePipelineInputs(
       (!resident_opsin && !opsin.valid()) ||
       !BlockGrid::IsPaddedPixelExtent(opsin_extent) ||
       !std::isfinite(options.initial_quant_rescale) ||
-      options.initial_quant_rescale <= 0.0f ||
-      block_extent == nullptr) {
+      options.initial_quant_rescale <= 0.0f || block_extent == nullptr) {
     return Status::InvalidArgument(
       "Quantization pipeline inputs or options are invalid");
   }
@@ -133,21 +134,21 @@ Status ValidatePipelineInputs(
         output.initial_quantization.strategy_mask.extent != *block_extent ||
         output.initial_quantization.pixel_mask.extent != opsin_extent)) ||
       (materialization.adaptive_quant_field &&
-       (!output.adaptive_quantization.quant_field.valid() ||
-        output.adaptive_quantization.quant_field.extent != *block_extent)) ||
+        (!output.adaptive_quantization.quant_field.valid() ||
+          output.adaptive_quantization.quant_field.extent != *block_extent)) ||
       (materialization.block_distance_map &&
-       (!output.adaptive_quantization.block_distance_map.valid() ||
-        output.adaptive_quantization.block_distance_map.extent !=
-          *block_extent)) ||
+        (!output.adaptive_quantization.block_distance_map.valid() ||
+          output.adaptive_quantization.block_distance_map.extent !=
+            *block_extent)) ||
       (materialization.reconstructed_linear_rgb &&
-       (!output.adaptive_quantization.reconstructed_linear_rgb.valid() ||
-        output.adaptive_quantization.reconstructed_linear_rgb.extent() !=
-          original_linear_rgb.extent())) ||
+        (!output.adaptive_quantization.reconstructed_linear_rgb.valid() ||
+          output.adaptive_quantization.reconstructed_linear_rgb.extent() !=
+            original_linear_rgb.extent())) ||
       output.adaptive_quantization.frame == nullptr ||
       output.adaptive_quantization.score_history == nullptr ||
       (options.adaptive_quantization.control_mode ==
-         AdaptiveQuantizationControlMode::kMaximumError &&
-       output.adaptive_quantization.maximum_error_result == nullptr)) {
+          AdaptiveQuantizationControlMode::kMaximumError &&
+        output.adaptive_quantization.maximum_error_result == nullptr)) {
     return Status::InvalidArgument(
       "Quantization pipeline outputs have invalid geometry");
   }
@@ -307,14 +308,62 @@ Status quantization_pipeline_internal::PrepareQuantizationPipeline(
   return Status::Ok();
 }
 
+Status quantization_pipeline_internal::PreparedQuantizationPipeline::
+  PrepareHostInitialStorage(bool include_pixel_mask) {
+  size_t block_count = 0;
+  size_t pixel_count = 0;
+  if (!BlockGrid::IsPaddedPixelExtent(padded_extent) ||
+      block_extent != BlockGrid::FromPaddedPixelExtent(padded_extent).blocks ||
+      !block_extent.try_area(&block_count) ||
+      !padded_extent.try_area(&pixel_count)) {
+    return Status::InvalidArgument(
+      "Host initial-quantization storage geometry is invalid");
+  }
+  if (initial_quant.size() == block_count &&
+      strategy_mask.size() == block_count &&
+      (!include_pixel_mask || pixel_mask.size() == pixel_count)) {
+    return Status::Ok();
+  }
+  try {
+    resource_budget_internal::ManagedVector<float> quant(block_count);
+    resource_budget_internal::ManagedVector<float> strategy(block_count);
+    resource_budget_internal::ManagedVector<float> pixel(
+      include_pixel_mask ? pixel_count : 0);
+    initial_quant.swap(quant);
+    strategy_mask.swap(strategy);
+    if (include_pixel_mask) pixel_mask.swap(pixel);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
+    return failure.status();
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory(
+      "Unable to allocate host initial-quantization storage");
+  } catch (const std::length_error&) {
+    return Status::InvalidArgument(
+      "Host initial-quantization storage is too large");
+  }
+  return Status::Ok();
+}
+
 Status quantization_pipeline_internal::PrepareResidentQuantizationPipeline(
-    ConstImage3FView original_linear_rgb, Extent2D padded_extent,
-    ConstDeviceImage3View resident_original_linear_rgb,
-    ConstDeviceImage3View resident_coding_opsin,
-    CpuQuantizationPipelineOptions options,
-    PreparedQuantizationPipeline* prepared) {
+  ConstImage3FView original_linear_rgb,
+  Extent2D padded_extent,
+  ConstDeviceImage3View resident_original_linear_rgb,
+  ConstDeviceImage3View resident_coding_opsin,
+  CpuQuantizationPipelineOptions options,
+  PreparedQuantizationPipeline* prepared) {
+  const auto valid_resident_image = [](ConstDeviceImage3View image,
+                                      Extent2D extent) {
+    return std::ranges::all_of(image.plane, [&](ConstDevicePlaneView plane) {
+      return plane.buffer != nullptr &&
+             plane.element_type == DeviceElementType::kF32 &&
+             plane.extent == extent && plane.row_stride >= extent.width;
+    });
+  };
   if (prepared == nullptr || !original_linear_rgb.valid() ||
       !BlockGrid::IsPaddedPixelExtent(padded_extent) ||
+      !valid_resident_image(
+        resident_original_linear_rgb, original_linear_rgb.extent()) ||
+      !valid_resident_image(resident_coding_opsin, padded_extent) ||
       !options.adaptive_quantization.profile.valid() ||
       !std::isfinite(options.initial_quant_rescale) ||
       options.initial_quant_rescale <= 0.0f ||
@@ -354,8 +403,12 @@ Status quantization_pipeline_internal::PrepareResidentQuantizationPipeline(
       candidate.epf_sharpness.data(), candidate.block_extent,
       candidate.block_extent.width});
     if (!status.ok()) return status;
-    candidate.initial_quant.resize(block_count);
-    candidate.strategy_mask.resize(block_count);
+    // CUDA's resident policy keeps these fields on device until diagnostics
+    // request them. Metal's frontend still materializes the small block fields.
+    if (resident_original_linear_rgb.plane[0].buffer->backend() != BackendKind::kCuda) {
+      candidate.initial_quant.resize(block_count);
+      candidate.strategy_mask.resize(block_count);
+    }
     // The resident AC search consumes its device mask. Allocate a host copy
     // only when initial-field materialization is explicitly requested.
     candidate.butteraugli_options = options.adaptive_quantization.butteraugli;
@@ -440,6 +493,23 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
     }
   }
 
+  const bool resident_only_initial =
+    initial_quantization_ready &&
+    materialization.resident_initial_quantization;
+  const ConstPlaneF32View initial_quant = resident_only_initial
+    ? ConstPlaneF32View{}
+    : ConstPlaneF32View{
+        prepared.initial_quant.data(), block_extent, block_extent.width};
+  const ConstPlaneF32View pixel_mask =
+    (resident_only_initial || prepared.pixel_mask.empty())
+    ? ConstPlaneF32View{}
+    : ConstPlaneF32View{
+        prepared.pixel_mask.data(), prepared.padded_extent,
+        prepared.padded_extent.width};
+  const ColorCorrelationMap empty_color_correlation;
+  const ColorCorrelationMap& initial_color_correlation = resident_only_initial
+    ? empty_color_correlation : prepared.initial_color_correlation;
+
   const AcStrategySearchOptions search_options{
       .butteraugli_target = control_target,
       .dense_dct32_search = options.dense_dct32_search};
@@ -457,12 +527,9 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
   } else if (!deferred_search) {
     status = strategy_search.Find(
       pipeline_opsin,
-      {prepared.initial_quant.data(), block_extent, block_extent.width},
-      prepared.pixel_mask.empty()
-        ? ConstPlaneF32View{}
-        : ConstPlaneF32View{prepared.pixel_mask.data(), prepared.padded_extent,
-                            prepared.padded_extent.width},
-      prepared.initial_color_correlation,
+      initial_quant,
+      pixel_mask,
+      initial_color_correlation,
       {.butteraugli_target = control_target,
        .dense_dct32_search = options.dense_dct32_search},
       &prepared.strategies);
@@ -487,14 +554,9 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
         strategy_search,
         {.original_linear_rgb = original_linear_rgb,
          .opsin = pipeline_opsin,
-         .initial_quant_field = {prepared.initial_quant.data(), block_extent,
-                                 block_extent.width},
-         .pixel_mask = prepared.pixel_mask.empty()
-                           ? ConstPlaneF32View{}
-                           : ConstPlaneF32View{prepared.pixel_mask.data(),
-                                               prepared.padded_extent,
-                                               prepared.padded_extent.width},
-         .initial_color_correlation = &prepared.initial_color_correlation,
+         .initial_quant_field = initial_quant,
+         .pixel_mask = pixel_mask,
+         .initial_color_correlation = &initial_color_correlation,
          .epf_sharpness = {prepared.epf_sharpness.data(), block_extent,
                            block_extent.width},
          .search_options = search_options,
@@ -503,7 +565,7 @@ quantization_pipeline_internal::RunPreparedQuantizationPipelineWithProviders(
   } else {
     status = adaptive_quantization.Find(
         original_linear_rgb, pipeline_opsin, prepared.strategies,
-        {prepared.initial_quant.data(), block_extent, block_extent.width},
+        initial_quant,
         {prepared.epf_sharpness.data(), block_extent, block_extent.width},
         adaptive_options, prepared.butteraugli_reference.get(),
         output.adaptive_quantization);

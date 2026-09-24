@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="(empty)"
+	tests="1"
+	failures="0"
+	disabled="0"
+	skipped="0"
+	hostname=""
+	time="2"
+	timestamp="2026-09-21T23:34:22"
+	>
+	<testcase name="metal_aq_strategy_metadata" classname="metal_aq_strategy_metadata" time="2.89958" status="run">
+		<properties/>
+		<system-out>2026-09-21 23:34:22.893 gjxl_metal_aq_strategy_metadata_test[9541:340196659] Metal API Validation Enabled
+2026-09-21 23:34:22.893 gjxl_metal_aq_strategy_metadata_test[9541:340196659] Metal GPU Validation Enabled
+27 GPU-family/indirect AQ consumer cases matched CPU dispatch exactly
+27 full device-metadata AQ consumer cases matched CPU dispatch exactly
+12 malformed device maps rejected atomically through AQ
+42 managed allocation failures rejected atomically (37 after completion)
+3 complete resident-metadata lifetimes fit declared admission
+292 exact CPU-builder/GPU-metadata cases passed; guards, failure and reuse passed
+</system-out>
+	</testcase>
+</testsuite>

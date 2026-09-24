@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include "codestream/resident_workflow_storage_plan.h"
+#include "codestream/ac_tokenization_provider_internal.h"
 
 #include "codestream/workflow_publication_storage_plan.h"
 
@@ -59,14 +60,18 @@ Status ProfilePlan(Extent2D source, Extent2D coding,
       source, coding, policy, AqProfileFrameOutput::kCompleted, &aq);
   if (!status.ok())
     return status;
-  // Six orchestration wall stages, four AC stages, three completed-output
-  // stages. Reference, initial, AC, adjustment and resident policy each emit
-  // one child submission. Zero-update encoding omits the reference child.
+  // Reference, initial quantization and resident policy each emit a child
+  // submission. Zero-update encoding omits the reference child. Dense search
+  // retains a separate ACS submission; ordinary GPU selection and initial
+  // field adjustment are prefixes of the resident policy submission. The
+  // submission bound also covers backends without direct image transforms,
+  // which cannot combine ACS/AQ. Other counts retain that separate ACS bound.
   // The input preparer does not emit a profile graph.
   // Max label includes registered kernel IDs and generated fallback IDs.
   p->profile_shape = {
       .wall_stages = 6 + (fixed_dct8 ? 0u : 4u) + 3,
-      .submissions = (evaluation_free ? 4u : 5u) - size_t(fixed_dct8),
+      .submissions = (evaluation_free ? 2u : 3u) +
+          size_t(!fixed_dct8),
       .stages = (evaluation_free ? 2u : 3u) + ac.stage_capacity +
                 aq.metadata.stage_capacity,
       .dispatches = aux.reference_dispatches + aux.initial_dispatches +
@@ -116,8 +121,8 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
       e.cpu_thread_count > kMaximumCpuThreadCount ||
       (e.backend != VarDctBackendPreference::kMetal &&
        e.backend != VarDctBackendPreference::kAutomatic) ||
-      (e.metal_aq_mode != GpuAdaptiveQuantizationMode::kFullyResident &&
-       e.metal_aq_mode != GpuAdaptiveQuantizationMode::kThroughput) ||
+      (e.gpu_aq_mode != GpuAdaptiveQuantizationMode::kFullyResident &&
+       e.gpu_aq_mode != GpuAdaptiveQuantizationMode::kThroughput) ||
       (e.density_mode != VarDctDensityMode::kDefault &&
        e.density_mode != VarDctDensityMode::kHighDensity) ||
       (e.compression_mode != VarDctCompressionMode::kAutomatic &&
@@ -125,9 +130,9 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
       (!search &&
        e.rate_control_mode != VarDctRateControlMode::kButteraugliTarget) ||
       ((search ||
-        e.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput) &&
+        e.gpu_aq_mode == GpuAdaptiveQuantizationMode::kThroughput) &&
        e.backend != VarDctBackendPreference::kMetal) ||
-      (e.metal_aq_mode == GpuAdaptiveQuantizationMode::kThroughput &&
+      (e.gpu_aq_mode == GpuAdaptiveQuantizationMode::kThroughput &&
        e.density_mode == VarDctDensityMode::kHighDensity) ||
       (!search &&
        (!std::isfinite(e.butteraugli_target) || e.butteraugli_target <= 0)) ||
@@ -158,7 +163,7 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
       size_t{2}, size_t(filters.gaborish) + filters.epf_options.iterations);
   const bool sinks = !evaluation_free && source.width >= 15 && source.height >= 15;
   const bool resident_strategy_metadata =
-      !fixed_dct8 && !UseDenseDct32Search(e) && !o.collect_gpu_profile;
+      !fixed_dct8 && !UseDenseDct32Search(e);
   AqHostStoragePlan host;
   status = ComputeAqHostStoragePlan(
       {.source_extent = source,
@@ -260,8 +265,7 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
         completed_cache_bytes = completed_cache_limit;
     }
   }
-  p.idle_pool_capacity = {input.capacity_bytes, aq.persistent_bytes,
-                          aq.staging_bytes, butter.capacity_bytes, completed_cache_bytes};
+
   frontend_storage_internal::ColorCorrelationStoragePlan cfl;
   status = frontend_storage_internal::ComputeColorCorrelationStoragePlan(
       coding, frontend_storage_internal::ColorCorrelationStorageMode::kCopy,
@@ -302,7 +306,9 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
                          {iterations, final_score, sinks, filters.gaborish,
                           filters.epf_options.iterations,
                           ResolveDcQuantization(e) == DcQuantizationMode::kPredictionAware,
-                          ResolveAdaptiveDcSmoothing(e), UseEpfSharpnessSearch(e)},
+                          ResolveAdaptiveDcSmoothing(e),
+                          resident_strategy_metadata,
+                          resident_strategy_metadata, true, UseEpfSharpnessSearch(e)},
                          fixed_dct8, submission, &p, &profile_output);
     if (!status.ok())
       return status;
@@ -316,10 +322,15 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
                   .dc_prediction = e.dc_prediction,
                   .dc_uint_search = UseDcUintSearch(e)},
        .cpu_thread_count = e.cpu_thread_count,
-       .collect_profile = o.collect_profile || o.collect_gpu_profile},
+       .collect_profile = o.collect_profile || o.collect_gpu_profile,
+       .gpu_tokenization = GpuTokenizationEnabled()},
       &p.serializer);
   if (!status.ok())
     return status;
+  p.idle_pool_capacity = {input.capacity_bytes, aq.persistent_bytes,
+                          aq.staging_bytes, butter.capacity_bytes,
+                          p.serializer.token_idle_pool_capacity[0],
+                          p.serializer.token_idle_pool_capacity[1], completed_cache_bytes};
   WorkflowPublicationStoragePlan publication;
   status = ComputeWorkflowPublicationStoragePlan(
       p.serializer.output, p.score_count, p.maximum_attempts, search,

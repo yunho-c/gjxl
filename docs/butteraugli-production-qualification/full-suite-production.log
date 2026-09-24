@@ -1,0 +1,367 @@
+Test project /Users/yunhocho/GitHub/gjxl-butteraugli-production/build/production
+        Start   1: planning_recipes
+  1/156 Test   #1: planning_recipes ........................   Passed    0.01 sec
+        Start   2: resident_qualification_controller
+  2/156 Test   #2: resident_qualification_controller .......   Passed    0.22 sec
+        Start   3: stdlib_storage_compat
+  3/156 Test   #3: stdlib_storage_compat ...................   Passed    0.00 sec
+        Start   4: stdlib_storage_compat_cxx23
+  4/156 Test   #4: stdlib_storage_compat_cxx23 .............   Passed    0.00 sec
+        Start   5: storage_toolchain
+  5/156 Test   #5: storage_toolchain .......................   Passed    5.29 sec
+        Start   6: metal_build_graph
+  6/156 Test   #6: metal_build_graph .......................   Passed   12.58 sec
+        Start   7: metal_embedded_library
+  7/156 Test   #7: metal_embedded_library ..................   Passed    0.04 sec
+        Start   8: metal_profile_driver
+  8/156 Test   #8: metal_profile_driver ....................   Passed    0.98 sec
+        Start   9: encode_image
+  9/156 Test   #9: encode_image ............................   Passed    0.61 sec
+        Start  10: codestream_conformance_smoke
+ 10/156 Test  #10: codestream_conformance_smoke ............   Passed    0.50 sec
+        Start  11: bit_writer_append
+ 11/156 Test  #11: bit_writer_append .......................   Passed    0.27 sec
+        Start  12: bit_writer_word
+ 12/156 Test  #12: bit_writer_word .........................   Passed    0.01 sec
+        Start  13: ans_bit_emission
+ 13/156 Test  #13: ans_bit_emission ........................   Passed    0.37 sec
+        Start  14: bit_writer
+ 14/156 Test  #14: bit_writer ..............................   Passed    0.00 sec
+        Start  15: entropy
+ 15/156 Test  #15: entropy .................................   Passed    0.16 sec
+        Start  16: context_map
+ 16/156 Test  #16: context_map .............................   Passed    0.55 sec
+        Start  17: ans_reverse_bits
+ 17/156 Test  #17: ans_reverse_bits ........................   Passed    0.72 sec
+        Start  18: sections
+ 18/156 Test  #18: sections ................................   Passed    0.00 sec
+        Start  19: dc_group
+ 19/156 Test  #19: dc_group ................................   Passed    0.04 sec
+        Start  20: ac_group
+ 20/156 Test  #20: ac_group ................................   Passed    0.07 sec
+        Start  21: coefficient_order
+ 21/156 Test  #21: coefficient_order .......................   Passed    0.26 sec
+        Start  22: ac_direct_tokenization
+ 22/156 Test  #22: ac_direct_tokenization ..................   Passed    1.80 sec
+        Start  23: token_storage_plan
+ 23/156 Test  #23: token_storage_plan ......................   Passed    0.09 sec
+        Start  24: entropy_storage_plan
+ 24/156 Test  #24: entropy_storage_plan ....................   Passed    1.74 sec
+        Start  25: representation_storage_plan
+ 25/156 Test  #25: representation_storage_plan .............   Passed    0.07 sec
+        Start  26: serializer_storage_plan
+ 26/156 Test  #26: serializer_storage_plan .................   Passed   30.78 sec
+        Start  27: ac_section_validation
+ 27/156 Test  #27: ac_section_validation ...................   Passed    0.04 sec
+        Start  28: compact_vardct_frame
+ 28/156 Test  #28: compact_vardct_frame ....................   Passed    1.53 sec
+        Start  29: compact_frame_allocation
+ 29/156 Test  #29: compact_frame_allocation ................   Passed    0.68 sec
+        Start  30: frame_validation
+ 30/156 Test  #30: frame_validation ........................   Passed    0.98 sec
+        Start  31: sparse_coefficients
+ 31/156 Test  #31: sparse_coefficients .....................   Passed    0.03 sec
+        Start  32: sparse_vardct_frame
+ 32/156 Test  #32: sparse_vardct_frame .....................   Passed    6.07 sec
+        Start  33: sparse_frame_allocation
+ 33/156 Test  #33: sparse_frame_allocation .................   Passed    0.44 sec
+        Start  34: quantization_storage
+ 34/156 Test  #34: quantization_storage ....................   Passed    0.01 sec
+        Start  35: block_context_map
+ 35/156 Test  #35: block_context_map .......................   Passed    0.00 sec
+        Start  36: codestream_encoder
+ 36/156 Test  #36: codestream_encoder ......................   Passed    6.60 sec
+        Start  37: codestream_workflow
+ 37/156 Test  #37: codestream_workflow .....................   Passed    1.59 sec
+        Start  38: codestream_batch_workflow
+ 38/156 Test  #38: codestream_batch_workflow ...............   Passed    0.13 sec
+        Start  39: batch_lifecycle
+ 39/156 Test  #39: batch_lifecycle .........................   Passed    0.11 sec
+        Start  40: batch_lifecycle_cpu
+ 40/156 Test  #40: batch_lifecycle_cpu .....................   Passed    0.03 sec
+        Start  41: batch_scheduling
+ 41/156 Test  #41: batch_scheduling ........................   Passed    0.09 sec
+        Start  42: batch_scheduling_cpu
+ 42/156 Test  #42: batch_scheduling_cpu ....................   Passed    0.01 sec
+        Start  43: parallel_work
+ 43/156 Test  #43: parallel_work ...........................   Passed    0.00 sec
+        Start  44: worker_launch_failure_startup
+ 44/156 Test  #44: worker_launch_failure_startup ...........   Passed    0.01 sec
+        Start  45: worker_launch_failure_forward
+ 45/156 Test  #45: worker_launch_failure_forward ...........   Passed    0.33 sec
+        Start  46: worker_launch_failure_cpu_color
+ 46/156 Test  #46: worker_launch_failure_cpu_color .........   Passed    5.76 sec
+        Start  47: worker_launch_failure_cpu_aq
+ 47/156 Test  #47: worker_launch_failure_cpu_aq ............   Passed    6.01 sec
+        Start  48: worker_launch_failure_cpu_orders
+ 48/156 Test  #48: worker_launch_failure_cpu_orders ........   Passed    7.53 sec
+        Start  49: worker_launch_failure_cpu_sections
+ 49/156 Test  #49: worker_launch_failure_cpu_sections ......   Passed    7.51 sec
+        Start  50: worker_launch_failure_cpu_drains
+ 50/156 Test  #50: worker_launch_failure_cpu_drains ........   Passed    2.49 sec
+        Start  51: worker_launch_failure_metal_forward
+ 51/156 Test  #51: worker_launch_failure_metal_forward .....   Passed    0.82 sec
+        Start  52: worker_launch_failure_metal_orders
+ 52/156 Test  #52: worker_launch_failure_metal_orders ......   Passed    1.12 sec
+        Start  53: worker_launch_failure_metal_sections
+ 53/156 Test  #53: worker_launch_failure_metal_sections ....   Passed    0.29 sec
+        Start  54: worker_launch_failure_metal_drains
+ 54/156 Test  #54: worker_launch_failure_metal_drains ......   Passed    0.19 sec
+        Start  55: rate_control_search
+ 55/156 Test  #55: rate_control_search .....................   Passed    0.00 sec
+        Start  56: rate_control_probe
+ 56/156 Test  #56: rate_control_probe ......................   Passed    0.01 sec
+        Start  57: codestream_cli
+ 57/156 Test  #57: codestream_cli ..........................   Passed    0.66 sec
+        Start  58: codestream_sample_generated
+ 58/156 Test  #58: codestream_sample_generated .............   Passed    0.03 sec
+        Start  59: c_api_image_conversion
+ 59/156 Test  #59: c_api_image_conversion ..................   Passed    0.00 sec
+        Start  60: c_api
+ 60/156 Test  #60: c_api ...................................   Passed    0.13 sec
+        Start  61: c_api_cpp
+ 61/156 Test  #61: c_api_cpp ...............................   Passed    0.01 sec
+        Start  62: pfm
+ 62/156 Test  #62: pfm .....................................   Passed    0.01 sec
+        Start  63: butteraugli_primitives
+ 63/156 Test  #63: butteraugli_primitives ..................   Passed    0.00 sec
+        Start  64: butteraugli_stages
+ 64/156 Test  #64: butteraugli_stages ......................   Passed    0.00 sec
+        Start  65: butteraugli_distance
+ 65/156 Test  #65: butteraugli_distance ....................   Passed    0.03 sec
+        Start  66: core_geometry
+ 66/156 Test  #66: core_geometry ...........................   Passed    0.00 sec
+        Start  67: resource_budget
+ 67/156 Test  #67: resource_budget .........................   Passed    0.05 sec
+        Start  68: cpu_budget
+ 68/156 Test  #68: cpu_budget ..............................   Passed    0.03 sec
+        Start  69: cpu_execution
+ 69/156 Test  #69: cpu_execution ...........................   Passed    0.03 sec
+        Start  70: workflow_cpu_coordination
+ 70/156 Test  #70: workflow_cpu_coordination ...............   Passed    4.31 sec
+        Start  71: workflow_cpu_coordination_cpu
+ 71/156 Test  #71: workflow_cpu_coordination_cpu ...........   Passed    3.54 sec
+        Start  72: managed_allocator
+ 72/156 Test  #72: managed_allocator .......................   Passed    0.00 sec
+        Start  73: serializer_storage
+ 73/156 Test  #73: serializer_storage ......................   Passed    0.02 sec
+        Start  74: frontend_storage
+ 74/156 Test  #74: frontend_storage ........................   Passed    0.03 sec
+        Start  75: frontend_storage_plan
+ 75/156 Test  #75: frontend_storage_plan ...................   Passed    0.29 sec
+        Start  76: frontend_field_storage_plan
+ 76/156 Test  #76: frontend_field_storage_plan .............   Passed    0.44 sec
+        Start  77: perceptual_storage_plan
+ 77/156 Test  #77: perceptual_storage_plan .................   Passed    1.41 sec
+        Start  78: publication_storage
+ 78/156 Test  #78: publication_storage .....................   Passed    0.03 sec
+        Start  79: workflow_publication
+ 79/156 Test  #79: workflow_publication ....................   Passed    0.59 sec
+        Start  80: diagnostic_storage
+ 80/156 Test  #80: diagnostic_storage ......................   Passed    0.00 sec
+        Start  81: ac_strategy_grid
+ 81/156 Test  #81: ac_strategy_grid ........................   Passed    0.00 sec
+        Start  82: fast_math
+ 82/156 Test  #82: fast_math ...............................   Passed    0.00 sec
+        Start  83: dct_reference
+ 83/156 Test  #83: dct_reference ...........................   Passed    0.00 sec
+        Start  84: cpu_dct
+ 84/156 Test  #84: cpu_dct .................................   Passed    0.00 sec
+        Start  85: ac_strategy_cost
+ 85/156 Test  #85: ac_strategy_cost ........................   Passed    0.00 sec
+        Start  86: ac_strategy_search
+ 86/156 Test  #86: ac_strategy_search ......................   Passed    0.01 sec
+        Start  87: quantization
+ 87/156 Test  #87: quantization ............................   Passed    0.00 sec
+        Start  88: quantization_adjustment
+ 88/156 Test  #88: quantization_adjustment .................   Passed    0.00 sec
+        Start  89: maximum_error
+ 89/156 Test  #89: maximum_error ...........................   Passed    0.05 sec
+        Start  90: dc_conversion
+ 90/156 Test  #90: dc_conversion ...........................   Passed    0.00 sec
+        Start  91: dc_quantization
+ 91/156 Test  #91: dc_quantization .........................   Passed    0.00 sec
+        Start  92: dc_processing
+ 92/156 Test  #92: dc_processing ...........................   Passed    0.04 sec
+        Start  93: cpu_workflow_storage_plan
+ 93/156 Test  #93: cpu_workflow_storage_plan ...............   Passed   14.97 sec
+        Start  94: cpu_workflow_legacy_dc_tree
+ 94/156 Test  #94: cpu_workflow_legacy_dc_tree .............   Passed   15.13 sec
+        Start  95: resident_workflow_legacy_dc_tree
+ 95/156 Test  #95: resident_workflow_legacy_dc_tree ........   Passed    5.30 sec
+        Start  96: compatibility_workflow_legacy_dc_tree
+ 96/156 Test  #96: compatibility_workflow_legacy_dc_tree ...   Passed    4.38 sec
+        Start  97: dc_context_tree
+ 97/156 Test  #97: dc_context_tree .........................   Passed    0.03 sec
+        Start  98: adaptive_quantization
+ 98/156 Test  #98: adaptive_quantization ...................   Passed    0.01 sec
+        Start  99: adaptive_quantization_loop
+ 99/156 Test  #99: adaptive_quantization_loop ..............   Passed    0.02 sec
+        Start 100: color_transform
+100/156 Test #100: color_transform .........................   Passed    0.00 sec
+        Start 101: quantization_pipeline
+101/156 Test #101: quantization_pipeline ...................   Passed    0.03 sec
+        Start 102: quantization_pipeline_uniform
+102/156 Test #102: quantization_pipeline_uniform ...........   Passed    0.00 sec
+        Start 103: quantization_pipeline_search_policy
+103/156 Test #103: quantization_pipeline_search_policy .....   Passed    0.00 sec
+        Start 104: low_effort_strategy_policy
+104/156 Test #104: low_effort_strategy_policy ..............   Passed    0.01 sec
+        Start 105: dc_policy
+105/156 Test #105: dc_policy ...............................   Passed    0.60 sec
+        Start 106: gaborish
+106/156 Test #106: gaborish ................................   Passed    0.00 sec
+        Start 107: chroma_from_luma
+107/156 Test #107: chroma_from_luma ........................   Passed    0.00 sec
+        Start 108: epf
+108/156 Test #108: epf .....................................   Passed    0.00 sec
+        Start 109: reconstruction
+109/156 Test #109: reconstruction ..........................   Passed    0.01 sec
+        Start 110: overwrite_array
+110/156 Test #110: overwrite_array .........................   Passed    0.00 sec
+        Start 111: vardct_frame
+111/156 Test #111: vardct_frame ............................   Passed    0.13 sec
+        Start 112: vardct_frame_view
+112/156 Test #112: vardct_frame_view .......................   Passed    9.79 sec
+        Start 113: simple_codestream_profile
+113/156 Test #113: simple_codestream_profile ...............   Passed    0.00 sec
+        Start 114: loop_filter
+114/156 Test #114: loop_filter .............................   Passed    0.00 sec
+        Start 115: butteraugli
+115/156 Test #115: butteraugli .............................   Passed    0.00 sec
+        Start 116: quantization_tables_generated
+116/156 Test #116: quantization_tables_generated ...........   Passed    0.07 sec
+        Start 117: gpu_image
+117/156 Test #117: gpu_image ...............................   Passed    0.00 sec
+        Start 118: ac_strategy_storage_plan
+118/156 Test #118: ac_strategy_storage_plan ................   Passed    0.00 sec
+        Start 119: ac_strategy_host_storage_plan
+119/156 Test #119: ac_strategy_host_storage_plan ...........   Passed    1.60 sec
+        Start 120: profile_storage_plan
+120/156 Test #120: profile_storage_plan ....................   Passed    0.00 sec
+        Start 121: gpu_profile_json
+121/156 Test #121: gpu_profile_json ........................   Passed    0.04 sec
+        Start 122: metal_profile_storage_plan
+122/156 Test #122: metal_profile_storage_plan ..............   Passed    0.06 sec
+        Start 123: metal_gpu_primitives
+123/156 Test #123: metal_gpu_primitives ....................   Passed    0.06 sec
+        Start 124: metal_butteraugli_operation_contract
+124/156 Test #124: metal_butteraugli_operation_contract ....   Passed    0.14 sec
+        Start 125: metal_butteraugli
+125/156 Test #125: metal_butteraugli .......................   Passed    0.56 sec
+        Start 126: metal_aq_evaluation
+126/156 Test #126: metal_aq_evaluation .....................   Passed    2.09 sec
+        Start 127: adaptive_quantization_gpu_policy
+127/156 Test #127: adaptive_quantization_gpu_policy ........   Passed    0.25 sec
+        Start 128: metal_aq_reconstruction
+128/156 Test #128: metal_aq_reconstruction .................   Passed    0.75 sec
+        Start 129: metal_aq_postprocess
+129/156 Test #129: metal_aq_postprocess ....................   Passed    0.24 sec
+        Start 130: metal_dct
+130/156 Test #130: metal_dct ...............................   Passed    1.89 sec
+        Start 131: metal_ac_strategy
+131/156 Test #131: metal_ac_strategy .......................***Failed    0.13 sec
+4K AC scratch mode=0 A=304496640 B=304496640 rate=3110400 device=626786016
+AC callback inputs: three physical failures/recoveries and three terminal underplans checked
+Dispatch-boundary timestamps unavailable; stage mode qualified
+exact loss fusion DCT8 max absolute cost error 0.000244141, max relative error 1.99471e-07
+exact loss fusion DCT16x8 max absolute cost error 0.000488281, max relative error 2.33452e-07
+exact loss fusion DCT8x16 max absolute cost error 0.000732422, max relative error 2.72404e-07
+exact loss fusion DCT16x16 max absolute cost error 0.000488281, max relative error 1.18516e-07
+exact loss fusion DCT32x16 max absolute cost error 0.00146484, max relative error 2.0857e-07
+exact loss fusion DCT16x32 max absolute cost error 0.00244141, max relative error 3.52006e-07
+exact loss fusion DCT32x32 max absolute cost error 0.00195312, max relative error 1.44533e-07
+4K AC scratch mode=1 A=1555200 B=0 rate=3110400 device=19347936
+AC callback inputs: three physical failures/recoveries and three terminal underplans checked
+Dispatch-boundary timestamps unavailable; stage mode qualified
+exact loss fusion DCT8 max absolute cost error 0.000244141, max relative error 1.99471e-07
+exact loss fusion DCT16x8 max absolute cost error 0.000488281, max relative error 2.33452e-07
+exact loss fusion DCT8x16 max absolute cost error 0.000732422, max relative error 2.72404e-07
+exact loss fusion DCT16x16 max absolute cost error 0.000488281, max relative error 1.18516e-07
+exact loss fusion DCT32x16 max absolute cost error 0.00146484, max relative error 2.0857e-07
+exact loss fusion DCT16x32 max absolute cost error 0.00244141, max relative error 3.52006e-07
+exact loss fusion DCT32x32 max absolute cost error 0.00195312, max relative error 1.44533e-07
+AC callback inputs: three physical failures/recoveries and three terminal underplans checked
+Dispatch-boundary timestamps unavailable; stage mode qualified
+scalar matmul DCT8 max absolute cost error 0.000244141, max relative error 1.99471e-07
+scalar matmul DCT16x8 max absolute cost error 0.000488281, max relative error 2.33452e-07
+scalar matmul DCT8x16 max absolute cost error 0.000732422, max relative error 2.72404e-07
+scalar matmul DCT16x16 max absolute cost error 0.000488281, max relative error 1.18516e-07
+scalar matmul DCT32x16 max absolute cost error 0.00146484, max relative error 2.0857e-07
+scalar matmul DCT16x32 max absolute cost error 0.00244141, max relative error 3.52006e-07
+scalar matmul DCT32x32 max absolute cost error 0.00195312, max relative error 1.44533e-07
+AC callback inputs: three physical failures/recoveries and three terminal underplans checked
+Dispatch-boundary timestamps unavailable; stage mode qualified
+simdgroup matmul DCT8 max absolute cost error 0.000244141, max relative error 1.99471e-07
+simdgroup matmul DCT16x8 max absolute cost error 0.000488281, max relative error 2.33452e-07
+simdgroup matmul DCT8x16 max absolute cost error 0.000732422, max relative error 2.72404e-07
+simdgroup matmul DCT16x16 max absolute cost error 0.000488281, max relative error 1.18516e-07
+simdgroup matmul DCT32x16 max absolute cost error 0.00146484, max relative error 2.0857e-07
+simdgroup matmul DCT16x32 max absolute cost error 0.00244141, max relative error 3.52006e-07
+
+        Start 132: metal_ac_strategy_search
+132/156 Test #132: metal_ac_strategy_search ................   Passed    2.44 sec
+        Start 133: metal_aq_strategy_metadata
+133/156 Test #133: metal_aq_strategy_metadata ..............   Passed    0.84 sec
+        Start 134: metal_quantization_pipeline
+134/156 Test #134: metal_quantization_pipeline .............   Passed    4.42 sec
+        Start 135: metal_completed_frame
+135/156 Test #135: metal_completed_frame ...................   Passed    1.26 sec
+        Start 136: metal_resource_budget
+136/156 Test #136: metal_resource_budget ...................   Passed    2.02 sec
+        Start 137: metal_diagnostic_storage
+137/156 Test #137: metal_diagnostic_storage ................   Passed    0.25 sec
+        Start 138: metal_storage_plan
+138/156 Test #138: metal_storage_plan ......................   Passed    0.02 sec
+        Start 139: metal_aq_host_storage_plan
+139/156 Test #139: metal_aq_host_storage_plan ..............   Passed    3.99 sec
+        Start 140: metal_quantizer_selection
+140/156 Test #140: metal_quantizer_selection ...............   Passed    0.67 sec
+        Start 141: metal_dc_processing
+141/156 Test #141: metal_dc_processing .....................   Passed    4.22 sec
+        Start 142: metal_submission_storage_plan
+142/156 Test #142: metal_submission_storage_plan ...........   Passed    0.00 sec
+        Start 143: metal_aq_profile_storage_plan
+143/156 Test #143: metal_aq_profile_storage_plan ...........   Passed    0.01 sec
+        Start 144: resident_workflow_storage_plan
+144/156 Test #144: resident_workflow_storage_plan ..........   Passed    5.14 sec
+        Start 145: compatibility_workflow_storage_plan
+145/156 Test #145: compatibility_workflow_storage_plan .....   Passed    4.26 sec
+        Start 146: metal_butteraugli_legacy
+146/156 Test #146: metal_butteraugli_legacy ................   Passed    0.56 sec
+        Start 147: metal_aq_evaluation_legacy
+147/156 Test #147: metal_aq_evaluation_legacy ..............   Passed    2.03 sec
+        Start 148: metal_aq_host_storage_plan_legacy
+148/156 Test #148: metal_aq_host_storage_plan_legacy .......   Passed    4.22 sec
+        Start 149: metal_cache_admission
+149/156 Test #149: metal_cache_admission ...................   Passed    0.24 sec
+        Start 150: workflow_storage_plan
+150/156 Test #150: workflow_storage_plan ...................   Passed    0.37 sec
+        Start 151: workflow_admission
+151/156 Test #151: workflow_admission ......................   Passed   17.54 sec
+        Start 152: workflow_admission_cpu
+152/156 Test #152: workflow_admission_cpu ..................   Passed    0.15 sec
+        Start 153: codec_install_consumer
+153/156 Test #153: codec_install_consumer ..................   Passed   14.85 sec
+        Start 154: quality_benchmark_cli
+154/156 Test #154: quality_benchmark_cli ...................   Passed    0.16 sec
+        Start 155: encoding_benchmark_cli
+155/156 Test #155: encoding_benchmark_cli ..................   Passed    1.42 sec
+        Start 156: image_batch_benchmark_cli
+156/156 Test #156: image_batch_benchmark_cli ...............   Passed    0.84 sec
+
+99% tests passed, 1 tests failed out of 156
+
+Label Time Summary:
+benchmark              =   2.42 sec*proc (3 tests)
+cli                    =   4.23 sec*proc (6 tests)
+conformance            =   0.50 sec*proc (1 test)
+metal                  =   1.58 sec*proc (2 tests)
+worker-launch-cpu      =  29.63 sec*proc (7 tests)
+worker-launch-metal    =   2.42 sec*proc (4 tests)
+
+Total Test time (real) = 249.57 sec
+
+The following tests FAILED:
+	131 - metal_ac_strategy (Failed)
+Errors while running CTest

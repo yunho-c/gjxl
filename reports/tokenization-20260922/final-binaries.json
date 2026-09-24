@@ -1,0 +1,23 @@
+{
+  "time": 1790055537.305737,
+  "base_revision": "7659cac8d933a9f6d41f1155503c7ca99fc46e6c",
+  "candidate_parent": "7659cac8d933a9f6d41f1155503c7ca99fc46e6c",
+  "files": {
+    "candidate-capture": {
+      "path": "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/capture",
+      "sha256": "82cb94d58fedca361479d048b3289c56613e3eeda817281ccfb5fa66993ec73b"
+    },
+    "candidate-batch": {
+      "path": "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-batch/candidate",
+      "sha256": "edd4968b65960cc57c2e7eed5cf9093ba84460ab98ff3159198f80159cd1ffe2"
+    },
+    "baseline-capture": {
+      "path": "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-profile/baseline",
+      "sha256": "c661e65282d8eb3c331cda7c08fb190c401dad544ee0e3838d1d3038bbb2e57c"
+    },
+    "baseline-batch": {
+      "path": "/Users/yunhocho/GitHub/gjxl-gpu-tokenization-20260922/reports/tokenization-20260922/final-batch/base",
+      "sha256": "29ee4ef4aebc3b8a8a827d6fc760a1dfd52ce08fa75f806c1aa68745b4ace71b"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+Test project /Users/yunhocho/GitHub/gjxl-butteraugli-production-base/build/production
+    Start 133: metal_aq_strategy_metadata
+1/3 Test #133: metal_aq_strategy_metadata .......***Failed    0.38 sec
+
+    Start 139: metal_aq_host_storage_plan
+2/3 Test #139: metal_aq_host_storage_plan .......   Passed    4.50 sec
+    Start 152: encoding_benchmark_cli
+3/3 Test #152: encoding_benchmark_cli ...........   Passed    1.61 sec
+
+67% tests passed, 1 tests failed out of 3
+
+Label Time Summary:
+benchmark    =   1.61 sec*proc (1 test)
+cli          =   1.61 sec*proc (1 test)
+metal        =   1.61 sec*proc (1 test)
+
+Total Test time (real) =   6.49 sec
+
+The following tests FAILED:
+	133 - metal_aq_strategy_metadata (Failed)
+Errors while running CTest

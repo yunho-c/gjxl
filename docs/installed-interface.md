@@ -7,7 +7,7 @@ implementation dependencies needed to compile them. Adding a header under
 
 The public list preserves the C API, C++ domain bridge, core value/owner types,
 codec algorithms, serializer primitives, single/batch workflows, GPU operation
-contracts, and Metal backend factory. Existing include paths and exported target
+contracts, and conditional Metal/CUDA backend factories. Existing include paths and exported target
 names are unchanged.
 
 | Consumer interface | Headers | CMake target |
@@ -17,7 +17,7 @@ names are unchanged.
 | Core values, images and execution domain | Public `core/` entries in the manifest | `gjxl::core` |
 | CPU codec algorithms and frames | Public `codec/` entries | `gjxl::codec` |
 | Serialization and complete workflows | Public `codestream/` entries | `gjxl::codestream` |
-| GPU interfaces and Metal factory | Public `gpu/` entries | Existing `gjxl::gjxl_gpu`, `gjxl::gjxl_gpu_ops`, `gjxl::gjxl_gpu_butteraugli`, `gjxl::gjxl_metal` targets, also linked transitively by `gjxl::codestream` |
+| GPU interfaces and backend factories | Public `gpu/` entries; enabled backend headers | `gjxl::gjxl_gpu`, `gjxl::gjxl_gpu_ops`, `gjxl::gjxl_gpu_butteraugli`, and conditional `gjxl::gjxl_metal` / `gjxl::cuda` targets, also linked transitively by `gjxl::codestream` |
 
 The package components remain `c`, `core`, `codec`, and `codestream`. For example:
 

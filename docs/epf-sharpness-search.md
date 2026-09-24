@@ -12,7 +12,7 @@ The reference is `lib/jxl/enc_heuristics.cc` in local libjxl revision
 `ComputeARHeuristics` and `ComputeBlockL2Distance`. The implementation worktree
 starts from GJXL `b1a7373`.
 
-The default policy enables search at effort 6 and above, distance at least
+The CPU and Metal default policy enables search at effort 6 and above, distance at least
 0.5, and nonzero EPF iterations. Maximum-error control and explicit
 maximum-throughput mode retain their existing filtering policy. AQ uses the
 neutral sharpness field (4); search runs only after the final coefficient
@@ -21,7 +21,8 @@ coefficients, quantization, transforms, or the number of EPF passes. Changed
 codestream size can affect subsequent attempts in target-size control.
 
 `VarDctEncodingOptions::adaptive_epf_sharpness` defaults to true and can be
-disabled for ablation. The CLI, public-workflow encoding benchmark, and quality
+disabled for ablation. CUDA retains fixed sharpness; its low-level AQ API
+rejects explicit search requests until a CUDA implementation is available. The CLI, public-workflow encoding benchmark, and quality
 benchmark expose `--epf-sharpness-search on|off`. Both benchmarks record the
 setting in their raw JSON. The quality benchmark also writes the codestream for
 independent decoding and quality measurement.

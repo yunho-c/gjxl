@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 
 #include "codec/dct.h"
+#include "codec/dct_internal.h"
 
 #include <array>
 #include <cmath>
@@ -110,6 +111,10 @@ Status ValidateDct(
 }
 
 }  // namespace
+
+std::span<const double> dct_internal::InverseBasis(size_t length) {
+  return Basis(length, BasisDirection::kInverse);
+}
 
 bool SupportsCpuDct(AcStrategyType strategy) noexcept {
   switch (strategy) {

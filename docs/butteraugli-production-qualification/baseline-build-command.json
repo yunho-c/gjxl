@@ -1,0 +1,7 @@
+[
+  "cmake",
+  "--build",
+  "/Users/yunhocho/GitHub/gjxl-butteraugli-production-base/build/production",
+  "-j",
+  "8"
+]

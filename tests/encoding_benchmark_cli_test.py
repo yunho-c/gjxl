@@ -62,7 +62,6 @@ PHASES = {
 
 ELIMINATED_WORK_PHASES = {
     "codestream_coefficient_context_materialization_work",
-    "codestream_entropy_prefix_code_build_work",
     "codestream_entropy_ans_prefix_validation_work",
     "codestream_entropy_ans_value_collection_work",
     "codestream_entropy_ans_value_aggregation_work",
@@ -73,12 +72,12 @@ ELIMINATED_WORK_PHASES = {
 
 AC_CANDIDATE_KERNEL_SUFFIX = {
     "dct8": "local",
-    "dct16": "parallel",
-    "dct16x8": "parallel",
+    "dct16": "factored",
+    "dct16x8": "factored",
     "dct8x16": "parallel",
-    "dct32x16": "local",
-    "dct16x32": "local",
-    "dct32": "local",
+    "dct32x16": "factored",
+    "dct16x32": "factored",
+    "dct32": "factored",
 }
 
 
@@ -225,9 +224,14 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
             self.assertGreaterEqual(value, 0)
         for phase in PHASES:
             if phase in ELIMINATED_WORK_PHASES:
-                self.assertEqual(sample["phase_nanoseconds"][phase], 0)
-            elif phase.endswith("_work"):
-                self.assertGreater(sample["phase_nanoseconds"][phase], 0)
+                self.assertEqual(sample["phase_nanoseconds"][phase], 0, phase)
+        # Prefix/ANS branches depend on the encoded populations. A short
+        # executed substage can also round to zero at the host clock's
+        # resolution; only the aggregate work must have measurable duration.
+        self.assertGreater(sum(
+            value for phase, value in sample["phase_nanoseconds"].items()
+            if phase.endswith("_work")
+        ), 0)
         self.assertFalse(list(self.directory.glob("samples.json.tmp-*")))
 
     def test_external_pfm_input_uses_its_source_extent(self) -> None:
@@ -268,7 +272,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         self.assertEqual(document["density"], "high")
         self.assertIn("density=high", result.stdout)
 
-    def test_effort_nine_selects_high_density_entropy(self) -> None:
+    def test_effort_nine_selects_rate_optimized_entropy(self) -> None:
         destination = self.directory / "effort-nine.json"
         result = self.run_benchmark(
             "--effort",
@@ -286,7 +290,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         self.assertIn("effort=9", result.stdout)
         self.assertEqual(
             document["workloads"][0]["samples"][0]["entropy_behavior"],
-            "high-density",
+            "rate-optimized",
         )
 
     def test_maximum_compression_is_explicit_in_raw_samples(self) -> None:
@@ -376,9 +380,13 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
             str(destination),
         )
 
+        if result.returncode != 0 and "GPU stage-boundary timestamp sampling is unavailable" in result.stderr:
+            self.assertFalse(destination.exists())
+            self.skipTest("device lacks stage-boundary timestamp sampling")
         self.assertEqual(result.returncode, 0, result.stderr)
         document = json.loads(destination.read_text(encoding="utf-8"))
         self.assertEqual(document["schema_version"], 4)
+        self.assertEqual(document["execution_path"], "production-aligned-resident-v1")
         self.assertEqual(document["mode"], "stage")
         self.assertEqual(document["ac_residual_inverse"], "fused-tuned")
         self.assertFalse(document["collect_final_score"])
@@ -393,8 +401,6 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
             [
                 "frontend.prepare_aq.reference",
                 "frontend.initial_quantization",
-                "frontend.ac_strategy",
-                "frontend.quant_adjustment",
                 "resident.aq",
             ],
         )
@@ -408,9 +414,14 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
             f"frontend.prepare_aq.reference.{scale}.{phase}"
             for scale in ("main", "sub") for phase in psycho_phases + ["mask"]
         ])
+        shared_filters = reference[1]["dispatches"][0]["kernel_id"] == (
+            "gjxl_butteraugli_low_medium_shared_f32")
+        filter_passes = 1 if shared_filters else 2
+        reference_passes = [1, 1, filter_passes, filter_passes,
+                            filter_passes, 1, filter_passes, filter_passes,
+                            2 if shared_filters else 3]
         self.assertEqual([len(stage["dispatches"]) for stage in reference],
-                         [1, 1, 2, 2, 2, 1, 2, 2, 3,
-                          4, 1, 2, 2, 2, 1, 2, 2, 3])
+                         reference_passes + [4] + reference_passes[1:])
         self.assertTrue(all(stage["group_id"] == "frontend.prepare_aq.reference"
                             for stage in reference))
         wall_stages = {
@@ -423,7 +434,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
         self.assertIn(
             ("frontend.initial_quantization", "operation"), wall_stages
         )
-        self.assertIn(("frontend.ac_strategy.wait", "wait"), wall_stages)
+        self.assertNotIn(("frontend.ac_strategy.wait", "wait"), wall_stages)
         self.assertIn(("frontend.reconfigure_aq", "preparation"), wall_stages)
         self.assertNotIn(("frontend.prepare_aq", "preparation"), wall_stages)
         self.assertIn(("frontend.fixed_cfl", "host"), wall_stages)
@@ -448,7 +459,8 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                 self.assertEqual([stage["stage_id"] for stage in parts],
                     [f"butteraugli.psycho.{scale}.{phase}" for phase in psycho_phases])
                 self.assertEqual([len(stage["dispatches"]) for stage in parts],
-                    [4 if scale == "sub" else 1, 1, 2, 2, 2, 1, 2, 2])
+                    [4 if scale == "sub" else 1, 1, filter_passes,
+                     filter_passes, filter_passes, 1, filter_passes, filter_passes])
         reconstruction_stages = {
             stage["stage_id"]
             for stage in stages
@@ -491,12 +503,22 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                 stage["end_timestamp"] - stage["begin_timestamp"],
             )
             self.assertTrue(stage["dispatches"])
-        ac_submission = next(
-            item
-            for item in sample["submissions"]
-            if item["submission_id"] == "frontend.ac_strategy"
-        )
-        ac_stages = ac_submission["stages"]
+            if not stage["timestamp_valid"]:
+                self.assertEqual(stage["gpu_nanoseconds"], 0)
+                self.assertTrue(all(dispatch["kind"] == "indirect_threadgroups"
+                                    and 0 in dispatch["grid"]
+                                    for dispatch in stage["dispatches"]))
+            self.assertTrue(all(not dispatch["timestamp_valid"]
+                                for dispatch in stage["dispatches"]))
+        stage_ids = {stage["stage_id"] for stage in stages}
+        self.assertTrue({"frontend.ac_strategy.select", "frontend.ac_strategy.metadata",
+                         "frontend.quant_adjustment", "aq.policy_bounds",
+                         "aq.strategy_dispatch"} <= stage_ids)
+        self.assertTrue(any(dispatch["kind"] == "indirect_threadgroups"
+                            and all(dispatch["grid"])
+                            for stage in stages for dispatch in stage["dispatches"]))
+        ac_stages = [stage for stage in stages
+                     if stage["stage_id"].startswith("frontend.ac_strategy.dct")]
         self.assertEqual(
             {stage["stage_id"] for stage in ac_stages},
             {
@@ -522,7 +544,8 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
             }
             candidate_kernel = next((kernel for kernel in kernel_ids
                                      if kernel.endswith(("_candidate_loss_parallel",
-                                                         "_candidate_loss_local"))), None)
+                                                         "_candidate_loss_local",
+                                                         "_candidate_loss_factored"))), None)
             if candidate_kernel:
                 shape = stage["stage_id"].removeprefix("frontend.ac_strategy.")
                 self.assertIn(shape, AC_CANDIDATE_KERNEL_SUFFIX)
@@ -603,6 +626,9 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                     "--gpu-profile-output",
                     str(destination),
                 )
+                if result.returncode != 0 and "GPU stage-boundary timestamp sampling is unavailable" in result.stderr:
+                    self.assertFalse(destination.exists())
+                    self.skipTest("device lacks stage-boundary timestamp sampling")
                 self.assertEqual(result.returncode, 0, result.stderr)
                 document = json.loads(
                     destination.read_text(encoding="utf-8")
@@ -612,9 +638,11 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                 submission = next(
                     item
                     for item in sample["submissions"]
-                    if item["submission_id"] == "frontend.ac_strategy"
+                    if item["submission_id"] == "resident.aq"
                 )
                 for stage in submission["stages"]:
+                    if not stage["stage_id"].startswith("frontend.ac_strategy.dct"):
+                        continue
                     inverse_suffix = "_inverse_simdgroup_2d_matmul"
                     if mode == "fused-wide":
                         inverse_suffix = "_residual_inverse_fused"
@@ -637,7 +665,8 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
                     }
                     candidate_kernel = next((kernel for kernel in kernel_ids
                         if kernel.endswith(("_candidate_loss_parallel",
-                                            "_candidate_loss_local"))), None)
+                                            "_candidate_loss_local",
+                                            "_candidate_loss_factored"))), None)
                     if candidate_kernel:
                         self.assertEqual(mode, "fused-tuned")
                         shape = stage["stage_id"].removeprefix("frontend.ac_strategy.")
@@ -679,15 +708,22 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
             "--gpu-profile-output",
             str(capability_output),
         )
-        self.assertEqual(stage_result.returncode, 0, stage_result.stderr)
-        capability_document = json.loads(
-            capability_output.read_text(encoding="utf-8")
+        stage_unavailable = (
+            stage_result.returncode != 0 and
+            "GPU stage-boundary timestamp sampling is unavailable" in stage_result.stderr
         )
-        capabilities = capability_document["workloads"][0]["samples"][0][
-            "capabilities"
-        ]
-        if capabilities["dispatch_boundary"]:
-            self.skipTest("device supports dispatch-boundary timestamps")
+        if stage_unavailable:
+            self.assertFalse(capability_output.exists())
+        else:
+            self.assertEqual(stage_result.returncode, 0, stage_result.stderr)
+            capability_document = json.loads(
+                capability_output.read_text(encoding="utf-8")
+            )
+            capabilities = capability_document["workloads"][0]["samples"][0][
+                "capabilities"
+            ]
+            if capabilities["dispatch_boundary"]:
+                self.skipTest("device supports dispatch-boundary timestamps")
 
         destination = self.directory / "dispatch.json"
         destination.write_text("sentinel", encoding="utf-8")
@@ -704,6 +740,7 @@ class EncodingBenchmarkCliTest(unittest.TestCase):
 
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(
+            "GPU stage-boundary timestamp sampling is unavailable" if stage_unavailable else
             "GPU dispatch-boundary timestamp sampling is unavailable",
             result.stderr,
         )

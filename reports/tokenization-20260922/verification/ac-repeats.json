@@ -1,0 +1,102 @@
+[
+  {
+    "variant": "base",
+    "round": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "candidate",
+    "round": 0,
+    "returncode": 0
+  },
+  {
+    "variant": "base",
+    "round": 1,
+    "returncode": 0
+  },
+  {
+    "variant": "candidate",
+    "round": 1,
+    "returncode": 0
+  },
+  {
+    "variant": "base",
+    "round": 2,
+    "returncode": 0
+  },
+  {
+    "variant": "candidate",
+    "round": 2,
+    "returncode": 0
+  },
+  {
+    "variant": "base",
+    "round": 3,
+    "returncode": 0
+  },
+  {
+    "variant": "candidate",
+    "round": 3,
+    "returncode": 0
+  },
+  {
+    "variant": "base",
+    "round": 4,
+    "returncode": 0
+  },
+  {
+    "variant": "candidate",
+    "round": 4,
+    "returncode": 0
+  },
+  {
+    "variant": "base",
+    "round": 5,
+    "returncode": 0
+  },
+  {
+    "variant": "candidate",
+    "round": 5,
+    "returncode": 0
+  },
+  {
+    "variant": "base",
+    "round": 6,
+    "returncode": 0
+  },
+  {
+    "variant": "candidate",
+    "round": 6,
+    "returncode": 0
+  },
+  {
+    "variant": "base",
+    "round": 7,
+    "returncode": 0
+  },
+  {
+    "variant": "candidate",
+    "round": 7,
+    "returncode": 0
+  },
+  {
+    "variant": "base",
+    "round": 8,
+    "returncode": 0
+  },
+  {
+    "variant": "candidate",
+    "round": 8,
+    "returncode": 0
+  },
+  {
+    "variant": "base",
+    "round": 9,
+    "returncode": 0
+  },
+  {
+    "variant": "candidate",
+    "round": 9,
+    "returncode": 0
+  }
+]

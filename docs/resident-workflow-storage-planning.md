@@ -88,8 +88,13 @@ public-domain integration work.
 
 ## Parent diagnostic session
 
-A fresh successful resident workflow emits five child submissions: reference
-preparation, initial quantization, AC search, field adjustment and resident AQ.
+A fresh profiled resident workflow emits reference preparation, initial
+quantization and resident AQ submissions. Evaluation-free encoding omits the
+reference. Eligible GPU search and field adjustment are now prefixes of resident
+AQ; dense search and non-direct-transform backends retain a separate AC search
+submission. The submission bound allows that fallback. See
+[resident profiling](metal-resident-profiling.md) for the execution and timestamp
+contracts, including empty indirect dispatches.
 Resident input preparation does not produce a GPU profile graph. Six
 orchestration wall records, four AC wall records and three completed-output wall
 records give a 13-record upper bound. Stage and dispatch counts come from the

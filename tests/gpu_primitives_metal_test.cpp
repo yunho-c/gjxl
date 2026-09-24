@@ -20,12 +20,40 @@
 
 #include "codec/convolution.h"
 #include "gpu/backend.h"
+#if defined(GJXL_TEST_CUDA)
+#include "gpu/cuda/cuda_backend.h"
+#else
 #include "gpu/metal/metal_backend.h"
+#endif
 #include "gpu/ops/primitives.h"
 #include "gpu/scratch.h"
 #include "gpu_test_utils.h"
 
 namespace {
+
+#if defined(GJXL_TEST_CUDA)
+using TestBackendOptions = gjxl::CudaBackendOptions;
+constexpr std::string_view kBackendName = "CUDA";
+
+gjxl::Status CreateTestBackend(
+  const TestBackendOptions& options,
+  std::unique_ptr<gjxl::GpuBackend>* out) {
+  return gjxl::CreateCudaBackend(options, out);
+}
+#else
+using TestBackendOptions = gjxl::MetalBackendOptions;
+constexpr std::string_view kBackendName = "Metal";
+
+gjxl::Status CreateTestBackend(
+  const TestBackendOptions& options,
+  std::unique_ptr<gjxl::GpuBackend>* out) {
+  return gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, options, out);
+}
+#endif
+
+gjxl::Status CreateTestBackend(std::unique_ptr<gjxl::GpuBackend>* out) {
+  return CreateTestBackend({}, out);
+}
 
 bool CheckStatus(gjxl::Status status, std::string_view operation) {
   if (status.ok()) return true;
@@ -562,7 +590,7 @@ bool CheckValidation(
   }
 
   std::unique_ptr<gjxl::GpuBackend> other;
-  if (!CheckStatus(gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &other),
+  if (!CheckStatus(CreateTestBackend(&other),
                    "second backend creation")) {
     return false;
   }
@@ -582,11 +610,11 @@ bool CheckValidation(
 }
 
 bool CheckFailureStatuses() {
-  const auto check = [](gjxl::MetalBackendOptions options,
+  const auto check = [](TestBackendOptions options,
                         gjxl::StatusCode expected_submit,
                         gjxl::StatusCode expected_wait) {
     std::unique_ptr<gjxl::GpuBackend> gpu;
-    if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, options, &gpu).ok()) {
+    if (!CreateTestBackend(options, &gpu).ok()) {
       return false;
     }
     gjxl::GpuImagePrimitives* primitives =
@@ -643,9 +671,9 @@ bool CheckFailureStatuses() {
            gpu->stats().committed_submissions == 2;
   };
 
-  gjxl::MetalBackendOptions submit_failure;
+  TestBackendOptions submit_failure;
   submit_failure.test_fail_submission = true;
-  gjxl::MetalBackendOptions completion_failure;
+  TestBackendOptions completion_failure;
   completion_failure.test_fail_completion = true;
   return check(
            submit_failure,
@@ -661,7 +689,7 @@ bool CheckSubmissionOutlivesBackend() {
   std::unique_ptr<gjxl::GpuSubmission> submission;
   {
     std::unique_ptr<gjxl::GpuBackend> gpu;
-    if (!gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu).ok()) {
+    if (!CreateTestBackend(&gpu).ok()) {
       return false;
     }
     gjxl::GpuImagePrimitives* primitives =
@@ -746,8 +774,8 @@ bool CheckConcurrentSubmissions(
 int main() {
   std::unique_ptr<gjxl::GpuBackend> gpu;
   if (!CheckStatus(
-        gjxl::CreateMetalBackend(GJXL_METALLIB_PATH, &gpu),
-        "Metal backend creation")) {
+        CreateTestBackend(&gpu),
+        "GPU backend creation")) {
     return EXIT_FAILURE;
   }
   gjxl::GpuImagePrimitives* primitives =
@@ -766,6 +794,7 @@ int main() {
       !CheckSubmissionOutlivesBackend()) {
     return EXIT_FAILURE;
   }
-  std::cout << "All Metal primitive infrastructure tests passed.\n";
+  std::cout << "All " << kBackendName
+            << " primitive infrastructure tests passed.\n";
   return EXIT_SUCCESS;
 }

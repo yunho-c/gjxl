@@ -1,0 +1,12 @@
+{
+  "baseline": {
+    "old_mode": "0o644",
+    "new_mode": "0o755",
+    "sha256_unchanged": "41bf9bf51d6ec0964794abb1cd034b89f0923308155a598d120eb402b21dc896"
+  },
+  "candidate": {
+    "old_mode": "0o644",
+    "new_mode": "0o755",
+    "sha256_unchanged": "7fbee34cc7be5f9d1bb73ace58e44c03cff64fb95ac63caa98da6df13af17924"
+  }
+}

@@ -1,0 +1,282 @@
+[
+  {
+    "job": "alpine24-e7",
+    "pair": 0,
+    "side": "baseline",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":1828195,\"submissions\":4,\"samples\":[458868666,467292208,479914959,466876542,468320958,467363083,483511375],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:24:06.827472+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/alpine_lake/24mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"7\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/alpine24-e7/00-baseline/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "alpine24-e7",
+    "pair": 0,
+    "side": "candidate",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":1828195,\"submissions\":4,\"samples\":[463944291,469310792,469690542,462047875,470338541,474307042,469060042],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:24:13.176864+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/alpine_lake/24mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"7\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/alpine24-e7/00-candidate/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "alpine24-e7",
+    "pair": 1,
+    "side": "candidate",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":1828195,\"submissions\":4,\"samples\":[465883417,466427542,472741417,466046416,468067416,467904709,468561958],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:24:19.561606+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/alpine_lake/24mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"7\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/alpine24-e7/01-candidate/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "alpine24-e7",
+    "pair": 1,
+    "side": "baseline",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":1828195,\"submissions\":4,\"samples\":[465067625,478226333,470615083,466133208,464035875,470519542,469399875],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:24:25.936612+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/alpine_lake/24mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"7\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/alpine24-e7/01-baseline/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "alpine24-e7",
+    "pair": 2,
+    "side": "baseline",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":1828195,\"submissions\":4,\"samples\":[456935708,466928291,464320417,469313500,485834625,469488125,482304500],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:24:32.318738+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/alpine_lake/24mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"7\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/alpine24-e7/02-baseline/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "alpine24-e7",
+    "pair": 2,
+    "side": "candidate",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":1828195,\"submissions\":4,\"samples\":[459950666,469325875,477052584,462938167,477142167,466602208,480973500],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:24:38.685121+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/alpine_lake/24mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"7\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/alpine24-e7/02-candidate/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "alpine24-e7",
+    "pair": 3,
+    "side": "candidate",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":1828195,\"submissions\":4,\"samples\":[466135041,465735000,468220292,470261625,469455083,468060750,466283916],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:24:45.074448+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/alpine_lake/24mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"7\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/alpine24-e7/03-candidate/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "alpine24-e7",
+    "pair": 3,
+    "side": "baseline",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":1828195,\"submissions\":4,\"samples\":[462819708,464536083,467224250,470857625,465014375,476057208,481769292],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:24:51.436953+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/alpine_lake/24mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"7\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/alpine24-e7/03-baseline/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "alpine24-e7",
+    "pair": 4,
+    "side": "baseline",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":1828195,\"submissions\":4,\"samples\":[475715958,470463083,467617958,468654000,469307875,462769500,471425375],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:24:57.822828+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/alpine_lake/24mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"7\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/alpine24-e7/04-baseline/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "alpine24-e7",
+    "pair": 4,
+    "side": "candidate",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":1828195,\"submissions\":4,\"samples\":[465117042,471747167,472188458,476455625,478348083,475077500,487913792],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:25:04.180333+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/alpine_lake/24mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"7\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/alpine24-e7/04-candidate/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "alpine24-e7",
+    "pair": 5,
+    "side": "candidate",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":1828195,\"submissions\":4,\"samples\":[467686542,464741375,464665333,468507791,469614083,469339583,475792250],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:25:10.537512+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/alpine_lake/24mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"7\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/alpine24-e7/05-candidate/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "alpine24-e7",
+    "pair": 5,
+    "side": "baseline",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":1828195,\"submissions\":4,\"samples\":[459932334,469156208,461966458,463128875,464251334,460801625,472466792],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:25:16.900952+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/alpine_lake/24mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"7\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/alpine24-e7/05-baseline/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "alpine24-e7",
+    "pair": 6,
+    "side": "baseline",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":1828195,\"submissions\":4,\"samples\":[459758375,464834125,467130625,467083166,463655709,458992167,470967250],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:25:23.264088+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/alpine_lake/24mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"7\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/alpine24-e7/06-baseline/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "alpine24-e7",
+    "pair": 6,
+    "side": "candidate",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":1828195,\"submissions\":4,\"samples\":[460897958,465309416,461121667,463772375,463191375,461451500,473468375],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:25:29.655451+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/alpine_lake/24mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"7\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/alpine24-e7/06-candidate/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "forest48-e10",
+    "pair": 0,
+    "side": "baseline",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":5724086,\"submissions\":5,\"samples\":[1893770459,1887655791,1883907291,1899721125,1914432708,1882755833,1883714000],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:25:51.790546+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/48mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"10\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/forest48-e10/00-baseline/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "forest48-e10",
+    "pair": 0,
+    "side": "candidate",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":5724086,\"submissions\":5,\"samples\":[1879157791,1875349875,1882124917,1878318625,1892052500,1896710791,1886271958],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:26:13.853881+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/48mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"10\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/forest48-e10/00-candidate/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "forest48-e10",
+    "pair": 1,
+    "side": "candidate",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":5724086,\"submissions\":5,\"samples\":[1876722542,1869895958,1874720875,1878333250,1904201750,1870071958,1871706167],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:26:35.998459+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/48mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"10\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/forest48-e10/01-candidate/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "forest48-e10",
+    "pair": 1,
+    "side": "baseline",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":5724086,\"submissions\":5,\"samples\":[1875094875,1872069917,1881070500,1881486958,1903093125,1914497375,1904617042],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:26:58.165588+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/48mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"10\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/forest48-e10/01-baseline/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "forest48-e10",
+    "pair": 2,
+    "side": "baseline",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":5724086,\"submissions\":5,\"samples\":[1876746958,1901844458,1892116917,1871401625,1897613083,1960803709,1946726375],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:27:20.274110+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/48mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"10\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/forest48-e10/02-baseline/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "forest48-e10",
+    "pair": 2,
+    "side": "candidate",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":5724086,\"submissions\":5,\"samples\":[1949865417,1988707333,1953145125,1935386375,1989654750,1961895833,1935312833],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:27:42.402519+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/48mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"10\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/forest48-e10/02-candidate/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "forest48-e10",
+    "pair": 3,
+    "side": "candidate",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":5724086,\"submissions\":5,\"samples\":[1893919917,1914018291,1879037959,1885432083,1904783500,1888406541,1907342125],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:28:04.558886+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/48mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"10\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/forest48-e10/03-candidate/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "forest48-e10",
+    "pair": 3,
+    "side": "baseline",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":5724086,\"submissions\":5,\"samples\":[1907038333,1912908917,1932545833,2019725667,1977943250,1888982834,1889271000],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:28:26.747937+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/48mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"10\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/forest48-e10/03-baseline/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "forest48-e10",
+    "pair": 4,
+    "side": "baseline",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":5724086,\"submissions\":5,\"samples\":[1873470375,1877303042,1869118042,1888077875,1883185500,1873943375,1873871834],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:28:48.890831+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/48mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"10\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/forest48-e10/04-baseline/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "forest48-e10",
+    "pair": 4,
+    "side": "candidate",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":5724086,\"submissions\":5,\"samples\":[1882094916,1894495292,1869158292,1866062667,1884192917,1874981584,1875549667],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:29:11.014807+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/48mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"10\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/forest48-e10/04-candidate/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "forest48-e10",
+    "pair": 5,
+    "side": "candidate",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":5724086,\"submissions\":5,\"samples\":[1853100833,1876315958,1869605625,1880869833,1898997375,1876600750,1851047458],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:29:32.082248+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/48mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"10\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/forest48-e10/05-candidate/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "forest48-e10",
+    "pair": 5,
+    "side": "baseline",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":5724086,\"submissions\":5,\"samples\":[1862727084,1870959291,1880384459,1862195542,1876571458,1897201708,1862171959],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:29:53.142380+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/48mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"10\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/forest48-e10/05-baseline/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "forest48-e10",
+    "pair": 6,
+    "side": "baseline",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":5724086,\"submissions\":5,\"samples\":[1876270500,1860101208,1887769791,1849393791,1878744625,1876989750,1853148458],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:30:14.241806+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/48mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"10\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/forest48-e10/06-baseline/samples.json\"\n]\n"
+    }
+  },
+  {
+    "job": "forest48-e10",
+    "pair": 6,
+    "side": "candidate",
+    "files": {
+      "samples.json": "{\"schema_version\":1,\"profiled\":false,\"encoded_bytes\":5724086,\"submissions\":5,\"samples\":[1870901584,1876797208,1888188584,1891854208,1938552584,1893059459,1898929458],\"byte_equal\":true,\"summary_equal\":true}\n",
+      "execution.json": "{\n  \"returncode\": 0,\n  \"interference\": [],\n  \"finished_at\": \"2026-09-22T03:30:36.388049+00:00\"\n}\n",
+      "command.json": "[\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/baseline/encode_probe\",\n  \"--input\",\n  \"/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/48mp.pfm\",\n  \"--scope\",\n  \"metal-public-workflow\",\n  \"--validation\",\n  \"metal-only\",\n  \"--gpu-aq\",\n  \"fully-resident\",\n  \"--effort\",\n  \"10\",\n  \"--distance\",\n  \"1.9\",\n  \"--cpu-threads\",\n  \"8\",\n  \"--warmups\",\n  \"3\",\n  \"--samples\",\n  \"7\",\n  \"--raw-samples\",\n  \"/Users/yunhocho/GitHub/gjxl/reports/butteraugli-production-20260921/unchanged-control/forest48-e10/06-candidate/samples.json\"\n]\n"
+    }
+  }
+]

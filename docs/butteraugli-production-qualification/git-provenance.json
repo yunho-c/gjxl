@@ -1,0 +1,21 @@
+{
+  "base": "3b0de6d9d47846f6aa13f33ad6cca7e24e52ada6",
+  "source_commit": "b58c236fe408b5a8e1265f913e5038b1368257ce",
+  "source_files": {
+    "CMakeLists.txt": "8e782d7b3207843400d6d1f4f6079e00db631ab25d8c7f91a1efd6bd1b9b6498",
+    "src/gpu/metal/kernels/butteraugli.metal": "7649d5359c60b21ff97574772f25dcfca60dcdf37c662722eed3f456a2c805ea",
+    "src/gpu/metal/metal_aq_profile_storage_plan.h": "4e050bf4ea26dd5316733f437b1617fab478ccd5bb6aa1660b6b7a4c873c16ca",
+    "src/gpu/metal/metal_backend_internal.h": "47b78de985b8d8c933c1a2a6845ed32cf0efe255559c61cc6b60db977f67e0c9",
+    "src/gpu/metal/metal_butteraugli.cpp": "fe03cb586acba7dfafb3fb08453261a18880d67bac10749c49ece28e64035c7f",
+    "tests/encoding_benchmark_cli_test.py": "2da80a2ed9ca692f803d1e59a5ae97b745c4ab8ee24833b63ab4c70da9fac441",
+    "tests/metal_aq_evaluation_test.cpp": "b4dfbc62d06ff5f55e16fac52db68ca6b8424d7b3f0bee32bb10ef6ebbc187b4",
+    "tests/metal_aq_host_storage_plan_test.cpp": "5ea56a54ec20641d7b8e8688c83b8c29dbcc9844732ac610bd172b2ae68659e0",
+    "tests/metal_aq_strategy_metadata_test.cpp": "f2a055ab63131adecf6548a678be76ad53790c586a3af45df030defd0b8b3b39",
+    "tests/metal_butteraugli_test.cpp": "c53bb2c77772afb2906d73053fa5ae6fcbf10f0b23bd70b67081346df85b43c6",
+    "tests/metal_butteraugli_traffic_test_utils.h": "7104eb9b8712562a6221343244355239593636c13f0e647e7c6dd672dc057568"
+  },
+  "study_branch": "perf/butteraugli-traffic",
+  "study_head": "c7549eaed63e3a84d0fd86a4b113d36e64764aeb",
+  "study_bundle": "db8a4d67d554bcb04b651243c3660c42ec245bb8",
+  "excluded_refinement": "ef5f29003c52ec788d339f00b6f2e50a6f1818e7"
+}
