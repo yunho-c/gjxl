@@ -57,6 +57,10 @@ def main():
         ("_LIBCPP_ABI_VERSION", "2", "stable libc++ ABI version 1"),
         ("_LIBCPP_ABI_UNSTABLE", "1", "stable libc++ ABI version 1"),
     ])
+    if not msvc and not gnu:
+        # Reject mixing the two individually recognized compiler/header versions.
+        other_compiler = "17000604" if "#define __apple_build_version__ 21000334" in macros else "21000334"
+        cases.append(("__apple_build_version__", other_compiler, "audited Apple Clang/libc++ pairing"))
     with tempfile.TemporaryDirectory(prefix="gjxl-storage-header-") as directory:
         source_path = Path(directory) / "probe.cpp"
 
