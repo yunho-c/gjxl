@@ -27,12 +27,15 @@ void CheckBoundedDefault() {
   size_t cases = 0;
   // The narrow shape crosses a DC-group boundary: CPU 2 must fall back,
   // while CPU 4 can reserve both DC participants and the AC participant.
+  for (const char* setting : {static_cast<const char*>(nullptr), "0", "1"}) {
+  if (setting) setenv("GJXL_EARLY_DC", setting, 1);
+  else unsetenv("GJXL_EARLY_DC");
   for (Extent2D extent : {Extent2D{273, 265}, Extent2D{2057, 17}}) {
     Image3FBuffer image(extent);
     for (size_t c = 0; c < 3; ++c)
       for (size_t i = 0; i < image.plane(c).size(); ++i)
         image.plane(c)[i] = 0.05f + 0.8f * ((i * (c + 3)) % 127) / 127.0f;
-    for (int effort : {1, 7})
+    for (int effort : {1, 4, 7})
       for (size_t cpu : {2, 4})
         for (auto aq : {GpuAdaptiveQuantizationMode::kFullyResident,
                         GpuAdaptiveQuantizationMode::kThroughput})
@@ -96,7 +99,9 @@ void CheckBoundedDefault() {
             ++cases;
           }
   }
-  std::cout << "Passed " << cases << " bounded production-default cases: "
+  }
+  unsetenv("GJXL_EARLY_DC");
+  std::cout << "Passed " << cases << " bounded default/opt-out/forced-on DC cases: "
       "ordinary/timing APIs, fully-resident/throughput, DC boundary, "
       "CPU 2/4, exact planned memory caps, repeated calls and byte/summary parity.\n";
 }

@@ -25,6 +25,14 @@ inline unsigned EntropyReadinessMode() {
   return 3;  // Preserve the full DC grant before admitting early AC entropy.
 }
 
+// Start DC before AC setup by default. The DC opt-out and existing entropy
+// disable/diagnostic controls retain their respective fallback schedules.
+inline bool EarlierDcEnabled() {
+  const char* value = std::getenv("GJXL_EARLY_DC");
+  return (value == nullptr || std::strcmp(value, "0") != 0) &&
+         EntropyReadinessMode() == 3;
+}
+
 // Batch workers install this marker on the thread that enters the serializer.
 inline thread_local bool entropy_readiness_in_batch = false;
 class EntropyReadinessBatchScope {

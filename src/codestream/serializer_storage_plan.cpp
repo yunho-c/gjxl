@@ -351,8 +351,9 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
       (g == 1 && !AddWriter(padded_payload_bits, &work)) ||
       !work.Add(plan.output))
     return Overflow();
-  // The readiness dispatcher stays live across DC token preparation
-  // and the initial entropy models. Their envelopes are already summed above;
+  // The readiness dispatcher can start before AC context/order preparation
+  // and stay live across DC tokenization and the initial entropy models.
+  // AC setup, tokenization and entropy envelopes are already summed above;
   // add the outer dispatcher's owned status/thread storage explicitly.
   if (options.gpu_tokenization && !exhaustive && workers > 1 &&
       (!work.AddVector<Status>(2, kFreshExact) ||

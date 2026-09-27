@@ -54,6 +54,8 @@ struct Provider final : AcTokenizationProvider {
   }
 };
 int main() try {
+  // Exercise the original early-entropy boundary independently of earlier DC.
+  setenv("GJXL_EARLY_DC", "0", 1);
   auto owner = gjxl_test::MakeFrame(gjxl_test::kStrategies.size(), 2, 36);
   const auto frame = vardct_frame_internal::BorrowFrame(owner);
   std::vector<uint8_t> expected;

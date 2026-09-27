@@ -1207,6 +1207,52 @@ Status AssembleCandidate(
   return Status::Ok();
 }
 
+// DC can become ready while AC metadata is still being constructed. Keep
+// its model builder independent of order flags and the AC candidate vector.
+Status PrepareInitialDcEntropyTask(
+    VarDctCodestreamOptions options, bool exhaustive_representation_search,
+    std::span<const Storage<EntropyToken>> dc_streams,
+    const codestream_internal::DcContextTreeLayout& dc_layout,
+    InitialEntropyState& initial,
+    codestream_internal::EntropyWorkProfile* entropy_profile) {
+  auto& dc_code = initial.dc_code;
+  auto& dc_cost = initial.dc_cost;
+  auto& prefix_dc_code = initial.prefix_dc_code;
+  auto& prefix_dc_cost = initial.prefix_dc_cost;
+  if (exhaustive_representation_search) {
+    return OptimizeBestEntropyCode(
+      dc_streams, {.context_count = dc_layout.context_count}, &dc_code,
+      &dc_cost, &prefix_dc_code, &prefix_dc_cost, entropy_profile);
+  }
+  if (options.entropy_behavior == VarDctEntropyBehavior::kBalanced) {
+    // Keep this work in the parallel entropy phase. Selection and ANS
+    // construction share populations instead of traversing DC twice.
+    Storage<EntropyTokenStreamView> dc_views;
+    dc_views.reserve(dc_streams.size());
+    for (const auto& stream : dc_streams) {
+      dc_views.push_back(EntropyTokenStreamView::Interleaved(stream));
+    }
+    Storage<codestream_internal::PreparedFixedAnsCluster> populations;
+    const auto population_begin = WorkBegin(entropy_profile != nullptr);
+    Status population_status =
+      codestream_internal::CollectDefaultEntropyPopulations(
+        dc_views, dc_layout.context_count, &populations);
+    WorkEnd(
+      entropy_profile != nullptr, population_begin,
+      entropy_profile == nullptr ? nullptr :
+        &entropy_profile->ans_histogram_build_nanoseconds);
+    if (!population_status.ok()) return population_status;
+    return OptimizeOrdinaryEntropyCode(
+      dc_views, {.context_count = dc_layout.context_count},
+      options.entropy_behavior, populations, true,
+      &dc_code, &dc_cost, entropy_profile, options.dc_uint_search);
+  }
+  return OptimizeOrdinaryEntropyCode(
+    dc_streams, {.context_count = dc_layout.context_count},
+    options.entropy_behavior, true,
+    &dc_code, &dc_cost, entropy_profile);
+}
+
 Status PrepareInitialEntropyTask(
     size_t index, const VarDctFrameView& frame, VarDctCodestreamOptions options,
     bool exhaustive_representation_search,
@@ -1215,52 +1261,17 @@ Status PrepareInitialEntropyTask(
     const codestream_internal::DcContextTreeLayout& dc_layout,
     InitialEntropyState& initial,
     codestream_internal::EntropyWorkProfile* entropy_profile) {
-  const auto& dc_streams = prepared.dc_streams;
+  if (index == 0) {
+    return PrepareInitialDcEntropyTask(options, exhaustive_representation_search,
+        prepared.dc_streams, dc_layout, initial, entropy_profile);
+  }
   const auto& order_tokens = prepared.order_tokens;
   const bool has_custom_orders = prepared.custom_orders.used_order_mask != 0;
   const size_t order_task_count = has_custom_orders ? 1 : 0;
-  auto& dc_code = initial.dc_code;
-  auto& dc_cost = initial.dc_cost;
-  auto& prefix_dc_code = initial.prefix_dc_code;
-  auto& prefix_dc_cost = initial.prefix_dc_cost;
   auto& order_code = initial.order_code;
   auto& order_cost = initial.order_cost;
   auto& prefix_order_code = initial.prefix_order_code;
   auto& prefix_order_cost = initial.prefix_order_cost;
-  if (index == 0) {
-    if (exhaustive_representation_search) {
-      return OptimizeBestEntropyCode(
-        dc_streams, {.context_count = dc_layout.context_count}, &dc_code,
-        &dc_cost, &prefix_dc_code, &prefix_dc_cost, entropy_profile);
-    }
-    if (options.entropy_behavior == VarDctEntropyBehavior::kBalanced) {
-      // Keep this work in the parallel entropy phase. Selection and ANS
-      // construction share populations instead of traversing DC twice.
-      Storage<EntropyTokenStreamView> dc_views;
-      dc_views.reserve(dc_streams.size());
-      for (const auto& stream : dc_streams) {
-        dc_views.push_back(EntropyTokenStreamView::Interleaved(stream));
-      }
-      Storage<codestream_internal::PreparedFixedAnsCluster> populations;
-      const auto population_begin = WorkBegin(entropy_profile != nullptr);
-      Status population_status =
-        codestream_internal::CollectDefaultEntropyPopulations(
-          dc_views, dc_layout.context_count, &populations);
-      WorkEnd(
-        entropy_profile != nullptr, population_begin,
-        entropy_profile == nullptr ? nullptr :
-          &entropy_profile->ans_histogram_build_nanoseconds);
-      if (!population_status.ok()) return population_status;
-      return OptimizeOrdinaryEntropyCode(
-        dc_views, {.context_count = dc_layout.context_count},
-        options.entropy_behavior, populations, true,
-        &dc_code, &dc_cost, entropy_profile, options.dc_uint_search);
-    }
-    return OptimizeOrdinaryEntropyCode(
-      dc_streams, {.context_count = dc_layout.context_count},
-      options.entropy_behavior, true,
-      &dc_code, &dc_cost, entropy_profile);
-  }
   if (has_custom_orders && index == 1) {
     const std::span<const Storage<EntropyToken>> order_streams(
       &order_tokens, 1);
@@ -1850,8 +1861,10 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
     ParallelTokenCleanup token_cleanup{prepared};
     if (rate_optimized) options.entropy_behavior = VarDctEntropyBehavior::kBalanced;
     Status status;
+    // Capture the caller's provider before either branch can move to a worker.
+    auto* const ac_provider = codestream_internal::active_ac_tokenization_provider;
     const bool overlap_dc = !exhaustive_representation_search &&
-        codestream_internal::active_ac_tokenization_provider != nullptr &&
+        ac_provider != nullptr &&
         codestream_internal::GpuTokenizationOverlapEnabled();
     const thread_budget_internal::CpuWorkerGroup* reserved_dc = nullptr;
     const auto prepare_dc = [&]() -> Status {
@@ -1899,6 +1912,18 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
       if (!status.ok()) return status;
     }
 
+    std::optional<codestream_internal::EntropyReadinessAdmission> early_dc_admission;
+    if (codestream_internal::EarlierDcEnabled() && overlap_dc &&
+        !rate_optimized && profile == nullptr) {
+      early_dc_admission.emplace(
+          codestream_internal::DesiredDcTokenizationParticipants(frame),
+          codestream_internal::DesiredSectionParticipants(kMaximumSectionWorkers));
+    }
+    const bool early_dc = early_dc_admission && early_dc_admission->admitted();
+    if (early_dc) reserved_dc = &early_dc_admission->dc();
+
+    const auto prepare_ac = [&]() -> Status {
+    Status status;
     const ProfileClock::time_point ac_tokenization_begin = ProfileBegin(profile);
     auto& block_context_maps = prepared.block_context_maps;
     auto& custom_orders = prepared.custom_orders;
@@ -1992,10 +2017,25 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
       AcEncodingCandidate& candidate = candidates.front();
       const bool collect_fixed_populations =
         options.entropy_behavior == VarDctEntropyBehavior::kBalanced;
-      if (auto* provider = codestream_internal::active_ac_tokenization_provider) {
+      if (auto* provider = ac_provider) {
         status = provider->Begin(frame, has_custom_orders ? custom_orders : natural_orders,
             prepared_natural_orders, candidate.block_context_map, collect_fixed_populations);
         if (!status.ok()) return status;
+        if (early_dc) {
+          if (has_custom_orders) {
+            status = PrepareInitialEntropyTask(1, frame, options, false,
+                prepared, prepared.candidates, dc_layout, early_entropy, nullptr);
+            if (!status.ok()) return status;
+          }
+          status = provider->Finish(&candidate.streams,
+              &candidate.fixed_context_populations);
+          if (!status.ok()) return status;
+          status = PrepareInitialEntropyTask(1 + (has_custom_orders ? 1 : 0),
+              frame, options, false, prepared, prepared.candidates, dc_layout,
+              early_entropy, nullptr);
+          if (!status.ok()) return status;
+          entropy_prepared_early = true;
+        } else {
         const unsigned eager_mode = codestream_internal::EntropyReadinessMode();
         const size_t requested = thread_budget_internal::CpuThreadCount();
         const size_t workers = std::min(kMaximumSectionWorkers, requested == 0
@@ -2073,6 +2113,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
           }
           status = provider->Finish(&candidate.streams, &candidate.fixed_context_populations);
           if (!status.ok()) return status;
+        }
         }
         if (profile != nullptr) {
           for (auto stream : candidate.streams) candidate_profile.coefficient_token_count += stream.size();
@@ -2285,6 +2326,41 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
     if (candidates.empty() || candidates.front().streams.empty()) {
       return Status::Internal("Validated frame produced no AC candidates");
     }
+
+    return Status::Ok();
+    };
+
+    if (early_dc) {
+      auto* tracker = thread_budget_internal::ParticipantTracker();
+      constexpr thread_budget_internal::ParallelWorkErrors errors{
+        .allocation = "Early DC allocation failed",
+        .unexpected = "Early DC worker failed",
+        .length_code = StatusCode::kOutOfMemory,
+        .length = "Early DC storage overflow",
+        .launch_allocation = "Early DC worker allocation failed",
+        .launch_action = thread_budget_internal::LaunchFailureAction::kReturnError,
+        .launch = "Unable to start early DC worker",
+      };
+      status = thread_budget_internal::RunParallelWork<Storage>(2,
+          early_dc_admission->branches(), 1,
+          thread_budget_internal::WorkerLaunchSite::kSerializerSections,
+          errors, [&](size_t branch, size_t) -> Status {
+        thread_budget_internal::EncodeScope scope(
+            branch == 0 ? reserved_dc->participants() : 1, tracker);
+        if (branch == 1) return prepare_ac();
+        Status result = prepare_dc();
+        if (!result.ok()) return result;
+        return PrepareInitialDcEntropyTask(options, false, prepared.dc_streams,
+            dc_layout, early_entropy, nullptr);
+      });
+      // Both branches have joined, including on every failure path. Release
+      // protected capacity before the existing selection/writing dispatcher.
+      reserved_dc = nullptr;
+      early_dc_admission.reset();
+    } else {
+      status = prepare_ac();
+    }
+    if (!status.ok()) return status;
 
     if (!rate_optimized) {
       status = EncodePreparedVarDctRepresentation(

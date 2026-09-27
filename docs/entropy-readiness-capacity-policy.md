@@ -9,11 +9,17 @@ concurrent callers.
 
 ## Scheduling and eligibility
 
-GPU AC tokenization starts at the existing point. One branch prepares DC tokens
-and their entropy model. The other prepares any coefficient-order model,
-consumes completed GPU AC tokens/populations, and builds the AC entropy model.
+One branch prepares DC tokens and their entropy model. The other selects AC
+contexts/orders and signaling, starts GPU AC tokenization, prepares any
+coefficient-order model, consumes completed GPU AC tokens/populations, and
+builds the AC entropy model.
 Section writing waits for both branches. Encoded bytes and codec decisions are
 unchanged.
+
+[Earlier DC preparation](earlier-dc-preparation.md) places the branch split
+before AC context/order preparation by default. It retains this policy's
+capacity and fallback contracts. `GJXL_EARLY_DC=0` restores the split after
+GPU tokenization begins while retaining earlier entropy readiness.
 
 Before launching either branch, admission requires the complete desired DC
 participation plus one AC participant from both the per-image and shared-domain
@@ -45,6 +51,10 @@ static early-entropy split, and capacity-aware early entropy respectively. Unset
 or invalid values select mode 3. The stable disable switch takes precedence;
 normal builds ignore all four experimental values. Batch exclusion applies to
 all modes.
+
+`GJXL_EARLY_DC=0` disables only the earlier DC start. Unset, `1`, and
+unrecognized values select the production default. The entropy disable switch
+and experimental modes other than 3 take precedence over earlier DC.
 
 ## Profiling contract
 
@@ -83,3 +93,10 @@ records normal-build tests, the before/after comparison, bounded-memory checks,
 source/binary hashes and preservation of unrelated working-tree changes.
 Qualification is AC-only at the user's request and does not establish a
 cross-device, cold-start, or concurrent-throughput improvement guarantee.
+
+The later [earlier-DC qualification](../reports/earlier-dc-20260927/REPORT.md)
+measures the incremental benefit of moving DC preparation ahead of AC setup.
+Its historical opt-in recommendation and mixed effort-1/7 results are retained.
+The [default-promotion checks](../reports/earlier-dc-default-20260927/REPORT.md)
+record the requested production policy, default/opt-out validation and exact
+source identity; promotion does not imply a universal speedup.
