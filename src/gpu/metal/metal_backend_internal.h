@@ -261,6 +261,8 @@ struct ButteraugliTrafficPipelines {
   NS::SharedPtr<MTL::ComputePipelineState> medium_b_reuse;
   NS::SharedPtr<MTL::ComputePipelineState> mask_reuse;
   NS::SharedPtr<MTL::ComputePipelineState> high_reuse;
+  // Independently optional: failure preserves the qualified scalar filters.
+  NS::SharedPtr<MTL::ComputePipelineState> high_xy_suppress;
   NS::SharedPtr<MTL::ComputePipelineState> ultra_direct;
   NS::SharedPtr<MTL::ComputePipelineState> malta_l2;
   NS::SharedPtr<MTL::ComputePipelineState> final_packed_dc;

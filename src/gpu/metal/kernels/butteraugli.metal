@@ -3040,6 +3040,290 @@ kernel void gjxl_butteraugli_high_shared_f32(
   }
 }
 
+// The paired filter preserves each channel's FP32 operation order. Suppress
+// High-X while both high values are in registers; no unsuppressed X plane is
+// materialized. Inputs and all four outputs may have independent strides.
+struct ButteraugliHighXYParams {
+  uint width, height, input_x_stride, input_y_stride;
+  uint medium_x_stride, medium_y_stride, high_x_stride, high_y_stride;
+};
+kernel void gjxl_butteraugli_high_xy_suppress_f32(
+    device const float *input_x [[buffer(0)]],
+    device const float *input_y [[buffer(1)]],
+    device const float *weights [[buffer(2)]],
+    device float *medium_x [[buffer(3)]], device float *medium_y [[buffer(4)]],
+    device float *high_x [[buffer(5)]], device float *high_y [[buffer(6)]],
+    constant ButteraugliHighXYParams &q [[buffer(7)]],
+    threadgroup float2 *scratch [[threadgroup(0)]],
+    uint3 local [[thread_position_in_threadgroup]],
+    uint3 grid [[threadgroup_position_in_grid]],
+    uint3 group_size [[threads_per_threadgroup]]) {
+  const uint2 group = grid.xy;
+  const ButteraugliHighParams p{q.width, q.height, 0, 0, 0, 0};
+  constexpr uint R = 7, W = 16, H = 64, P = 4;
+  const uint thread_index = local.y * group_size.x + local.x,
+             threads = group_size.x * group_size.y;
+  const int gx = int(group.x * W), gy = int(group.y * H);
+  for (uint i = thread_index; i < W * (H + 2 * R) / 2; i += threads) {
+    uint lx = (i % (W / 2)) * 2, ly = i / (W / 2);
+    int first_x = gx + int(lx), y = gy - int(R) + int(ly);
+    float2 sum[2] = {float2(0), float2(0)};
+    float ws[2] = {0, 0};
+    if (first_x < int(p.width) && y >= 0 && y < int(p.height)) {
+      if (first_x >= int(R) && first_x + 1 + int(R) < int(p.width)) {
+        {
+          float2 v = float2(input_x[uint(y) * q.input_x_stride +
+                                    uint(first_x - int(R) + (0))],
+                            input_y[uint(y) * q.input_y_stride +
+                                    uint(first_x - int(R) + (0))]);
+          {
+            float w = weights[(0) - 0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+        }
+        for (int t = 1; t < int(2 * R + 1); ++t) {
+          float2 v = float2(input_x[uint(y) * q.input_x_stride +
+                                    uint(first_x - int(R) + (t))],
+                            input_y[uint(y) * q.input_y_stride +
+                                    uint(first_x - int(R) + (t))]);
+          {
+            float w = weights[(t)-0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+          {
+            float w = weights[(t)-1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+        }
+        {
+          float2 v =
+              float2(input_x[uint(y) * q.input_x_stride +
+                             uint(first_x - int(R) + (int(2 * R + 1) + 0))],
+                     input_y[uint(y) * q.input_y_stride +
+                             uint(first_x - int(R) + (int(2 * R + 1) + 0))]);
+          {
+            float w = weights[(int(2 * R + 1) + 0) - 1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+        }
+      } else {
+        int first = max(0, first_x - int(R)),
+            last = min(int(p.width) - 1, first_x + 1 + int(R));
+        for (int x = first; x <= last; ++x) {
+          float2 v = float2(input_x[uint(y) * q.input_x_stride + uint(x)],
+                            input_y[uint(y) * q.input_y_stride + uint(x)]);
+          for (uint k = 0; k < 2; ++k)
+            if (first_x + int(k) < int(p.width) &&
+                x >= first_x + int(k) - int(R) &&
+                x <= first_x + int(k) + int(R)) {
+              float w = weights[x + int(R) - first_x - int(k)];
+              ws[k] += w;
+              sum[k] += v * w;
+            }
+        }
+      }
+    }
+    for (uint k = 0; k < 2; ++k)
+      scratch[ly * W + lx + k] = ws[k] == 0.0f ? 0.0f : sum[k] / ws[k];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  const uint x = uint(gx) + local.x;
+  const int first_y = gy + int(local.y * P);
+  float2 sum[P] = {};
+  float ws[P] = {0.0f};
+  if (x < p.width) {
+    if (first_y >= int(R) && first_y + int(P) - 1 + int(R) < int(p.height)) {
+      if (P == 2u) {
+        {
+          float2 v =
+              scratch[uint(first_y - int(R) + (0) - gy + int(R)) * W + local.x];
+          {
+            float w = weights[(0) - 0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+        }
+        for (int t = 1; t < int(2 * R + 1); ++t) {
+          float2 v =
+              scratch[uint(first_y - int(R) + (t)-gy + int(R)) * W + local.x];
+          {
+            float w = weights[(t)-0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+          {
+            float w = weights[(t)-1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+        }
+        {
+          float2 v = scratch[uint(first_y - int(R) + (int(2 * R + 1) + 0) - gy +
+                                  int(R)) *
+                                 W +
+                             local.x];
+          {
+            float w = weights[(int(2 * R + 1) + 0) - 1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+        }
+      } else {
+        {
+          float2 v =
+              scratch[uint(first_y - int(R) + (0) - gy + int(R)) * W + local.x];
+          {
+            float w = weights[(0) - 0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+        }
+        {
+          float2 v =
+              scratch[uint(first_y - int(R) + (1) - gy + int(R)) * W + local.x];
+          {
+            float w = weights[(1) - 0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+          {
+            float w = weights[(1) - 1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+        }
+        {
+          float2 v =
+              scratch[uint(first_y - int(R) + (2) - gy + int(R)) * W + local.x];
+          {
+            float w = weights[(2) - 0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+          {
+            float w = weights[(2) - 1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+          {
+            float w = weights[(2) - 2];
+            ws[2] += w;
+            sum[2] += v * w;
+          }
+        }
+        for (int t = 3; t < int(2 * R + 1); ++t) {
+          float2 v =
+              scratch[uint(first_y - int(R) + (t)-gy + int(R)) * W + local.x];
+          {
+            float w = weights[(t)-0];
+            ws[0] += w;
+            sum[0] += v * w;
+          }
+          {
+            float w = weights[(t)-1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+          {
+            float w = weights[(t)-2];
+            ws[2] += w;
+            sum[2] += v * w;
+          }
+          {
+            float w = weights[(t)-3];
+            ws[3] += w;
+            sum[3] += v * w;
+          }
+        }
+        {
+          float2 v = scratch[uint(first_y - int(R) + (int(2 * R + 1) + 0) - gy +
+                                  int(R)) *
+                                 W +
+                             local.x];
+          {
+            float w = weights[(int(2 * R + 1) + 0) - 1];
+            ws[1] += w;
+            sum[1] += v * w;
+          }
+          {
+            float w = weights[(int(2 * R + 1) + 0) - 2];
+            ws[2] += w;
+            sum[2] += v * w;
+          }
+          {
+            float w = weights[(int(2 * R + 1) + 0) - 3];
+            ws[3] += w;
+            sum[3] += v * w;
+          }
+        }
+        {
+          float2 v = scratch[uint(first_y - int(R) + (int(2 * R + 1) + 1) - gy +
+                                  int(R)) *
+                                 W +
+                             local.x];
+          {
+            float w = weights[(int(2 * R + 1) + 1) - 2];
+            ws[2] += w;
+            sum[2] += v * w;
+          }
+          {
+            float w = weights[(int(2 * R + 1) + 1) - 3];
+            ws[3] += w;
+            sum[3] += v * w;
+          }
+        }
+        {
+          float2 v = scratch[uint(first_y - int(R) + (int(2 * R + 1) + 2) - gy +
+                                  int(R)) *
+                                 W +
+                             local.x];
+          {
+            float w = weights[(int(2 * R + 1) + 2) - 3];
+            ws[3] += w;
+            sum[3] += v * w;
+          }
+        }
+      }
+    } else {
+      for (uint k = 0; k < P; ++k) {
+        int y = first_y + int(k);
+        if (y >= int(p.height))
+          continue;
+        int first = max(0, y - int(R)),
+            last = min(int(p.height) - 1, y + int(R));
+        for (int sy = first; sy <= last; ++sy) {
+          float w = weights[sy + int(R) - y];
+          ws[k] += w;
+          sum[k] += scratch[uint(sy - gy + int(R)) * W + local.x] * w;
+        }
+      }
+    }
+  }
+  for (uint k = 0; k < P; ++k) {
+    uint y = uint(first_y) + k;
+    if (x >= p.width || y >= p.height)
+      continue;
+    const float2 low_pass = sum[k] / ws[k];
+    const float2 original = float2(input_x[y * q.input_x_stride + x],
+                                   input_y[y * q.input_y_stride + x]);
+    float2 hv = original - low_pass;
+    {
+      const float denominator = unfused_multiply_add(hv.y, hv.y, 46.0f);
+      const float scaler = unfused_multiply_add(
+          46.0f / denominator, 1.0f - 0.653020556257f, 0.653020556257f);
+      hv.x *= scaler;
+    }
+    high_x[y * q.high_x_stride + x] = hv.x;
+    high_y[y * q.high_y_stride + x] = hv.y;
+    medium_x[y * q.medium_x_stride + x] = remove_range(low_pass.x, 0.29f);
+    medium_y[y * q.medium_y_stride + x] = amplify_range(low_pass.y, 0.1f);
+  }
+}
+
 template <uint R, uint W, uint H, uint P>
 inline void
 ButteraugliShortReuse(device const float *input, device const float *weights,

@@ -10,6 +10,43 @@ Date: 2026-09-04; updated 2026-09-05
 - Status: Phases 0--7 complete
 - Completed work: Phases 0--7, with the combined Phase 7 cache layout retained
 
+## Production update: High-X/Y plus suppression, 2026-09-27
+
+Ordinary whole-stage Butteraugli construction now uses the dedicated
+`gjxl_butteraugli_high_xy_suppress_f32` kernel when the existing M4 Pro/Apple9
+traffic pipeline bundle is enabled and the new pipeline passes resource
+admission. It computes the independent High-X/Y filters and applies X
+suppression in one dispatch. Medium-B remains separate. This supersedes the
+earlier negative channel-fusion experiments below for this specific tiled
+implementation; it does not enable concurrent encoders.
+
+The launch keeps 256 threads and a 16×64 output tile, using 9,984 bytes of
+dynamic threadgroup memory and no additional global image planes. There is no
+opt-in switch or new size/effort threshold. The existing automatic backend
+policy and device gate still apply. A missing shader, pipeline creation failure,
+or resource-admission failure retains the original optimized High filters and
+suppression pass. Individual-stage profiling also retains those scalar
+dispatches so it can expose the individual operations; its stage times do not
+measure the fused production path.
+
+The production candidate was measured against unmodified `4f6cfa2` on M4 Pro
+with automatic backend/CPU defaults at distances 1.0 and 1.2, plus a forced-Metal
+d1.9 bridge. All 4,264 public API calls preserved exact codestreams and full
+summaries. Dedicated kernel, missing-shader/resource fallback, dispatch-activation,
+and existing Butteraugli/AQ tests passed. The nine tested 4K–48 MP single-image
+conditions improved warmed complete API time by 0.73–1.60%; the two-image 4K/e10
+batch improved 1.49% against the primary baseline.
+
+Small/low-effort timings and some process-first timings remained inconclusive
+after the bounded follow-up, with material differences between identical
+baseline controls. No repeatable fusion-caused regression was established.
+The user approved production adoption with this uncertainty retained; enabling
+the implementation does not turn those cases into measured wins or qualify
+other GPUs. The sealed evidence remains in
+`reports/high-xy-production-20260927/REPORT.md`; its original recommendation is
+preserved as a historical qualification result. Integration checks are retained
+separately in `reports/high-xy-integration-20260927/`.
+
 ## Executive outcome
 
 The completed experiments support a small set of selective Butteraugli

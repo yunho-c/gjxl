@@ -7,6 +7,7 @@
 
 #include "core/managed_allocator.h"
 #include "gpu/metal/metal_butteraugli_encoding.h"
+#include "gpu/metal/metal_butteraugli_high_xy.h"
 
 #include <algorithm>
 #include <array>
@@ -1133,6 +1134,12 @@ private:
       PackedDcReference dc_reference = PackedDcReference::kNone) {
 
     const bool shared_filters = metal_.butteraugli_pipelines_.traffic.enabled;
+    // Stage capture still exposes the original individual operations. Whole
+    // psycho construction can suppress X as soon as paired high values exist;
+    // Medium-B is independent of both high outputs.
+    const bool fused_high_xy = shared_filters &&
+        stage == MetalButteraugliPsychoStage::kAll &&
+        metal_.butteraugli_pipelines_.traffic.high_xy_suppress.get() != nullptr;
     const bool packed_dc =
         shared_filters && dc_reference != PackedDcReference::kNone;
 
@@ -1260,7 +1267,33 @@ private:
 
     if (shared_filters) {
       // Direct filters must not alias their halo input with their output.
-      for (size_t channel = 0; channel < 2; ++channel) {
+      if (fused_high_xy) {
+        const auto input_x = psycho[8], input_y = psycho[9];
+        const auto medium_x = psycho[3], medium_y = psycho[4];
+        const auto high_x = Plane(kImage + 3, scale_extent);
+        const auto high_y = Plane(kImage + 4, scale_extent);
+        const HighXYParams p{
+            uint32_t(scale_extent.width), uint32_t(scale_extent.height),
+            uint32_t(input_x.row_stride), uint32_t(input_y.row_stride),
+            uint32_t(medium_x.row_stride), uint32_t(medium_y.row_stride),
+            uint32_t(high_x.row_stride), uint32_t(high_y.row_stride)};
+        encoder->setComputePipelineState(
+            metal_.butteraugli_pipelines_.traffic.high_xy_suppress.get());
+        const std::array<DevicePlaneView, 7> planes{
+            input_x, input_y, kernels_[2], medium_x, medium_y, high_x, high_y};
+        for (size_t i = 0; i < planes.size(); ++i)
+          Bind(encoder, Handle(metal_, planes[i]), planes[i].offset_bytes, i);
+        encoder->setBytes(&p, sizeof(p), 7);
+        encoder->setThreadgroupMemoryLength(kHighXYScratchBytes, 0);
+        DispatchMetalThreadgroups(
+            encoder,
+            MTL::Size((scale_extent.width + kShortFilterTileWidth - 1) /
+                          kShortFilterTileWidth,
+                      (scale_extent.height + kShortFilterTileHeight - 1) /
+                          kShortFilterTileHeight, 1),
+            MTL::Size(kShortFilterTileWidth, kShortFilterThreadHeight, 1));
+      }
+      for (size_t channel = 0; channel < (fused_high_xy ? 0u : 2u); ++channel) {
         if (!selected(channel == 0 ? MetalButteraugliPsychoStage::kHighX
                                    : MetalButteraugliPsychoStage::kHighY))
           continue;
@@ -1364,7 +1397,7 @@ private:
       }
     }
 
-    if (selected(MetalButteraugliPsychoStage::kSuppressX)) {
+    if (selected(MetalButteraugliPsychoStage::kSuppressX) && !fused_high_xy) {
       DevicePlaneView high_x =
           shared_filters ? Plane(kImage + 3, scale_extent) : psycho[6];
       DevicePlaneView high_y =
@@ -2565,6 +2598,16 @@ void TryCreateButteraugliTrafficPipelines(MTL::Device *device,
             device->maxThreadgroupMemoryLength() ||
         (binding.requires_simd32 && pipeline->threadExecutionWidth() != 32))
       return;
+  }
+  // Fusion is independently optional. Keep every existing optimized pipeline
+  // if its creation or resource admission fails (including older metallibs).
+  NS::SharedPtr<MTL::ComputePipelineState> high_xy;
+  if (CreatePipeline(device, library, "gjxl_butteraugli_high_xy_suppress_f32",
+                     &high_xy).ok() &&
+      HighXYDispatchFits(high_xy->maxTotalThreadsPerThreadgroup(),
+                         high_xy->staticThreadgroupMemoryLength(),
+                         device->maxThreadgroupMemoryLength())) {
+    candidate.high_xy_suppress = std::move(high_xy);
   }
   candidate.enabled = true;
   *out = std::move(candidate);
