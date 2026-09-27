@@ -3406,6 +3406,25 @@ if(GJXL_BUILD_TESTS)
   )
   add_dependencies(gjxl_metal_completed_frame_test gjxl_metal_shaders)
   add_test(NAME metal_completed_frame COMMAND gjxl_metal_completed_frame_test)
+  add_test(NAME metal_completed_frame_host_metadata
+    COMMAND gjxl_metal_completed_frame_test --expect-host-metadata 1)
+  add_test(NAME metal_aq_strategy_host_metadata COMMAND gjxl_metal_aq_strategy_metadata_test)
+  set_tests_properties(metal_completed_frame_host_metadata metal_aq_strategy_host_metadata
+    PROPERTIES ENVIRONMENT "GJXL_HOST_METADATA=1")
+  add_test(NAME metal_completed_frame_host_metadata_default
+    COMMAND gjxl_metal_completed_frame_test --expect-host-metadata 1)
+  set_tests_properties(metal_completed_frame_host_metadata_default
+    PROPERTIES ENVIRONMENT_MODIFICATION "GJXL_HOST_METADATA=unset:")
+  add_test(NAME metal_completed_frame_host_metadata_optout
+    COMMAND gjxl_metal_completed_frame_test --expect-host-metadata 0)
+  add_test(NAME metal_aq_strategy_host_metadata_optout
+    COMMAND gjxl_metal_aq_strategy_metadata_test)
+  set_tests_properties(metal_completed_frame_host_metadata_optout metal_aq_strategy_host_metadata_optout
+    PROPERTIES ENVIRONMENT "GJXL_HOST_METADATA=0")
+  add_test(NAME metal_completed_frame_host_metadata_invalid
+    COMMAND gjxl_metal_completed_frame_test --expect-host-metadata 1)
+  set_tests_properties(metal_completed_frame_host_metadata_invalid
+    PROPERTIES ENVIRONMENT "GJXL_HOST_METADATA=invalid")
 
   add_executable(gjxl_metal_resource_budget_test tests/metal_resource_budget_test.cpp)
   target_link_libraries(gjxl_metal_resource_budget_test PRIVATE gjxl_codestream gjxl_metal)

@@ -137,10 +137,87 @@ bool CheckCompletionAndIteration() {
   return true;
 }
 
+std::vector<uint8_t> Encode(const gjxl::AcStrategyGrid& grid) {
+  const auto extent = grid.extent();
+  std::vector<uint8_t> cells(extent.width * extent.height);
+  for (size_t y = 0; y < extent.height; ++y)
+    for (size_t x = 0; x < extent.width; ++x) {
+      gjxl::AcStrategyCell cell;
+      if (!grid.Get(x, y, &cell).ok()) return {};
+      cells[y * extent.width + x] = (uint8_t(cell.strategy) << 1) | cell.is_anchor;
+    }
+  return cells;
+}
+
+// Independent pre-optimization import: checked placement, complete cover, then
+// exact comparison of every ownership byte.
+bool ImportOracle(gjxl::Extent2D extent, std::span<const uint8_t> cells) {
+  gjxl::AcStrategyGrid grid;
+  if (!gjxl::AcStrategyGrid::Create(extent, &grid).ok()) return false;
+  for (size_t y = 0; y < extent.height; ++y)
+    for (size_t x = 0; x < extent.width; ++x) {
+      const auto cell = cells[y * extent.width + x];
+      if ((cell & 1u) &&
+          !grid.Set(x, y, gjxl::AcStrategyType(cell >> 1)).ok()) return false;
+    }
+  return grid.complete() && std::ranges::equal(Encode(grid), cells);
+}
+
+bool CheckEncodedImport() {
+  using gjxl::AcStrategyGrid;
+  AcStrategyGrid sentinel;
+  if (!AcStrategyGrid::Create({1, 1}, &sentinel).ok()) return false;
+  sentinel.fill_dct8();
+  const auto check = [&](gjxl::Extent2D extent, const std::vector<uint8_t>& cells) {
+    AcStrategyGrid out = sentinel;
+    const bool expected = ImportOracle(extent, cells);
+    const bool accepted = AcStrategyGrid::CreateFromEncodedCells(extent, cells, &out).ok();
+    return accepted == expected && (accepted
+      ? out.complete() && std::ranges::equal(Encode(out), cells)
+      : out.extent() == sentinel.extent() && Encode(out) == Encode(sentinel));
+  };
+  for (const auto& info : gjxl::kAcStrategyInfos) {
+    AcStrategyGrid grid;
+    if (!AcStrategyGrid::Create(info.covered_blocks, &grid).ok() ||
+        !grid.Set(0, 0, info.type).ok() || !check(grid.extent(), Encode(grid)))
+      return false;
+  }
+  // Include mixed/edge partitions, unknown/sentinel bytes, truncated covers,
+  // changed anchor bits and ownership, and newly overlapping rectangles.
+  AcStrategyGrid grid;
+  if (!AcStrategyGrid::Create({8, 8}, &grid).ok() ||
+      !grid.Set(0, 0, gjxl::AcStrategyType::kDct16x32).ok() ||
+      !grid.Set(4, 0, gjxl::AcStrategyType::kDct32x32).ok() ||
+      !grid.Set(0, 2, gjxl::AcStrategyType::kDct32x16).ok()) return false;
+  grid.fill_empty_dct8();
+  auto cells = Encode(grid);
+  for (size_t i = 0; i < cells.size(); ++i) {
+    const uint8_t saved = cells[i];
+    for (unsigned value = 0; value < 256; ++value) {
+      cells[i] = uint8_t(value);
+      if (!check(grid.extent(), cells)) return false;
+    }
+    cells[i] = saved;
+  }
+  // Anti-diagonal 2x2 rectangles can overlap without covering either anchor.
+  cells.assign(16, 1);
+  cells[1] = cells[4] = 9;
+  cells[2] = cells[5] = cells[6] = cells[8] = cells[9] = 8;
+  cells[15] = 0;  // Hole balances overlap: sum of covered areas still equals 16.
+  if (!check({4, 4}, cells)) return false;
+  AcStrategyGrid out = sentinel;
+  if (AcStrategyGrid::CreateFromEncodedCells({0, 1}, {}, &out).ok() ||
+      AcStrategyGrid::CreateFromEncodedCells({SIZE_MAX, 2}, {}, &out).ok() ||
+      AcStrategyGrid::CreateFromEncodedCells({1, 1}, {}, &out).ok() ||
+      AcStrategyGrid::CreateFromEncodedCells({1, 1}, {cells.data(), 1}, nullptr).ok() ||
+      Encode(out) != Encode(sentinel)) return false;
+  return true;
+}
+
 }  // namespace
 
 int main() {
-  if (!CheckCreation() ||
+  if (!CheckEncodedImport() || !CheckCreation() ||
       !CheckPlacementAndCells() ||
       !CheckCompletionAndIteration()) {
     return EXIT_FAILURE;

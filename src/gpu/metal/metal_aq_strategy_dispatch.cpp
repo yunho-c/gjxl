@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
+#include "codec/host_metadata_internal.h"
 #include "codec/coefficient_order_population_internal.h"
 #include "gpu/metal/metal_aq_evaluation_internal.h"
 #include <cstring>
@@ -327,29 +328,40 @@ Status MetalPreparedAqEvaluation::FinishResidentStrategyMetadata(
       return Status::DeviceError(
           "Resident strategy selector reported an invalid tile");
   AcStrategyGrid grid;
-  status = AcStrategyGrid::Create(block_extent_, &grid);
-  if (!status.ok())
-    return status;
-  for (size_t y = 0; y < block_extent_.height; ++y)
-    for (size_t x = 0; x < block_extent_.width; ++x) {
-      const uint8_t cell = cells[y * block_extent_.width + x];
-      if (cell & 1u) {
-        status = grid.Set(x, y, AcStrategyType(cell >> 1));
-        if (!status.ok())
-          return Status::DeviceError("Resident strategy cover is invalid");
+  if (vardct_frame_internal::HostMetadataReuseEnabled()) {
+    status = AcStrategyGrid::CreateFromEncodedCells(
+      block_extent_, {cells, block_count_}, &grid);
+    if (!status.ok()) {
+      // Keep allocation/capacity failures distinct from malformed GPU output.
+      if (status.code() == StatusCode::kInvalidArgument)
+        return Status::DeviceError("Resident strategy ownership is invalid");
+      return status;
+    }
+  } else {
+    status = AcStrategyGrid::Create(block_extent_, &grid);
+    if (!status.ok())
+      return status;
+    for (size_t y = 0; y < block_extent_.height; ++y)
+      for (size_t x = 0; x < block_extent_.width; ++x) {
+        const uint8_t cell = cells[y * block_extent_.width + x];
+        if (cell & 1u) {
+          status = grid.Set(x, y, AcStrategyType(cell >> 1));
+          if (!status.ok())
+            return Status::DeviceError("Resident strategy cover is invalid");
+        }
       }
-    }
-  if (!grid.complete())
-    return Status::DeviceError("Resident strategy cover is incomplete");
-  for (size_t y = 0; y < block_extent_.height; ++y)
-    for (size_t x = 0; x < block_extent_.width; ++x) {
-      AcStrategyCell cell;
-      status = grid.Get(x, y, &cell);
-      if (!status.ok() || cells[y * block_extent_.width + x] !=
-                              ((uint8_t(cell.strategy) << 1) | cell.is_anchor))
-        return Status::DeviceError(
-            "Resident strategy ownership is inconsistent");
-    }
+    if (!grid.complete())
+      return Status::DeviceError("Resident strategy cover is incomplete");
+    for (size_t y = 0; y < block_extent_.height; ++y)
+      for (size_t x = 0; x < block_extent_.width; ++x) {
+        AcStrategyCell cell;
+        status = grid.Get(x, y, &cell);
+        if (!status.ok() || cells[y * block_extent_.width + x] !=
+                                ((uint8_t(cell.strategy) << 1) | cell.is_anchor))
+          return Status::DeviceError(
+              "Resident strategy ownership is inconsistent");
+      }
+  }
   status = ReconfigureImpl(
       grid, {epf_sharpness_host_.data(), block_extent_, block_extent_.width},
       true);

@@ -222,6 +222,13 @@ bool CheckParity(Extent2D extent) {
   const VarDctFrameView external(storage.data());
   CHECK(owned.valid() && borrowed.valid() && external.valid());
   CHECK(CheckConsumers(owned, external));
+  CHECK(!external.has_validated_structure() && !borrowed.has_validated_structure());
+  VarDctFrameView published;
+  CHECK(ValidateFrameViewForPublication(external, &published).ok());
+  CHECK(published.valid() && published.has_validated_structure());
+  CHECK(ValidateFrameViewForPublication(published, &published).ok());
+  CHECK(!ValidateFrameViewForPublication(external, nullptr).ok());
+  CHECK(CheckConsumers(owned, published));
   for (size_t i = 0; i < owned.ac_group_count(); ++i) {
     VarDctAcGroupView a, b, c;
     CHECK(owned.GetAcGroup(i, &a).ok() && borrowed.GetAcGroup(i, &b).ok());
@@ -260,6 +267,9 @@ bool CheckParity(Extent2D extent) {
                   external, options, &b, &profile)
                   .ok());
         CHECK(a == expected && b == expected);
+        CHECK(codestream_internal::EncodeVarDctCodestreamFromView(
+                  published, options, &b).ok());
+        CHECK(b == expected);
         CHECK(profile.entropy_behavior == entropy);
       }
       if (entropy == VarDctEntropyBehavior::kBalanced &&
@@ -270,10 +280,10 @@ bool CheckParity(Extent2D extent) {
   // No owning encoder frame survives this point. Borrowing external storage
   // still works, including two simultaneous serializer calls and their workers.
   owned = {};
-  const auto encode = [&external, &retained] {
+  const auto encode = [published, &retained] {
     thread_budget_internal::EncodeScope scope(8);
     std::vector<uint8_t> result;
-    return codestream_internal::EncodeVarDctCodestreamFromView(external, {},
+    return codestream_internal::EncodeVarDctCodestreamFromView(published, {},
                                                                &result)
                .ok() &&
            result == retained;
@@ -287,6 +297,10 @@ bool CheckParity(Extent2D extent) {
 bool CheckRejected(const VarDctFrameView& frame,
                    bool structurally_valid = false) {
   CHECK(frame.valid() == structurally_valid);
+  VarDctFrameView published;
+  CHECK(ValidateFrameViewForPublication(frame, &published).ok() == structurally_valid);
+  CHECK(published.has_validated_structure() == structurally_valid);
+  CHECK(published.valid() == structurally_valid);
   const std::vector<uint8_t> sentinel{1, 2, 3};
   std::vector<uint8_t> output = sentinel;
   codestream_internal::VarDctCodestreamProfile profile;
@@ -295,6 +309,9 @@ bool CheckRejected(const VarDctFrameView& frame,
   CHECK(!codestream_internal::EncodeVarDctCodestreamFromView(frame, {}, &output,
                                                              &profile)
              .ok());
+  CHECK(output == sentinel && profile == original);
+  CHECK(!codestream_internal::EncodeVarDctCodestreamFromView(
+    published, {}, &output, &profile).ok());
   CHECK(output == sentinel && profile == original);
   return true;
 }
@@ -383,6 +400,11 @@ bool CheckInvalid() {
   CHECK(reject(good));
   storage.strategies = original_strategies;
   CHECK(VarDctFrameView(good).valid());
+  VarDctFrameView retained;
+  CHECK(ValidateFrameViewForPublication(VarDctFrameView(good), &retained).ok());
+  CHECK(!ValidateFrameViewForPublication({}, &retained).ok());
+  CHECK(retained.has_validated_structure() && retained.valid());
+  CHECK(retained.raw_quant_field().data == good.input.raw_quant_field.data);
   VarDctAcGroupView group;
   group.block_x = 987;
   CHECK(!VarDctFrameView(good).GetAcGroup(storage.used.size(), &group).ok());

@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <future>
 #include <iostream>
 #include <memory>
@@ -14,6 +15,7 @@
 #include <vector>
 
 #include "codec/adaptive_quantization_internal.h"
+#include "codec/host_metadata_internal.h"
 #include "coefficient_order_population_fixture.h"
 #include "codec/color_transform.h"
 #include "codec/vardct_frame_view_internal.h"
@@ -31,6 +33,7 @@ namespace {
 using namespace gjxl;
 using vardct_frame_internal::CompletedVarDctFrame;
 using vardct_frame_internal::VarDctFrameView;
+bool expect_validated_structure = false;
 
 bool Check(Status status) {
   if (status.ok())
@@ -80,6 +83,10 @@ struct Retained {
 
 bool SerializeEqual(const Retained &retained) {
   const auto view = retained.frame->view();
+  if (view.has_validated_structure() != expect_validated_structure) {
+    std::cerr << "Completed frame publication path differs\n";
+    return false;
+  }
   const gjxl_test::OrderPopulationFixture oracle(view);
   const auto actual = view.coefficient_order_population();
   if (actual.present_mask != oracle.mask || !std::ranges::equal(actual.counts, oracle.counts)) {
@@ -409,7 +416,16 @@ bool CheckPreparationIntegration() {
 }
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+  expect_validated_structure = vardct_frame_internal::HostMetadataReuseEnabled();
+  if (argc == 3 && std::strcmp(argv[1], "--expect-host-metadata") == 0 &&
+      (std::strcmp(argv[2], "0") == 0 || std::strcmp(argv[2], "1") == 0)) {
+    // Independent publication expectation for default/opt-out/forced-on runs.
+    expect_validated_structure = std::strcmp(argv[2], "1") == 0;
+  } else if (argc != 1) {
+    std::cerr << "Usage: metal_completed_frame [--expect-host-metadata 0|1]\n";
+    return EXIT_FAILURE;
+  }
   if (!CheckPreparationIntegration()) return EXIT_FAILURE;
   for (const auto extent :
        std::array<Extent2D, 4>{{{1, 1}, {19, 17}, {273, 265}, {2057, 17}}}) {
