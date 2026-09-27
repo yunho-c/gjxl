@@ -14,6 +14,11 @@ GPU tokenization applies to resident Metal fully-resident and throughput workflo
 
 The resident Metal admission plan includes token metadata/output arenas and their idle pools. CPU-only, compatibility, and exhaustive serializer plans do not reserve these arenas. Selection does not currently adapt to image size, effort, batch concurrency, or memory budget. Resource errors retain the existing error/publication behavior; they do not silently trigger an unplanned CPU retry.
 
+Eligible single-image calls also use [earlier entropy readiness](entropy-readiness-capacity-policy.md)
+with a complete DC-plus-AC CPU reservation. Batch calls retain the original
+readiness schedule. `GJXL_EARLY_ENTROPY=0` disables only this scheduling policy;
+it leaves GPU tokenization enabled and is independent of the tokenizer switch.
+
 ## Performance policy
 
 Default-on is an explicit rollout choice based on the measured benefits, with the CPU override available for regressions. On the qualification M4 Pro, large-image single-call latency improved at efforts 1, 7, and 8. The 24 MP/e1 four-image batch had a repeatable throughput regression against the improved CPU tokenizer. Other measured e1 batch cases improved, so effort and requested batch size alone do not identify the regression.

@@ -253,6 +253,9 @@ struct VarDctEncodingTiming {
 ///
 /// Input may be strided. Failure leaves both caller-visible outputs unchanged.
 /// `summary` may be null when analysis reporting is not required.
+/// Scheduling favors individual-image latency. Use VarDctBatchEncoder for
+/// multi-image workloads. Concurrent single-image calls remain supported and
+/// share domain limits, but may have lower aggregate throughput than batching.
 [[nodiscard]] Status EncodeLinearRgbVarDctCodestream(
   ConstImage3FView linear_rgb,
   VarDctEncodingOptions options,
@@ -269,6 +272,7 @@ struct VarDctEncodingTiming {
 /// Encodes identically to EncodeLinearRgbVarDctCodestream and atomically
 /// returns wall-clock diagnostics. Timing values are observational and are
 /// intentionally excluded from deterministic summary equality.
+/// This timing-only API uses the ordinary single-image scheduling policy.
 [[nodiscard]] Status EncodeLinearRgbVarDctCodestreamProfiled(
   ConstImage3FView linear_rgb,
   VarDctEncodingOptions options,

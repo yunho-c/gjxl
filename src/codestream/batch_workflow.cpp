@@ -4,6 +4,7 @@
 #include "codestream/batch_workflow.h"
 
 #include "codestream/batch_workflow_test.h"
+#include "codestream/entropy_readiness_internal.h"
 #include "codestream/workflow_admission.h"
 #include "codestream/workflow_internal.h"
 #include "core/cpu_execution.h"
@@ -101,6 +102,7 @@ void EncodeOne(
   VarDctBatchEncodingResult candidate;
   OwnedEncodingResult candidate_owned;
   try {
+    const codestream_internal::EntropyReadinessBatchScope batch_scope;
     candidate.status = codestream_internal::EncodeLinearRgbVarDctCodestreamOwned(
       request.linear_rgb,
       request.options,
