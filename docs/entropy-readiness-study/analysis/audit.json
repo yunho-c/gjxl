@@ -1,0 +1,11 @@
+{
+  "status": "complete",
+  "matrix_processes": 200,
+  "original_worktree_preserved": true,
+  "source_and_binary_hashes_valid": true,
+  "prior_reference_profiles_matching": 31,
+  "decoded_references": 35,
+  "local_links_checked": 32,
+  "tests": 160,
+  "contract_cases": 84
+}
