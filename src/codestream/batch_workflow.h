@@ -53,6 +53,8 @@ struct VarDctBatchEncodingResult {
 /// preparation and scratch. This permits CPU preparation and serialization
 /// for one image to overlap another image's GPU work; it does not fuse images
 /// into one GPU dispatch.
+/// Batch workers retain the original DC/AC entropy schedule, including when
+/// max_in_flight is one; the single-image early-entropy policy is not used.
 /// Encoded bytes remain internally owned until the whole result array is
 /// published; this ownership boundary alone does not impose a memory limit.
 ///

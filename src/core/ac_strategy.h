@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <new>
+#include <span>
 #include <stdexcept>
 #include <string_view>
 #include <utility>
@@ -218,6 +219,51 @@ public:
         "AC-strategy grid extent is too large");
     }
 
+    return Status::Ok();
+  }
+
+  /// Imports a complete encoded partition, checking both ownership and cover.
+  /// The low bit marks an anchor; the remaining bits encode AcStrategyType.
+  /// Publishes atomically, including when input aliases the destination grid.
+  [[nodiscard]] static Status CreateFromEncodedCells(
+    Extent2D extent, std::span<const uint8_t> cells, AcStrategyGrid* out) {
+    size_t count = 0;
+    if (out == nullptr || extent.empty() || !extent.try_area(&count) ||
+        cells.size() != count) {
+      return Status::InvalidArgument("Encoded AC-strategy geometry is invalid");
+    }
+    AcStrategyGrid candidate;
+    Status status = Create(extent, &candidate);
+    if (!status.ok()) return status;
+    size_t covered = 0;
+    for (size_t y = 0; y < extent.height; ++y) {
+      for (size_t x = 0; x < extent.width; ++x) {
+        const uint8_t cell = cells[y * extent.width + x];
+        if (!(cell & 1u)) continue;
+        const auto* info = GetAcStrategyInfo(AcStrategyType(cell >> 1));
+        if (info == nullptr || info->covered_blocks.width > extent.width - x ||
+            info->covered_blocks.height > extent.height - y) {
+          return Status::InvalidArgument("Encoded AC-strategy anchor is invalid");
+        }
+        for (size_t dy = 0; dy < info->covered_blocks.height; ++dy) {
+          for (size_t dx = 0; dx < info->covered_blocks.width; ++dx) {
+            const size_t index = (y + dy) * extent.width + x + dx;
+            const uint8_t expected = EncodeCell(info->type, dx == 0 && dy == 0);
+            if (candidate.cells_[index] != kInvalidCell ||
+                cells[index] != expected) {
+              return Status::InvalidArgument(
+                "Encoded AC-strategy ownership is inconsistent");
+            }
+            candidate.cells_[index] = expected;
+            ++covered;
+          }
+        }
+      }
+    }
+    if (covered != count) {
+      return Status::InvalidArgument("Encoded AC-strategy cover is incomplete");
+    }
+    *out = std::move(candidate);
     return Status::Ok();
   }
 

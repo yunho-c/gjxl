@@ -21,6 +21,7 @@
 namespace gjxl {
 
 class VarDctEncoderFrame;
+namespace thread_budget_internal { class CpuWorkerGroup; }
 namespace vardct_frame_internal {
 class VarDctFrameView;
 }
@@ -105,11 +106,15 @@ template <typename Allocator>
 
 namespace codestream_internal {
 
+[[nodiscard]] size_t DesiredDcTokenizationParticipants(
+    const vardct_frame_internal::VarDctFrameView& frame);
+
 /// Serializer-only entry point for an already validated frame.
 [[nodiscard]] Status TokenizeSimpleDcGroupsForEncoder(
     const vardct_frame_internal::VarDctFrameView &frame,
     codestream_internal::Storage<SimpleDcGroupTokenStreams> *groups,
-    VarDctDcPrediction prediction = VarDctDcPrediction::kGradient);
+    VarDctDcPrediction prediction = VarDctDcPrediction::kGradient,
+    const thread_budget_internal::CpuWorkerGroup* reserved = nullptr);
 
 /// Compatibility adapter; managed callers select the non-template overload.
 template <typename Allocator>

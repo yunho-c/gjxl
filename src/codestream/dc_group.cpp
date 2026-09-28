@@ -438,9 +438,30 @@ Status TokenizeSimpleDcGroups(const VarDctEncoderFrame& frame,
     vardct_frame_internal::BorrowFrame(frame), groups);
 }
 
+namespace {
+size_t DcTokenizationWorkerLimit() {
+  size_t maximum = codestream_internal::kSerializerMaximumSectionWorkers;
+#ifdef GJXL_TOKENIZATION_EXPERIMENT
+  if (const char* value = std::getenv("GJXL_EXPERIMENT_DC_WORKERS")) {
+    const long count = std::strtol(value, nullptr, 10);
+    if (count >= 1 && count <= 8) maximum = static_cast<size_t>(count);
+  }
+#endif
+  return maximum;
+}
+}  // namespace
+
+size_t codestream_internal::DesiredDcTokenizationParticipants(const VarDctFrameView& frame) {
+  size_t count = 0;
+  if (!frame.geometry().block_grid().blocks.ceil_div(kSimpleDcGroupBlockDimension).try_area(&count))
+    return 0;
+  return DesiredSectionParticipants(count, DcTokenizationWorkerLimit());
+}
+
 Status codestream_internal::TokenizeSimpleDcGroupsForEncoder(
     const VarDctFrameView &frame, Storage<SimpleDcGroupTokenStreams> *groups,
-    VarDctDcPrediction prediction) {
+    VarDctDcPrediction prediction,
+    const thread_budget_internal::CpuWorkerGroup* reserved) {
 
   if (!IsValidDcPrediction(prediction))
     return Status::InvalidArgument("DC prediction is invalid");
@@ -516,15 +537,8 @@ Status codestream_internal::TokenizeSimpleDcGroupsForEncoder(
         candidate[group_index] = std::move(stream);
         return Status::Ok();
     };
-    size_t maximum_workers = codestream_internal::kSerializerMaximumSectionWorkers;
-#ifdef GJXL_TOKENIZATION_EXPERIMENT
-    if (const char* value = std::getenv("GJXL_EXPERIMENT_DC_WORKERS")) {
-      const long count = std::strtol(value, nullptr, 10);
-      if (count >= 1 && count <= 8) maximum_workers = static_cast<size_t>(count);
-    }
-#endif
     const Status token_status = codestream_internal::RunParallelSections(
-        group_count, tokenize_group, maximum_workers);
+        group_count, tokenize_group, DcTokenizationWorkerLimit(), reserved);
     if (!token_status.ok()) return token_status;
     *groups = std::move(candidate);
   } catch (const resource_budget_internal::ManagedAllocationFailure& error) {

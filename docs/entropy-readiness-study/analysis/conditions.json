@@ -1,0 +1,49 @@
+{
+  "power": {
+    "battery": 68,
+    "ac": 131,
+    "transition": 1
+  },
+  "paging": [
+    {
+      "id": "batch-alpine24-e7-d1.9-c8-b4-g1-r0",
+      "Pageouts": 5,
+      "Swapouts": 0
+    },
+    {
+      "id": "ac_confirm-alpine24-e7-d1.9-c8-b1-g1-r0",
+      "Pageouts": 110,
+      "Swapouts": 0
+    },
+    {
+      "id": "batch-alpine24-e7-d1.9-c8-b4-g1-r1",
+      "Pageouts": 2,
+      "Swapouts": 0
+    },
+    {
+      "id": "trace-alpine24-e7-d1.9-c8-b1-g1-r0",
+      "Pageouts": 21,
+      "Swapouts": 0
+    },
+    {
+      "id": "rate-alpine24-e10-d1.9-c8-b1-g1-r1",
+      "Pageouts": 15,
+      "Swapouts": 0
+    },
+    {
+      "id": "cpu_tokens-alpine24-e7-d1.9-c8-b1-g0-r0",
+      "Pageouts": 20,
+      "Swapouts": 0
+    },
+    {
+      "id": "ac_trace-alpine24-e7-d1.9-c8-b1-g1-r0",
+      "Pageouts": 26,
+      "Swapouts": 0
+    },
+    {
+      "id": "trace_followup-alpine24-e7-d1.9-c8-b1-g1-r1",
+      "Pageouts": 64,
+      "Swapouts": 0
+    }
+  ]
+}

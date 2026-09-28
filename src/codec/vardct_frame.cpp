@@ -425,7 +425,23 @@ Status vardct_frame_internal::VarDctFrameView::GetAcGroup(
   return Status::Ok();
 }
 
+Status vardct_frame_internal::ValidateFrameViewForPublication(
+    const VarDctFrameView& frame, VarDctFrameView* out) {
+  if (out == nullptr) {
+    return Status::InvalidArgument("Validated frame view output is null");
+  }
+  VarDctFrameView candidate = frame;
+  candidate.structurally_validated_ = false;
+  if (!candidate.valid()) {
+    return Status::InvalidArgument("Completed frame view is invalid");
+  }
+  candidate.structurally_validated_ = true;
+  *out = candidate;
+  return Status::Ok();
+}
+
 bool vardct_frame_internal::VarDctFrameView::valid() const {
+  if (structurally_validated_) return true;
   if (native_owner_ != nullptr) return native_owner_->valid();
   const auto population = coefficient_order_population();
   if (population.counts.empty() ? population.present_mask != 0

@@ -3,6 +3,7 @@
 #include "codestream/simple_ac_context.h"
 #include "gpu/metal/metal_backend_internal.h"
 #include "gpu/metal/metal_status.h"
+#include "gpu/metal/ac_population_reduction_internal.h"
 #include <bit>
 #include <chrono>
 #include <cstdio>
@@ -452,38 +453,11 @@ public:
       reduced.resize(context_count_);
       const auto *hist = Data<uint32_t>(8);
       uint64_t population_tokens = 0;
-      if (TokenizationExperimentSetting(
-              "GJXL_EXPERIMENT_TOKEN_SPECIALIZED_REDUCE")) {
-        switch (shards_) {
-        case 1:
-          population_tokens = ReduceHistograms<1>(hist, &reduced);
-          break;
-        case 2:
-          population_tokens = ReduceHistograms<2>(hist, &reduced);
-          break;
-        case 4:
-          population_tokens = ReduceHistograms<4>(hist, &reduced);
-          break;
-        case 8:
-          population_tokens = ReduceHistograms<8>(hist, &reduced);
-          break;
-        }
-      } else {
-        for (size_t context = 0; context < context_count_; ++context) {
-          auto &dst = reduced[context];
-          for (size_t symbol = 0; symbol < 128; ++symbol) {
-            uint64_t count = 0;
-            for (size_t shard = 0; shard < shards_; ++shard)
-              count += hist[(shard * context_count_ + context) * 128 + symbol];
-            dst.counts[symbol] = count;
-            dst.token_count += count;
-            if (count)
-              dst.maximum_symbol = static_cast<uint32_t>(symbol);
-            if (symbol >= 16)
-              dst.extra_bits += count * (2 + ((symbol - 16) >> 2));
-          }
-          population_tokens += dst.token_count;
-        }
+      switch (shards_) {
+      case 1: population_tokens = ReduceAcPopulations<1>(hist, reduced); break;
+      case 2: population_tokens = ReduceAcPopulations<2>(hist, reduced); break;
+      case 4: population_tokens = ReduceAcPopulations<4>(hist, reduced); break;
+      case 8: population_tokens = ReduceAcPopulations<8>(hist, reduced); break;
       }
       if (population_tokens != total_tokens)
         return Status::Internal(
@@ -504,27 +478,6 @@ public:
   }
 
 private:
-  template <size_t shards>
-  uint64_t ReduceHistograms(const uint32_t *hist,
-                            Storage<PreparedFixedAnsCluster> *out) {
-    uint64_t total = 0;
-    for (size_t context = 0; context < context_count_; ++context) {
-      auto &dst = (*out)[context];
-      for (size_t symbol = 0; symbol < 128; ++symbol) {
-        uint64_t count = 0;
-        for (size_t shard = 0; shard < shards; ++shard)
-          count += hist[(shard * context_count_ + context) * 128 + symbol];
-        dst.counts[symbol] = count;
-        dst.token_count += count;
-        if (count)
-          dst.maximum_symbol = static_cast<uint32_t>(symbol);
-        if (symbol >= 16)
-          dst.extra_bits += count * (2 + ((symbol - 16) >> 2));
-      }
-      total += dst.token_count;
-    }
-    return total;
-  }
   Status PrepareOutput(uint32_t tokens) {
     // Previous speculative output is no longer in use: Finish waited first.
     output_arena_ = DeviceScratchArena{};

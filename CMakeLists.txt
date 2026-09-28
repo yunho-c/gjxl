@@ -1587,6 +1587,10 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_ac_direct_tokenization_test PRIVATE gjxl_codestream)
   add_test(NAME ac_direct_tokenization COMMAND gjxl_ac_direct_tokenization_test)
 
+  add_executable(gjxl_ac_population_reduction_test tests/ac_population_reduction_test.cpp)
+  target_link_libraries(gjxl_ac_population_reduction_test PRIVATE gjxl_codestream)
+  add_test(NAME ac_population_reduction COMMAND gjxl_ac_population_reduction_test)
+
   add_executable(gjxl_token_storage_plan_test tests/token_storage_plan_test.cpp)
   target_link_libraries(gjxl_token_storage_plan_test PRIVATE gjxl_codestream)
   add_test(NAME token_storage_plan COMMAND gjxl_token_storage_plan_test)
@@ -2015,6 +2019,19 @@ if(GJXL_BUILD_TESTS)
   add_executable(gjxl_cpu_execution_test tests/cpu_execution_test.cpp)
   target_link_libraries(gjxl_cpu_execution_test PRIVATE gjxl_core)
   add_test(NAME cpu_execution COMMAND gjxl_cpu_execution_test)
+
+  add_executable(gjxl_entropy_readiness_test tests/entropy_readiness_test.cpp)
+  target_link_libraries(gjxl_entropy_readiness_test PRIVATE gjxl_codestream)
+  add_test(NAME entropy_readiness COMMAND gjxl_entropy_readiness_test)
+  set_tests_properties(entropy_readiness PROPERTIES TIMEOUT 30)
+  add_executable(gjxl_earlier_dc_contract_test tests/earlier_dc_contract_test.cpp)
+  target_link_libraries(gjxl_earlier_dc_contract_test PRIVATE gjxl_codestream)
+  add_test(NAME earlier_dc_contract COMMAND gjxl_earlier_dc_contract_test)
+  set_tests_properties(earlier_dc_contract PROPERTIES TIMEOUT 60)
+  add_executable(gjxl_entropy_readiness_contract_test tests/entropy_readiness_contract_test.cpp)
+  target_link_libraries(gjxl_entropy_readiness_contract_test PRIVATE gjxl_codestream)
+  add_test(NAME entropy_readiness_contract COMMAND gjxl_entropy_readiness_contract_test)
+  set_tests_properties(entropy_readiness_contract PROPERTIES TIMEOUT 60)
   set_tests_properties(cpu_execution PROPERTIES TIMEOUT 30)
 
   add_executable(gjxl_workflow_cpu_coordination_test tests/workflow_cpu_coordination_test.cpp)
@@ -3393,6 +3410,25 @@ if(GJXL_BUILD_TESTS)
   )
   add_dependencies(gjxl_metal_completed_frame_test gjxl_metal_shaders)
   add_test(NAME metal_completed_frame COMMAND gjxl_metal_completed_frame_test)
+  add_test(NAME metal_completed_frame_host_metadata
+    COMMAND gjxl_metal_completed_frame_test --expect-host-metadata 1)
+  add_test(NAME metal_aq_strategy_host_metadata COMMAND gjxl_metal_aq_strategy_metadata_test)
+  set_tests_properties(metal_completed_frame_host_metadata metal_aq_strategy_host_metadata
+    PROPERTIES ENVIRONMENT "GJXL_HOST_METADATA=1")
+  add_test(NAME metal_completed_frame_host_metadata_default
+    COMMAND gjxl_metal_completed_frame_test --expect-host-metadata 1)
+  set_tests_properties(metal_completed_frame_host_metadata_default
+    PROPERTIES ENVIRONMENT_MODIFICATION "GJXL_HOST_METADATA=unset:")
+  add_test(NAME metal_completed_frame_host_metadata_optout
+    COMMAND gjxl_metal_completed_frame_test --expect-host-metadata 0)
+  add_test(NAME metal_aq_strategy_host_metadata_optout
+    COMMAND gjxl_metal_aq_strategy_metadata_test)
+  set_tests_properties(metal_completed_frame_host_metadata_optout metal_aq_strategy_host_metadata_optout
+    PROPERTIES ENVIRONMENT "GJXL_HOST_METADATA=0")
+  add_test(NAME metal_completed_frame_host_metadata_invalid
+    COMMAND gjxl_metal_completed_frame_test --expect-host-metadata 1)
+  set_tests_properties(metal_completed_frame_host_metadata_invalid
+    PROPERTIES ENVIRONMENT "GJXL_HOST_METADATA=invalid")
 
   add_executable(gjxl_metal_resource_budget_test tests/metal_resource_budget_test.cpp)
   target_link_libraries(gjxl_metal_resource_budget_test PRIVATE gjxl_codestream gjxl_metal)
@@ -3443,6 +3479,10 @@ if(GJXL_BUILD_TESTS)
   add_executable(gjxl_gpu_tokenization_default_test tests/gpu_tokenization_default_test.cpp)
   target_link_libraries(gjxl_gpu_tokenization_default_test PRIVATE gjxl_codestream gjxl_metal)
   add_test(NAME gpu_tokenization_default COMMAND gjxl_gpu_tokenization_default_test)
+  add_executable(gjxl_entropy_readiness_workflow_test tests/entropy_readiness_workflow_test.cpp)
+  target_link_libraries(gjxl_entropy_readiness_workflow_test PRIVATE gjxl_codestream gjxl_metal)
+  add_test(NAME entropy_readiness_workflow COMMAND gjxl_entropy_readiness_workflow_test)
+  set_tests_properties(entropy_readiness_workflow PROPERTIES TIMEOUT 120)
   if(GJXL_BUILD_TOKENIZATION_EXPERIMENT)
     add_executable(gjxl_metal_ac_tokenization_failure_test tests/metal_ac_tokenization_failure_test.cpp)
     target_link_libraries(gjxl_metal_ac_tokenization_failure_test PRIVATE gjxl_codestream gjxl_metal)

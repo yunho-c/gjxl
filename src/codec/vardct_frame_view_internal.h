@@ -56,6 +56,9 @@ class VarDctFrameView {
   explicit VarDctFrameView(VarDctFrameViewData data) noexcept : data_(data) {}
 
   [[nodiscard]] bool valid() const;
+  [[nodiscard]] bool has_validated_structure() const noexcept {
+    return structurally_validated_;
+  }
   [[nodiscard]] const FrameGeometry& geometry() const noexcept {
     return data_.input.geometry;
   }
@@ -96,7 +99,10 @@ class VarDctFrameView {
 
  private:
   friend VarDctFrameView BorrowFrame(const VarDctEncoderFrame&) noexcept;
+  friend Status ValidateFrameViewForPublication(
+      const VarDctFrameView&, VarDctFrameView*);
   VarDctFrameViewData data_;
+  bool structurally_validated_ = false;
   // Owned frames retain their validated native compact/sparse representation.
   // Only BorrowFrame can attach this immutable owner; raw borrowed dense views
   // continue to receive the full structural and coefficient validation.
@@ -123,6 +129,14 @@ class CompletedVarDctFrame {
     const VarDctEncoderFrame& frame) noexcept;
 VarDctFrameView BorrowFrame(VarDctEncoderFrame&&) = delete;
 VarDctFrameView BorrowFrame(const VarDctEncoderFrame&&) = delete;
+
+/// Performs the full structural/value validation before publishing a view whose
+/// subsequent valid() calls reuse that result. All borrowed backing MUST remain
+/// immutable for the entire published view lifetime. Codec/profile support is
+/// still checked separately by each serializer. Raw views never inherit proof.
+/// Revalidates even an already-published input; leaves output unchanged on error.
+[[nodiscard]] Status ValidateFrameViewForPublication(
+    const VarDctFrameView& frame, VarDctFrameView* out);
 
 /// Same structural and initial-profile gates as the owned public API.
 [[nodiscard]] Status ValidateSimpleCodestreamFrame(
