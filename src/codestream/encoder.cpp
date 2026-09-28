@@ -5,6 +5,7 @@
 
 #include "codestream/encoder.h"
 #include "codestream/entropy_readiness_internal.h"
+#include "codestream/section_writing_internal.h"
 #include "codestream/dc_context_tree_internal.h"
 
 #include <algorithm>
@@ -811,6 +812,80 @@ Status WriteAcSections(
     }
     *sections = std::move(candidate);
     if (token_bits != nullptr) *token_bits = candidate_token_bits;
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
+  }
+  return Status::Ok();
+}
+
+// Both immutable models are validated by their global writers before any
+// worker consumes them. Outputs remain local until the combined queue joins.
+Status WriteOverlappedSections(
+    const VarDctFrameView& frame,
+    std::span<const SimpleDcGroupTokenStreams> dc_groups,
+    std::span<const Storage<EntropyToken>> dc_streams,
+    const SimpleBlockContextMap& block_context_map,
+    const EntropyCode& dc_code,
+    const codestream_internal::DcContextTreeLayout& dc_layout,
+    const AcEncodingCandidate& ac, const EntropyCode& ac_code,
+    const SimpleCoefficientOrders& custom_orders,
+    std::span<const EntropyToken> order_tokens, const EntropyCode* order_code,
+    Storage<BitWriter>* common_sections, Storage<BitWriter>* ac_sections,
+    uint64_t* dc_token_bits, uint64_t* ac_token_bits) {
+  if (common_sections == nullptr || ac_sections == nullptr || dc_groups.empty() ||
+      ac.streams.empty() || dc_streams.size() / 2 != dc_groups.size() ||
+      dc_streams.size() % 2 != 0) {
+    return Status::InvalidArgument("Overlapped codestream sections are invalid");
+  }
+  try {
+    Storage<BitWriter> common(1 + dc_groups.size()), ac_output(1 + ac.streams.size());
+    Status status = codestream_internal::WriteDcGlobalWithLayout(
+        frame.quantizer().params(), dc_groups.size(), block_context_map,
+        dc_code, &common[0], dc_layout);
+    if (!status.ok()) return status;
+    status = WriteSimpleAcGlobal(ac.streams.size(),
+        ac.custom_order ? custom_orders.used_order_mask : 0,
+        ac.custom_order ? order_tokens : std::span<const EntropyToken>{},
+        ac.custom_order ? order_code : nullptr, ac_code, &ac_output[0]);
+    if (!status.ok()) return status;
+    Storage<uint64_t> dc_bits(dc_token_bits == nullptr ? 0 : dc_groups.size());
+    status = codestream_internal::RunSectionWritingTasks(
+        dc_groups.size(), ac.streams.size(),
+        [&](size_t index) {
+          return WriteDcGroupSection(dc_groups[index], dc_streams[2 * index],
+              dc_streams[2 * index + 1], dc_code, &common[1 + index],
+              dc_token_bits == nullptr ? nullptr : &dc_bits[index], nullptr,
+              frame.profile().extra_dc_precision);
+        },
+        [&](size_t index) {
+          BitWriter local_output;
+          Status result = WriteValidatedTokenStream(ac.streams[index], ac_code,
+                                                   &local_output);
+          if (result.ok()) ac_output[1 + index] = std::move(local_output);
+          return result;
+        });
+    if (!status.ok()) return status;
+    uint64_t dc_total = 0, ac_total = 0;
+    for (uint64_t bits : dc_bits) {
+      if (dc_total > std::numeric_limits<uint64_t>::max() - bits)
+        return Status::InvalidArgument("DC token bit count overflow");
+      dc_total += bits;
+    }
+    if (ac_token_bits != nullptr) {
+      for (size_t i = 1; i < ac_output.size(); ++i) {
+        if (ac_total > std::numeric_limits<uint64_t>::max() - ac_output[i].bits_written())
+          return Status::InvalidArgument("AC token bit count overflow");
+        ac_total += ac_output[i].bits_written();
+      }
+    }
+    *common_sections = std::move(common);
+    *ac_sections = std::move(ac_output);
+    if (dc_token_bits) *dc_token_bits = dc_total;
+    if (ac_token_bits) *ac_token_bits = ac_total;
   } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
     return error.status();
   } catch (const std::bad_alloc&) {
@@ -1642,28 +1717,31 @@ Status EncodePreparedVarDctRepresentation(
     ? (selected.all_prefix_entropy ? &prefix_order_code : &order_code)
     : nullptr;
   const ProfileClock::time_point selected_write_begin = ProfileBegin(profile);
-  Storage<BitWriter> common_sections;
-  uint64_t written_dc_token_bits = 0;
+  Storage<BitWriter> common_sections, ac_sections;
+  uint64_t written_dc_token_bits = 0, written_ac_token_bits = 0;
   codestream_internal::SectionWritingWorkProfile selected_write_profile;
-  status = WriteCommonSections(
-      frame, dc_groups, dc_streams, selected.block_context_map,
-      selected_dc_code, &common_sections,
-      exhaustive_representation_search ? nullptr : &written_dc_token_bits,
-      profile == nullptr ? nullptr : &selected_write_profile,
-      dc_layout);
-  if (!status.ok()) {
-    return status;
+  if (profile == nullptr &&
+      codestream_internal::CanOverlapSectionWriting(selected.streams.size())) {
+    status = WriteOverlappedSections(frame, dc_groups, dc_streams,
+        selected.block_context_map, selected_dc_code, dc_layout, selected,
+        selected_ac_code, custom_orders, order_tokens, selected_order_code,
+        &common_sections, &ac_sections,
+        exhaustive_representation_search ? nullptr : &written_dc_token_bits,
+        exhaustive_representation_search ? nullptr : &written_ac_token_bits);
+  } else {
+    status = WriteCommonSections(
+        frame, dc_groups, dc_streams, selected.block_context_map,
+        selected_dc_code, &common_sections,
+        exhaustive_representation_search ? nullptr : &written_dc_token_bits,
+        profile == nullptr ? nullptr : &selected_write_profile, dc_layout);
+    if (!status.ok()) return status;
+    status = WriteAcSections(
+        selected, selected_ac_code, custom_orders, order_tokens,
+        selected_order_code, &ac_sections,
+        exhaustive_representation_search ? nullptr : &written_ac_token_bits,
+        profile == nullptr ? nullptr : &selected_write_profile);
   }
-  Storage<BitWriter> ac_sections;
-  uint64_t written_ac_token_bits = 0;
-  status = WriteAcSections(
-    selected, selected_ac_code, custom_orders, order_tokens,
-    selected_order_code, &ac_sections,
-    exhaustive_representation_search ? nullptr : &written_ac_token_bits,
-    profile == nullptr ? nullptr : &selected_write_profile);
-  if (!status.ok()) {
-    return status;
-  }
+  if (!status.ok()) return status;
   uint64_t selected_write_nanoseconds = 0;
   ProfileEnd(profile, selected_write_begin, &selected_write_nanoseconds);
   if (phase_times != nullptr)
@@ -2407,7 +2485,10 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
         });
       }
       auto* tracker = thread_budget_internal::ParticipantTracker();
+      const bool in_batch = codestream_internal::entropy_readiness_in_batch;
       status = RunParallelSections(2, [&](size_t policy) {
+        std::optional<codestream_internal::EntropyReadinessBatchScope> batch_scope;
+        if (in_batch) batch_scope.emplace();
         // A single participant handles the cheaper fallback. The other policy
         // may launch section/config workers within the remaining capacity.
         // RunParallelSections propagates resource and CPU-domain participation;
@@ -2574,7 +2655,8 @@ Status codestream_internal::ComputeSerializerControlStorageBound(
   const size_t sections = g == 1 ? 1 : g + d + 2;
   const size_t entropy_tasks = 1 + static_cast<size_t>(has_orders) + candidates;
   const size_t group_tasks = candidates * g;
-  const size_t maximum_tasks = std::max({group_tasks, entropy_tasks, d,
+  const size_t writing_tasks = g + d;
+  const size_t maximum_tasks = std::max({group_tasks, entropy_tasks, writing_tasks,
                                         2 * maximum_maps});
   const size_t measuring_workers = std::min(workers, candidates);
   HostStorageBound work;

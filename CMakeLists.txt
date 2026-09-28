@@ -1591,6 +1591,10 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_ac_population_reduction_test PRIVATE gjxl_codestream)
   add_test(NAME ac_population_reduction COMMAND gjxl_ac_population_reduction_test)
 
+  add_executable(gjxl_section_writing_test tests/section_writing_test.cpp)
+  target_link_libraries(gjxl_section_writing_test PRIVATE gjxl_codestream)
+  add_test(NAME section_writing COMMAND gjxl_section_writing_test)
+
   add_executable(gjxl_token_storage_plan_test tests/token_storage_plan_test.cpp)
   target_link_libraries(gjxl_token_storage_plan_test PRIVATE gjxl_codestream)
   add_test(NAME token_storage_plan COMMAND gjxl_token_storage_plan_test)
