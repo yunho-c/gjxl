@@ -100,3 +100,26 @@ harness mode assumptions; their logs are preserved alongside passing reruns.
 
 Timing qualification is excluded because a concurrent laptop compression
 workload was active. The rate study also made no throughput claim.
+
+### Combined revision with current main
+
+Merge revision `6c880ad` combines the e3 policy with main `e1e4cc6`, including
+the ordinary-e5 zero-refinement policy. Both revisions were built in separate
+Release build trees; the original qualification binaries were preserved.
+
+- All 170 native CTests pass, with no failures or skips.
+- All 11 Rust workspace tests pass, together with formatting, Clippy, and the
+  native incremental-rebuild check.
+- The GPU quantization pipeline passes with Metal API and shader validation.
+- Thirty-six e3 codestream checks cover CPU and Metal, both smoothing settings,
+  and Q30/Q80/Q95 on two Kodak images and one CLIC image. Metal matches the
+  retained study hashes; CPU matches the pre-merge e3 candidate. Nine independent
+  libjxl decodes also match the study's linear-float hashes.
+- Thirty-six non-e3 controls cover every other effort on CPU and Metal at two
+  distances. These and five specialized-policy controls are byte-identical to
+  current main, including its intentional e5 change.
+
+The scripts, commands, source and binary hashes, test logs, and final audit are
+retained in `build/e3-integration-qualification/`. The unrelated dirty main
+worktree's status and staged/unstaged patches were verified unchanged. CUDA
+build/runtime and timing qualification remain outside these completed checks.
