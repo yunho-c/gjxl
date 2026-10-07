@@ -76,7 +76,8 @@ struct VarDctEncodingOptions {
   /// block; efforts 5-9 use two-block spacing for these larger families.
   /// In the ordinary policy, efforts 1-4 use DCT8, disable Gaborish, and
   /// start with a uniform quantization field and run zero AQ updates.
-  /// Efforts 5-6 enable mixed-transform AC search and run one AQ update.
+  /// Effort 5 enables mixed-transform AC search, spatial initialization, and
+  /// Gaborish with zero AQ updates. Effort 6 adds one AQ update.
   /// High-density and maximum-error overrides preserve their existing
   /// refinement and mixed-transform search behavior.
   /// Ordinary automatic effort 4 also searches DC integer mappings when DC

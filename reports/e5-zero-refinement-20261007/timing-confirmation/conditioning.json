@@ -1,0 +1,80 @@
+{
+  "commands": [
+    {
+      "argv": [
+        "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-qualification/baseline-build/gjxl_quality_benchmark",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/48mp.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-timing-confirmation-20261007/conditioning/baseline/out.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-timing-confirmation-20261007/conditioning/baseline/raw.json",
+        "--effort",
+        "5",
+        "--num-threads",
+        "8",
+        "--distance",
+        "2.31000209",
+        "--warmups",
+        "2",
+        "--samples",
+        "32"
+      ],
+      "ended": 1791400602.8484108,
+      "output_sha256": "3c8535c144fcc3976eb81117fedd59f4bfcdf84c64c6260ba549e115a93dcee2",
+      "raw_sha256": "60b11d6276343e6913a3675fa44e955eaf2f99093e69d8a4a5437af4c8a53796",
+      "returncode": 0,
+      "started": 1791400580.117449,
+      "stderr": "",
+      "stdout": ""
+    },
+    {
+      "argv": [
+        "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-qualification/candidate-build/gjxl_quality_benchmark",
+        "--input",
+        "/Users/yunhocho/GitHub/libjxl-runtime-study-2026-09-03/corpus/pfm/unsplash/forest_stream/48mp.pfm",
+        "--output",
+        "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-timing-confirmation-20261007/conditioning/candidate/out.jxl",
+        "--raw-samples",
+        "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-timing-confirmation-20261007/conditioning/candidate/raw.json",
+        "--effort",
+        "5",
+        "--num-threads",
+        "8",
+        "--distance",
+        "2.48866272",
+        "--warmups",
+        "2",
+        "--samples",
+        "32"
+      ],
+      "ended": 1791400611.37273,
+      "output_sha256": "d994428ff0399c55d13d5eec022005b1e3ed9ce3b0cc91a5aa530a4b9b18ece9",
+      "raw_sha256": "e56f18f9a1a07d43456c3b8ebf8ea5c6c0f8c8b9339acc4f6f9612a54530aad7",
+      "returncode": 0,
+      "started": 1791400602.850796,
+      "stderr": "",
+      "stdout": ""
+    }
+  ],
+  "files": {
+    "conditioning/baseline/out.jxl": "3c8535c144fcc3976eb81117fedd59f4bfcdf84c64c6260ba549e115a93dcee2",
+    "conditioning/baseline/raw.json": "60b11d6276343e6913a3675fa44e955eaf2f99093e69d8a4a5437af4c8a53796",
+    "conditioning/candidate/out.jxl": "d994428ff0399c55d13d5eec022005b1e3ed9ce3b0cc91a5aa530a4b9b18ece9",
+    "conditioning/candidate/raw.json": "e56f18f9a1a07d43456c3b8ebf8ea5c6c0f8c8b9339acc4f6f9612a54530aad7",
+    "conditioning/commands.jsonl": "2d6f13b6a5940e0acbbca22173328f52a2a2baf97ff8415234cd138a8c66ca2d",
+    "conditioning/plan.json": "e2c59d55f21c8a8987b4980629e5b1eab482a35457c5268ec7d365dc50d7d5e7"
+  },
+  "plan": {
+    "arms": [
+      "baseline",
+      "candidate"
+    ],
+    "created": 1791400580.117147,
+    "image": "unsplash/forest_stream/48mp",
+    "maximum_bursts": 1,
+    "purpose": "One foreground encoding burst to test whether background services settle under load, following user suggestion. Separate from and excluded from scheduled timing data.",
+    "samples": 32,
+    "warmups": 2
+  }
+}

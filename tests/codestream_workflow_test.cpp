@@ -616,7 +616,7 @@ bool CheckEffortPolicy() {
     {2, 1},
     {3, 1},
     {4, 1},
-    {5, 2},
+    {5, 1},
     {6, 2},
     {7, 3},
     {8, 4},
@@ -670,11 +670,9 @@ bool CheckEffortPolicy() {
   }
 
 #if GJXL_TEST_HAS_METAL
-  for (const int32_t effort : {1, 2, 3, 4, 5, 7, 8, 9, 10}) {
+  for (const int32_t effort : {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}) {
     const size_t index = static_cast<size_t>(effort - 1);
-    const size_t expected_score_count = effort <= 4
-      ? 0
-      : kCases[index].expected_score_count - 1;
+    const size_t expected_score_count = kCases[index].expected_score_count - 1;
     std::vector<uint8_t> bytes;
     gjxl::VarDctEncodingSummary summary;
     status = gjxl::EncodeLinearRgbVarDctCodestream(
@@ -705,7 +703,7 @@ bool CheckEffortPolicy() {
       std::cerr << "Low Metal effort selected a non-DCT8 strategy\n";
       return false;
     }
-    if (effort <= 4) {
+    if (effort <= 5) {
       std::vector<uint8_t> scored_bytes;
       gjxl::VarDctEncodingSummary scored_summary;
       status = gjxl::EncodeLinearRgbVarDctCodestream(

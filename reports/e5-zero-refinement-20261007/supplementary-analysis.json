@@ -1,0 +1,20 @@
+[
+  {
+    "butteraugli_percent": 20.462457248554244,
+    "bytes_percent": 8.15158220068135,
+    "image_id": "clic2024_test/d79d465ac77c36518e0f0d626bf97ec4",
+    "score_difference": 0.004333314753282025
+  },
+  {
+    "butteraugli_percent": 10.315655625075749,
+    "bytes_percent": 4.013339922254255,
+    "image_id": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+    "score_difference": -0.004699365232852415
+  },
+  {
+    "butteraugli_percent": 14.71286512572718,
+    "bytes_percent": 3.3677402575734927,
+    "image_id": "clic2024_test/c80999cd5533e448167cd9b3ccfa2a37",
+    "score_difference": 0.020257916152317534
+  }
+]
