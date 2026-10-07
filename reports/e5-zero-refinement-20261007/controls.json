@@ -1,0 +1,255 @@
+{
+  "checks": 23,
+  "complete": true,
+  "results": [
+    {
+      "flags": [
+        "--effort",
+        "1",
+        "--distance",
+        "1.9"
+      ],
+      "identical": true,
+      "image_id": "kodak/01",
+      "label": "e1",
+      "sha256": "86743e1a21d2b4356f7f05b88b67ed99e3cdf007b7fbbeb6efec65a6eeaf2133"
+    },
+    {
+      "flags": [
+        "--effort",
+        "2",
+        "--distance",
+        "1.9"
+      ],
+      "identical": true,
+      "image_id": "kodak/01",
+      "label": "e2",
+      "sha256": "86743e1a21d2b4356f7f05b88b67ed99e3cdf007b7fbbeb6efec65a6eeaf2133"
+    },
+    {
+      "flags": [
+        "--effort",
+        "3",
+        "--distance",
+        "1.9"
+      ],
+      "identical": true,
+      "image_id": "kodak/01",
+      "label": "e3",
+      "sha256": "86743e1a21d2b4356f7f05b88b67ed99e3cdf007b7fbbeb6efec65a6eeaf2133"
+    },
+    {
+      "flags": [
+        "--effort",
+        "4",
+        "--distance",
+        "1.9"
+      ],
+      "identical": true,
+      "image_id": "kodak/01",
+      "label": "e4",
+      "sha256": "817ebe5af5ddce42c4d324cc29686a99cb6506167160b19604527c5f26fb65a5"
+    },
+    {
+      "flags": [
+        "--effort",
+        "6",
+        "--distance",
+        "1.9"
+      ],
+      "identical": true,
+      "image_id": "kodak/01",
+      "label": "e6",
+      "sha256": "32b561aba825338ddc2ab4d21ce7086273d406be4aac1bc5f02a7d209a1ccdfe"
+    },
+    {
+      "flags": [
+        "--effort",
+        "7",
+        "--distance",
+        "1.9"
+      ],
+      "identical": true,
+      "image_id": "kodak/01",
+      "label": "e7",
+      "sha256": "e0ba5c0c8d198ac9b81c662580709c89557bb6cd4e64f75643abf1a2bfd6e360"
+    },
+    {
+      "flags": [
+        "--effort",
+        "8",
+        "--distance",
+        "1.9"
+      ],
+      "identical": true,
+      "image_id": "kodak/01",
+      "label": "e8",
+      "sha256": "ed719121dc8b4e97227854d53ec50f44bf9f14f32909dd8bea9d214721fa74bb"
+    },
+    {
+      "flags": [
+        "--effort",
+        "9",
+        "--distance",
+        "1.9"
+      ],
+      "identical": true,
+      "image_id": "kodak/01",
+      "label": "e9",
+      "sha256": "e2bf0f779e56da75976616117e7a8bd8bf2be0143a1d8af6fa0f0a552474eaf5"
+    },
+    {
+      "flags": [
+        "--effort",
+        "10",
+        "--distance",
+        "1.9"
+      ],
+      "identical": true,
+      "image_id": "kodak/01",
+      "label": "e10",
+      "sha256": "d5fca0c353b890ba2dae0df06c0e49e238f75bbddc3b369094f2f4343449ee48"
+    },
+    {
+      "flags": [
+        "--distance",
+        "1.9",
+        "--high-density"
+      ],
+      "identical": true,
+      "image_id": "kodak/01",
+      "label": "high-density",
+      "sha256": "07afc814b4d19243ddf144c674f723079af9cd07033f53383a9a6d0faa260820"
+    },
+    {
+      "flags": [
+        "--effort",
+        "5",
+        "--maximum-error",
+        ".2",
+        ".2",
+        ".2"
+      ],
+      "identical": true,
+      "image_id": "kodak/01",
+      "label": "maximum-error",
+      "sha256": "983c2cff1b59254c7eabd2b45c64c34ee77ee275d2dd844d1dd0fbfd3f4323ac"
+    },
+    {
+      "flags": [
+        "--effort",
+        "5",
+        "--distance",
+        "1.9",
+        "--gpu-aq",
+        "maximum-throughput"
+      ],
+      "identical": true,
+      "image_id": "kodak/01",
+      "label": "maximum-throughput",
+      "sha256": "4ba8c1770e1ffa61148f753fe567ce4d7c79f2c1b5b78e9ea94931ba87a87bc3"
+    },
+    {
+      "flags": [
+        "--effort",
+        "6",
+        "--distance",
+        "1.9",
+        "--backend",
+        "cpu"
+      ],
+      "identical": true,
+      "image_id": "kodak/01",
+      "label": "cpu-e6",
+      "sha256": "ee68bfd1effd77613e201c0b4fad827753d76832c8592adabc9bb76afa1c0fa6"
+    },
+    {
+      "flags": [
+        "--effort",
+        "6",
+        "--distance",
+        "1.9",
+        "--gpu-aq",
+        "exact-coefficients"
+      ],
+      "identical": true,
+      "image_id": "kodak/01",
+      "label": "exact-e6",
+      "sha256": "ee68bfd1effd77613e201c0b4fad827753d76832c8592adabc9bb76afa1c0fa6"
+    },
+    {
+      "flags": [
+        "--effort",
+        "4",
+        "--distance",
+        "1.9"
+      ],
+      "identical": true,
+      "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "label": "photo-0-e4",
+      "sha256": "2d9994b8492e746ce6b50644f6a4d4d3b251711f78b38b01f067d80e92f53e85"
+    },
+    {
+      "flags": [
+        "--effort",
+        "6",
+        "--distance",
+        "1.9"
+      ],
+      "identical": true,
+      "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "label": "photo-0-e6",
+      "sha256": "251b56b6769a5b28750b46484d3dbaa17001d2b8631d0a4f058710f4e38af009"
+    },
+    {
+      "flags": [
+        "--effort",
+        "4",
+        "--distance",
+        "1.9"
+      ],
+      "identical": true,
+      "image_id": "unsplash/campus_interior/12mp",
+      "label": "photo-1-e4",
+      "sha256": "57ac2a517b4f2787abd734a15e62b1619937c646c90e7f95ccd2aa0f23292c48"
+    },
+    {
+      "flags": [
+        "--effort",
+        "6",
+        "--distance",
+        "1.9"
+      ],
+      "identical": true,
+      "image_id": "unsplash/campus_interior/12mp",
+      "label": "photo-1-e6",
+      "sha256": "ae7340015134db52b0f3ae4341741beebf480a06398e51b2abcaf31836fbe1b5"
+    },
+    {
+      "identical": true,
+      "label": "e5-fully-resident-scored",
+      "sha256": "81cc8022b9c3fd2a941cf2dfa0cca52e5c019dec86a411c2f4cd3d5cb8c199f7"
+    },
+    {
+      "identical": true,
+      "label": "e5-exact-coefficients-scored",
+      "sha256": "81cc8022b9c3fd2a941cf2dfa0cca52e5c019dec86a411c2f4cd3d5cb8c199f7"
+    },
+    {
+      "identical": true,
+      "label": "e5-cpu-scored",
+      "sha256": "81cc8022b9c3fd2a941cf2dfa0cca52e5c019dec86a411c2f4cd3d5cb8c199f7"
+    },
+    {
+      "identical": true,
+      "label": "e5-metal-target-retries",
+      "sha256": "e6808aced7e17e9a1f30a75ef3f1d521ac34b02653c7a6c49d50f8eddd3dd39f"
+    },
+    {
+      "identical": true,
+      "label": "e5-cpu-target-retries",
+      "sha256": "e6808aced7e17e9a1f30a75ef3f1d521ac34b02653c7a6c49d50f8eddd3dd39f"
+    }
+  ],
+  "runner_sha256": "6a68bffb548dc9de2798cfe75e28317fb45809584b96235ef6fc1ff6545bd4b7"
+}

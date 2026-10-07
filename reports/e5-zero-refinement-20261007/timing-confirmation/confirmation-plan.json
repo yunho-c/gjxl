@@ -1,0 +1,14 @@
+{
+  "created": 1791400033.559167,
+  "decision": "Require all original timing gates and absolute difference of aggregate candidate/baseline ratios between runs <=0.05. No pooling or replacement of the first run; no repeat-until-pass.",
+  "environment": "User-authorized mediaanalysisd pause under restoration watchdog before the first measured pair; other applications remain running.",
+  "failed_image": "kodak/08",
+  "first_aggregate_ratio": 0.5751758374454686,
+  "first_analysis_sha256": "f56590a4f7b5748a21881a5714502579ee4c1876dd43954eb27f78842c5a4f46",
+  "first_root": "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-timing-20261007",
+  "maximum_aggregate_ratio_difference": 0.05,
+  "maximum_complete_confirmation_runs": 1,
+  "original_failed_gate": "aa_images",
+  "protocol": "Identical to the first run after its recorded retry amendment; no changes to samples, warmups, cohort, load thresholds, timing gates, or aggregation.",
+  "purpose": "One complete independent confirmation following Kodak 08 A/A instability in the first run. Preserve the failed run and report both independently."
+}

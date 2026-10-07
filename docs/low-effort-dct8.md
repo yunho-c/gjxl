@@ -3,7 +3,8 @@
 Ordinary efforts 1–4 select DCT8 for every 8×8 base block without invoking
 AC-strategy search. They disable Gaborish and initialize every quantization
 block to `0.79 / distance`, matching libjxl’s e1–4 initialization boundary.
-Effort 5 enables mixed-transform search, spatial initialization, and Gaborish.
+Effort 5 enables mixed-transform search, spatial initialization, and Gaborish
+without perceptual refinement. Effort 6 adds the first refinement update.
 Ordinary effort 4 now skips perceptual AQ refinement, like efforts 1–3.
 It also enables the [default DC integer-mapping search](entropy-defaults.md)
 under automatic compression; native context-map compression applies at every
@@ -13,10 +14,11 @@ The adaptive-quantization update schedule is:
 | Effort | Transform selection | AQ updates |
 | --- | --- | --- |
 | 1–4 | Fixed DCT8 | 0 |
-| 5–6 | Mixed-transform search | 1 |
+| 5 | Mixed-transform search | 0 |
+| 6 | Mixed-transform search | 1 |
 | 7 | Mixed-transform search | 2 |
-| 8–9 | Mixed-transform search | 3 |
-| 10 | Mixed-transform search | 4 |
+| 8 | Mixed-transform search | 3 |
+| 9–10 | Mixed-transform search | 4 |
 
 The high-density and maximum-error overrides retain their existing search
 and refinement behavior; high density still requests four AQ updates.

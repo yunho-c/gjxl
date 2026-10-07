@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="(empty)"
+	tests="4"
+	failures="2"
+	disabled="0"
+	skipped="0"
+	hostname=""
+	time="14"
+	timestamp="2026-10-07T11:54:32"
+	>
+	<testcase name="codestream_workflow" classname="codestream_workflow" time="2.44753" status="run">
+		<properties/>
+		<system-out>2026-10-07 11:54:32.639 gjxl_codestream_workflow_test[2637:3221258] Metal API Validation Enabled
+2026-10-07 11:54:32.639 gjxl_codestream_workflow_test[2637:3221258] Metal GPU Validation Enabled
+Public workflow bytes=182 hash=17549798887378340505 strategies=5
+All public codestream workflow tests passed.
+</system-out>
+	</testcase>
+	<testcase name="low_effort_strategy_policy" classname="low_effort_strategy_policy" time="0.0334154" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="resident_workflow_storage_plan" classname="resident_workflow_storage_plan" time="8.32887" status="fail">
+		<failure message="Subprocess aborted"/>
+		<properties/>
+		<system-out>2026-10-07 11:54:35.128 gjxl_resident_workflow_storage_plan_test[2695:3221605] Metal API Validation Enabled
+2026-10-07 11:54:35.128 gjxl_resident_workflow_storage_plan_test[2695:3221605] Metal GPU Validation Enabled
+validateComputeFunctionArguments:1272: failed assertion `Functon(gjxl_aq_dc_quantize): total used threadgroupMemoryLength(49152) must be &lt;= 32768.'
+Whole workflow plan shapes: 2240; search bounds: 64
+</system-out>
+	</testcase>
+	<testcase name="compatibility_workflow_storage_plan" classname="compatibility_workflow_storage_plan" time="3.81149" status="fail">
+		<failure message="Subprocess aborted"/>
+		<properties/>
+		<system-out>2026-10-07 11:54:43.462 gjxl_compatibility_workflow_storage_plan_test[2808:3222602] Metal API Validation Enabled
+2026-10-07 11:54:43.463 gjxl_compatibility_workflow_storage_plan_test[2808:3222602] Metal GPU Validation Enabled
+validateComputeFunctionArguments:1272: failed assertion `Functon(gjxl_aq_dc_quantize): total used threadgroupMemoryLength(49152) must be &lt;= 32768.'
+Compatibility planning checks: 2800; mixed limits: 64
+</system-out>
+	</testcase>
+</testsuite>

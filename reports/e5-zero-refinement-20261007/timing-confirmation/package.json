@@ -1,0 +1,21 @@
+{
+  "files": {
+    "analysis.json": "20a16a837c2a67286621b3a10d6082addc13c2d7a510cf5bd6ddae0de8f9e931",
+    "attempts.jsonl": "4690af039e6120bd4002bff78a9e15e397875ced79829b27c13b6697a2651e96",
+    "commands.jsonl": "6abbc77594659ebd3d43e5c3c8fcde99fdf6b949c99acfe02b0ee490fa532e3e",
+    "conditioning.json": "55b99a2dbad4bfdb71cebb4ad30a5d960effa6108ab25364b656f7b9bc7e3950",
+    "confirmation-decision.json": "7705bd68425c19985c8cc290f7d182fb5b2eaf1807aadd429013f90bc10deba0",
+    "confirmation-plan.json": "8454dacd1a2f769caadc2d07243c876fca03fa89580f2e8c76bba80acb05ee90",
+    "environment-summary.json": "b8ec6b6e9352040e48c8f8d96f592103eeb241bf8d063cbd1d37284273f09d35",
+    "manifest.json": "f36aa98b8eb4e4bc35e99a4523ad58afbc151e5f8bc5616db168d312532cca97",
+    "report.md": "c18bd32f1dfb91ecec327bc39decc4d38b40129cdecc55fc686e6fb57b0298db",
+    "service-control.jsonl": "1e059ed625e7b1f919e9fb69259a32541a14b6100f71abcf1c2223096b698976",
+    "timing.png": "9ce5fef309fec56c7485c696acee7aa33bf39124db9c6346acee468765dce96d",
+    "watch_media.py": "66d9c810d58b7255a4fe1d4cd70fd1bb8fd1fe23a9c5eba852d1faaad4f30652",
+    "watch_spotlight.py": "b103bcaef4d7f8f8f7030dcc20948dac66cdcb60acf9888ceb4ff7ef8a77a7b6",
+    "watch_spotlight_main.py": "9bec179f3a7c20b75af891a017329dfef749861259cb8439c35879ae8679df24"
+  },
+  "generator_sha256": "a4a2354c1b96ae23e02bccdd50fb0e91b07513295abfd5d55d40d54d726c42d2",
+  "raw_root": "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-timing-confirmation-20261007",
+  "status": "passed"
+}

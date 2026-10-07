@@ -1,0 +1,27 @@
+{
+  "environment": {
+    "MTL_DEBUG_LAYER": "1",
+    "MTL_SHADER_VALIDATION": "1",
+    "SDKROOT": "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk"
+  },
+  "checks": [
+    {
+      "name": "metal-validation",
+      "argv": [
+        "ctest",
+        "--test-dir",
+        "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-qualification/candidate-build",
+        "-R",
+        "^(codestream_workflow|low_effort_strategy_policy|resident_workflow_storage_plan|compatibility_workflow_storage_plan)$",
+        "--output-on-failure",
+        "-j",
+        "1",
+        "--output-junit",
+        "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-qualification/metal-validation.xml"
+      ],
+      "exit_code": 8,
+      "log": "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-qualification/metal-validation.log",
+      "sha256": "d981ada34e9a7689e16078c2b1ad31967eda590956330817e77af6efef59bad0"
+    }
+  ]
+}

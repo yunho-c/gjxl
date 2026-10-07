@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="(empty)"
+	tests="2"
+	failures="2"
+	disabled="0"
+	skipped="0"
+	hostname=""
+	time="13"
+	timestamp="2026-10-07T11:59:02"
+	>
+	<testcase name="resident_workflow_storage_plan" classname="resident_workflow_storage_plan" time="9.16407" status="fail">
+		<failure message="Subprocess aborted"/>
+		<properties/>
+		<system-out>2026-10-07 11:59:02.693 gjxl_resident_workflow_storage_plan_test[8186:3239569] Metal API Validation Enabled
+2026-10-07 11:59:02.694 gjxl_resident_workflow_storage_plan_test[8186:3239569] Metal GPU Validation Enabled
+validateComputeFunctionArguments:1272: failed assertion `Functon(gjxl_aq_dc_quantize): total used threadgroupMemoryLength(49152) must be &lt;= 32768.'
+Whole workflow plan shapes: 2240; search bounds: 64
+</system-out>
+	</testcase>
+	<testcase name="compatibility_workflow_storage_plan" classname="compatibility_workflow_storage_plan" time="4.15037" status="fail">
+		<failure message="Subprocess aborted"/>
+		<properties/>
+		<system-out>2026-10-07 11:59:11.651 gjxl_compatibility_workflow_storage_plan_test[8408:3240674] Metal API Validation Enabled
+2026-10-07 11:59:11.652 gjxl_compatibility_workflow_storage_plan_test[8408:3240674] Metal GPU Validation Enabled
+validateComputeFunctionArguments:1272: failed assertion `Functon(gjxl_aq_dc_quantize): total used threadgroupMemoryLength(49152) must be &lt;= 32768.'
+Compatibility planning checks: 2800; mixed limits: 64
+</system-out>
+	</testcase>
+</testsuite>
