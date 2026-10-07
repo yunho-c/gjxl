@@ -132,6 +132,9 @@ typedef struct {
   /// Speed/refinement intent in [1, 10]. Efforts 1-4 use DCT8, disable Gaborish, and start with a uniform
   /// quantization field with zero AQ updates;
   /// efforts 5-10 enable mixed-transform AC-strategy search.
+  /// Ordinary effort 5 retains spatial initialization and Gaborish with zero
+  /// AQ updates; effort 6 adds one update. High-density and maximum-error
+  /// overrides preserve their existing refinement policies.
   /// Efforts 8-10 share the rate-optimized writer and, on ordinary fully
   /// resident Metal, eight-step nonlinear final chroma-from-luma.
   /// Effort 8 uses three AQ updates; efforts 9-10 use four. Ordinary effort 10

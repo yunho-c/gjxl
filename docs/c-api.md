@@ -294,10 +294,15 @@ behavior:
 | Effort | AQ updates | Entropy behavior |
 | ---: | ---: | --- |
 | 1-4 | 0 | Balanced |
-| 5-6 | 1 | Balanced |
+| 5 | 0 | Balanced |
+| 6 | 1 | Balanced |
 | 7 | 2 | Balanced default |
 | 8 | 3 | Rate optimized, with balanced whole-file fallback |
 | 9-10 | 4 | Rate optimized, with balanced whole-file fallback |
+
+Effort 5 enables mixed-transform search, spatial initial quantization, and
+Gaborish without perceptual refinement. Effort 6 adds the first refinement
+update. High-density and maximum-error overrides retain their existing policy.
 
 Ordinary fully resident Metal efforts 8-10 also share eight-step nonlinear
 final chroma-from-luma. CPU and explicit exact/throughput frontend modes retain

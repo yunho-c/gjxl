@@ -1,0 +1,17 @@
+{
+  "accepted_before": 33,
+  "changes": {
+    "maximum_attempts_per_pair": {
+      "from": 3,
+      "to": 12
+    }
+  },
+  "excluded_before": 7,
+  "provenance": {
+    "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-timing-20261007/attempts-before-amendment.jsonl": "f9504bc36fe4d03239dbd3f95391a543706caf782edc5b2aea3673f003931380",
+    "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-timing-20261007/manifest-original.json": "999b22d655a45eb0889dba7cf868228854218e4f5e86e44d4ed883dd643b0977"
+  },
+  "reason": "Environment-only retry budget exhausted with 33 accepted and 7 excluded pairs. Extend uniformly to complete the same frozen cohort. No aggregate timing analysis performed.",
+  "time": 1791399579.824764,
+  "unchanged": "All environment thresholds, quality pairs, binaries, schedule, samples, aggregation, and timing gates."
+}

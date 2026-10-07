@@ -1,0 +1,21 @@
+Test project /Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-qualification/candidate-build
+    Start  39: codestream_workflow
+1/4 Test  #39: codestream_workflow ...................   Passed    2.24 sec
+    Start 109: low_effort_strategy_policy
+2/4 Test #109: low_effort_strategy_policy ............   Passed    0.03 sec
+    Start 158: resident_workflow_storage_plan
+3/4 Test #158: resident_workflow_storage_plan ........***Timeout 605.57 sec
+2026-10-07 11:59:18.285 gjxl_resident_workflow_storage_plan_test[9122:3242980] Metal API Validation Enabled
+Whole workflow plan shapes: 2240; search bounds: 64
+Bounded complete-workflow cases (cold/warm): 223
+
+    Start 159: compatibility_workflow_storage_plan
+4/4 Test #159: compatibility_workflow_storage_plan ...   Passed    5.70 sec
+
+75% tests passed, 1 tests failed out of 4
+
+Total Test time (real) = 613.54 sec
+
+The following tests FAILED:
+	158 - resident_workflow_storage_plan (Timeout)
+Errors while running CTest
