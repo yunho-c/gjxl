@@ -113,7 +113,7 @@ pub struct EncoderOptions {
     pub compression_mode: CompressionMode,
     pub dc_prediction: DcPrediction,
     pub dc_quantization: DcQuantization,
-    /// None follows effort (off at 1-3, on at 4-10); Some overrides it.
+    /// None follows effort (off at 1-2, on at 3-10); Some overrides it.
     pub adaptive_dc_smoothing: Option<bool>,
 }
 
@@ -650,7 +650,7 @@ mod tests {
                             DcQuantization::Automatic => DcQuantization::Round,
                             mode => mode,
                         },
-                        adaptive_dc_smoothing: Some(adaptive_dc_smoothing.unwrap_or(effort >= 4)),
+                        adaptive_dc_smoothing: Some(adaptive_dc_smoothing.unwrap_or(effort >= 3)),
                         ..options
                     };
                     assert_eq!(

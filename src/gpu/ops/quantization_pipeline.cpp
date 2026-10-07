@@ -307,6 +307,8 @@ Status PrepareResidentFrontend(
     state.evaluation != nullptr &&
     state.quantization_pipeline_generation == prepared.generation &&
     state.backend == &gpu &&
+    state.coefficient_decision_mode ==
+      options.adaptive_quantization.coefficient_decision_mode &&
     SameImageIdentity(state.original_linear_rgb, original_linear_rgb) &&
     SameImageIdentity(state.coding_opsin, prepared.coding_opsin) &&
     SameDeviceImageIdentity(state.input_resident_original_linear_rgb,
@@ -370,7 +372,7 @@ Status PrepareResidentFrontend(
         .omit_initial_search_data = omit_initial_search_data,
         .resident_quantization = true,
         .coefficient_decision_mode =
-            AcCoefficientDecisionMode::kAdjustedSharedQuant,
+            options.adaptive_quantization.coefficient_decision_mode,
         .defer_final_transform_metadata = true,
         .resident_strategy_metadata = resident_strategy_metadata,
     };
@@ -425,6 +427,8 @@ Status PrepareResidentFrontend(
       prepared.resident_original_linear_rgb;
     state.input_resident_coding_opsin = prepared.resident_coding_opsin;
     state.evaluation_options = evaluation_options;
+    state.coefficient_decision_mode =
+      options.adaptive_quantization.coefficient_decision_mode;
     state.resident_quantization = true;
     state.frame_only_resident_frontend = false;
     state.resident_original_linear_rgb = prepared.resident_original_linear_rgb;

@@ -138,11 +138,22 @@ struct VarDctEncodingOptions {
   /// Automatic uses ordinary rounding at efforts 1-3 and prediction-aware
   /// quantization with one extra precision bit at efforts 4-10.
   DcQuantizationMode dc_quantization = DcQuantizationMode::kAutomatic;
-  /// Nullopt follows effort (off at 1-3, on at 4-10). Explicit false/true
-  /// overrides that policy independently of quantization. The resolved value
+  /// Nullopt enables smoothing at ordinary e3 and at efforts 4-10.
+  /// Specialized e3 density/error/maximum-throughput recipes retain it off.
+  /// Explicit false/true overrides the policy independently of quantization.
+  /// The resolved value
   /// is signaled to the decoder and used for reconstruction during AQ.
   std::optional<bool> adaptive_dc_smoothing;
 };
+
+/// Effort-three frontend policy, independent of the serializer intensity.
+[[nodiscard]] constexpr bool UsesOrdinaryEffort3Policy(
+    const VarDctEncodingOptions& options) {
+  return options.effort == 3 &&
+    options.density_mode == VarDctDensityMode::kDefault &&
+    options.rate_control_mode != VarDctRateControlMode::kMaximumError &&
+    options.gpu_aq_mode != GpuAdaptiveQuantizationMode::kMaximumThroughput;
+}
 
 /// Resolve public defaults before reconstruction and memory admission.
 [[nodiscard]] constexpr DcQuantizationMode ResolveDcQuantization(
@@ -155,7 +166,8 @@ struct VarDctEncodingOptions {
 
 [[nodiscard]] constexpr bool ResolveAdaptiveDcSmoothing(
     const VarDctEncodingOptions& options) {
-  return options.adaptive_dc_smoothing.value_or(options.effort >= 4);
+  return options.adaptive_dc_smoothing.value_or(
+    options.effort >= 4 || UsesOrdinaryEffort3Policy(options));
 }
 
 /// Encoder analysis reported without exposing temporary pipeline storage.

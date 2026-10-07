@@ -28,7 +28,9 @@ exhaustive entropy/codestream search. Automatic mode uses the ordinary
 effort-aligned behavior.
 
 DC quantization defaults to `DcQuantization::Automatic`; adaptive DC smoothing
-defaults to `None`. Both activate at efforts 4–10 and are off at 1–3. To keep
+defaults to `None`. Prediction-aware quantization starts at effort 4; smoothing
+starts at effort 3. Effort 3 also retains the initial AC quantizer with fixed
+Y thresholds. To keep
 ordinary rounding and disable smoothing regardless of effort, set
 `dc_quantization: gjxl::DcQuantization::Round` and
 `adaptive_dc_smoothing: Some(false)`. Previous explicit boolean smoothing values

@@ -11,10 +11,11 @@
 namespace {
 using namespace resident_sparse_test;
 
-std::unique_ptr<PreparedAqEvaluation> Prepare(GpuBackend &gpu, const Fixture &f,
-                                              bool evaluation_free, bool omit,
-                                              bool gaborish, unsigned dc_policy,
-                                              bool defer_metadata = false) {
+std::unique_ptr<PreparedAqEvaluation> Prepare(
+    GpuBackend &gpu, const Fixture &f, bool evaluation_free, bool omit,
+    bool gaborish, unsigned dc_policy, bool defer_metadata = false,
+    AcCoefficientDecisionMode decision =
+        AcCoefficientDecisionMode::kAdjustedSharedQuant) {
   AqEvaluationOptions options;
   options.evaluation_free = evaluation_free;
   options.profile.loop_filter.gaborish = gaborish;
@@ -38,8 +39,7 @@ std::unique_ptr<PreparedAqEvaluation> Prepare(GpuBackend &gpu, const Fixture &f,
        .resident_ac_strategy_inputs = true,
        .omit_initial_search_data = omit,
        .resident_quantization = true,
-       .coefficient_decision_mode =
-           AcCoefficientDecisionMode::kAdjustedSharedQuant,
+       .coefficient_decision_mode = decision,
        .defer_final_transform_metadata = defer_metadata},
       &result));
   return result;
@@ -123,11 +123,15 @@ void DeferredMetadata(GpuBackend &gpu) {
                "cases passed.\n";
 }
 
-void Case(GpuBackend &gpu, Extent2D extent, bool gaborish, unsigned dc_policy) {
+void Case(GpuBackend &gpu, Extent2D extent, bool gaborish, unsigned dc_policy,
+          AcCoefficientDecisionMode decision) {
   Fixture f(extent);
-  auto complete = Prepare(gpu, f, false, false, gaborish, dc_policy);
-  auto no_evaluation = Prepare(gpu, f, true, false, gaborish, dc_policy);
-  auto minimal = Prepare(gpu, f, true, true, gaborish, dc_policy);
+  auto complete = Prepare(
+      gpu, f, false, false, gaborish, dc_policy, false, decision);
+  auto no_evaluation = Prepare(
+      gpu, f, true, false, gaborish, dc_policy, false, decision);
+  auto minimal = Prepare(
+      gpu, f, true, true, gaborish, dc_policy, false, decision);
   const auto full_stats = complete->memory_stats();
   const auto free_stats = no_evaluation->memory_stats();
   const auto minimal_stats = minimal->memory_stats();
@@ -232,9 +236,11 @@ int main() {
     for (auto extent : {Extent2D{1, 1}, {17, 33}, {65, 67}, {257, 263}})
       for (bool gaborish : {false, true})
         for (unsigned dc_policy = 0; dc_policy < 4; ++dc_policy)
-          Case(*gpu, extent, gaborish, dc_policy);
+          for (auto decision : {AcCoefficientDecisionMode::kAdjustedSharedQuant,
+                                AcCoefficientDecisionMode::kFixedRawQuant})
+            Case(*gpu, extent, gaborish, dc_policy, decision);
     std::cout << "CUDA low-effort uniform/adaptive, DC and evaluation-free "
-                 "parity: 96 cases passed.\n";
+                 "parity with adjusted and fixed raw quantization passed.\n";
   } catch (const std::exception &error) {
     std::cerr << error.what() << '\n';
     return 1;

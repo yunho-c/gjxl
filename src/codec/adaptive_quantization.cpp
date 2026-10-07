@@ -921,7 +921,7 @@ Status EvaluateQuantization(
         },
         options.profile,
         &result.frame,
-        AcCoefficientDecisionMode::kAdjustedSharedQuant,
+        options.coefficient_decision_mode,
         options.dc_quantization,
         options.dc_prediction);
       if (!coding_status.ok()) {
@@ -1282,6 +1282,10 @@ Status ValidateAdaptiveQuantizationPolicyMetadataForExtent(
   if (options.color_correlation_iterations == 0 ||
       options.color_correlation_iterations > 20)
     return Status::InvalidArgument("Final CfL iteration limit is invalid");
+  if (options.coefficient_decision_mode !=
+        AcCoefficientDecisionMode::kAdjustedSharedQuant &&
+      options.coefficient_decision_mode != AcCoefficientDecisionMode::kFixedRawQuant)
+    return Status::InvalidArgument("AC coefficient decision mode is invalid");
   if (!options.profile.valid() ||
       !IsValidDcQuantization({options.dc_quantization, options.dc_prediction,
                               options.profile.extra_dc_precision})) {

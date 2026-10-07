@@ -31,7 +31,10 @@ VarDctEncodingOptions Explicit(VarDctEncodingOptions options) {
                                   ? DcQuantizationMode::kPredictionAware
                                   : DcQuantizationMode::kRound;
   if (!options.adaptive_dc_smoothing.has_value())
-    options.adaptive_dc_smoothing = options.effort >= 4;
+    options.adaptive_dc_smoothing = options.effort >= 4 ||
+      (options.effort == 3 && options.density_mode == VarDctDensityMode::kDefault &&
+       options.rate_control_mode != VarDctRateControlMode::kMaximumError &&
+       options.gpu_aq_mode != GpuAdaptiveQuantizationMode::kMaximumThroughput);
   return options;
 }
 
@@ -208,7 +211,11 @@ int main(int argc, char** argv) {
     }
     Check(argc == 1, "Unknown DC policy test arguments");
     CheckEncoding(image.const_view(), VarDctBackendPreference::kCpu);
-    CheckEncoding(image.const_view(), VarDctBackendPreference::kMetal);
+    for (auto mode : {GpuAdaptiveQuantizationMode::kExactCoefficients,
+                      GpuAdaptiveQuantizationMode::kFullyResident,
+                      GpuAdaptiveQuantizationMode::kThroughput,
+                      GpuAdaptiveQuantizationMode::kMaximumThroughput})
+      CheckEncoding(image.const_view(), VarDctBackendPreference::kMetal, mode);
     std::cout << "DC defaults, independent overrides, admission, and batch "
                  "policy passed.\n";
     return 0;

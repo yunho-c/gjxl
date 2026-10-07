@@ -886,6 +886,8 @@ PrepareWorkflow(ConstImage3FView linear_rgb, VarDctEncodingOptions options,
   pipeline_options.butteraugli_target = options.butteraugli_target;
   pipeline_options.adaptive_quantization.iterations =
     codestream_internal::AdaptiveQuantizationIterations(options);
+  pipeline_options.adaptive_quantization.coefficient_decision_mode =
+    codestream_internal::ResolveAcCoefficientDecision(options);
   pipeline_options.adaptive_quantization.dc_quantization = ResolveDcQuantization(options);
   pipeline_options.adaptive_quantization.dc_prediction = options.dc_prediction;
   pipeline_options.adaptive_quantization.profile.extra_dc_precision =

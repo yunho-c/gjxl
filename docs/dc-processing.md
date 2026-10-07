@@ -1,8 +1,10 @@
 # Prediction-aware DC quantization and adaptive DC smoothing
 
-The public encoder automatically enables prediction-aware DC quantization and
-adaptive DC smoothing at efforts 4–10. Efforts 1–3 use ordinary rounding and
-no smoothing. Both controls remain independently overridable. Weighted residual
+The public encoder uses ordinary DC rounding at efforts 1–3 and prediction-aware
+DC quantization at efforts 4–10. Adaptive DC smoothing defaults on at ordinary
+e3 and efforts 4–10, and off at e1–2. Specialized e3 high-density, maximum-error,
+and maximum-throughput recipes retain smoothing off. Both controls remain
+independently overridable. See the [e3 AC policy](e3-quantization-policy.md). Weighted residual
 coding and size-adaptive predefined DC trees remain the lossless defaults.
 
 The [e4 qualification](dc-e4-qualification/REPORT.md) supports this as an

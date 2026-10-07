@@ -17,6 +17,14 @@
 
 namespace gjxl::codestream_internal {
 
+/// Ordinary e3 retains the initial AC quantizer and fixed Y thresholds.
+[[nodiscard]] constexpr AcCoefficientDecisionMode ResolveAcCoefficientDecision(
+  const VarDctEncodingOptions& options) noexcept {
+  return UsesOrdinaryEffort3Policy(options)
+    ? AcCoefficientDecisionMode::kFixedRawQuant
+    : AcCoefficientDecisionMode::kAdjustedSharedQuant;
+}
+
 /// Scope for modular DC mapping search. Keep explicit frontend and
 /// entropy modes, ordinary DC rounding, and other efforts on their own policy.
 [[nodiscard]] constexpr bool UseDcUintSearch(

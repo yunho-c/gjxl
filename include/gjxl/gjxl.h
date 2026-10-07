@@ -131,6 +131,7 @@ typedef struct {
   float distance;
   /// Speed/refinement intent in [1, 10]. Efforts 1-4 use DCT8, disable Gaborish, and start with a uniform
   /// quantization field with zero AQ updates;
+  /// effort 3 retains the initial AC quantizer with fixed Y thresholds;
   /// efforts 5-10 enable mixed-transform AC-strategy search.
   /// Efforts 8-10 share the rate-optimized writer and, on ordinary fully
   /// resident Metal, eight-step nonlinear final chroma-from-luma.
@@ -146,7 +147,7 @@ typedef struct {
   /// Defaults to AUTOMATIC: ROUND at efforts 1-3, PREDICTION_AWARE at 4-10.
   /// Older struct sizes without this field also select AUTOMATIC.
   GJXLDcQuantization dc_quantization;
-  /// 0 disables, 1 enables, 2 follows effort (off at 1-3, on at 4-10).
+  /// 0 disables, 1 enables, 2 follows effort (off at 1-2, on at 3-10).
   /// Defaults to AUTOMATIC (2), including older sizes without this field.
   uint32_t adaptive_dc_smoothing;
 } GJXLEncoderOptions;
