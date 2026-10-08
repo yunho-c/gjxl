@@ -1229,7 +1229,9 @@ __device__ __forceinline__ void EncodeResidentCoefficientsBody(
     }
   }
 
-  if (params.adjust_ac_quant != 0) {
+  // Reconstruction always needs sigma from the quantizer used for coding,
+  // including fixed-raw coding where no adjustment dispatch initializes it.
+  {
     constexpr float kInverseSigmaNumerator = -1.1715728752538099024f;
     const float quantizer_scale =
         static_cast<float>(quantizer[0]) * (1.0f / 65536.0f);

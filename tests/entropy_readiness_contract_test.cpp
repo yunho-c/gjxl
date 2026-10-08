@@ -7,6 +7,7 @@
 #include "core/thread_budget.h"
 #include "core/worker_launch_internal.h"
 #include "quantized_frame_fixture.h"
+#include "environment_test_utils.h"
 #include <atomic>
 #include <iostream>
 #include <optional>
@@ -55,22 +56,22 @@ struct Provider final : AcTokenizationProvider {
 };
 int main() try {
   // Exercise the original early-entropy boundary independently of earlier DC.
-  setenv("GJXL_EARLY_DC", "0", 1);
+  gjxl_test::SetEnvironment("GJXL_EARLY_DC", "0");
   auto owner = gjxl_test::MakeFrame(gjxl_test::kStrategies.size(), 2, 36);
   const auto frame = vardct_frame_internal::BorrowFrame(owner);
   std::vector<uint8_t> expected;
   Check(EncodeVarDctCodestreamFromView(frame, {}, &expected));
   size_t cases = 0;
-  unsetenv("GJXL_EARLY_ENTROPY");
-  unsetenv("GJXL_EXPERIMENT_EAGER_ENTROPY");
+  gjxl_test::SetEnvironment("GJXL_EARLY_ENTROPY", nullptr);
+  gjxl_test::SetEnvironment("GJXL_EXPERIMENT_EAGER_ENTROPY", nullptr);
   for (const char* mode : {static_cast<const char*>(nullptr), "disabled", "0", "1", "2", "3"})
     for (size_t cpu : {1, 2, 4, 8})
       for (int scenario = 0; scenario < 10; ++scenario) {
         const bool disabled = mode && std::strcmp(mode, "disabled") == 0;
-        unsetenv("GJXL_EARLY_ENTROPY");
-        unsetenv("GJXL_EXPERIMENT_EAGER_ENTROPY");
-        if (disabled) setenv("GJXL_EARLY_ENTROPY", "0", 1);
-        else if (mode) setenv("GJXL_EXPERIMENT_EAGER_ENTROPY", mode, 1);
+        gjxl_test::SetEnvironment("GJXL_EARLY_ENTROPY", nullptr);
+        gjxl_test::SetEnvironment("GJXL_EXPERIMENT_EAGER_ENTROPY", nullptr);
+        if (disabled) gjxl_test::SetEnvironment("GJXL_EARLY_ENTROPY", "0");
+        else if (mode) gjxl_test::SetEnvironment("GJXL_EXPERIMENT_EAGER_ENTROPY", mode);
         bool early_requested = !disabled;
 #ifdef GJXL_TOKENIZATION_EXPERIMENT
         if (mode && std::strcmp(mode, "0") == 0) early_requested = false;
@@ -125,8 +126,8 @@ int main() try {
             snap.active_reservations == 0, "Budget exceeded or workers leaked");
         ++cases;
       }
-  unsetenv("GJXL_EARLY_ENTROPY");
-  unsetenv("GJXL_EXPERIMENT_EAGER_ENTROPY");
+  gjxl_test::SetEnvironment("GJXL_EARLY_ENTROPY", nullptr);
+  gjxl_test::SetEnvironment("GJXL_EXPERIMENT_EAGER_ENTROPY", nullptr);
   for (size_t limit : {2, 4, 8}) {
     std::shared_ptr<const ExecutionDomain> domain;
     Check(ExecutionDomain::Create({0, limit}, &domain));
