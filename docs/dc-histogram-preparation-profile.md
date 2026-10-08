@@ -13,7 +13,7 @@ This is a diagnostic-only study of `aa5025c` on `perf/entropy-bit-writing`, date
 
 ## Source findings
 
-- [`SelectOrdinaryEntropyCodingMode`](../src/codestream/encoder.cpp) scans every
+- [`SelectOrdinaryEntropyCodingMode`](../src/codestream/vardct/encoder.cpp) scans every
   token to count tokens and determine whether each context has a single symbol.
   It validates stream/context inputs and calls the external, checked
   `EncodeHybridUint` for every value. That wrapper checks the configuration and
@@ -25,7 +25,7 @@ This is a diagnostic-only study of `aa5025c` on `perf/entropy-bit-writing`, date
 - `PrepareDirectAnsPartition` allocates 45 DC-context histograms and then scans
   and clusters them. Allocation is only a few microseconds. The ordinary path
   selected ANS for every measured input.
-- [`TokenizeSimpleDcGroupsForEncoder`](../src/codestream/dc_group.cpp) processes DC groups in
+- [`TokenizeSimpleDcGroupsForEncoder`](../src/codestream/vardct/dc_group.cpp) processes DC groups in
   sequential nested loops. In `encoder.cpp`, DC tokenization precedes AC
   preparation/tokenization; DC, coefficient-order and AC entropy optimization
   subsequently run through `RunParallelSections`. The existing population-based

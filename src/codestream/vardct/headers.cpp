@@ -1,0 +1,521 @@
+// Copyright (c) the JPEG XL Project Authors.
+// SPDX-License-Identifier: BSD-3-Clause
+//
+// Adapted for GJXL from libjxl-tiny's encoder/enc_file.cc and
+// encoder/enc_frame.cc.
+
+#include "codestream/headers.h"
+#include "codestream/dc_context_tree_internal.h"
+#include "codestream/fields_internal.h"
+
+#include <algorithm>
+#include <array>
+#include <bit>
+#include <cstdint>
+#include <limits>
+#include <new>
+#include <span>
+#include <stdexcept>
+
+#include "codestream/block_context_map.h"
+#include "codestream/coefficient_order.h"
+#include "codestream/dc_group.h"
+#include "codestream/modular/stream_encoder.h"
+#include "codestream/modular/tree_codec.h"
+#include "codestream/simple_ac_context.h"
+#include "codestream/serializer_storage_plan.h"
+
+namespace gjxl {
+namespace {
+
+using codestream_internal::kMaximumJxlDimension;
+using codestream_internal::BitField;
+using codestream_internal::WriteFields;
+using codestream_internal::WriteSize;
+using codestream_internal::AppendTemporary;
+
+Status WriteCoefficientOrderMask(uint16_t mask, BitWriter* writer) {
+  if (mask == 0x5F) {
+    return writer->WriteBits(2, 0);
+  }
+  if (mask == 0x13) {
+    return writer->WriteBits(2, 1);
+  }
+  if (mask == 0) {
+    return writer->WriteBits(2, 2);
+  }
+  if (mask >=
+      (uint16_t{1} << codestream_internal::kSimpleCoefficientOrderCount)) {
+    return Status::InvalidArgument(
+      "Coefficient-order mask cannot be encoded");
+  }
+  const std::array<BitField, 2> fields = {{{2, 3}, {13, mask}}};
+  return WriteFields(writer, fields);
+}
+
+Status WriteQuantizerInternal(QuantizerParams params, BitWriter* writer) {
+  if (params.global_scale == 0 ||
+      params.global_scale > kMaxEncoderGlobalScale ||
+      params.quant_dc == 0 || params.quant_dc > kMaxQuantDc) {
+    return Status::InvalidArgument("Quantizer parameters cannot be encoded");
+  }
+
+  Status status;
+  if (params.global_scale < 2049) {
+    const std::array fields = {
+      BitField{2, 0}, BitField{11, params.global_scale - 1}};
+    status = WriteFields(writer, fields);
+  } else if (params.global_scale < 4097) {
+    const std::array fields = {
+      BitField{2, 1}, BitField{11, params.global_scale - 2049}};
+    status = WriteFields(writer, fields);
+  } else if (params.global_scale < 8193) {
+    const std::array fields = {
+      BitField{2, 2}, BitField{12, params.global_scale - 4097}};
+    status = WriteFields(writer, fields);
+  } else {
+    const std::array fields = {
+      BitField{2, 3}, BitField{16, params.global_scale - 8193}};
+    status = WriteFields(writer, fields);
+  }
+  if (!status.ok()) {
+    return status;
+  }
+
+  if (params.quant_dc == 16) {
+    return writer->WriteBits(2, 0);
+  }
+  if (params.quant_dc < 33) {
+    const std::array fields = {
+      BitField{2, 1}, BitField{5, params.quant_dc - 1}};
+    return WriteFields(writer, fields);
+  }
+  if (params.quant_dc < 257) {
+    const std::array fields = {
+      BitField{2, 2}, BitField{8, params.quant_dc - 1}};
+    return WriteFields(writer, fields);
+  }
+  const std::array fields = {
+    BitField{2, 3}, BitField{16, params.quant_dc - 1}};
+  return WriteFields(writer, fields);
+}
+
+Status WriteQuantizationThreshold(uint32_t threshold, BitWriter* writer) {
+  if (threshold == 0 || threshold > 255) {
+    return Status::InvalidArgument(
+      "Block-context quantization threshold is invalid");
+  }
+  const uint32_t value = threshold - 1;
+  if (value < 4) {
+    const std::array fields = {BitField{2, 0}, BitField{2, value}};
+    return WriteFields(writer, fields);
+  }
+  if (value < 12) {
+    const std::array fields = {BitField{2, 1}, BitField{3, value - 4}};
+    return WriteFields(writer, fields);
+  }
+  if (value < 44) {
+    const std::array fields = {BitField{2, 2}, BitField{5, value - 12}};
+    return WriteFields(writer, fields);
+  }
+  const std::array fields = {BitField{2, 3}, BitField{8, value - 44}};
+  return WriteFields(writer, fields);
+}
+
+Status WriteBlockContextMap(
+  const SimpleBlockContextMap& block_context_map,
+  BitWriter* writer) {
+
+  Status status = ValidateSimpleBlockContextMap(block_context_map);
+  if (!status.ok()) {
+    return status;
+  }
+  // The JPEG XL default map has a dedicated one-bit representation. The
+  // simple four-context map and adaptive maps use the general representation.
+  if (codestream_internal::IsJxlDefaultBlockContextMap(block_context_map)) {
+    return writer->WriteBits(1, 1);
+  }
+  if (Status write = writer->WriteBits(1, 0); !write.ok()) {
+    return write;
+  }
+  // This profile does not split block contexts by quantized DC.
+  const std::array<BitField, 3> dc_threshold_counts = {{
+    {4, 0}, {4, 0}, {4, 0},
+  }};
+  if (Status write = WriteFields(writer, dc_threshold_counts); !write.ok()) {
+    return write;
+  }
+  if (Status write = writer->WriteBits(
+        4, block_context_map.qf_thresholds.size());
+      !write.ok()) {
+    return write;
+  }
+  for (uint32_t threshold : block_context_map.qf_thresholds) {
+    if (Status write = WriteQuantizationThreshold(threshold, writer);
+        !write.ok()) {
+      return write;
+    }
+  }
+  EntropyCode map;
+  map.context_count = block_context_map.context_map.size();
+  map.context_map = block_context_map.context_map;
+  // Prefix codes are irrelevant to context-map serialization, but retaining
+  // the referenced clusters keeps the EntropyCode structurally valid.
+  map.uint_configs.resize(
+    block_context_map.num_contexts, kDefaultHybridUintConfig);
+  map.prefix_codes.resize(block_context_map.num_contexts);
+  return WriteContextMap(map, writer);
+}
+
+Status WriteContextTree(size_t dc_group_count, BitWriter *writer,
+                        const codestream_internal::DcContextTreeLayout& layout) {
+  if (dc_group_count == 0 ||
+      dc_group_count >= static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
+    return Status::InvalidArgument("DC-group count cannot be encoded");
+  }
+
+  auto storage = layout.tokens;
+  std::span<EntropyToken> tokens(storage.data(), layout.token_count);
+  tokens[1].value = PackSigned(static_cast<int32_t>(1 + dc_group_count));
+  return modular_internal::WriteGlobalTreeInTransaction(tokens, writer);
+}
+
+Status AllocationFailure(const char* operation) {
+  return Status::OutOfMemory(operation);
+}
+
+}  // namespace
+
+Status codestream_internal::ComputeSerializerHeaderStoragePlan(
+  size_t ac_groups, size_t dc_groups, const BlockContextMapStoragePlan& maps,
+  size_t order_tokens, SerializerHeaderStoragePlan* out,
+  size_t maximum_ac_ans_clusters) {
+  if (out == nullptr || ac_groups == 0 || dc_groups == 0 ||
+      maximum_ac_ans_clusters == 0 || maximum_ac_ans_clusters > kMaximumAnsClusters ||
+      dc_groups >= static_cast<size_t>(std::numeric_limits<int32_t>::max()) ||
+      maps.maximum_map_entries == 0 || maps.maximum_block_contexts == 0 ||
+      maps.maximum_block_contexts > 16 || maps.maximum_thresholds > 1) {
+    return Status::InvalidArgument("Serializer header storage inputs are invalid");
+  }
+  const auto overflow = [] {
+    return Status::OutOfMemory("Serializer header storage overflows");
+  };
+  const auto add_bits = [](size_t n, size_t* total) {
+    if (n > std::numeric_limits<size_t>::max() - *total) return false;
+    *total += n;
+    return true;
+  };
+  const auto writer = [](size_t bits, HostStorageBound* bound) {
+    HostStorageBound scratch;
+    const Status status = ComputeEntropyWriterStorageBound(bits, &scratch);
+    return status.ok() && bound->Add(scratch);
+  };
+  const auto either_model = [](size_t contexts, EntropyModelStoragePlan* model,
+                               size_t maximum_ans_clusters = kDefaultDirectAnsClusters) {
+    EntropyModelStoragePlan prefix, ans;
+    const size_t clusters = std::min(contexts, kMaximumPrefixClusters);
+    Status status = ComputeEntropyModelStoragePlan(
+      EntropyCodingMode::kPrefix, contexts, clusters, &prefix);
+    if (!status.ok()) return status;
+    status = ComputeEntropyModelStoragePlan(
+      EntropyCodingMode::kAns, contexts, std::min(contexts, maximum_ans_clusters), &ans);
+    if (!status.ok()) return status;
+    *model = {
+      .maximum_bits = std::max(prefix.maximum_bits, ans.maximum_bits),
+      .owned = {std::max(prefix.owned.retained_bytes, ans.owned.retained_bytes),
+                std::max(prefix.owned.peak_bytes, ans.owned.peak_bytes)},
+      .write_scratch = {
+        std::max(prefix.write_scratch.retained_bytes, ans.write_scratch.retained_bytes),
+        std::max(prefix.write_scratch.peak_bytes, ans.write_scratch.peak_bytes)},
+    };
+    return Status::Ok();
+  };
+  SerializerHeaderStoragePlan plan;
+  // Maximum file header: 17 prefix + 32 height + 3 ratio + 32 width +
+  // 33 metadata = 117 bits, padded to 120. The no-Gaborish frame header is at most 41 bits.
+  plan.frame_prefix_bits = 120 + 41;
+  if (!writer(120, &plan.frame_scratch) ||
+      !writer(41, &plan.frame_scratch)) return overflow();
+  Status status = either_model(kSimpleDcContextCount, &plan.dc_model);
+  if (!status.ok()) return status;
+  status = either_model(maps.maximum_ac_contexts, &plan.ac_model, maximum_ac_ans_clusters);
+  if (!status.ok()) return status;
+  status = either_model(kSimplePermutationContextCount, &plan.order_model);
+  if (!status.ok()) return status;
+
+  EntropyModelStoragePlan map_model;
+  status = ComputeEntropyModelStoragePlan(
+    EntropyCodingMode::kPrefix, maps.maximum_map_entries,
+    maps.maximum_block_contexts, &map_model);
+  if (!status.ok()) return status;
+  modular_internal::GlobalTreeStoragePlan tree;
+  status = modular_internal::ComputeGlobalTreeStoragePlan(
+    codestream_internal::DcContextTreeLayout::kMaximumTokens, &tree);
+  if (!status.ok()) return status;
+  EntropyTokenEmissionStoragePlan order_emission;
+  status = ComputeEntropyTokenEmissionStoragePlan(
+    EntropyCodingMode::kAns, order_tokens, &order_emission);
+  if (!status.ok()) return status;
+  // Quantizer <=36 bits; general block map <=17 flags/count bits plus 10 per
+  // threshold. The full map-model bound safely includes its context-map part.
+  plan.dc_global_bits = 1 + 36 + 17 + 10 * maps.maximum_thresholds + 1 + 1;
+  for (size_t bits : {map_model.maximum_bits, tree.maximum_bits,
+                      plan.dc_model.maximum_bits}) {
+    if (!add_bits(bits, &plan.dc_global_bits)) return overflow();
+  }
+  if (!plan.dc_global_scratch.Add(map_model.owned) ||
+      !plan.dc_global_scratch.Add(map_model.write_scratch) ||
+      !plan.dc_global_scratch.Add(tree.scratch) ||
+      !plan.dc_global_scratch.Add(plan.dc_model.write_scratch) ||
+      !writer(plan.dc_global_bits, &plan.dc_global_scratch)) return overflow();
+
+  const size_t histogram_bits = std::bit_width(ac_groups - 1);
+  if (histogram_bits > BitWriter::kMaxBitsPerWrite) {
+    return Status::InvalidArgument("AC histogram count cannot be serialized");
+  }
+  plan.ac_global_bits = 1 + histogram_bits + 15 + 1;
+  if (!add_bits(plan.ac_model.maximum_bits, &plan.ac_global_bits) ||
+      !plan.ac_global_scratch.Add(plan.ac_model.write_scratch)) return overflow();
+  if (order_tokens != 0 &&
+      (!add_bits(1, &plan.ac_global_bits) ||
+       !add_bits(plan.order_model.maximum_bits, &plan.ac_global_bits) ||
+       !add_bits(order_emission.maximum_bits, &plan.ac_global_bits) ||
+       !plan.ac_global_scratch.Add(plan.order_model.write_scratch) ||
+       !plan.ac_global_scratch.Add(order_emission.scratch))) return overflow();
+  if (!writer(plan.ac_global_bits, &plan.ac_global_scratch)) return overflow();
+  *out = plan;
+  return Status::Ok();
+}
+
+Status WriteSimpleCodestreamHeader(Extent2D frame_extent, BitWriter* writer) {
+  if (writer == nullptr) {
+    return Status::InvalidArgument("Codestream-header output is null");
+  }
+  if (frame_extent.empty() || frame_extent.width > kMaximumJxlDimension ||
+      frame_extent.height > kMaximumJxlDimension) {
+    return Status::InvalidArgument("Frame dimensions cannot be encoded");
+  }
+
+  BitWriter temporary;
+  const std::array<BitField, 3> prefix = {{{8, 0xFF}, {8, 0x0A}, {1, 0}}};
+  if (Status status = WriteFields(&temporary, prefix); !status.ok()) {
+    return status;
+  }
+  if (Status status = WriteSize(
+        static_cast<uint32_t>(frame_extent.height), &temporary);
+      !status.ok()) {
+    return status;
+  }
+  if (Status status = temporary.WriteBits(3, 0); !status.ok()) {
+    return status;
+  }
+  if (Status status = WriteSize(
+        static_cast<uint32_t>(frame_extent.width), &temporary);
+      !status.ok()) {
+    return status;
+  }
+
+  // Non-default metadata: float32 linear sRGB, XYB transform, no extras.
+  const std::array<BitField, 19> metadata = {{
+    {1, 0}, {1, 0}, {1, 1}, {2, 0}, {4, 7}, {1, 0}, {2, 0},
+    {1, 1}, {1, 0}, {1, 0}, {2, 0}, {2, 1}, {2, 1}, {1, 0},
+    {2, 2}, {4, 6}, {2, 1}, {2, 0}, {1, 1},
+  }};
+  if (Status status = WriteFields(&temporary, metadata); !status.ok()) {
+    return status;
+  }
+  if (Status status = temporary.ZeroPadToByte(); !status.ok()) {
+    return status;
+  }
+  return AppendTemporary(writer, temporary);
+}
+
+Status WriteSimpleFrameHeader(
+  const SimpleVarDctCodestreamProfile& profile, BitWriter* writer) {
+
+  if (writer == nullptr) {
+    return Status::InvalidArgument("Frame-header output is null");
+  }
+  const SimpleVarDctCodestreamProfile defaults;
+  SimpleVarDctCodestreamProfile normalized = profile;
+  normalized.x_qm_scale = defaults.x_qm_scale;
+  normalized.b_qm_scale = defaults.b_qm_scale;
+  normalized.extra_dc_precision = defaults.extra_dc_precision;
+  normalized.loop_filter.gaborish = defaults.loop_filter.gaborish;
+  normalized.adaptive_dc_smoothing = defaults.adaptive_dc_smoothing;
+  if (!profile.valid() || normalized != defaults) {
+    return Status::InvalidArgument(
+      "Profile cannot be represented by the simple frame header");
+  }
+
+  BitWriter temporary;
+  const std::array<BitField, 21> fields = {{
+    {1, 0},   // not all default
+    {2, 0},   // regular frame
+    {1, 0},   // VarDCT
+    {2, profile.adaptive_dc_smoothing ? 0u : 2u}, // flags selector
+    {profile.adaptive_dc_smoothing ? 0u : 8u,
+     profile.adaptive_dc_smoothing ? 0u : 111u}, // kSkipAdaptiveDCSmoothing
+    {2, 0},   // no upsampling
+    {3, profile.x_qm_scale},
+    {3, profile.b_qm_scale},
+    {2, 0},   // one pass
+    {1, 0},   // no custom size or origin
+    {2, 0},   // replace blend mode
+    {1, 1},   // final frame
+    {2, 0},   // no name
+    {1, profile.loop_filter.gaborish ? 1u : 0u}, // loop-filter all_default
+    {profile.loop_filter.gaborish ? 0u : 1u, 0}, // gaborish off
+    {profile.loop_filter.gaborish ? 0u : 2u, profile.loop_filter.gaborish ? 0u : 2u}, // two EPF passes
+    {profile.loop_filter.gaborish ? 0u : 1u, 0}, // default sharpness
+    {profile.loop_filter.gaborish ? 0u : 1u, 0}, // default weights
+    {profile.loop_filter.gaborish ? 0u : 1u, 0}, // default sigma
+    {profile.loop_filter.gaborish ? 0u : 2u, 0}, // loop-filter extensions
+    {2, 0},   // no extensions
+  }};
+  if (Status status = WriteFields(&temporary, fields); !status.ok()) {
+    return status;
+  }
+  return AppendTemporary(writer, temporary);
+}
+
+Status WriteSimpleQuantizer(QuantizerParams params, BitWriter* writer) {
+  if (writer == nullptr) {
+    return Status::InvalidArgument("Quantizer output is null");
+  }
+  BitWriter temporary;
+  if (Status status = WriteQuantizerInternal(params, &temporary); !status.ok()) {
+    return status;
+  }
+  return AppendTemporary(writer, temporary);
+}
+
+Status WriteSimpleDcGlobal(QuantizerParams params, size_t dc_group_count,
+                           const SimpleBlockContextMap& block_context_map,
+                           const EntropyCode& dc_code, BitWriter* writer,
+                           VarDctDcPrediction prediction) {
+  if (!IsValidDcPrediction(prediction))
+    return Status::InvalidArgument("DC prediction is invalid");
+  return codestream_internal::WriteDcGlobalWithLayout(
+      params, dc_group_count, block_context_map, dc_code, writer,
+      codestream_internal::LegacyDcContextTree(prediction));
+}
+
+Status codestream_internal::WriteDcGlobalWithLayout(
+    QuantizerParams params, size_t dc_group_count,
+    const SimpleBlockContextMap& block_context_map, const EntropyCode& dc_code,
+    BitWriter* writer, const DcContextTreeLayout& layout) {
+  if (writer == nullptr) {
+    return Status::InvalidArgument("DC-global output is null");
+  }
+  try {
+    BitWriter temporary;
+    if (Status status = temporary.WriteBits(1, 1); !status.ok()) {
+      return status;
+    }
+    if (Status status = WriteQuantizerInternal(params, &temporary);
+        !status.ok()) {
+      return status;
+    }
+    if (Status status = WriteBlockContextMap(
+          block_context_map, &temporary);
+        !status.ok()) {
+      return status;
+    }
+    if (Status status = temporary.WriteBits(1, 1); !status.ok()) {
+      return status;
+    }
+    if (Status status =
+            WriteContextTree(dc_group_count, &temporary, layout);
+        !status.ok()) {
+      return status;
+    }
+    if (Status status = modular_internal::WriteGlobalModelInTransaction(
+          dc_code, &temporary); !status.ok()) {
+      return status;
+    }
+    return AppendTemporary(writer, temporary);
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure("DC-global allocation failed");
+  } catch (const std::length_error&) {
+    return AllocationFailure("DC-global allocation is too large");
+  }
+}
+
+Status WriteSimpleDcGlobal(
+  QuantizerParams params, size_t dc_group_count,
+  const EntropyCode& dc_code, BitWriter* writer) {
+  return WriteSimpleDcGlobal(
+    params, dc_group_count, DefaultSimpleBlockContextMap(), dc_code, writer);
+}
+
+Status WriteSimpleAcGlobal(
+  size_t ac_group_count,
+  uint16_t used_order_mask,
+  std::span<const EntropyToken> order_tokens,
+  const EntropyCode* order_code,
+  const EntropyCode& ac_code,
+  BitWriter* writer) {
+
+  if (writer == nullptr) {
+    return Status::InvalidArgument("AC-global output is null");
+  }
+  if (ac_group_count == 0) {
+    return Status::InvalidArgument("AC-group count is zero");
+  }
+  if ((used_order_mask == 0) != order_tokens.empty() ||
+      (used_order_mask == 0) != (order_code == nullptr)) {
+    return Status::InvalidArgument(
+      "Coefficient-order AC-global state is inconsistent");
+  }
+
+  BitWriter temporary;
+  if (Status status = temporary.WriteBits(1, 1); !status.ok()) {
+    return status;
+  }
+  const size_t histogram_bits = std::bit_width(ac_group_count - 1);
+  if (histogram_bits > BitWriter::kMaxBitsPerWrite) {
+    return Status::InvalidArgument("AC-group count cannot be encoded");
+  }
+  if (histogram_bits != 0) {
+    if (Status status = temporary.WriteBits(histogram_bits, 0); !status.ok()) {
+      return status;
+    }
+  }
+  if (Status status = WriteCoefficientOrderMask(
+        used_order_mask, &temporary);
+      !status.ok()) {
+    return status;
+  }
+  if (used_order_mask != 0) {
+    if (Status status = temporary.WriteBits(1, 0); !status.ok()) {
+      return status;
+    }
+    if (Status status = WriteEntropyCode(*order_code, &temporary);
+        !status.ok()) {
+      return status;
+    }
+    if (Status status = WriteTokenStream(
+          order_tokens, *order_code, &temporary);
+        !status.ok()) {
+      return status;
+    }
+  }
+  if (Status status = temporary.WriteBits(1, 0); !status.ok()) {
+    return status;
+  }
+  if (Status status = WriteEntropyCode(ac_code, &temporary); !status.ok()) {
+    return status;
+  }
+  return AppendTemporary(writer, temporary);
+}
+
+Status WriteSimpleAcGlobal(
+  size_t ac_group_count, const EntropyCode& ac_code, BitWriter* writer) {
+  return WriteSimpleAcGlobal(
+    ac_group_count, 0, {}, nullptr, ac_code, writer);
+}
+
+}  // namespace gjxl

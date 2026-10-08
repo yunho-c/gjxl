@@ -72,7 +72,7 @@ AC task. Deferred AC candidates can retain all four alphabet-width models,
 Prefix, selected/fallback copies and costs. Finalization is included. Width
 measurement arrays remain charged after `clear()` because capacity is retained.
 
-[`ComputeSerializerControlStorageBound`](../src/codestream/encoder.cpp) lives
+[`ComputeSerializerControlStorageBound`](../src/codestream/vardct/encoder.cpp) lives
 beside the private candidate/task types, so their sizes cannot silently diverge
 from a duplicated stand-in type. It includes:
 
@@ -100,7 +100,7 @@ storage and retained models remain separately included throughout.
 
 ## Headers, writer reservations and output bound
 
-[`ComputeSerializerHeaderStoragePlan`](../src/codestream/headers.cpp) lives beside
+[`ComputeSerializerHeaderStoragePlan`](../src/codestream/vardct/headers.cpp) lives beside
 the actual format writers and fixed context-tree tokens. It combines:
 
 - At most 120 padded file-header bits and 33 frame-header bits.

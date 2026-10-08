@@ -3,7 +3,7 @@
 // Default weighted predictor adapted from pinned libjxl context_predict.h.
 // This implementation has no libjxl runtime or header dependency.
 #include "codestream/weighted_dc.h"
-#include "codec/weighted_dc_predictor_internal.h"
+#include "codec/modular/prediction.h"
 #include "codestream/dc_group.h"
 #include <algorithm>
 #include <array>
@@ -55,7 +55,7 @@ Status TokenizeWeightedDcGroup(ConstImage3I32View dc,
   try {
     Storage<EntropyToken> candidate;
     candidate.reserve(area * 3);
-    dc_prediction_internal::WeightedDcPredictor<
+    modular_internal::WeightedPredictor<
         resource_budget_internal::ResourceClass::kSerializer>
         state(dc.extent().width);
     for (const size_t channel : {size_t{1}, size_t{0}, size_t{2}}) {

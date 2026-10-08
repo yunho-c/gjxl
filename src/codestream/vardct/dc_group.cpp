@@ -4,6 +4,8 @@
 // Adapted for GJXL from libjxl-tiny's encoder/enc_frame.cc.
 
 #include "codestream/dc_group.h"
+#include "codec/vardct/dc_prediction_internal.h"
+#include "codestream/modular/stream_encoder.h"
 #include "codestream/weighted_dc.h"
 #include "codestream/parallel_sections_internal.h"
 #include <cstdlib>
@@ -505,7 +507,8 @@ Status codestream_internal::TokenizeSimpleDcGroupsForEncoder(
                        stream.block_extent);
         }
         Status status =
-            prediction == VarDctDcPrediction::kWeighted
+            vardct_internal::ModularDcPredictor(prediction) ==
+                modular_internal::Predictor::kWeighted
                 ? TokenizeWeightedDcGroup(group_dc, &stream.dc_tokens)
                 : TokenizeSimpleDcGroup(group_dc, &stream.dc_tokens);
         if (!status.ok()) {
@@ -556,12 +559,12 @@ Status WriteSimpleDcGroupModularHeader(BitWriter* writer,
   if (writer == nullptr || extra_dc_precision > 3) {
     return Status::InvalidArgument("DC modular-header inputs are invalid");
   }
-  return writer->WithMaxBits(6, [&]() {
+  return writer->WithMaxBits(2 + modular_internal::kStreamHeaderBits, [&]() {
     Status status = writer->WriteBits(2, extra_dc_precision);
     if (!status.ok()) {
       return status;
     }
-    return writer->WriteBits(4, 3);
+    return modular_internal::WriteStreamHeader({}, writer);
   });
 }
 
@@ -578,7 +581,7 @@ Status WriteSimpleAcMetadataModularHeader(Extent2D block_extent,
       "AC-metadata transform-anchor count is invalid");
   }
   const size_t count_bits = std::bit_width(block_count - 1);
-  return writer->WithMaxBits(count_bits + 4, [&]() {
+  return writer->WithMaxBits(count_bits + modular_internal::kStreamHeaderBits, [&]() {
     Status status = Status::Ok();
     if (count_bits != 0) {
       status = writer->WriteBits(count_bits, transform_anchor_count - 1);
@@ -586,7 +589,7 @@ Status WriteSimpleAcMetadataModularHeader(Extent2D block_extent,
         return status;
       }
     }
-    return writer->WriteBits(4, 3);
+    return modular_internal::WriteStreamHeader({}, writer);
   });
 }
 

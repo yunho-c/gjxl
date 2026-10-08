@@ -13,7 +13,8 @@
 #include <optional>
 #include <stdexcept>
 
-#include "codec/weighted_dc_predictor_internal.h"
+#include "codec/modular/prediction.h"
+#include "codec/vardct/dc_prediction_internal.h"
 #include "core/managed_allocator.h"
 
 namespace gjxl {
@@ -135,7 +136,7 @@ Status QuantizeDcCoefficients(ConstImage3FView dc, const Quantizer &quantizer,
       // and permits the input to alias the reconstructed output.
       resource_budget_internal::ManagedVector<int32_t> candidate(3 *
                                                                  sample_count);
-      using WeightedState = dc_prediction_internal::WeightedDcPredictor<
+      using WeightedState = modular_internal::WeightedPredictor<
           resource_budget_internal::ResourceClass::kCount>;
       for (size_t group_y = 0; group_y < dc.height();
            group_y += kDcPredictionGroupBlockDimension) {
@@ -148,7 +149,8 @@ Status QuantizeDcCoefficients(ConstImage3FView dc, const Quantizer &quantizer,
           // No predictor allocation for the gradient alternative. The optional
           // state owns its five managed arrays, never an untracked heap object.
           std::optional<WeightedState> weighted;
-          if (options.prediction == VarDctDcPrediction::kWeighted)
+          if (vardct_internal::ModularDcPredictor(options.prediction) ==
+              modular_internal::Predictor::kWeighted)
             weighted.emplace(width);
           for (size_t c : {kY, kX, kB}) {
             if (weighted)

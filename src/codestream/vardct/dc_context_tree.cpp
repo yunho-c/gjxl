@@ -8,7 +8,7 @@
 
 namespace gjxl::codestream_internal {
 namespace {
-#include "codestream/dc_context_tree_legacy.inc"
+#include "codestream/vardct/dc_context_tree_legacy.inc"
 
 struct Node {
   uint32_t property = 0;  // Wire property (zero denotes a leaf).

@@ -286,7 +286,7 @@ Relevant implementations:
 
 - [`vardct_frame.h`](../src/codec/vardct_frame.h)
 - [`vardct_frame.cpp`](../src/codec/vardct_frame.cpp)
-- [`dc_quantization.cpp`](../src/codec/dc_quantization.cpp)
+- [`dc_quantization.cpp`](../src/codec/vardct/dc_quantization.cpp)
 - [`vardct_frame_test.cpp`](../tests/vardct_frame_test.cpp)
 - [`dc_quantization_test.cpp`](../tests/dc_quantization_test.cpp)
 

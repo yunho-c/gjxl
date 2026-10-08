@@ -16,6 +16,12 @@ namespace gjxl::codestream_internal {
 
 struct EntropyWorkProfile;
 
+// Internal fast emission after a global section has validated the shared model.
+// Model and tokens remain borrowed through the call. Uses the same storage plan
+// as WriteTokenStream and does not repeat model-wide ANS validation per section.
+[[nodiscard]] Status WriteValidatedTokenStream(
+    EntropyTokenStreamView tokens, const EntropyCode& code, BitWriter* writer);
+
 /// Eager cache preparation before model costing. Writers remain const and can
 /// safely share a prepared code; edited maps are detected by exact comparison.
 [[nodiscard]] Status PrepareEntropyContextMap(EntropyCode* code);

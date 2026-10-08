@@ -69,7 +69,7 @@ The current GJXL source explains the multiplication:
 - [`ComputeSimpleBlockContextMapCandidates()`](../src/codestream/block_context_map.cpp)
   constructs the compact, JPEG XL default, one-context, two-context, adaptive,
   and optionally quant-split adaptive maps.
-- [`EncodeVarDctCodestreamImpl()`](../src/codestream/encoder.cpp) crosses every
+- [`EncodeVarDctCodestreamImpl()`](../src/codestream/vardct/encoder.cpp) crosses every
   map with the eligible natural and custom coefficient orders.
 - `OptimizeBestEntropyCode()` first performs the bounded exact Prefix search,
   uses the Prefix partition to prepare ANS, and then selects the exact smaller

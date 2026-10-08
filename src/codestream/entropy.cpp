@@ -25,6 +25,14 @@
 
 namespace gjxl {
 using codestream_internal::Storage;
+
+Status codestream_internal::WriteValidatedTokenStream(
+    EntropyTokenStreamView tokens, const EntropyCode& code, BitWriter* writer) {
+  return code.mode == EntropyCodingMode::kAns
+    ? WriteAnsTokenStream(tokens, code, writer)
+    : WriteTokenStream(tokens, code, writer);
+}
+
 namespace {
 
 using ProfileClock = std::chrono::steady_clock;

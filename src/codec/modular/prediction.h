@@ -13,7 +13,12 @@
 
 #include "core/managed_allocator.h"
 
-namespace gjxl::dc_prediction_internal {
+namespace gjxl::modular_internal {
+
+// Only the predictors used by the existing embedded streams are exposed here.
+// Values match the Modular predictor IDs; other IDs/parameters are Phase 2.
+enum class Predictor : uint8_t { kGradient = 5, kWeighted = 6, kInvalid = 255 };
+
 constexpr std::array<uint32_t, 64> Reciprocals() {
   std::array<uint32_t, 64> values{};
   for (size_t i = 0; i < values.size(); ++i)
@@ -23,9 +28,11 @@ constexpr std::array<uint32_t, 64> Reciprocals() {
 constexpr auto kReciprocal = Reciprocals();
 
 template <resource_budget_internal::ResourceClass Owner>
-class WeightedDcPredictor {
+class WeightedPredictor {
 public:
-  explicit WeightedDcPredictor(size_t width)
+  // The caller validates width and plans five two-row arrays before allocation.
+  // Owner stays explicit: preparation and serialization have distinct charges.
+  explicit WeightedPredictor(size_t width)
       : width_(width), error_((width + 2) * 2) {
     for (auto &errors : prediction_errors_)
       errors.resize((width + 2) * 2);
@@ -121,4 +128,4 @@ private:
   resource_budget_internal::ManagedVector<int32_t, Owner> error_;
 };
 
-} // namespace gjxl::dc_prediction_internal
+} // namespace gjxl::modular_internal

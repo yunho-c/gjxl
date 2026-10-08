@@ -36,7 +36,7 @@ Relevant implementations:
 - [`codestream.h`](../src/codec/codestream.h)
 - [`vardct_frame.h`](../src/codec/vardct_frame.h)
 - [`vardct_frame.cpp`](../src/codec/vardct_frame.cpp)
-- [`dc_quantization.cpp`](../src/codec/dc_quantization.cpp)
+- [`dc_quantization.cpp`](../src/codec/vardct/dc_quantization.cpp)
 - [`reconstruction.cpp`](../src/codec/reconstruction.cpp)
 
 ## Dependency order

@@ -286,7 +286,7 @@ add_library(
   src/codec/color_transform.cpp
   src/codec/convolution.cpp
   src/codec/dc_conversion.cpp
-  src/codec/dc_quantization.cpp
+  src/codec/vardct/dc_quantization.cpp
   src/codec/dc_smoothing.cpp
   src/codec/dct.cpp
   src/codec/epf.cpp
@@ -329,13 +329,16 @@ add_library(
   src/codestream/bit_writer.cpp
   src/codestream/block_context_map.cpp
   src/codestream/coefficient_order.cpp
-  src/codestream/dc_group.cpp
-  src/codestream/weighted_dc.cpp
-  src/codestream/dc_context_tree.cpp
+  src/codestream/vardct/dc_group.cpp
+  src/codestream/vardct/weighted_dc.cpp
+  src/codestream/vardct/dc_context_tree.cpp
   src/codestream/entropy.cpp
   src/codestream/context_map.cpp
-  src/codestream/encoder.cpp
+  src/codestream/vardct/encoder.cpp
   src/codestream/headers.cpp
+  src/codestream/vardct/headers.cpp
+  src/codestream/modular/stream_encoder.cpp
+  src/codestream/modular/tree_codec.cpp
   src/codestream/huffman.cpp
   src/codestream/rate_control.cpp
   src/codestream/cpu_workflow_storage_plan.cpp
@@ -2288,6 +2291,10 @@ if(GJXL_BUILD_TESTS)
   add_executable(gjxl_dc_context_tree_test tests/dc_context_tree_test.cpp)
   target_link_libraries(gjxl_dc_context_tree_test PRIVATE gjxl_codestream)
   add_test(NAME dc_context_tree COMMAND gjxl_dc_context_tree_test)
+
+  add_executable(gjxl_modular_stream_test tests/modular_stream_test.cpp)
+  target_link_libraries(gjxl_modular_stream_test PRIVATE gjxl_codestream)
+  add_test(NAME modular_stream COMMAND gjxl_modular_stream_test)
 
   # Optional direct oracle from a separately built, pinned libjxl archive.
   # These dependencies never enter the native library or installed interface.

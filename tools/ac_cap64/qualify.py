@@ -20,8 +20,13 @@ def build():
         subprocess.run(args,cwd=BUILD,check=True);records.append(args)
     probe=OUT/'probe.cpp';probe.write_text((HERE/'probe.inc').read_text().replace('BENCHMARK_SOURCE',str(ROOT/'benchmarks/encoding_benchmark.cpp')))
     compile_like(ROOT/'benchmarks/encoding_benchmark.cpp',probe,OUT/'probe.o')
-    current=(ROOT/'src/codestream/encoder.cpp').read_text()
-    baseline=subprocess.check_output(['git','show','HEAD:src/codestream/encoder.cpp'],cwd=ROOT,text=True)
+    encoder=Path('src/codestream/vardct/encoder.cpp')
+    if not (ROOT/encoder).exists():encoder=Path('src/codestream/encoder.cpp')
+    current=(ROOT/encoder).read_text()
+    committed='HEAD:'+encoder.as_posix()
+    if subprocess.run(['git','cat-file','-e',committed],cwd=ROOT,stderr=subprocess.DEVNULL).returncode:
+        committed='HEAD:src/codestream/encoder.cpp'
+    baseline=subprocess.check_output(['git','show',committed],cwd=ROOT,text=True)
     key='codestream_internal::AcAnsClusterLimit(\n              frame.geometry().frame())';assert current.count(key)==1
     forced=current.replace(key,'gjxl::kMaximumAnsClusters')
     links=[];binaries={}
@@ -29,7 +34,7 @@ def build():
         objects=[str(OUT/'probe.o')]
         if source is not None:
             p=OUT/(mode+'.cpp');p.write_text(source)
-            compile_like(ROOT/'src/codestream/encoder.cpp',p,OUT/(mode+'.o'));objects.append(str(OUT/(mode+'.o')))
+            compile_like(ROOT/encoder,p,OUT/(mode+'.o'));objects.append(str(OUT/(mode+'.o')))
         args=shlex.split(commands[-1])[2:-2]
         i=args.index('CMakeFiles/gjxl_encoding_benchmark.dir/benchmarks/encoding_benchmark.cpp.o');args[i:i+1]=objects
         args=[str(OUT/mode) if a=='gjxl_encoding_benchmark' else a for a in args]

@@ -3,7 +3,7 @@
 
 // Exercise the private validation boundary in its implementation translation
 // unit without exposing a production test hook or widening the installed API.
-#include "codestream/encoder.cpp"
+#include "codestream/vardct/encoder.cpp"
 
 #include <exception>
 #include <iostream>

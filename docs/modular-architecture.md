@@ -39,20 +39,20 @@ AC metadata, and raw quantization tables. Its
 these roles. GJXL should make the adapter boundary explicit without importing
 libjxl's broad pass-state dependencies or matching its mostly flat VarDCT layout.
 
-### Current extraction points
+### Extraction boundaries
 
 | Current code | Reusable mechanism | Responsibility that stays with VarDCT |
 | --- | --- | --- |
-| [`weighted_dc_predictor_internal.h`](../src/codec/weighted_dc_predictor_internal.h) | Default weighted-predictor arithmetic and state | Prediction-aware DC quantization and its decisions |
-| [`dc_group.cpp`](../src/codestream/dc_group.cpp), [`weighted_dc.cpp`](../src/codestream/weighted_dc.cpp) | Neighbor handling, predictor reset, residual packing, channel tokenization | Y/X/B traversal, DC group geometry, metadata packing, fixed context selection |
-| [`dc_context_tree.cpp`](../src/codestream/dc_context_tree.cpp) | Tree representation and serialization inputs | Size-adaptive DC trees, metadata/DC leaf numbering, thresholds and defaults |
-| [`headers.cpp`](../src/codestream/headers.cpp) | Primitive field writing and Modular tree/model emission | VarDCT quantizer, block contexts, coefficient orders and current profile defaults |
+| [`modular/prediction.h`](../src/codec/modular/prediction.h) (formerly `weighted_dc_predictor_internal.h`) | Default weighted-predictor arithmetic and state | Prediction-aware DC quantization and its decisions |
+| [`dc_group.cpp`](../src/codestream/vardct/dc_group.cpp), [`weighted_dc.cpp`](../src/codestream/vardct/weighted_dc.cpp) | Neighbor handling, predictor reset, residual packing, channel tokenization | Y/X/B traversal, DC group geometry, metadata packing, fixed context selection |
+| [`dc_context_tree.cpp`](../src/codestream/vardct/dc_context_tree.cpp) | Tree representation and serialization inputs | Size-adaptive DC trees, metadata/DC leaf numbering, thresholds and defaults |
+| [`vardct/headers.cpp`](../src/codestream/vardct/headers.cpp) | Primitive field writing and Modular tree/model emission | VarDCT quantizer, block contexts, coefficient orders and current profile defaults |
 | [`entropy.h`](../src/codestream/entropy.h), ANS/Huffman/context-map sources | Integer tokens, HybridUint, model construction and entropy emission | VarDCT candidate searches and effort-to-policy mapping |
 | [`sections.h`](../src/codestream/sections.h) | TOC size coding, padding and concatenation | Deciding which payloads occupy which frame sections |
 
 Important existing constraints:
 
-- The weighted predictor is already used by both `codec/dc_quantization.cpp`
+- The weighted predictor is already used by both `codec/vardct/dc_quantization.cpp`
   and the serializer. Extract it below both callers, preserving each allocation
   owner. Moving it into `codestream/` would reverse the codec dependency.
 - `WriteSimpleDcGroupModularHeader` writes a VarDCT precision field before the
