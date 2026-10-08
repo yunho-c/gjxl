@@ -96,6 +96,9 @@ struct AdaptiveQuantizationOptions {
   ButteraugliOptions butteraugli;
   DcQuantizationMode dc_quantization = DcQuantizationMode::kRound;
   VarDctDcPrediction dc_prediction = VarDctDcPrediction::kGradient;
+  /// Shared by CPU, exact-coefficient GPU, and resident GPU coding.
+  AcCoefficientDecisionMode coefficient_decision_mode =
+    AcCoefficientDecisionMode::kAdjustedSharedQuant;
 };
 
 struct AdaptiveQuantizationOutput {

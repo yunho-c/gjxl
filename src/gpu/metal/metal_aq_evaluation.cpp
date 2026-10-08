@@ -3752,7 +3752,7 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
   if (frame_requested && !exact_coefficients_) {
     candidate_readback_stats.mapped_frame_bytes =
       (coefficient_value_count_ + 3 * block_count_ +
-       (coefficient_decision_mode_ ==
+       (resident_quantization_ || coefficient_decision_mode_ ==
           AcCoefficientDecisionMode::kAdjustedSharedQuant
           ? block_count_ : 0)) * sizeof(int32_t);
   }
@@ -3792,7 +3792,7 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
       status = AssembleFrameFromReadback(&final_frame);
     } else {
       status = AssembleFrameFromCompletedDeviceBuffers(
-        coefficient_decision_mode_ ==
+        resident_quantization_ || coefficient_decision_mode_ ==
           AcCoefficientDecisionMode::kAdjustedSharedQuant,
         &final_frame);
     }
@@ -4223,12 +4223,6 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
   if (preparation.resident_quantization && preparation.frame_only) {
     return Status::InvalidArgument(
       "Resident AQ quantization requires complete evaluation preparation");
-  }
-  if (preparation.resident_quantization &&
-      preparation.coefficient_decision_mode !=
-        AcCoefficientDecisionMode::kAdjustedSharedQuant) {
-    return Status::InvalidArgument(
-      "Resident AQ quantization requires adjusted coefficient decisions");
   }
   switch (preparation.coefficient_decision_mode) {
     case AcCoefficientDecisionMode::kAdjustedSharedQuant:

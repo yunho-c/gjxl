@@ -9,6 +9,9 @@ Ordinary effort 4 now skips perceptual AQ refinement, like efforts 1–3.
 It also enables the [default DC integer-mapping search](entropy-defaults.md)
 under automatic compression; native context-map compression applies at every
 effort. These serializer choices preserve the frontend's reconstruction.
+Ordinary efforts 1–4 retain the initial AC quantizer with fixed Y thresholds.
+Adaptive DC smoothing defaults off at e1–2 and on at e3–4; the smoothing override
+remains independent. See the [AC policy and qualification](e3-quantization-policy.md).
 The adaptive-quantization update schedule is:
 
 | Effort | Transform selection | AQ updates |

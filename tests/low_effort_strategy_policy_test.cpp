@@ -57,6 +57,51 @@ bool CheckPolicy() {
   return true;
 }
 
+bool CheckLowEffortQuantizationPolicy() {
+  for (int effort = 1; effort <= 10; ++effort) {
+    for (auto density : {VarDctDensityMode::kDefault,
+                         VarDctDensityMode::kHighDensity}) {
+      for (auto rate : {VarDctRateControlMode::kButteraugliTarget,
+                       VarDctRateControlMode::kTargetBytes,
+                       VarDctRateControlMode::kTargetBitsPerPixel,
+                       VarDctRateControlMode::kMaximumError}) {
+        for (auto mode : {GpuAdaptiveQuantizationMode::kExactCoefficients,
+                          GpuAdaptiveQuantizationMode::kFullyResident,
+                          GpuAdaptiveQuantizationMode::kThroughput,
+                          GpuAdaptiveQuantizationMode::kMaximumThroughput}) {
+          for (auto compression : {VarDctCompressionMode::kAutomatic,
+                                   VarDctCompressionMode::kMaximumCompression}) {
+            VarDctEncodingOptions o;
+            o.effort = effort;
+            o.density_mode = density;
+            o.rate_control_mode = rate;
+            o.gpu_aq_mode = mode;
+            o.compression_mode = compression;
+            const bool ordinary = density == VarDctDensityMode::kDefault &&
+              rate != VarDctRateControlMode::kMaximumError &&
+              mode != GpuAdaptiveQuantizationMode::kMaximumThroughput;
+            const auto expected = effort <= 4 && ordinary
+              ? AcCoefficientDecisionMode::kFixedRawQuant
+              : AcCoefficientDecisionMode::kAdjustedSharedQuant;
+            if (!Check(ResolveAcCoefficientDecision(o) == expected &&
+                         ResolveAdaptiveDcSmoothing(o) ==
+                           (effort >= 4 || (effort == 3 && ordinary)),
+                       "Low-effort quantization or smoothing scope changed"))
+              return false;
+            for (bool smoothing : {false, true}) {
+              o.adaptive_dc_smoothing = smoothing;
+              if (!Check(ResolveAdaptiveDcSmoothing(o) == smoothing &&
+                           ResolveAcCoefficientDecision(o) == expected,
+                         "Smoothing override changed AC decisions")) return false;
+            }
+          }
+        }
+      }
+    }
+  }
+  return true;
+}
+
 struct Search final : AcStrategySearchProvider {
   size_t calls = 0;
   Status Find(ConstImage3FView, ConstPlaneF32View, ConstPlaneF32View,
@@ -194,6 +239,7 @@ bool CheckSearchStorage() {
 }  // namespace
 
 int main() {
-  return CheckPolicy() && CheckProviderBypass() && CheckSearchStorage()
+  return CheckPolicy() && CheckLowEffortQuantizationPolicy() &&
+    CheckProviderBypass() && CheckSearchStorage()
     ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -17,6 +17,19 @@
 
 namespace gjxl::codestream_internal {
 
+/// Ordinary efforts 1-4 retain the initial AC quantizer and fixed Y thresholds.
+/// DC quantization and smoothing follow their independent effort policies.
+[[nodiscard]] constexpr AcCoefficientDecisionMode ResolveAcCoefficientDecision(
+  const VarDctEncodingOptions& options) noexcept {
+  const bool fixed_raw = options.effort >= 1 && options.effort <= 4 &&
+    options.density_mode == VarDctDensityMode::kDefault &&
+    options.rate_control_mode != VarDctRateControlMode::kMaximumError &&
+    options.gpu_aq_mode != GpuAdaptiveQuantizationMode::kMaximumThroughput;
+  return fixed_raw
+    ? AcCoefficientDecisionMode::kFixedRawQuant
+    : AcCoefficientDecisionMode::kAdjustedSharedQuant;
+}
+
 /// Scope for modular DC mapping search. Keep explicit frontend and
 /// entropy modes, ordinary DC rounding, and other efforts on their own policy.
 [[nodiscard]] constexpr bool UseDcUintSearch(

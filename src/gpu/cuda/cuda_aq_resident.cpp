@@ -384,9 +384,11 @@ class CudaPreparedResidentAqEvaluation final
         "CUDA resident AQ external input is incomplete");
     }
     if (preparation.coefficient_decision_mode !=
-        AcCoefficientDecisionMode::kAdjustedSharedQuant) {
-      return Status::Unavailable(
-          "CUDA resident AQ requires adjusted shared quantization");
+          AcCoefficientDecisionMode::kAdjustedSharedQuant &&
+        preparation.coefficient_decision_mode !=
+          AcCoefficientDecisionMode::kFixedRawQuant) {
+      return Status::InvalidArgument(
+          "CUDA resident AQ coefficient decision mode is invalid");
     }
     if (preparation.options.evaluation_free &&
         preparation.options.metric != AqEvaluationMetric::kButteraugli) {
@@ -481,6 +483,7 @@ class CudaPreparedResidentAqEvaluation final
     status = BuildAcReadbackLayout();
     if (!status.ok()) return status;
     options_ = preparation.options;
+    coefficient_decision_mode_ = preparation.coefficient_decision_mode;
     resident_frontend_ = resident_frontend;
     final_transform_metadata_pending_ = preparation.defer_final_transform_metadata;
     omit_initial_search_data_ = preparation.omit_initial_search_data;
@@ -2702,7 +2705,8 @@ class CudaPreparedResidentAqEvaluation final
         QuantizationMatrixMultiplier(options_.profile.x_qm_scale);
     params.b_matrix_multiplier =
         QuantizationMatrixMultiplier(options_.profile.b_qm_scale);
-    params.adjust_ac_quant = 1;
+    params.adjust_ac_quant = coefficient_decision_mode_ ==
+        AcCoefficientDecisionMode::kAdjustedSharedQuant ? 1u : 0u;
     params.defer_dc = DeferredDc();
     params.defer_low_frequencies = DeferredDc();
     params.epf_quant_multiplier = options_.profile.epf_sigma.quant_multiplier;
@@ -2907,16 +2911,18 @@ class CudaPreparedResidentAqEvaluation final
       const CudaAqExactBatch& batch = self.batches_[batch_index];
       if (batch.anchor_count == 0) continue;
       const CudaAqResidentParams params = self.ResidentParams(batch_index);
-      status = LaunchCudaAqSelectAdjustedQuantization(
-          Pointer<CudaAqAnchor>(self.anchors_device_),
-          Pointer<const float>(self.quant_tables_device_),
-          Pointer<int>(self.raw_quant_device_),
-          Pointer<const float>(self.forward_device_),
-          Pointer<float>(self.thresholds_device_),
-          Pointer<const unsigned int>(self.quantizer_device_),
-          Pointer<unsigned int>(self.error_device_), batch, params,
-          backend.state_->stream);
-      if (status != cudaSuccess) return status;
+      if (params.adjust_ac_quant != 0) {
+        status = LaunchCudaAqSelectAdjustedQuantization(
+            Pointer<CudaAqAnchor>(self.anchors_device_),
+            Pointer<const float>(self.quant_tables_device_),
+            Pointer<int>(self.raw_quant_device_),
+            Pointer<const float>(self.forward_device_),
+            Pointer<float>(self.thresholds_device_),
+            Pointer<const unsigned int>(self.quantizer_device_),
+            Pointer<unsigned int>(self.error_device_), batch, params,
+            backend.state_->stream);
+        if (status != cudaSuccess) return status;
+      }
       status = LaunchCudaAqEncodeResidentCoefficients(
           Pointer<CudaAqAnchor>(self.anchors_device_),
           Pointer<const float>(self.quant_tables_device_),
@@ -3192,16 +3198,18 @@ class CudaPreparedResidentAqEvaluation final
         const CudaAqExactBatch& batch = self.batches_[batch_index];
         if (batch.anchor_count == 0) continue;
         const CudaAqResidentParams params = self.ResidentParams(batch_index);
-        status = LaunchCudaAqSelectAdjustedQuantization(
-            Pointer<CudaAqAnchor>(self.anchors_device_),
-            Pointer<const float>(self.quant_tables_device_),
-            Pointer<int>(self.raw_quant_device_),
-            Pointer<const float>(self.forward_device_),
-            Pointer<float>(self.thresholds_device_),
-            Pointer<const unsigned int>(self.quantizer_device_),
-            Pointer<unsigned int>(self.error_device_), batch, params,
-            backend.state_->stream);
-        if (status != cudaSuccess) return status;
+        if (params.adjust_ac_quant != 0) {
+          status = LaunchCudaAqSelectAdjustedQuantization(
+              Pointer<CudaAqAnchor>(self.anchors_device_),
+              Pointer<const float>(self.quant_tables_device_),
+              Pointer<int>(self.raw_quant_device_),
+              Pointer<const float>(self.forward_device_),
+              Pointer<float>(self.thresholds_device_),
+              Pointer<const unsigned int>(self.quantizer_device_),
+              Pointer<unsigned int>(self.error_device_), batch, params,
+              backend.state_->stream);
+          if (status != cudaSuccess) return status;
+        }
         // This branch rejects diagnostic reconstruction and only assembles
         // integer coefficients. A later evaluation rewrites the complete
         // reconstruction before running any inverse transform or filter.
@@ -3441,6 +3449,8 @@ class CudaPreparedResidentAqEvaluation final
   size_t anchor_count_ = 0;
   size_t filter_xyb_stage_count_ = 0;
   AqEvaluationOptions options_{};
+  AcCoefficientDecisionMode coefficient_decision_mode_ =
+      AcCoefficientDecisionMode::kAdjustedSharedQuant;
   AcStrategyGrid strategies_{};
   std::array<CudaAqExactBatch, 7> batches_{};
   ManagedVector<HostAnchor> row_major_anchors_;
