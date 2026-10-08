@@ -2324,13 +2324,22 @@ if(GJXL_BUILD_TESTS)
       "${dc_oracle_source}" "${dc_oracle_source}/lib/include"
       "${GJXL_DC_ORACLE_BUILD}/lib/include"
       "${dc_oracle_source}/third_party/highway")
+    if(WIN32)
+      set(dc_oracle_prefix "")
+      set(dc_oracle_archive_suffix ".lib")
+      set(dc_oracle_link_suffix ".lib")
+    else()
+      set(dc_oracle_prefix "lib")
+      set(dc_oracle_archive_suffix ".a")
+      set(dc_oracle_link_suffix "${CMAKE_SHARED_LIBRARY_SUFFIX}")
+    endif()
     target_link_libraries(gjxl_dc_processing_oracle_test PRIVATE gjxl_codec
-      "${GJXL_DC_ORACLE_BUILD}/lib/libjxl-internal.a"
-      "${GJXL_DC_ORACLE_BUILD}/third_party/highway/libhwy.a"
-      "${GJXL_DC_ORACLE_BUILD}/lib/libjxl_cms${CMAKE_SHARED_LIBRARY_SUFFIX}"
-      "${GJXL_DC_ORACLE_BUILD}/third_party/brotli/libbrotlienc${CMAKE_SHARED_LIBRARY_SUFFIX}"
-      "${GJXL_DC_ORACLE_BUILD}/third_party/brotli/libbrotlidec${CMAKE_SHARED_LIBRARY_SUFFIX}"
-      "${GJXL_DC_ORACLE_BUILD}/third_party/brotli/libbrotlicommon${CMAKE_SHARED_LIBRARY_SUFFIX}")
+      "${GJXL_DC_ORACLE_BUILD}/lib/${dc_oracle_prefix}jxl-internal${dc_oracle_archive_suffix}"
+      "${GJXL_DC_ORACLE_BUILD}/third_party/highway/${dc_oracle_prefix}hwy${dc_oracle_archive_suffix}"
+      "${GJXL_DC_ORACLE_BUILD}/lib/${dc_oracle_prefix}jxl_cms${dc_oracle_link_suffix}"
+      "${GJXL_DC_ORACLE_BUILD}/third_party/brotli/${dc_oracle_prefix}brotlienc${dc_oracle_link_suffix}"
+      "${GJXL_DC_ORACLE_BUILD}/third_party/brotli/${dc_oracle_prefix}brotlidec${dc_oracle_link_suffix}"
+      "${GJXL_DC_ORACLE_BUILD}/third_party/brotli/${dc_oracle_prefix}brotlicommon${dc_oracle_link_suffix}")
     add_executable(gjxl_dc_context_tree_oracle_test tests/dc_context_tree_test.cpp)
     target_compile_definitions(gjxl_dc_context_tree_oracle_test PRIVATE GJXL_DC_TREE_ORACLE=1)
     get_target_property(dc_oracle_includes gjxl_dc_processing_oracle_test INCLUDE_DIRECTORIES)
@@ -2342,6 +2351,11 @@ if(GJXL_BUILD_TESTS)
     endif()
     add_test(NAME dc_context_tree_oracle COMMAND gjxl_dc_context_tree_oracle_test)
     add_test(NAME dc_processing_oracle COMMAND gjxl_dc_processing_oracle_test)
+    if(WIN32)
+      # BuildPinnedDjxl collects the reference DLLs beside its tools.
+      set_tests_properties(dc_context_tree_oracle dc_processing_oracle PROPERTIES
+        ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${GJXL_DC_ORACLE_BUILD}/tools")
+    endif()
   endif()
 
   add_executable(

@@ -1,7 +1,9 @@
 # Modular architecture and implementation plan
 
-Status: proposed architecture and implementation sequence; no milestones below
-are claimed complete. Written 2026-10-07 against GJXL
+Status: Phase 1 extraction implemented; see the
+[qualification record and platform limits](modular-phase1/README.md).
+Phase 2 remains a proposed implementation sequence. Originally written
+2026-10-07 against GJXL
 `67caa6d89830f6a13c057923e34f80753a161e9d` and pinned libjxl
 `e8ff09762481785938d8e4e01333ed3917571161`.
 
@@ -686,7 +688,9 @@ revisions, resolved profiles, fixture hashes and retained failures. Run sanitize
 coverage for integer arithmetic, bounds and ownership on supported toolchains,
 and exercise representative x86-64 and ARM64 CPU builds. GPU-enabled regression
 checks require the appropriate hardware; unrun configurations remain explicitly
-unqualified. This planning document records no new test results.
+unqualified. Phase 1 results are recorded in the
+[qualification report](modular-phase1/README.md); Phase 2 coverage remains
+planned.
 
 ### Compression and performance gates
 

@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "baseline": "build\\modular-phase1\\photo-stage-timings\\round-7-baseline",
+  "artifacts": {
+    "photo_frame_p0.jxl": {
+      "bytes": 136098,
+      "sha256": "8e40bf5d698614b386966e75fd11b93859094ee549f9ce76713c72a9b5247ee8"
+    },
+    "photo_frame_p0.snapshot": {
+      "bytes": 1909064,
+      "sha256": "51b7bc97ae2b369a719816b614c0c23c49fe19af08f145dc5d59f4f884f94255"
+    },
+    "photo_frame_p1.jxl": {
+      "bytes": 134077,
+      "sha256": "9cafa3d98b6f5430008149aaed4345f8d59b000f748140373bddf560a1fe9658"
+    },
+    "photo_frame_p1.snapshot": {
+      "bytes": 1909064,
+      "sha256": "9907f7afd68202890487baa94407fb4992318929b6af9d22dfcbc8e34b116b61"
+    }
+  },
+  "candidate": "build\\modular-phase1\\photo-stage-timings\\round-7-candidate",
+  "compared": 4,
+  "mismatches": [],
+  "passed": true
+}

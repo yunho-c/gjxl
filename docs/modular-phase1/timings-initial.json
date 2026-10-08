@@ -1,0 +1,3337 @@
+{
+  "schema": 1,
+  "rounds": 7,
+  "warmup_pairs": 1,
+  "binaries": {
+    "baseline": "C:\\Users\\hocbu\\GitHub\\gjxl\\build\\modular-phase1\\baseline-capture\\modular_extraction_capture.exe",
+    "candidate": "C:\\Users\\hocbu\\GitHub\\gjxl\\build\\modular-phase1\\candidate-capture\\modular_extraction_capture.exe"
+  },
+  "criteria": {
+    "dc_serializer": {
+      "relative": 0.05,
+      "absolute_ns": 50000
+    },
+    "workflow": {
+      "relative": 0.03,
+      "absolute_ns": 200000
+    }
+  },
+  "results": [
+    {
+      "case": "compact_1",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          270800,
+          255800,
+          249400,
+          246900,
+          411200,
+          445500,
+          235600
+        ],
+        "candidate": [
+          435100,
+          263900,
+          246500,
+          266600,
+          238600,
+          290400,
+          257900
+        ]
+      },
+      "medians_ns": {
+        "baseline": 255800,
+        "candidate": 263900
+      },
+      "relative_change": 0.031665363565285376,
+      "absolute_change_ns": 8100,
+      "median_absolute_deviation_ns": {
+        "baseline": 15000,
+        "candidate": 17400
+      },
+      "flagged": false
+    },
+    {
+      "case": "compact_1",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          7776300,
+          7765200,
+          7268300,
+          7676600,
+          9067500,
+          8768400,
+          7794800
+        ],
+        "candidate": [
+          7831600,
+          7507100,
+          7790700,
+          7356300,
+          7003200,
+          8487500,
+          7504100
+        ]
+      },
+      "medians_ns": {
+        "baseline": 7776300,
+        "candidate": 7507100
+      },
+      "relative_change": -0.03461800599256716,
+      "absolute_change_ns": -269200,
+      "median_absolute_deviation_ns": {
+        "baseline": 99700,
+        "candidate": 283600
+      },
+      "flagged": false
+    },
+    {
+      "case": "compact_2",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          248000,
+          267200,
+          248800,
+          262800,
+          469600,
+          290700,
+          261600
+        ],
+        "candidate": [
+          263100,
+          282700,
+          288800,
+          343500,
+          257000,
+          299700,
+          257200
+        ]
+      },
+      "medians_ns": {
+        "baseline": 262800,
+        "candidate": 282700
+      },
+      "relative_change": 0.07572298325722983,
+      "absolute_change_ns": 19900,
+      "median_absolute_deviation_ns": {
+        "baseline": 14000,
+        "candidate": 19600
+      },
+      "flagged": false
+    },
+    {
+      "case": "compact_2",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          7763800,
+          7418500,
+          7638100,
+          8015600,
+          8822000,
+          8495500,
+          7357200
+        ],
+        "candidate": [
+          7347900,
+          8316400,
+          8340100,
+          8077900,
+          7571600,
+          8663200,
+          7205700
+        ]
+      },
+      "medians_ns": {
+        "baseline": 7763800,
+        "candidate": 8077900
+      },
+      "relative_change": 0.04045699270975553,
+      "absolute_change_ns": 314100,
+      "median_absolute_deviation_ns": {
+        "baseline": 345300,
+        "candidate": 506300
+      },
+      "flagged": false
+    },
+    {
+      "case": "entropy_0_p0_e1",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          3000,
+          5500,
+          4200,
+          3200,
+          3600,
+          4000,
+          6600
+        ],
+        "candidate": [
+          4000,
+          6800,
+          3600,
+          3500,
+          57500,
+          3600,
+          4900
+        ]
+      },
+      "medians_ns": {
+        "baseline": 4000,
+        "candidate": 4000
+      },
+      "relative_change": 0.0,
+      "absolute_change_ns": 0,
+      "median_absolute_deviation_ns": {
+        "baseline": 800,
+        "candidate": 500
+      },
+      "flagged": false
+    },
+    {
+      "case": "entropy_0_p0_e1",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          700300,
+          812200,
+          932300,
+          712400,
+          764900,
+          734600,
+          1436800
+        ],
+        "candidate": [
+          840400,
+          1428100,
+          864500,
+          679100,
+          1012700,
+          884400,
+          1473700
+        ]
+      },
+      "medians_ns": {
+        "baseline": 764900,
+        "candidate": 884400
+      },
+      "relative_change": 0.15622957249313635,
+      "absolute_change_ns": 119500,
+      "median_absolute_deviation_ns": {
+        "baseline": 52500,
+        "candidate": 128300
+      },
+      "flagged": true
+    },
+    {
+      "case": "entropy_0_p0_e2",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          23100,
+          5800,
+          4300,
+          6700,
+          6300,
+          4100,
+          6200
+        ],
+        "candidate": [
+          7300,
+          4600,
+          4100,
+          3900,
+          5800,
+          4600,
+          5500
+        ]
+      },
+      "medians_ns": {
+        "baseline": 6200,
+        "candidate": 4600
+      },
+      "relative_change": -0.25806451612903225,
+      "absolute_change_ns": -1600,
+      "median_absolute_deviation_ns": {
+        "baseline": 500,
+        "candidate": 700
+      },
+      "flagged": false
+    },
+    {
+      "case": "entropy_0_p0_e2",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          2703900,
+          3971000,
+          3150700,
+          2833400,
+          3150500,
+          2941900,
+          4049500
+        ],
+        "candidate": [
+          3352900,
+          3410500,
+          2667700,
+          2622900,
+          8566800,
+          2975000,
+          3602300
+        ]
+      },
+      "medians_ns": {
+        "baseline": 3150500,
+        "candidate": 3352900
+      },
+      "relative_change": 0.06424377083002698,
+      "absolute_change_ns": 202400,
+      "median_absolute_deviation_ns": {
+        "baseline": 317100,
+        "candidate": 377900
+      },
+      "flagged": true
+    },
+    {
+      "case": "entropy_0_p0_e3",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          5200,
+          6500,
+          7800,
+          4100,
+          4500,
+          3500,
+          4600
+        ],
+        "candidate": [
+          4300,
+          8100,
+          3900,
+          5900,
+          31900,
+          4000,
+          5100
+        ]
+      },
+      "medians_ns": {
+        "baseline": 4600,
+        "candidate": 5100
+      },
+      "relative_change": 0.10869565217391304,
+      "absolute_change_ns": 500,
+      "median_absolute_deviation_ns": {
+        "baseline": 600,
+        "candidate": 1100
+      },
+      "flagged": false
+    },
+    {
+      "case": "entropy_0_p0_e3",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          1681000,
+          2004700,
+          1774000,
+          1859400,
+          1843900,
+          1671800,
+          4408400
+        ],
+        "candidate": [
+          1808900,
+          4292500,
+          3902600,
+          2190600,
+          3384700,
+          1942700,
+          3937000
+        ]
+      },
+      "medians_ns": {
+        "baseline": 1843900,
+        "candidate": 3384700
+      },
+      "relative_change": 0.8356201529367102,
+      "absolute_change_ns": 1540800,
+      "median_absolute_deviation_ns": {
+        "baseline": 160800,
+        "candidate": 907800
+      },
+      "flagged": true
+    },
+    {
+      "case": "entropy_0_p1_e1",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          8600,
+          79600,
+          5900,
+          8100,
+          30800,
+          5300,
+          43700
+        ],
+        "candidate": [
+          13700,
+          7400,
+          6300,
+          5200,
+          7700,
+          8700,
+          5600
+        ]
+      },
+      "medians_ns": {
+        "baseline": 8600,
+        "candidate": 7400
+      },
+      "relative_change": -0.13953488372093023,
+      "absolute_change_ns": -1200,
+      "median_absolute_deviation_ns": {
+        "baseline": 3300,
+        "candidate": 1300
+      },
+      "flagged": false
+    },
+    {
+      "case": "entropy_0_p1_e1",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          716400,
+          827800,
+          739200,
+          704100,
+          946200,
+          680700,
+          1429600
+        ],
+        "candidate": [
+          823900,
+          1491200,
+          1255300,
+          699300,
+          787400,
+          1245100,
+          1336100
+        ]
+      },
+      "medians_ns": {
+        "baseline": 739200,
+        "candidate": 1245100
+      },
+      "relative_change": 0.6843885281385281,
+      "absolute_change_ns": 505900,
+      "median_absolute_deviation_ns": {
+        "baseline": 58500,
+        "candidate": 246100
+      },
+      "flagged": true
+    },
+    {
+      "case": "entropy_0_p1_e2",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          5900,
+          8200,
+          6200,
+          6100,
+          8200,
+          7000,
+          6900
+        ],
+        "candidate": [
+          7300,
+          16400,
+          5800,
+          5400,
+          7000,
+          7800,
+          5900
+        ]
+      },
+      "medians_ns": {
+        "baseline": 6900,
+        "candidate": 7000
+      },
+      "relative_change": 0.014492753623188406,
+      "absolute_change_ns": 100,
+      "median_absolute_deviation_ns": {
+        "baseline": 800,
+        "candidate": 1100
+      },
+      "flagged": false
+    },
+    {
+      "case": "entropy_0_p1_e2",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          3313700,
+          3014000,
+          2754900,
+          2731200,
+          2673900,
+          2648600,
+          4151900
+        ],
+        "candidate": [
+          3167000,
+          3644500,
+          3167400,
+          3252900,
+          2981900,
+          3477000,
+          3428600
+        ]
+      },
+      "medians_ns": {
+        "baseline": 2754900,
+        "candidate": 3252900
+      },
+      "relative_change": 0.18076881193509747,
+      "absolute_change_ns": 498000,
+      "median_absolute_deviation_ns": {
+        "baseline": 106300,
+        "candidate": 175700
+      },
+      "flagged": true
+    },
+    {
+      "case": "entropy_0_p1_e3",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          5500,
+          6300,
+          6600,
+          60300,
+          18800,
+          6500,
+          8700
+        ],
+        "candidate": [
+          9800,
+          26900,
+          5300,
+          5600,
+          7500,
+          5700,
+          6300
+        ]
+      },
+      "medians_ns": {
+        "baseline": 6600,
+        "candidate": 6300
+      },
+      "relative_change": -0.045454545454545456,
+      "absolute_change_ns": -300,
+      "median_absolute_deviation_ns": {
+        "baseline": 1100,
+        "candidate": 1000
+      },
+      "flagged": false
+    },
+    {
+      "case": "entropy_0_p1_e3",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          1649700,
+          1828400,
+          1788500,
+          2179000,
+          1977400,
+          1632900,
+          1861200
+        ],
+        "candidate": [
+          1802100,
+          2072800,
+          3989500,
+          1595500,
+          1864300,
+          4188800,
+          1747500
+        ]
+      },
+      "medians_ns": {
+        "baseline": 1828400,
+        "candidate": 1864300
+      },
+      "relative_change": 0.01963465324874207,
+      "absolute_change_ns": 35900,
+      "median_absolute_deviation_ns": {
+        "baseline": 149000,
+        "candidate": 208500
+      },
+      "flagged": false
+    },
+    {
+      "case": "entropy_1_p0_e1",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          12200,
+          15400,
+          15100,
+          17200,
+          21200,
+          21600,
+          15600
+        ],
+        "candidate": [
+          12900,
+          14500,
+          50700,
+          11600,
+          18100,
+          15400,
+          53600
+        ]
+      },
+      "medians_ns": {
+        "baseline": 15600,
+        "candidate": 15400
+      },
+      "relative_change": -0.01282051282051282,
+      "absolute_change_ns": -200,
+      "median_absolute_deviation_ns": {
+        "baseline": 1600,
+        "candidate": 2700
+      },
+      "flagged": false
+    },
+    {
+      "case": "entropy_1_p0_e1",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          2153400,
+          2300300,
+          3210900,
+          2080400,
+          3358300,
+          2327900,
+          4588100
+        ],
+        "candidate": [
+          2599500,
+          2904100,
+          2378800,
+          2167100,
+          2358500,
+          2158000,
+          2673000
+        ]
+      },
+      "medians_ns": {
+        "baseline": 2327900,
+        "candidate": 2378800
+      },
+      "relative_change": 0.02186520039520598,
+      "absolute_change_ns": 50900,
+      "median_absolute_deviation_ns": {
+        "baseline": 247500,
+        "candidate": 220700
+      },
+      "flagged": false
+    },
+    {
+      "case": "entropy_1_p0_e2",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          12100,
+          32400,
+          14500,
+          11500,
+          16000,
+          13700,
+          14300
+        ],
+        "candidate": [
+          16100,
+          16800,
+          12200,
+          18500,
+          13700,
+          14400,
+          14700
+        ]
+      },
+      "medians_ns": {
+        "baseline": 14300,
+        "candidate": 14700
+      },
+      "relative_change": 0.027972027972027972,
+      "absolute_change_ns": 400,
+      "median_absolute_deviation_ns": {
+        "baseline": 1700,
+        "candidate": 1400
+      },
+      "flagged": false
+    },
+    {
+      "case": "entropy_1_p0_e2",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          3854700,
+          4178500,
+          4286500,
+          4911700,
+          3571800,
+          3723700,
+          4675600
+        ],
+        "candidate": [
+          4186000,
+          4840100,
+          3761500,
+          3966900,
+          4272200,
+          3736900,
+          4339300
+        ]
+      },
+      "medians_ns": {
+        "baseline": 4178500,
+        "candidate": 4186000
+      },
+      "relative_change": 0.0017949024769654182,
+      "absolute_change_ns": 7500,
+      "median_absolute_deviation_ns": {
+        "baseline": 454800,
+        "candidate": 219100
+      },
+      "flagged": false
+    },
+    {
+      "case": "entropy_1_p0_e3",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          12600,
+          16800,
+          17700,
+          16400,
+          36300,
+          20800,
+          15600
+        ],
+        "candidate": [
+          14800,
+          13500,
+          14900,
+          14200,
+          18100,
+          15300,
+          16400
+        ]
+      },
+      "medians_ns": {
+        "baseline": 16800,
+        "candidate": 14900
+      },
+      "relative_change": -0.1130952380952381,
+      "absolute_change_ns": -1900,
+      "median_absolute_deviation_ns": {
+        "baseline": 1200,
+        "candidate": 700
+      },
+      "flagged": false
+    },
+    {
+      "case": "entropy_1_p0_e3",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          3439400,
+          4270600,
+          5910000,
+          3736400,
+          3603800,
+          3472200,
+          5343200
+        ],
+        "candidate": [
+          3936700,
+          6122700,
+          5578900,
+          3257700,
+          3770600,
+          3304800,
+          5962500
+        ]
+      },
+      "medians_ns": {
+        "baseline": 3736400,
+        "candidate": 3936700
+      },
+      "relative_change": 0.05360775077614816,
+      "absolute_change_ns": 200300,
+      "median_absolute_deviation_ns": {
+        "baseline": 297000,
+        "candidate": 679000
+      },
+      "flagged": true
+    },
+    {
+      "case": "entropy_1_p1_e1",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          44100,
+          57500,
+          47900,
+          56700,
+          45800,
+          49200,
+          48900
+        ],
+        "candidate": [
+          52200,
+          52900,
+          60300,
+          43800,
+          55000,
+          49200,
+          57600
+        ]
+      },
+      "medians_ns": {
+        "baseline": 48900,
+        "candidate": 52900
+      },
+      "relative_change": 0.081799591002045,
+      "absolute_change_ns": 4000,
+      "median_absolute_deviation_ns": {
+        "baseline": 3100,
+        "candidate": 3700
+      },
+      "flagged": false
+    },
+    {
+      "case": "entropy_1_p1_e1",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          2229100,
+          2627000,
+          2791100,
+          2514800,
+          2263100,
+          2349300,
+          2307500
+        ],
+        "candidate": [
+          2630300,
+          3177500,
+          2879300,
+          2210900,
+          2582400,
+          2219100,
+          3138600
+        ]
+      },
+      "medians_ns": {
+        "baseline": 2349300,
+        "candidate": 2630300
+      },
+      "relative_change": 0.11961009662452646,
+      "absolute_change_ns": 281000,
+      "median_absolute_deviation_ns": {
+        "baseline": 120200,
+        "candidate": 411200
+      },
+      "flagged": true
+    },
+    {
+      "case": "entropy_1_p1_e2",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          44700,
+          46900,
+          46700,
+          45600,
+          46300,
+          46700,
+          166500
+        ],
+        "candidate": [
+          66200,
+          53300,
+          44900,
+          46000,
+          55000,
+          57300,
+          56700
+        ]
+      },
+      "medians_ns": {
+        "baseline": 46700,
+        "candidate": 55000
+      },
+      "relative_change": 0.1777301927194861,
+      "absolute_change_ns": 8300,
+      "median_absolute_deviation_ns": {
+        "baseline": 400,
+        "candidate": 2300
+      },
+      "flagged": false
+    },
+    {
+      "case": "entropy_1_p1_e2",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          3899200,
+          4505200,
+          5219000,
+          3796200,
+          4226800,
+          3625900,
+          4345200
+        ],
+        "candidate": [
+          4871000,
+          5042200,
+          4373300,
+          4722500,
+          4220400,
+          4097600,
+          4916800
+        ]
+      },
+      "medians_ns": {
+        "baseline": 4226800,
+        "candidate": 4722500
+      },
+      "relative_change": 0.11727548026876124,
+      "absolute_change_ns": 495700,
+      "median_absolute_deviation_ns": {
+        "baseline": 327600,
+        "candidate": 319700
+      },
+      "flagged": true
+    },
+    {
+      "case": "entropy_1_p1_e3",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          47100,
+          57500,
+          45900,
+          145000,
+          44500,
+          46000,
+          57700
+        ],
+        "candidate": [
+          55100,
+          53000,
+          54100,
+          49800,
+          46700,
+          52200,
+          56200
+        ]
+      },
+      "medians_ns": {
+        "baseline": 47100,
+        "candidate": 53000
+      },
+      "relative_change": 0.12526539278131635,
+      "absolute_change_ns": 5900,
+      "median_absolute_deviation_ns": {
+        "baseline": 2600,
+        "candidate": 2100
+      },
+      "flagged": false
+    },
+    {
+      "case": "entropy_1_p1_e3",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          3593300,
+          3687700,
+          3566600,
+          4002500,
+          3463800,
+          3626500,
+          4080900
+        ],
+        "candidate": [
+          4215400,
+          4079700,
+          5771000,
+          3539000,
+          4112700,
+          3890600,
+          4079300
+        ]
+      },
+      "medians_ns": {
+        "baseline": 3626500,
+        "candidate": 4079700
+      },
+      "relative_change": 0.12496897835378463,
+      "absolute_change_ns": 453200,
+      "median_absolute_deviation_ns": {
+        "baseline": 61200,
+        "candidate": 135700
+      },
+      "flagged": true
+    },
+    {
+      "case": "frame_0_p0_t0",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          6600,
+          10500,
+          8800,
+          5200,
+          6500,
+          6000,
+          7600
+        ],
+        "candidate": [
+          6500,
+          13000,
+          4800,
+          5900,
+          8400,
+          5400,
+          8000
+        ]
+      },
+      "medians_ns": {
+        "baseline": 6600,
+        "candidate": 6500
+      },
+      "relative_change": -0.015151515151515152,
+      "absolute_change_ns": -100,
+      "median_absolute_deviation_ns": {
+        "baseline": 1000,
+        "candidate": 1500
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_0_p0_t0",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          1354400,
+          1528700,
+          1412500,
+          1276800,
+          1491200,
+          1803200,
+          2245800
+        ],
+        "candidate": [
+          1409900,
+          2502900,
+          1345800,
+          1286200,
+          1625200,
+          1354200,
+          2204800
+        ]
+      },
+      "medians_ns": {
+        "baseline": 1491200,
+        "candidate": 1409900
+      },
+      "relative_change": -0.05451984978540773,
+      "absolute_change_ns": -81300,
+      "median_absolute_deviation_ns": {
+        "baseline": 136800,
+        "candidate": 123700
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_0_p0_t1",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          48600,
+          12200,
+          33200,
+          9000,
+          9500,
+          45100,
+          9300
+        ],
+        "candidate": [
+          11200,
+          21800,
+          7800,
+          19600,
+          12000,
+          14900,
+          13800
+        ]
+      },
+      "medians_ns": {
+        "baseline": 12200,
+        "candidate": 13800
+      },
+      "relative_change": 0.13114754098360656,
+      "absolute_change_ns": 1600,
+      "median_absolute_deviation_ns": {
+        "baseline": 3200,
+        "candidate": 2600
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_0_p0_t1",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          1240600,
+          1249800,
+          1366900,
+          1339600,
+          1333800,
+          1162500,
+          1233600
+        ],
+        "candidate": [
+          1312100,
+          1640000,
+          1182000,
+          1152200,
+          1615700,
+          1385000,
+          1333000
+        ]
+      },
+      "medians_ns": {
+        "baseline": 1249800,
+        "candidate": 1333000
+      },
+      "relative_change": 0.06657065130420867,
+      "absolute_change_ns": 83200,
+      "median_absolute_deviation_ns": {
+        "baseline": 84000,
+        "candidate": 151000
+      },
+      "flagged": true
+    },
+    {
+      "case": "frame_0_p1_t0",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          18500,
+          7900,
+          9200,
+          7300,
+          5700,
+          6500,
+          6800
+        ],
+        "candidate": [
+          6300,
+          11000,
+          5600,
+          5400,
+          9700,
+          6000,
+          7100
+        ]
+      },
+      "medians_ns": {
+        "baseline": 7300,
+        "candidate": 6300
+      },
+      "relative_change": -0.136986301369863,
+      "absolute_change_ns": -1000,
+      "median_absolute_deviation_ns": {
+        "baseline": 800,
+        "candidate": 800
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_0_p1_t0",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          1246200,
+          1381600,
+          1367000,
+          1298500,
+          1268300,
+          1262100,
+          2966600
+        ],
+        "candidate": [
+          1336100,
+          3064700,
+          2858000,
+          1213100,
+          1433700,
+          2683700,
+          3111000
+        ]
+      },
+      "medians_ns": {
+        "baseline": 1298500,
+        "candidate": 2683700
+      },
+      "relative_change": 1.0667693492491337,
+      "absolute_change_ns": 1385200,
+      "median_absolute_deviation_ns": {
+        "baseline": 52300,
+        "candidate": 427300
+      },
+      "flagged": true
+    },
+    {
+      "case": "frame_0_p1_t1",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          6900,
+          7400,
+          7000,
+          7200,
+          8500,
+          5800,
+          8500
+        ],
+        "candidate": [
+          6500,
+          7700,
+          10700,
+          6800,
+          13900,
+          7400,
+          8500
+        ]
+      },
+      "medians_ns": {
+        "baseline": 7200,
+        "candidate": 7700
+      },
+      "relative_change": 0.06944444444444445,
+      "absolute_change_ns": 500,
+      "median_absolute_deviation_ns": {
+        "baseline": 300,
+        "candidate": 900
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_0_p1_t1",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          1026600,
+          1172200,
+          1069900,
+          1056200,
+          1035300,
+          1289400,
+          3487700
+        ],
+        "candidate": [
+          1095600,
+          2657500,
+          2778100,
+          1037800,
+          1882100,
+          2804600,
+          2838900
+        ]
+      },
+      "medians_ns": {
+        "baseline": 1069900,
+        "candidate": 2657500
+      },
+      "relative_change": 1.4838769978502664,
+      "absolute_change_ns": 1587600,
+      "median_absolute_deviation_ns": {
+        "baseline": 43300,
+        "candidate": 181400
+      },
+      "flagged": true
+    },
+    {
+      "case": "frame_1_p0_t0",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          12400,
+          15500,
+          13500,
+          15000,
+          11600,
+          13800,
+          15700
+        ],
+        "candidate": [
+          16000,
+          17000,
+          16100,
+          17900,
+          19500,
+          14700,
+          17300
+        ]
+      },
+      "medians_ns": {
+        "baseline": 13800,
+        "candidate": 17000
+      },
+      "relative_change": 0.2318840579710145,
+      "absolute_change_ns": 3200,
+      "median_absolute_deviation_ns": {
+        "baseline": 1400,
+        "candidate": 900
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_1_p0_t0",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          2007700,
+          2014300,
+          3397900,
+          1841300,
+          1797300,
+          1806200,
+          3566100
+        ],
+        "candidate": [
+          2278900,
+          3315900,
+          1855200,
+          2255400,
+          2316100,
+          2628600,
+          3435300
+        ]
+      },
+      "medians_ns": {
+        "baseline": 2007700,
+        "candidate": 2316100
+      },
+      "relative_change": 0.15360860686357525,
+      "absolute_change_ns": 308400,
+      "median_absolute_deviation_ns": {
+        "baseline": 201500,
+        "candidate": 312500
+      },
+      "flagged": true
+    },
+    {
+      "case": "frame_1_p0_t1",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          22300,
+          13900,
+          25500,
+          16800,
+          13200,
+          12100,
+          17000
+        ],
+        "candidate": [
+          16400,
+          14300,
+          15100,
+          14200,
+          16000,
+          15400,
+          13200
+        ]
+      },
+      "medians_ns": {
+        "baseline": 16800,
+        "candidate": 15100
+      },
+      "relative_change": -0.10119047619047619,
+      "absolute_change_ns": -1700,
+      "median_absolute_deviation_ns": {
+        "baseline": 3600,
+        "candidate": 900
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_1_p0_t1",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          1486400,
+          1601500,
+          1693900,
+          1495500,
+          1490700,
+          1405200,
+          3293000
+        ],
+        "candidate": [
+          1739600,
+          1531400,
+          1618100,
+          1379600,
+          1635200,
+          3154700,
+          1533500
+        ]
+      },
+      "medians_ns": {
+        "baseline": 1495500,
+        "candidate": 1618100
+      },
+      "relative_change": 0.08197927114677366,
+      "absolute_change_ns": 122600,
+      "median_absolute_deviation_ns": {
+        "baseline": 90300,
+        "candidate": 86700
+      },
+      "flagged": true
+    },
+    {
+      "case": "frame_1_p1_t0",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          47000,
+          50600,
+          47400,
+          45500,
+          45700,
+          45200,
+          52400
+        ],
+        "candidate": [
+          76100,
+          108900,
+          50700,
+          46700,
+          54200,
+          47400,
+          55100
+        ]
+      },
+      "medians_ns": {
+        "baseline": 47000,
+        "candidate": 54200
+      },
+      "relative_change": 0.15319148936170213,
+      "absolute_change_ns": 7200,
+      "median_absolute_deviation_ns": {
+        "baseline": 1500,
+        "candidate": 6800
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_1_p1_t0",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          1753800,
+          1912400,
+          3766200,
+          1894900,
+          2247100,
+          1772500,
+          2710700
+        ],
+        "candidate": [
+          2238800,
+          3917300,
+          3336100,
+          1769400,
+          1998900,
+          1980500,
+          3723300
+        ]
+      },
+      "medians_ns": {
+        "baseline": 1912400,
+        "candidate": 2238800
+      },
+      "relative_change": 0.1706755908805689,
+      "absolute_change_ns": 326400,
+      "median_absolute_deviation_ns": {
+        "baseline": 158600,
+        "candidate": 469400
+      },
+      "flagged": true
+    },
+    {
+      "case": "frame_1_p1_t1",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          45000,
+          51200,
+          49900,
+          50400,
+          44600,
+          48200,
+          53200
+        ],
+        "candidate": [
+          51900,
+          146100,
+          44800,
+          46200,
+          60100,
+          44600,
+          52100
+        ]
+      },
+      "medians_ns": {
+        "baseline": 49900,
+        "candidate": 51900
+      },
+      "relative_change": 0.04008016032064128,
+      "absolute_change_ns": 2000,
+      "median_absolute_deviation_ns": {
+        "baseline": 1700,
+        "candidate": 7100
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_1_p1_t1",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          1497700,
+          1627600,
+          3275900,
+          1590300,
+          1431000,
+          1509900,
+          3030800
+        ],
+        "candidate": [
+          1681300,
+          3225900,
+          3830600,
+          1462700,
+          1729700,
+          1425100,
+          3171600
+        ]
+      },
+      "medians_ns": {
+        "baseline": 1590300,
+        "candidate": 1729700
+      },
+      "relative_change": 0.08765641702823367,
+      "absolute_change_ns": 139400,
+      "median_absolute_deviation_ns": {
+        "baseline": 92600,
+        "candidate": 304600
+      },
+      "flagged": true
+    },
+    {
+      "case": "frame_2_p0_t0",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          67500,
+          79800,
+          69900,
+          64600,
+          78600,
+          63700,
+          86400
+        ],
+        "candidate": [
+          67500,
+          97200,
+          71800,
+          100800,
+          101000,
+          75500,
+          77600
+        ]
+      },
+      "medians_ns": {
+        "baseline": 69900,
+        "candidate": 77600
+      },
+      "relative_change": 0.11015736766809728,
+      "absolute_change_ns": 7700,
+      "median_absolute_deviation_ns": {
+        "baseline": 6200,
+        "candidate": 10100
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_2_p0_t0",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          10450200,
+          11228700,
+          10019000,
+          11188600,
+          10166900,
+          9723700,
+          11182900
+        ],
+        "candidate": [
+          11740000,
+          9466300,
+          10453600,
+          9914500,
+          10856400,
+          9846200,
+          10865400
+        ]
+      },
+      "medians_ns": {
+        "baseline": 10450200,
+        "candidate": 10453600
+      },
+      "relative_change": 0.00032535262483014677,
+      "absolute_change_ns": 3400,
+      "median_absolute_deviation_ns": {
+        "baseline": 726500,
+        "candidate": 539100
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_2_p0_t1",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          70600,
+          93500,
+          100900,
+          77400,
+          68500,
+          103000,
+          122800
+        ],
+        "candidate": [
+          106000,
+          79000,
+          80200,
+          94700,
+          164400,
+          90900,
+          72600
+        ]
+      },
+      "medians_ns": {
+        "baseline": 93500,
+        "candidate": 90900
+      },
+      "relative_change": -0.027807486631016044,
+      "absolute_change_ns": -2600,
+      "median_absolute_deviation_ns": {
+        "baseline": 16100,
+        "candidate": 11900
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_2_p0_t1",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          9702300,
+          10981700,
+          10565100,
+          10893700,
+          10885200,
+          9951500,
+          11179000
+        ],
+        "candidate": [
+          10969200,
+          10003100,
+          11028600,
+          9844800,
+          10648700,
+          9499500,
+          10150000
+        ]
+      },
+      "medians_ns": {
+        "baseline": 10885200,
+        "candidate": 10150000
+      },
+      "relative_change": -0.06754124866791607,
+      "absolute_change_ns": -735200,
+      "median_absolute_deviation_ns": {
+        "baseline": 293800,
+        "candidate": 498700
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_2_p1_t0",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          257400,
+          269700,
+          286500,
+          307500,
+          272700,
+          279200,
+          303100
+        ],
+        "candidate": [
+          276400,
+          274500,
+          280200,
+          264200,
+          305000,
+          266400,
+          505300
+        ]
+      },
+      "medians_ns": {
+        "baseline": 279200,
+        "candidate": 276400
+      },
+      "relative_change": -0.01002865329512894,
+      "absolute_change_ns": -2800,
+      "median_absolute_deviation_ns": {
+        "baseline": 9500,
+        "candidate": 10000
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_2_p1_t0",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          10164500,
+          11704400,
+          10240500,
+          11713800,
+          10105200,
+          10021800,
+          11334500
+        ],
+        "candidate": [
+          10851200,
+          10920700,
+          11081100,
+          9907200,
+          10971300,
+          9920800,
+          10782600
+        ]
+      },
+      "medians_ns": {
+        "baseline": 10240500,
+        "candidate": 10851200
+      },
+      "relative_change": 0.05963575997265758,
+      "absolute_change_ns": 610700,
+      "median_absolute_deviation_ns": {
+        "baseline": 218700,
+        "candidate": 120100
+      },
+      "flagged": true
+    },
+    {
+      "case": "frame_2_p1_t1",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          259500,
+          305300,
+          269800,
+          469800,
+          288000,
+          417100,
+          285600
+        ],
+        "candidate": [
+          301200,
+          491600,
+          267400,
+          266800,
+          282200,
+          283200,
+          276600
+        ]
+      },
+      "medians_ns": {
+        "baseline": 288000,
+        "candidate": 282200
+      },
+      "relative_change": -0.02013888888888889,
+      "absolute_change_ns": -5800,
+      "median_absolute_deviation_ns": {
+        "baseline": 18200,
+        "candidate": 14800
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_2_p1_t1",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          10013700,
+          10469400,
+          10128000,
+          13727200,
+          9664200,
+          9460400,
+          10979700
+        ],
+        "candidate": [
+          10600100,
+          10215200,
+          10782600,
+          10080400,
+          9854900,
+          10620400,
+          10374200
+        ]
+      },
+      "medians_ns": {
+        "baseline": 10128000,
+        "candidate": 10374200
+      },
+      "relative_change": 0.024308846761453395,
+      "absolute_change_ns": 246200,
+      "median_absolute_deviation_ns": {
+        "baseline": 463800,
+        "candidate": 246200
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_3_p0_t0",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          190300,
+          226400,
+          258900,
+          408300,
+          230100,
+          270500,
+          215800
+        ],
+        "candidate": [
+          166200,
+          200900,
+          225900,
+          306400,
+          185400,
+          190400,
+          234100
+        ]
+      },
+      "medians_ns": {
+        "baseline": 230100,
+        "candidate": 200900
+      },
+      "relative_change": -0.12690134724033028,
+      "absolute_change_ns": -29200,
+      "median_absolute_deviation_ns": {
+        "baseline": 28800,
+        "candidate": 25000
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_3_p0_t0",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          3216500,
+          3298200,
+          3291900,
+          4599100,
+          3453200,
+          3058200,
+          3833100
+        ],
+        "candidate": [
+          3071200,
+          3219800,
+          5564700,
+          3156300,
+          3311800,
+          3169900,
+          4080500
+        ]
+      },
+      "medians_ns": {
+        "baseline": 3298200,
+        "candidate": 3219800
+      },
+      "relative_change": -0.023770541507488932,
+      "absolute_change_ns": -78400,
+      "median_absolute_deviation_ns": {
+        "baseline": 155000,
+        "candidate": 92000
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_3_p0_t1",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          242800,
+          224700,
+          194400,
+          211200,
+          285000,
+          203300,
+          195200
+        ],
+        "candidate": [
+          165600,
+          459300,
+          238500,
+          175000,
+          171500,
+          218400,
+          302800
+        ]
+      },
+      "medians_ns": {
+        "baseline": 211200,
+        "candidate": 218400
+      },
+      "relative_change": 0.03409090909090909,
+      "absolute_change_ns": 7200,
+      "median_absolute_deviation_ns": {
+        "baseline": 16000,
+        "candidate": 46900
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_3_p0_t1",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          3083500,
+          3876100,
+          3114900,
+          3644900,
+          3144100,
+          3210100,
+          3792900
+        ],
+        "candidate": [
+          3366300,
+          4635700,
+          4783500,
+          3106300,
+          3266600,
+          3067100,
+          3372300
+        ]
+      },
+      "medians_ns": {
+        "baseline": 3210100,
+        "candidate": 3366300
+      },
+      "relative_change": 0.04865892028285723,
+      "absolute_change_ns": 156200,
+      "median_absolute_deviation_ns": {
+        "baseline": 126600,
+        "candidate": 260000
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_3_p1_t0",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          731700,
+          804900,
+          765700,
+          1098700,
+          756100,
+          1123600,
+          834500
+        ],
+        "candidate": [
+          834100,
+          803000,
+          840100,
+          771700,
+          775400,
+          752000,
+          997700
+        ]
+      },
+      "medians_ns": {
+        "baseline": 804900,
+        "candidate": 803000
+      },
+      "relative_change": -0.002360541682196546,
+      "absolute_change_ns": -1900,
+      "median_absolute_deviation_ns": {
+        "baseline": 48800,
+        "candidate": 31300
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_3_p1_t0",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          3738900,
+          4004500,
+          3864500,
+          4318300,
+          3565900,
+          4329600,
+          4540200
+        ],
+        "candidate": [
+          3616100,
+          3766600,
+          4420400,
+          3811100,
+          4003300,
+          3529400,
+          4052600
+        ]
+      },
+      "medians_ns": {
+        "baseline": 4004500,
+        "candidate": 3811100
+      },
+      "relative_change": -0.04829566737420402,
+      "absolute_change_ns": -193400,
+      "median_absolute_deviation_ns": {
+        "baseline": 313800,
+        "candidate": 195000
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_3_p1_t1",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          817900,
+          779900,
+          907900,
+          935400,
+          807100,
+          747500,
+          1393100
+        ],
+        "candidate": [
+          744900,
+          759300,
+          884600,
+          751500,
+          742100,
+          766800,
+          755800
+        ]
+      },
+      "medians_ns": {
+        "baseline": 817900,
+        "candidate": 755800
+      },
+      "relative_change": -0.07592615234136202,
+      "absolute_change_ns": -62100,
+      "median_absolute_deviation_ns": {
+        "baseline": 70400,
+        "candidate": 10900
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_3_p1_t1",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          3649100,
+          3921200,
+          4211900,
+          4651900,
+          4309800,
+          3790300,
+          4218800
+        ],
+        "candidate": [
+          3689900,
+          3964900,
+          4440500,
+          4127700,
+          4036000,
+          4296400,
+          4003800
+        ]
+      },
+      "medians_ns": {
+        "baseline": 4211900,
+        "candidate": 4036000
+      },
+      "relative_change": -0.041762624943612145,
+      "absolute_change_ns": -175900,
+      "median_absolute_deviation_ns": {
+        "baseline": 290700,
+        "candidate": 91700
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_4_p0_t0",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          57600,
+          248200,
+          62100,
+          66200,
+          59100,
+          79500,
+          67900
+        ],
+        "candidate": [
+          65500,
+          58800,
+          68200,
+          59100,
+          62500,
+          59700,
+          53500
+        ]
+      },
+      "medians_ns": {
+        "baseline": 66200,
+        "candidate": 59700
+      },
+      "relative_change": -0.09818731117824774,
+      "absolute_change_ns": -6500,
+      "median_absolute_deviation_ns": {
+        "baseline": 7100,
+        "candidate": 2800
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_4_p0_t0",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          2395100,
+          2885700,
+          2417800,
+          2639200,
+          2414100,
+          2925800,
+          2768600
+        ],
+        "candidate": [
+          2421700,
+          2455900,
+          2673000,
+          2699300,
+          2601700,
+          3327100,
+          2413300
+        ]
+      },
+      "medians_ns": {
+        "baseline": 2639200,
+        "candidate": 2601700
+      },
+      "relative_change": -0.014208851167020309,
+      "absolute_change_ns": -37500,
+      "median_absolute_deviation_ns": {
+        "baseline": 225100,
+        "candidate": 145800
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_4_p0_t1",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          44000,
+          66800,
+          56700,
+          70300,
+          52300,
+          229300,
+          60900
+        ],
+        "candidate": [
+          61400,
+          53700,
+          55300,
+          56000,
+          57300,
+          52700,
+          65100
+        ]
+      },
+      "medians_ns": {
+        "baseline": 60900,
+        "candidate": 56000
+      },
+      "relative_change": -0.08045977011494253,
+      "absolute_change_ns": -4900,
+      "median_absolute_deviation_ns": {
+        "baseline": 8600,
+        "candidate": 2300
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_4_p0_t1",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          1938800,
+          2168800,
+          2006800,
+          3038000,
+          2035900,
+          2327100,
+          2213900
+        ],
+        "candidate": [
+          2332500,
+          2381800,
+          4690400,
+          1973200,
+          2158500,
+          1954800,
+          1980900
+        ]
+      },
+      "medians_ns": {
+        "baseline": 2168800,
+        "candidate": 2158500
+      },
+      "relative_change": -0.004749170047952785,
+      "absolute_change_ns": -10300,
+      "median_absolute_deviation_ns": {
+        "baseline": 158300,
+        "candidate": 185300
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_4_p1_t0",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          195200,
+          363300,
+          183300,
+          220000,
+          226700,
+          196400,
+          216900
+        ],
+        "candidate": [
+          206900,
+          195900,
+          223100,
+          199800,
+          218400,
+          183000,
+          186100
+        ]
+      },
+      "medians_ns": {
+        "baseline": 216900,
+        "candidate": 199800
+      },
+      "relative_change": -0.07883817427385892,
+      "absolute_change_ns": -17100,
+      "median_absolute_deviation_ns": {
+        "baseline": 20500,
+        "candidate": 13700
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_4_p1_t0",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          2751500,
+          2873700,
+          2920600,
+          2977900,
+          2493400,
+          2599100,
+          2746900
+        ],
+        "candidate": [
+          2836600,
+          3032800,
+          2850100,
+          2447300,
+          2630100,
+          2418000,
+          2779600
+        ]
+      },
+      "medians_ns": {
+        "baseline": 2751500,
+        "candidate": 2779600
+      },
+      "relative_change": 0.010212611302925678,
+      "absolute_change_ns": 28100,
+      "median_absolute_deviation_ns": {
+        "baseline": 152400,
+        "candidate": 149500
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_4_p1_t1",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          196600,
+          227500,
+          194600,
+          219000,
+          192300,
+          209800,
+          215000
+        ],
+        "candidate": [
+          213800,
+          194400,
+          243000,
+          193600,
+          195900,
+          192400,
+          190600
+        ]
+      },
+      "medians_ns": {
+        "baseline": 209800,
+        "candidate": 194400
+      },
+      "relative_change": -0.07340324118207817,
+      "absolute_change_ns": -15400,
+      "median_absolute_deviation_ns": {
+        "baseline": 13200,
+        "candidate": 2000
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_4_p1_t1",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          2464600,
+          2295400,
+          2187000,
+          2388300,
+          2302300,
+          2184400,
+          2458600
+        ],
+        "candidate": [
+          2269800,
+          2117900,
+          2515800,
+          2324900,
+          2591400,
+          2198400,
+          2412300
+        ]
+      },
+      "medians_ns": {
+        "baseline": 2302300,
+        "candidate": 2324900
+      },
+      "relative_change": 0.009816270685835904,
+      "absolute_change_ns": 22600,
+      "median_absolute_deviation_ns": {
+        "baseline": 115300,
+        "candidate": 126500
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_5_p0_t0",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          3221500,
+          4237900,
+          3019100,
+          2329600,
+          2463100,
+          2835000,
+          2406700
+        ],
+        "candidate": [
+          5533600,
+          2661600,
+          4140400,
+          2627200,
+          2426600,
+          3842500,
+          2759400
+        ]
+      },
+      "medians_ns": {
+        "baseline": 2835000,
+        "candidate": 2759400
+      },
+      "relative_change": -0.02666666666666667,
+      "absolute_change_ns": -75600,
+      "median_absolute_deviation_ns": {
+        "baseline": 386500,
+        "candidate": 332800
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_5_p0_t0",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          28776600,
+          31858200,
+          28787600,
+          26449300,
+          27494700,
+          28962200,
+          26577500
+        ],
+        "candidate": [
+          34707600,
+          28584700,
+          32369700,
+          27628800,
+          32450400,
+          29275500,
+          29669200
+        ]
+      },
+      "medians_ns": {
+        "baseline": 28776600,
+        "candidate": 29669200
+      },
+      "relative_change": 0.031018257890091255,
+      "absolute_change_ns": 892600,
+      "median_absolute_deviation_ns": {
+        "baseline": 1281900,
+        "candidate": 2040400
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_5_p0_t1",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          2656400,
+          2516100,
+          2453100,
+          2434200,
+          2911900,
+          2603300,
+          2453200
+        ],
+        "candidate": [
+          2709200,
+          2530900,
+          2709400,
+          2818500,
+          2398300,
+          2381800,
+          2619500
+        ]
+      },
+      "medians_ns": {
+        "baseline": 2516100,
+        "candidate": 2619500
+      },
+      "relative_change": 0.0410953459719407,
+      "absolute_change_ns": 103400,
+      "median_absolute_deviation_ns": {
+        "baseline": 81900,
+        "candidate": 89900
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_5_p0_t1",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          29613600,
+          33234500,
+          28125800,
+          26205200,
+          33380900,
+          27239300,
+          26119100
+        ],
+        "candidate": [
+          28046700,
+          26301200,
+          30967500,
+          30988300,
+          25732400,
+          33906700,
+          27519800
+        ]
+      },
+      "medians_ns": {
+        "baseline": 28125800,
+        "candidate": 28046700
+      },
+      "relative_change": -0.0028123644483001374,
+      "absolute_change_ns": -79100,
+      "median_absolute_deviation_ns": {
+        "baseline": 1920600,
+        "candidate": 2314300
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_5_p1_t0",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          13466900,
+          12556100,
+          12867400,
+          12842700,
+          12330200,
+          13532400,
+          12694300
+        ],
+        "candidate": [
+          12216300,
+          13472200,
+          13268800,
+          15918100,
+          11796200,
+          13456400,
+          12247900
+        ]
+      },
+      "medians_ns": {
+        "baseline": 12842700,
+        "candidate": 13268800
+      },
+      "relative_change": 0.03317838149298823,
+      "absolute_change_ns": 426100,
+      "median_absolute_deviation_ns": {
+        "baseline": 286600,
+        "candidate": 1020900
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_5_p1_t0",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          37275400,
+          38485700,
+          36790900,
+          39854300,
+          40717000,
+          40107100,
+          36278800
+        ],
+        "candidate": [
+          35966500,
+          39186700,
+          38325800,
+          49034200,
+          36637000,
+          39754600,
+          37212500
+        ]
+      },
+      "medians_ns": {
+        "baseline": 38485700,
+        "candidate": 38325800
+      },
+      "relative_change": -0.004154789960946533,
+      "absolute_change_ns": -159900,
+      "median_absolute_deviation_ns": {
+        "baseline": 1621400,
+        "candidate": 1428800
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_5_p1_t1",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          12270400,
+          13613900,
+          12337800,
+          13589900,
+          12583100,
+          12218200,
+          12650900
+        ],
+        "candidate": [
+          12165400,
+          13556900,
+          13535600,
+          12589700,
+          12993600,
+          12060800,
+          11986200
+        ]
+      },
+      "medians_ns": {
+        "baseline": 12583100,
+        "candidate": 12589700
+      },
+      "relative_change": 0.0005245130373278445,
+      "absolute_change_ns": 6600,
+      "median_absolute_deviation_ns": {
+        "baseline": 312700,
+        "candidate": 528900
+      },
+      "flagged": false
+    },
+    {
+      "case": "frame_5_p1_t1",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          36659600,
+          42865300,
+          38486700,
+          37995000,
+          37033200,
+          37723100,
+          42946200
+        ],
+        "candidate": [
+          37262400,
+          40649900,
+          45306000,
+          39133800,
+          36478400,
+          35637400,
+          39635700
+        ]
+      },
+      "medians_ns": {
+        "baseline": 37995000,
+        "candidate": 39133800
+      },
+      "relative_change": 0.02997236478484011,
+      "absolute_change_ns": 1138800,
+      "median_absolute_deviation_ns": {
+        "baseline": 961800,
+        "candidate": 1871400
+      },
+      "flagged": false
+    },
+    {
+      "case": "sparse_1",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          247700,
+          266900,
+          530400,
+          273600,
+          260900,
+          296600,
+          256000
+        ],
+        "candidate": [
+          285500,
+          257100,
+          238300,
+          318200,
+          249100,
+          388600,
+          256700
+        ]
+      },
+      "medians_ns": {
+        "baseline": 266900,
+        "candidate": 257100
+      },
+      "relative_change": -0.036717871862120645,
+      "absolute_change_ns": -9800,
+      "median_absolute_deviation_ns": {
+        "baseline": 10900,
+        "candidate": 18800
+      },
+      "flagged": false
+    },
+    {
+      "case": "sparse_1",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          9873200,
+          8203300,
+          8755200,
+          8096200,
+          9670000,
+          9236000,
+          7799200
+        ],
+        "candidate": [
+          8080000,
+          8692500,
+          7978200,
+          8757900,
+          8967800,
+          9324600,
+          8440300
+        ]
+      },
+      "medians_ns": {
+        "baseline": 8755200,
+        "candidate": 8692500
+      },
+      "relative_change": -0.007161458333333333,
+      "absolute_change_ns": -62700,
+      "median_absolute_deviation_ns": {
+        "baseline": 659000,
+        "candidate": 275300
+      },
+      "flagged": false
+    },
+    {
+      "case": "sparse_2",
+      "stage": "dc",
+      "nanoseconds": {
+        "baseline": [
+          255900,
+          249100,
+          384300,
+          246300,
+          281200,
+          299700,
+          256100
+        ],
+        "candidate": [
+          255600,
+          261400,
+          261100,
+          306800,
+          272000,
+          292000,
+          265700
+        ]
+      },
+      "medians_ns": {
+        "baseline": 256100,
+        "candidate": 265700
+      },
+      "relative_change": 0.037485357282311595,
+      "absolute_change_ns": 9600,
+      "median_absolute_deviation_ns": {
+        "baseline": 9800,
+        "candidate": 6300
+      },
+      "flagged": false
+    },
+    {
+      "case": "sparse_2",
+      "stage": "serializer",
+      "nanoseconds": {
+        "baseline": [
+          8770000,
+          8622800,
+          8389600,
+          8564200,
+          8601900,
+          9844900,
+          8113200
+        ],
+        "candidate": [
+          8504400,
+          8268400,
+          8101900,
+          9079100,
+          7911200,
+          10434000,
+          8189800
+        ]
+      },
+      "medians_ns": {
+        "baseline": 8601900,
+        "candidate": 8268400
+      },
+      "relative_change": -0.038770504190934564,
+      "absolute_change_ns": -333500,
+      "median_absolute_deviation_ns": {
+        "baseline": 168100,
+        "candidate": 236000
+      },
+      "flagged": false
+    },
+    {
+      "case": "workflow_e10_p0",
+      "stage": "workflow",
+      "nanoseconds": {
+        "baseline": [
+          143963800,
+          125996700,
+          145130200,
+          129452600,
+          136451800,
+          128726400,
+          129660500
+        ],
+        "candidate": [
+          149680700,
+          130028500,
+          129683500,
+          129919500,
+          143679800,
+          130294700,
+          129546200
+        ]
+      },
+      "medians_ns": {
+        "baseline": 129660500,
+        "candidate": 130028500
+      },
+      "relative_change": 0.0028381812502651154,
+      "absolute_change_ns": 368000,
+      "median_absolute_deviation_ns": {
+        "baseline": 3663800,
+        "candidate": 345000
+      },
+      "flagged": false
+    },
+    {
+      "case": "workflow_e10_p1",
+      "stage": "workflow",
+      "nanoseconds": {
+        "baseline": [
+          133253700,
+          135955200,
+          133352400,
+          125866400,
+          132195500,
+          124844600,
+          127971300
+        ],
+        "candidate": [
+          132403300,
+          141744000,
+          125289900,
+          128592800,
+          131825700,
+          129967200,
+          140951000
+        ]
+      },
+      "medians_ns": {
+        "baseline": 132195500,
+        "candidate": 131825700
+      },
+      "relative_change": -0.002797372073935951,
+      "absolute_change_ns": -369800,
+      "median_absolute_deviation_ns": {
+        "baseline": 3759700,
+        "candidate": 3232900
+      },
+      "flagged": false
+    },
+    {
+      "case": "workflow_e1_p0",
+      "stage": "workflow",
+      "nanoseconds": {
+        "baseline": [
+          42964100,
+          43742000,
+          45717900,
+          44015300,
+          48109500,
+          49330600,
+          42660800
+        ],
+        "candidate": [
+          47710700,
+          47099200,
+          45942200,
+          48592200,
+          42330300,
+          50184600,
+          43350000
+        ]
+      },
+      "medians_ns": {
+        "baseline": 44015300,
+        "candidate": 47099200
+      },
+      "relative_change": 0.07006427310503394,
+      "absolute_change_ns": 3083900,
+      "median_absolute_deviation_ns": {
+        "baseline": 1354500,
+        "candidate": 1493000
+      },
+      "flagged": true
+    },
+    {
+      "case": "workflow_e1_p1",
+      "stage": "workflow",
+      "nanoseconds": {
+        "baseline": [
+          42947200,
+          43761800,
+          48793100,
+          48200100,
+          47878400,
+          44615900,
+          42016100
+        ],
+        "candidate": [
+          51300200,
+          45200900,
+          43796100,
+          42992500,
+          43473900,
+          45672800,
+          43357400
+        ]
+      },
+      "medians_ns": {
+        "baseline": 44615900,
+        "candidate": 43796100
+      },
+      "relative_change": -0.01837461532771949,
+      "absolute_change_ns": -819800,
+      "median_absolute_deviation_ns": {
+        "baseline": 2599800,
+        "candidate": 803600
+      },
+      "flagged": false
+    },
+    {
+      "case": "workflow_e4_p0",
+      "stage": "workflow",
+      "nanoseconds": {
+        "baseline": [
+          47921300,
+          42765600,
+          47514700,
+          43423800,
+          44410300,
+          42574300,
+          43179400
+        ],
+        "candidate": [
+          53058800,
+          58538200,
+          43119100,
+          42572600,
+          43627500,
+          44149400,
+          42756000
+        ]
+      },
+      "medians_ns": {
+        "baseline": 43423800,
+        "candidate": 43627500
+      },
+      "relative_change": 0.0046909759164329235,
+      "absolute_change_ns": 203700,
+      "median_absolute_deviation_ns": {
+        "baseline": 849500,
+        "candidate": 871500
+      },
+      "flagged": false
+    },
+    {
+      "case": "workflow_e4_p1",
+      "stage": "workflow",
+      "nanoseconds": {
+        "baseline": [
+          46744500,
+          42822000,
+          44699200,
+          43884600,
+          44130200,
+          42999800,
+          43034700
+        ],
+        "candidate": [
+          46188900,
+          44442200,
+          42941800,
+          44704100,
+          46101400,
+          44298300,
+          42739000
+        ]
+      },
+      "medians_ns": {
+        "baseline": 43884600,
+        "candidate": 44442200
+      },
+      "relative_change": 0.012706051781262676,
+      "absolute_change_ns": 557600,
+      "median_absolute_deviation_ns": {
+        "baseline": 849900,
+        "candidate": 1500400
+      },
+      "flagged": false
+    },
+    {
+      "case": "workflow_e7_p0",
+      "stage": "workflow",
+      "nanoseconds": {
+        "baseline": [
+          92028100,
+          80814300,
+          82366300,
+          78102200,
+          80556300,
+          78945300,
+          80306900
+        ],
+        "candidate": [
+          82060000,
+          84279000,
+          80496500,
+          79290700,
+          85059300,
+          86262500,
+          78345000
+        ]
+      },
+      "medians_ns": {
+        "baseline": 80556300,
+        "candidate": 82060000
+      },
+      "relative_change": 0.01866644818592711,
+      "absolute_change_ns": 1503700,
+      "median_absolute_deviation_ns": {
+        "baseline": 1611000,
+        "candidate": 2769300
+      },
+      "flagged": false
+    },
+    {
+      "case": "workflow_e7_p1",
+      "stage": "workflow",
+      "nanoseconds": {
+        "baseline": [
+          84976400,
+          81024700,
+          83986100,
+          80132200,
+          80356000,
+          80090400,
+          78719900
+        ],
+        "candidate": [
+          84268600,
+          90212400,
+          80096300,
+          77878000,
+          85602400,
+          84897300,
+          87681800
+        ]
+      },
+      "medians_ns": {
+        "baseline": 80356000,
+        "candidate": 84897300
+      },
+      "relative_change": 0.05651475932102146,
+      "absolute_change_ns": 4541300,
+      "median_absolute_deviation_ns": {
+        "baseline": 668700,
+        "candidate": 2784500
+      },
+      "flagged": true
+    },
+    {
+      "case": "workflow_e8_p0",
+      "stage": "workflow",
+      "nanoseconds": {
+        "baseline": [
+          111882100,
+          114731500,
+          101260700,
+          103949100,
+          102697000,
+          100986200,
+          117357100
+        ],
+        "candidate": [
+          103094600,
+          106887100,
+          102189000,
+          102618000,
+          105766200,
+          112539900,
+          110562300
+        ]
+      },
+      "medians_ns": {
+        "baseline": 103949100,
+        "candidate": 105766200
+      },
+      "relative_change": 0.017480670828318858,
+      "absolute_change_ns": 1817100,
+      "median_absolute_deviation_ns": {
+        "baseline": 2962900,
+        "candidate": 3148200
+      },
+      "flagged": false
+    },
+    {
+      "case": "workflow_e8_p1",
+      "stage": "workflow",
+      "nanoseconds": {
+        "baseline": [
+          101215300,
+          113932100,
+          101623300,
+          115029400,
+          101985000,
+          108704400,
+          114541500
+        ],
+        "candidate": [
+          102047900,
+          109960100,
+          120549500,
+          105967400,
+          102451600,
+          117539100,
+          109928600
+        ]
+      },
+      "medians_ns": {
+        "baseline": 108704400,
+        "candidate": 109928600
+      },
+      "relative_change": 0.011261733655675392,
+      "absolute_change_ns": 1224200,
+      "median_absolute_deviation_ns": {
+        "baseline": 6325000,
+        "candidate": 7477000
+      },
+      "flagged": false
+    },
+    {
+      "case": "workflow_e9_p0",
+      "stage": "workflow",
+      "nanoseconds": {
+        "baseline": [
+          117667900,
+          124231500,
+          119634900,
+          131064400,
+          117522000,
+          134384000,
+          122907800
+        ],
+        "candidate": [
+          117459800,
+          119896900,
+          131828200,
+          141719500,
+          120240500,
+          128074400,
+          120925300
+        ]
+      },
+      "medians_ns": {
+        "baseline": 122907800,
+        "candidate": 120925300
+      },
+      "relative_change": -0.01612997710478912,
+      "absolute_change_ns": -1982500,
+      "median_absolute_deviation_ns": {
+        "baseline": 5239900,
+        "candidate": 3465500
+      },
+      "flagged": false
+    },
+    {
+      "case": "workflow_e9_p1",
+      "stage": "workflow",
+      "nanoseconds": {
+        "baseline": [
+          122062700,
+          120471700,
+          118049500,
+          119842100,
+          128272900,
+          126812000,
+          117121700
+        ],
+        "candidate": [
+          122629600,
+          122517500,
+          120924700,
+          125974800,
+          120869700,
+          122223800,
+          123527600
+        ]
+      },
+      "medians_ns": {
+        "baseline": 120471700,
+        "candidate": 122517500
+      },
+      "relative_change": 0.016981581566459177,
+      "absolute_change_ns": 2045800,
+      "median_absolute_deviation_ns": {
+        "baseline": 2422200,
+        "candidate": 1010100
+      },
+      "flagged": false
+    },
+    {
+      "case": "workflow_photo",
+      "stage": "workflow",
+      "nanoseconds": {
+        "baseline": [
+          12827454500,
+          12854925000,
+          12886480600,
+          12739431200,
+          12856616200,
+          12764426600,
+          12846867300
+        ],
+        "candidate": [
+          12992026500,
+          13060335900,
+          12908122200,
+          12953330100,
+          12961180500,
+          12999873600,
+          12922343900
+        ]
+      },
+      "medians_ns": {
+        "baseline": 12846867300,
+        "candidate": 12961180500
+      },
+      "relative_change": 0.008898138147655655,
+      "absolute_change_ns": 114313200,
+      "median_absolute_deviation_ns": {
+        "baseline": 19412800,
+        "candidate": 38693100
+      },
+      "flagged": false
+    },
+    {
+      "case": "workflow_target",
+      "stage": "workflow",
+      "nanoseconds": {
+        "baseline": [
+          79688100,
+          97620600,
+          80419700,
+          84615200,
+          76632200,
+          79589500,
+          88663900
+        ],
+        "candidate": [
+          80060500,
+          85263000,
+          78677000,
+          79813000,
+          81127700,
+          77000400,
+          94375600
+        ]
+      },
+      "medians_ns": {
+        "baseline": 80419700,
+        "candidate": 80060500
+      },
+      "relative_change": -0.004466567271452144,
+      "absolute_change_ns": -359200,
+      "median_absolute_deviation_ns": {
+        "baseline": 3787500,
+        "candidate": 1383500
+      },
+      "flagged": false
+    }
+  ],
+  "flagged": [
+    "entropy_0_p0_e1/serializer",
+    "entropy_0_p0_e2/serializer",
+    "entropy_0_p0_e3/serializer",
+    "entropy_0_p1_e1/serializer",
+    "entropy_0_p1_e2/serializer",
+    "entropy_1_p0_e3/serializer",
+    "entropy_1_p1_e1/serializer",
+    "entropy_1_p1_e2/serializer",
+    "entropy_1_p1_e3/serializer",
+    "frame_0_p0_t1/serializer",
+    "frame_0_p1_t0/serializer",
+    "frame_0_p1_t1/serializer",
+    "frame_1_p0_t0/serializer",
+    "frame_1_p0_t1/serializer",
+    "frame_1_p1_t0/serializer",
+    "frame_1_p1_t1/serializer",
+    "frame_2_p1_t0/serializer",
+    "workflow_e1_p0/workflow",
+    "workflow_e7_p1/workflow"
+  ],
+  "binary_sha256": {
+    "baseline": "a8546d0cadb381a0927814e37b4c78df48222bce42e92bd962ab13753e6dafa4",
+    "candidate": "37d57365919a05b65ed3c2e7fad4b74cc60061958a1916b24a82d26dc8903c3f"
+  },
+  "capture_source_sha256": "3a7a48616a51e1c70ba2f535a23eb4cf7bbf5e594856afc77768dcb54685a01e"
+}

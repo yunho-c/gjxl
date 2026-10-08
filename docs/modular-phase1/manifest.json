@@ -1,0 +1,2391 @@
+{
+  "schema": 1,
+  "baseline_revision": "9ca5da9500a18e7843ddbb7a7285784588a82cde",
+  "baseline_runtime_revision": "67caa6d89830f6a13c057923e34f80753a161e9d",
+  "candidate_base_revision": "9ca5da9500a18e7843ddbb7a7285784588a82cde",
+  "candidate_is_uncommitted": true,
+  "baseline_clean_ignoring_submodule_junction": true,
+  "pinned_revision": "e8ff09762481785938d8e4e01333ed3917571161",
+  "pinned_clean": true,
+  "host": {
+    "platform": "Windows-11-10.0.28000-SP0",
+    "processor": "ARMv8 (64-bit) Family 8 Model 2 Revision 201, Qualcomm Technologies Inc",
+    "cpu": "Snapdragon X2 Elite X2E84100, 12 logical processors",
+    "execution": "x64 binaries on Windows ARM64 emulation"
+  },
+  "cmake_settings": {
+    "CMAKE_BUILD_TYPE": "Release",
+    "CMAKE_CXX_COMPILER": "C:/Users/hocbu/GitHub/gjxl/build/modular-phase1/toolchain/VC/Tools/MSVC/14.37.32822/bin/Hostx64/x64/cl.exe",
+    "CMAKE_CXX_FLAGS": "/DWIN32 /D_WINDOWS /EHsc",
+    "CMAKE_CXX_FLAGS_RELEASE": "/O2 /Ob2 /DNDEBUG",
+    "CMAKE_CXX_STANDARD": "20",
+    "CMAKE_C_COMPILER": "C:/Users/hocbu/GitHub/gjxl/build/modular-phase1/toolchain/VC/Tools/MSVC/14.37.32822/bin/Hostx64/x64/cl.exe",
+    "CMAKE_C_FLAGS": "/DWIN32 /D_WINDOWS",
+    "CMAKE_C_FLAGS_RELEASE": "/O2 /Ob2 /DNDEBUG",
+    "GJXL_BUILD_TESTS": "ON",
+    "GJXL_DC_ORACLE_BUILD": "C:/Users/hocbu/GitHub/gjxl/build/modular-phase1/pinned-libjxl-x64",
+    "GJXL_ENABLE_CUDA": "OFF",
+    "GJXL_ENABLE_LIBJXL_REFERENCE": "ON",
+    "GJXL_ENABLE_METAL": "OFF",
+    "CMAKE_GENERATOR": "Ninja"
+  },
+  "compilers": {
+    "native": {
+      "path": "C:\\Users\\hocbu\\GitHub\\gjxl\\build\\modular-phase1\\toolchain\\VC\\Tools\\MSVC\\14.37.32822\\bin\\Hostx64\\x64\\cl.exe",
+      "sha256": "37661d8479b56cd540d7462725db7a191b8b8043a7ebcd3ace6453f7b00167eb"
+    },
+    "reference": {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\Llvm\\x64\\bin\\clang-cl.exe",
+      "sha256": "93faf6d0a9e66ed1629eb1c9ca638a070aa1839b9490a87ff89b9cb39eeae36b"
+    }
+  },
+  "baseline_sources": {
+    "cmake/BuildPinnedDjxl.cmake": "7f752e81668dd3ed3de8123d7cba3773f1a69af6ddc9b004d718264d3ca61654",
+    "cmake/CheckStorageToolchain.cmake": "8bd908ad89ca298e1f4fb16e74ff160ed0b3d85aa1582efc9f8091c1cf761de7",
+    "cmake/InstalledHeaders.cmake": "6a2d420e32568897d1d4093ad3f00b9a934689fc88f66a28c075cdaf26dacbc7",
+    "cmake/RunCodestreamCliTest.cmake": "d546d093d61c9ec2a3558b38bdab5a85569075fd19ccf57fc90f1913454de0fe",
+    "cmake/test_installed_consumer.cmake": "cd1f2a33876552c2ba91d5b848f11c401004c1e62b68461fb5f7e35bd5f2bb6b",
+    "CMakeLists.txt": "c1e124a5dc99feba6f16b5233652f2a167817a7499cca6621903f60af72b140b",
+    "src/c_api/gjxl.cpp": "0c7dbeadc18e566f0b16cb760dd91d46443c3a4e126996b27f42b6273853c53f",
+    "src/c_api/image_conversion.cpp": "07fb765dd2fb33b3a42069e03979e56a82dd15dfaffa7d404ba6cddb6927d5c7",
+    "src/c_api/image_conversion.h": "ab95b8833ba9d7ff0ac12472e1d22f5281269b649c6f69ac590a34b4731e933e",
+    "src/codec/ac_strategy.cpp": "0d40666f752bfc4615c38a025d0f7d081ea5ac3aa9fac9968ae02987e75a2def",
+    "src/codec/ac_strategy.h": "80d10863b94c2717b2480593e7b72f350317ff01be74c56832ac8eac41f61e65",
+    "src/codec/ac_strategy_search_internal.h": "d56b8414546a892254ca3d5e40711add42fb53bc15991b4112c54b4826711ba7",
+    "src/codec/ac_strategy_search_policy.h": "51f47690d514c7427d9e42d95aabddfb21b1d0fc9212d6dd52118f437762615e",
+    "src/codec/ac_strategy_storage_plan.cpp": "15c2fb75f515a02412e8e2ceda892c44b2a1b3c24fba63db0f139674ecf705f7",
+    "src/codec/ac_strategy_storage_plan.h": "dc8c8af1ade13bbd9b51a366318f6543b475d11d5d5c3f09e5df65cbccdb3753",
+    "src/codec/adaptive_quantization.cpp": "3a60709cd5412f43d39d02f2b94b89935bf793c084331912cfb4f36df2d84fe7",
+    "src/codec/adaptive_quantization.h": "00f5afa962dbc8778918f802ec0f061534507caaa1f4c1a1d9acb5cf8007958a",
+    "src/codec/adaptive_quantization_internal.h": "03f04d9411daf2771bf8594a801f2284aae766099850d660ab03a32840d1e140",
+    "src/codec/adaptive_quantization_storage_plan.cpp": "a53f59286a2304e39bedb6eb5f603633e5bcbb613303bd63ec271d4bff45be5d",
+    "src/codec/adaptive_quantization_storage_plan.h": "7d6f1b9ddba85c43fd7488a306e08bcc4a1897d518a7dadcfb6b6d4d722b9c79",
+    "src/codec/butteraugli.cpp": "5395b16424bc40e7b6c9ffdad18999e0d1e8c59c6a00d4e2c325da22e901c482",
+    "src/codec/butteraugli.h": "53579dca83c8a9f03a2cbd0d92ebe082d2808b9cb08035f69bf5460aa60f4baa",
+    "src/codec/butteraugli_distance_internal.cpp": "1230506f5a3232ceff417cdb66a349f63f77242b96b27db79c5f2bf6563013c9",
+    "src/codec/butteraugli_distance_internal.h": "2ac5f7c8beb5567bd3cabe286ac4da64719b0c99a657fc76ffa68a2fcca5ba90",
+    "src/codec/butteraugli_internal.cpp": "fb807a3a1f6c42320b4fce7524272b4954c38e7a54bd6983d7d575ba17d57681",
+    "src/codec/butteraugli_internal.h": "33bec7e060e8d9b88ab8205b9559532ac3708f4e4771b750c55c54b52adcd561",
+    "src/codec/chroma_from_luma.cpp": "72b101d4d86ec7d588136ecb0da7d5f9591d3292e123f54bf20ff899d4252b15",
+    "src/codec/chroma_from_luma.h": "0c0781762bf10873c88f160ec6df9c4058478bc72e2bac408601f4f3582ac088",
+    "src/codec/chroma_from_luma_internal.h": "48d11bae334914bc289f42d78be7937a874a5e5ea210f689ed1898cfaab429f6",
+    "src/codec/codestream.cpp": "a9746a2dfbe057e5cff2a004e300e7e7ce4b3d061c5ccb8766bf6eda2776501e",
+    "src/codec/codestream.h": "9a7de6cd8058871bf3d9cf792865bc9c6f221a61e2a31f03c28d6dc9b1c054c8",
+    "src/codec/coefficient_order_population_internal.h": "c7b6237b81d501593db4e3e08b0531fcc36fe82b567e961fd632c775e40888a8",
+    "src/codec/color_transform.cpp": "e62cf4ca1fb6be395c20cc5c2939b52b2ef948af25439fb6eeabcc21070cad59",
+    "src/codec/color_transform.h": "3c7f490f6c0e009270c3b923c842dee7a79cda16a76f9e34f6972eb7b5ac8c4a",
+    "src/codec/color_transform_internal.h": "f0fbf7265861514128ff6f70d3cf8cc85c0bb365811b9e3ff84340a7eca362c2",
+    "src/codec/convolution.cpp": "032d60407e0779298abfa921e1564024323c4e820f9e6872ca8687bddfb6c8ea",
+    "src/codec/convolution.h": "ba178e054f7a7513514731b60dfa69fbdf6cc478c82a1781620845c5829d5319",
+    "src/codec/dc_conversion.cpp": "2735b06aff59175ea2be150986ac7d550fa73730160a1fcde5fb481d8ae53b9e",
+    "src/codec/dc_conversion.h": "c3fce951c4dd74c4167a427d74413f94ceabe1835043a9ffff4d9226f2b863ab",
+    "src/codec/dc_prediction.h": "9ba1cc3e7ac4beb280af63796621c511ac262e199c06a9395a3763dc88fe9ef9",
+    "src/codec/dc_quantization.cpp": "ab994a77b3d3caf5b6bd6603a9618693b0cad18c7fbe562f42eb977fdef7aaf1",
+    "src/codec/dc_quantization.h": "87a66324e7d2c429e66b35aa401f63a2c02f60d6b74c9592d6c9a9319cf21f3b",
+    "src/codec/dc_smoothing.cpp": "704dac6d1663aae4aa1dedcea5f79a7388b206c638b9ea5537afb62e222ff781",
+    "src/codec/dc_smoothing.h": "82ee031b7f38d24d29c2582d867d3eb99aff16a179523047fff02ed9cdfae674",
+    "src/codec/dct.cpp": "4e24d6ad2179d6609346fa23220a903961d6cbaeecc2a256c7923b91b1f77429",
+    "src/codec/dct.h": "424b0272739657dc7a01d6e29ae3f6bce327f7f5570de491b0f29ac8a8b4c087",
+    "src/codec/dct_internal.h": "9460e2965a7db3b5347a2dad0bea7a7854319067dca364215b346b026ce4ff0d",
+    "src/codec/epf.cpp": "07d4dd050ac4b791feaa28d282bac2f92d7e93d11c58cb3f9b0066fe58bca38a",
+    "src/codec/epf.h": "59ba022a50c11eea0e808581cae97d8a66d9c3cd83cd2affd4014daf891248ed",
+    "src/codec/frontend_dispatch_internal.h": "546cbb29deadd176e997a1d2bcc7ff8275f50f38c4a370bfbab8ae1792e81018",
+    "src/codec/frontend_storage_plan.cpp": "9970ca2ebd7b36cef4b961baf7f1c101d9ed6e004ab9615e235caa5f259717db",
+    "src/codec/frontend_storage_plan.h": "c5e0e4bdbdbeaf50e1bf35bff194d581202136b4f4a7f756a7083921e69a3375",
+    "src/codec/gaborish.cpp": "c6518de853896e0156cd64804314111b18958cae5c96447e9aa778638bd453b6",
+    "src/codec/gaborish.h": "5eb9b2e9a4b1750cfda6392a076a7d2c855044ae7b2864e47169f25e88a430a0",
+    "src/codec/gaborish_internal.h": "4b3e915db50cf54c40361776e50389527a5464334a02077b8ed69d18b59eb3b0",
+    "src/codec/host_metadata_internal.h": "9a470ddbaa17d3814346963838bf2ba9e99058fd918503e0b7862817e9838186",
+    "src/codec/loop_filter.cpp": "fd0b9e10ef97c79915ae5467f6f00ef946dbbee0f9f5be9b69bd4a79d1e425a7",
+    "src/codec/loop_filter.h": "b771743116d1d9a11470078e7bc4c7364e93c4ca0e42aea6e60ec3288df206cb",
+    "src/codec/maximum_error.cpp": "730ca02f4672bd0da627d21cff50063e730b464e548f8b0df0a40c15ce5728a1",
+    "src/codec/maximum_error.h": "aed8a5af4da68c1c3f14b13249a05407a3af7de9c03ad782eb35100fc2195cc8",
+    "src/codec/perceptual_storage_plan.cpp": "516993529f8fadc4b32533325ace73544bbc56b09ccf3f73c831fa1b34531896",
+    "src/codec/perceptual_storage_plan.h": "c83c42592fac46601b8bd59a41122b4694533e4c7dfb7668e3ca56dcd7f96490",
+    "src/codec/prepared_coefficients_internal.h": "4088f4830707b2e4a1c4ab58a6e84680767a35b104a4a532892ab5dfefa1ccc2",
+    "src/codec/quantization.cpp": "fc2b413eaf5e6f9d826e9cbb59b94fdc0f943205d8ce2f7876347e2900287f17",
+    "src/codec/quantization.h": "36ae3508f528ccbff74a6aa4f0e7337ae79e016f54c04510144ddc879fc1d4c3",
+    "src/codec/quantization_pipeline.cpp": "8769e93d16cde640247d9728acc3157846ac0755481dc32bc53485c9e4cc708a",
+    "src/codec/quantization_pipeline.h": "09cd00f536e472f15f9d01cf1a4847cb2145a37410aecb5894f514345baeca93",
+    "src/codec/quantization_pipeline_internal.h": "9aff7b8601b1a95195038168f7ac4ff8537c37311b7f569420c2ca2a26dc23e3",
+    "src/codec/quantization_tables_generated.h": "19640dfad9358ed1ddd6b14bd518ff4bcd72106e65e85570cabed23ab08fbfa8",
+    "src/codec/reconstruction.cpp": "a5d1a3e6f76366487119bce76bb82e6d52871a231b3de7d2fc5a4076186378e3",
+    "src/codec/reconstruction.h": "b8ee616644c9192f87d34d0e89a712c1df32c0f309b2dae463aebbf4770af12a",
+    "src/codec/reconstruction_internal.h": "389c7027d05eb5a871c8617854ee095789e8c75a09acffb7071bbdeea3bfd5b7",
+    "src/codec/sparse_coefficients.h": "589b8f5fe02cf236349786fb5e29ff11357758e248ab8f865400fa2f8e29ecde",
+    "src/codec/vardct_frame.cpp": "3a138abd94caf6d131925f1b5b1cb5232f71c6df9d24af10e8233cf261f38f92",
+    "src/codec/vardct_frame.h": "ef4eb5650e12d5484adc9f128f1ea5588603195189fa7a76038feb50ff551599",
+    "src/codec/vardct_frame_internal.h": "e07f4a1a5ebe3a4700050ebd0c342961374e2b03fb4b671ec254e836cceea6ce",
+    "src/codec/vardct_frame_view_internal.h": "39847ab0461d90460574d51f20ea44e9fb003dcde428ce16e2ed93d1f060f29f",
+    "src/codec/weighted_dc_predictor_internal.h": "c926224f7ffd968f404f51c65a6adf99067b6c6e74eaa02394775a84f05668e8",
+    "src/codestream/ac_group.cpp": "641c8d661617522937fb2317e08fc8470c85926117319e22abc25c1949a337cf",
+    "src/codestream/ac_group.h": "674a60dbaea658f513a63174265ee73b603209d744c9e354831e5818f6271bbb",
+    "src/codestream/ac_tokenization_provider_internal.h": "af85c0c67d82756ecfe01a644f333757b03ded0981db56a8bdc1fc448e9a19a7",
+    "src/codestream/ans.cpp": "7fcf10cc57b0efbdc4f5e4cca964ec7e4f77372354e6f4d7e55e01cfd948397f",
+    "src/codestream/ans_internal.h": "31fd72035901d24af86e0364507d4292956e84756f354245f8de5491f0484dcc",
+    "src/codestream/ans_reverse_bits_internal.h": "7755277802c5038129e43afa8ce58e5aca3e9c3c926525e0a4e23706f0603588",
+    "src/codestream/batch_workflow.cpp": "21d807c3db1ec1a0ca0e69ad0fa9372a6b37802a3f33e6dde8e285e2c9b48ce0",
+    "src/codestream/batch_workflow.h": "0f2eed6ec4efef4cfff5fa1ec79ea575308abbb17ca3e6efbdff7492798332f7",
+    "src/codestream/batch_workflow_test.h": "bb448308833b2cf4fd235e42fbad903a6d17764b5470c8c6ee3725306d8d33e3",
+    "src/codestream/bit_writer.cpp": "2f48df89ca348070a1a753f7fdbaa313e5e942b07e226e9d1f80e61988d2e2f1",
+    "src/codestream/bit_writer.h": "6667a494e62b59c5fadb42c8a494ceb7b996a2147d84191c7df25fd7c5e5bb0d",
+    "src/codestream/block_context_map.cpp": "2d17ae5ef92f7516d8cfee5ad11aa58bef56789a68b1dd6a4e6592a177270882",
+    "src/codestream/block_context_map.h": "c248e9f0154e0b27735485a76c22cbfdffae080d7c37bd34445bf93f5f0a923c",
+    "src/codestream/coefficient_order.cpp": "41aba78f4ae1e56747d205c5153e55ccc7a9a2c7b8bdcb1f54e03c06536e7128",
+    "src/codestream/coefficient_order.h": "eb8574971e052b00bc2e6fc669e15cb9ef22bdd2a33874ddc25855efcddc2d6c",
+    "src/codestream/compatibility_workflow_storage_plan.cpp": "1c54479aefe04630e86e1b4d2d567c2ddde733390d7b1d73a6329245e65cdac6",
+    "src/codestream/compatibility_workflow_storage_plan.h": "05a716ad3a4b25e71c31716f92b741d224a1245da0b4239e6b93d9eafc3f398f",
+    "src/codestream/context_map.cpp": "11423672b15ec3d0b47b409d2721d992c62e0326b7b9efaca9d6d55ef4fe03a3",
+    "src/codestream/context_map_internal.h": "75bdbddf6c7d52c182d8daa9d02eb2bed1b76db8961007576fc78adccdeffd8e",
+    "src/codestream/cpu_workflow_storage_plan.cpp": "38b0670b693adddd632e53bcd635ccfe2c1e3fea837ebd28d71822624f14b72c",
+    "src/codestream/cpu_workflow_storage_plan.h": "991187078bcf2ddf11ba2006ec123ba8cbbbb35fc6dc23942ed46ac2d8a22b08",
+    "src/codestream/cuda_workflow_storage_plan.cpp": "df0762a05b0b9b91e9acb725db5339c263c20f3a4915f238e2494db5ca5318a3",
+    "src/codestream/cuda_workflow_storage_plan.h": "044689dbd4b908fb34443c4a305b719b80a6e7e00fadf5ff1a1889d2d68b7345",
+    "src/codestream/dc_context_tree.cpp": "60f303038b9c88a9da4b265c90cd1aaa40c384d9f4bd73159430e2dd352265f2",
+    "src/codestream/dc_context_tree_internal.h": "334f5d12a6182f209189b48fed7c03c0d9233a3613acf000d08a4fecafad90ec",
+    "src/codestream/dc_context_tree_legacy.inc": "909274150b345eb87460d37a6b134709d21d11f735c5be9adb1f997ea9fb8e84",
+    "src/codestream/dc_group.cpp": "4a9ce6eb3216633b846c35cccd490ab1f97e82e1749eeb71f8169688bc922c1c",
+    "src/codestream/dc_group.h": "e49a15b512dd0d64a48c2788542a9003cb6f6190fdfd340625b6a4e73f52b2a4",
+    "src/codestream/dc_prediction.h": "34f4b180a8164ff212f6c5312eb0906969f3c500951b15a950d1c4835c2a9939",
+    "src/codestream/encoder.cpp": "86442520ab034369985a27a85a3830331642ea25e1a9435a35d1276cfe7474ea",
+    "src/codestream/encoder.h": "5cf871b96d515100ad6120122eac1eb1f576ec54b76b9b9384a37eac78ef81cb",
+    "src/codestream/encoder_internal.h": "85eaa3e546f1f16fb31314f7464c404c2ea60a1fd361220663da40f3b7784eef",
+    "src/codestream/encoding_result_internal.h": "10ad4cfaa911d7edee373eeb924c1707873706fd2145ad56d7ff087a9b651a48",
+    "src/codestream/entropy.cpp": "ebcdf5c1ff76f0e2a10ee76c4c318f98a336e1bdfbb9b8eaf47559449412551a",
+    "src/codestream/entropy.h": "e9f803bb7ab6a31979ca016c6603edeff01fe93216ffb2eeb67d8c9d0fed699c",
+    "src/codestream/entropy_behavior.h": "0a4216a1e3de2351462e8fdd32cc73d30a0f72ee82c79890dc6e3dce3b881365",
+    "src/codestream/entropy_internal.h": "6554610d89b01895943b0c0feaae7bb38e13d7354c15baef44bef77d2997d4c6",
+    "src/codestream/entropy_readiness_internal.h": "23f1d42132e096495d20ce59ebccea0b396f17f70304e566b2fbf0c877f22fb1",
+    "src/codestream/entropy_storage_plan.cpp": "7a3b114dbeb1201efdf51bc7ab51d01d7753907cc39a7c2f7d4a2254249d6a1b",
+    "src/codestream/entropy_storage_plan.h": "a784a7e7c9b4a953a0c8464bb06b03152fc232366ea8b0832de1bed00eed2d84",
+    "src/codestream/headers.cpp": "2d56329634c4d93e70c19b3bb15f3bd215ab6200823f508b977a295a8f930c74",
+    "src/codestream/headers.h": "8d62de35a1333cdc889b3f946e20a5c180eb330a3518283d8194d03aa7f6eb3d",
+    "src/codestream/huffman.cpp": "484c1501d91d5588146b8dc5ace85bceeff62e57581f6738f6d070bb96a44772",
+    "src/codestream/huffman.h": "7c1ee89955e9f12c93180cba24122006a5a8846390c724fe2819e870f14e6a53",
+    "src/codestream/parallel_sections_internal.h": "ba7c08046b1750931b0cf25e90dcdfb97e9c58744505a242714f3b6ad1b03f83",
+    "src/codestream/profile_internal.h": "d6d28350224df11df49af65995d1f3eb49be739225e5c2ae0a02854ee9f3af84",
+    "src/codestream/rate_control.cpp": "75ee6ffb52820cfa57d2919b13ea13771b1d92c317bf3c8e1b8754ee566b28b0",
+    "src/codestream/rate_control_internal.h": "d16c5c6abc4a0f12ae80d8eace73afb680dd29f7b1af784cfa95649e3ec831ee",
+    "src/codestream/representation_storage_plan.h": "5ff5d7f38b965c385bf1dd26258018a2f3c84dabb8a1b020424957ec12d0e458",
+    "src/codestream/resident_workflow_storage_plan.cpp": "e46435de6ae74ce2643ccaaf37eafff538f25440b9dbd08aa1aeac7b3f69aed8",
+    "src/codestream/resident_workflow_storage_plan.h": "81970b810f0ae6ba28e71ed04b988fc7754986f699525605e8c04cd77a25fe8c",
+    "src/codestream/sections.cpp": "c5b633f3b9418ea050f3d94865f6cb38139bfb68653d3997c57078030e0b46a0",
+    "src/codestream/sections.h": "0bf3a97ee499b71efecc1fc6c4e57964b97db11e099c2a3d0eda54e19e245ef4",
+    "src/codestream/serializer_storage_plan.cpp": "fca1958a84b5ecae05722c9adaf02109e83fa7b7711fcb41f79f4f368643f162",
+    "src/codestream/serializer_storage_plan.h": "4eebf980893890cccde569cd5daafc5eccd0024c2e688e3a9b79fa33f28e76c4",
+    "src/codestream/simple_ac_context.h": "642fabc9a42823fa00e5696964b6060b66f3a8785672d3942ccfbe3ef02c79f7",
+    "src/codestream/storage.h": "f29809485275d5a81fe33561427c89d8565490b080bf0c706114b8e1e13d992d",
+    "src/codestream/token_storage_plan.cpp": "f2f19e4a1dac4daa2ad611f876aeb955674ebb55e2da5c97c592c401e373e4e6",
+    "src/codestream/token_storage_plan.h": "66989527869524fb4fac15fe83f4863251091031d59fd22926a38a669e126977",
+    "src/codestream/weighted_dc.cpp": "4222bebcb3e435746500c4bd8935267c221eda9dab47d0f11b27ea43a3a95e17",
+    "src/codestream/weighted_dc.h": "bdf7bf4ef5aaa9111f3d82be3d99c40c7a63964652e7ded9dadbf7b206592ba7",
+    "src/codestream/workflow.cpp": "9f57863b5db94e2c786d5b0439db103caafceb63e1f76b32099e908e5e81402b",
+    "src/codestream/workflow.h": "7b98092d2e9530679c860fe60f4c1fa9cad4360da52187335c1c04eea0696c2d",
+    "src/codestream/workflow_admission.h": "4b3ec4d533a655804cdfc973695c35d297c8478d7232c80a6ded447c9b8d6444",
+    "src/codestream/workflow_admission_test.h": "108569feabd8952b48c0b7031fcf3a1a5a4237c803e255bb3e0616f6e9f285dd",
+    "src/codestream/workflow_internal.h": "3340f13d645138b70339dbe8943f3df0b7c2d9e06740247e335664e4ea1dba32",
+    "src/codestream/workflow_lifetime_test.h": "3753800ca1befaeb663728b42cc5252e82500eb85d86b0d73454022768564229",
+    "src/codestream/workflow_publication_storage_plan.h": "aec3c5e820b042afafdf047d61e17bab6954bc8648b0bcb90152f80ed728fcdd",
+    "src/codestream/workflow_storage_plan.cpp": "1621537fc3d98d594980b082de2f13f3d0781f524c0f6c52612555e96315ae23",
+    "src/codestream/workflow_storage_plan.h": "0569dd9eeccf1b7e07fbba05af995c7807df7c00d8f461b9e32c8fafdf5e87ba",
+    "src/core/ac_strategy.h": "b35b13f4cc4711ff5c62ba0ccabbb2234430aa0e7244268e2c016b8d8f8f06f9",
+    "src/core/block_grid.h": "9fa0dd147052334bd6435e6ae74a3a4d2d0a945bbd2c70cf639f007ecd088c46",
+    "src/core/cpu_budget.h": "2bafd21c555c93b2bd8b7856257027b6860710ee7c1b8db5d767b2f5ff7e32cd",
+    "src/core/cpu_execution.h": "96cccd72d191df309fa902fe1b6e5c888f9cd346543f055dab0f6e93ea3cbc69",
+    "src/core/execution_domain.h": "d7a0459b2ef6681d093177c8a7c51a0000c2cc772094a32591398ff0ec77d7ef",
+    "src/core/frame_geometry.h": "2a6854e0d0734f45e58dca9aa3b94400a795639fd61ba21f52f2993a18d96366",
+    "src/core/geometry.h": "70ded8bb9cbde4ecb478162ff7b0b173433c9319640899ef0602f6eb15ac4a33",
+    "src/core/host_storage_bound.h": "73d4e209eaae7e8267b302af290e26a40685cacd99fcb02b4bd2b7ce6ecfc72e",
+    "src/core/image.h": "ccdb5c5caca4528a1fa1843e5088c88e0a3f835873180d451fd4641d0168d604",
+    "src/core/image_buffer.h": "19db5581cf522b994787c5a99d4b64ade4a160b4b401f55227e91e75270d0959",
+    "src/core/image_ops.h": "02c82661b086b937ade577c12a3c6ac53f628b19f648673e13b523b7f57e244c",
+    "src/core/managed_allocator.h": "aebd7e4f7c54bf5187cd7a693e07914bd89450bbe5b352ad25560bdf802561fa",
+    "src/core/managed_publication.h": "f788e1a2375fc65bc3b0d7a70d10af2a9dc5db17678892c91803eaf31e504951",
+    "src/core/overwrite_array.h": "8292c135edbb5d5d5f18d81a0fdb27f809b2814effcfb2a7fa3a892d65681bf3",
+    "src/core/parallel_work_internal.h": "11493492ab61f53a01fb38552fb214c69f86bae2c7c8d1b401d647c729354a2a",
+    "src/core/publication_output.h": "a864d83a0ae19c84a131972e79e04ac106abb864026baa93c1b45538586b99f5",
+    "src/core/publication_record.h": "9651c4c52ff336dd766c0175e7bc1ff6f86fee4041b56b2a92a14aaf411f04b0",
+    "src/core/publication_vector.h": "838b9ba01688abc3141229a0792224a670a48d96106029ce211dedae001d47fe",
+    "src/core/quantizer.h": "f3188c4bd1ca7e7b20b25af4514f37f3e5b9dffd552b6b438ad0c2b247297311",
+    "src/core/resource_budget.h": "a6a57f0bad8e26d551443ad13d90f94beb12b7c3fa720b39d46ac47cbf5f00e3",
+    "src/core/resource_context.h": "3b4e38cd040272f889f74b449d9935fd6093cc43a6e32d80f27492bafe312b16",
+    "src/core/status.h": "d107bdbbb4285733a90acfe69f80a9db25e7e8951ad56d6bae524384a500c33d",
+    "src/core/stdlib_storage_compat.h": "2d756cf3d7ab726123366878c1421438282108ea538e56182eef4bb3683e5c9e",
+    "src/core/thread_budget.h": "00366c5866cd520fe0b7e8453214fee3dbce6d05d2c5b41476b54aa49513d3bc",
+    "src/core/worker_launch_internal.h": "c6269e8cc59637451596033ddbeb636c943dc4e563998813d70b1a547906b365",
+    "src/gpu/backend.h": "2063a08fa7d3926f194cea9114546f8e0d56743160d2efffe91e667f69bef189",
+    "src/gpu/buffer.h": "b45f4a7c354d50941965846bc4a842d55d7a5aa3a78765b5fa1af2b909474532",
+    "src/gpu/cuda/cuda_ac_group_kernels.cu": "50210b9c9d1381416583e8411433e4a8a6843703e971d6c72c71481e44c88d05",
+    "src/gpu/cuda/cuda_ac_group_kernels.h": "0e6f40f3677a33b942d85a775fec072bc9997469b416b2f433f4f1a89a09a08d",
+    "src/gpu/cuda/cuda_ac_strategy.cpp": "03997d2eaa9fd3735a03c7017ed6b111221b339a9f55839989130291bdc8fe54",
+    "src/gpu/cuda/cuda_ac_strategy_kernels.cu": "0153079eeb00c97edf1e9debc1bf37baf2c582c22b4102fbebc7093254ed3d2b",
+    "src/gpu/cuda/cuda_aq.cpp": "ee9e19d8f1c8d4af87a358266b73b8868d82689e735e37998a8eda3fd50c9476",
+    "src/gpu/cuda/cuda_aq_butteraugli_kernels.cu": "3d2fa9fa85f663ed51be4759144a7f97cb1fc432a984e9146f68524506eb402a",
+    "src/gpu/cuda/cuda_aq_butteraugli_kernels.h": "8430f5a5cc5b89ce2dd4858c4cca3f32c78a5f417884078934fdc933c6d8477d",
+    "src/gpu/cuda/cuda_aq_cpu_order_kernels.cu": "2bad95f927e03728f39de3665a274d8b3fac6686b73da54be74d85f400b7cd02",
+    "src/gpu/cuda/cuda_aq_cpu_order_kernels.h": "f699067ae128706550d6a09f587edc17975ea5dc208033b07140d43a28dc1bc3",
+    "src/gpu/cuda/cuda_aq_exact.cpp": "ce58572b70c4c098853c89beac59d0f9f00ea1ce5d82d744a7fd2d5be2a42d87",
+    "src/gpu/cuda/cuda_aq_exact_kernels.cu": "06a83a8ecfbeddebb8345c42759e549db2dcd5e23bd40604a2047bd91f740fab",
+    "src/gpu/cuda/cuda_aq_exact_kernels.h": "fa135dbce3ef07745d22afd40be1f15c96f2b3009a070b0b47221db4252e1753",
+    "src/gpu/cuda/cuda_aq_kernels.cu": "9030732f2d262dedffde9a458e5fe15e572494d2fcf24962edd75d31c83fb942",
+    "src/gpu/cuda/cuda_aq_resident.cpp": "5ce11d9846f395f3346ad69707745a06a8481fa27e4a15d892679f1f25444819",
+    "src/gpu/cuda/cuda_aq_resident_kernels.cu": "8f2dc30603d492e308c5b82637d9afdeca8ef4c1afe1d31faf6ff575f0850d37",
+    "src/gpu/cuda/cuda_aq_resident_kernels.h": "2c688456c144ef951f28e2593c184050992c0666dd7be86a30a00f4a31399927",
+    "src/gpu/cuda/cuda_backend.cpp": "fdce64f4214c3fc40604f1055db4b510b05e1dfc4fdfbbf56e51b3ee461cd7ed",
+    "src/gpu/cuda/cuda_backend.h": "564914805cba7f3f428c7f790009a601adca219cad1d5375c4b3aaa102512023",
+    "src/gpu/cuda/cuda_backend_internal.h": "c9052b0345adeef0412146cfe608bf41ab6e10d54c56db4d9be81f3fb4065772",
+    "src/gpu/cuda/cuda_butteraugli.cpp": "f996126080d6a711c1072e3cc005f4f56b68fcccf294f28e202bc1b435cea6ac",
+    "src/gpu/cuda/cuda_butteraugli_internal.h": "82771bb5af79b1aee94fa980818eb363d20fe553163b9f2326a4a536d06a0be2",
+    "src/gpu/cuda/cuda_butteraugli_kernels.cu": "8abf8ba01a5b5ab7649f72b90f4fde0d415ec223980e799846f0b787a888ba54",
+    "src/gpu/cuda/cuda_butteraugli_kernels.h": "3ed609589177ace94d5565361af76de223af06801e309114b3a28f6fbe75de38",
+    "src/gpu/cuda/cuda_coefficient_order_kernels.cu": "6cc48a307391335dd1e7ccc1ab95cb0f021b866757756b0a0b5ee44da2f84e4e",
+    "src/gpu/cuda/cuda_coefficient_order_kernels.h": "eeb2afa3cd52836f49803e75f4b0c2d410d5d7eec92a75c2a9984583a23d85d1",
+    "src/gpu/cuda/cuda_compact_ac_kernels.cu": "301d46d14396141b0fdf6b2c81058855ed49aa148cedd7f99a8b9da5e829f0df",
+    "src/gpu/cuda/cuda_compact_ac_kernels.h": "2279eed496e2b899bb8588020b13327679c3031e7c6561403c2a7969cc6c7725",
+    "src/gpu/cuda/cuda_dc_processing_kernels.cu": "3b13f56e8a2c944617c8633b4b240ea8d3e5eedca91a69b1bfbbaecd0c0ba005",
+    "src/gpu/cuda/cuda_dc_processing_kernels.h": "63d263cb397d2cbfac47bdf0647c7a27897badf1fdbc6a2aa2db7b742886a59d",
+    "src/gpu/cuda/cuda_direct_ac_pack_kernels.cu": "3a7dc63ecbc46a2d0fb6e5e322c1e04bbbfd7be10e2997695ae1109800acb0c8",
+    "src/gpu/cuda/cuda_direct_ac_pack_kernels.h": "1ccf98055e760d7b66e928abf9be12a900911e5984b395c43cc24fe9be706583",
+    "src/gpu/cuda/cuda_input_preparation.cpp": "d956b14c5d67d70993b106c890ded79c4aec8e5a1303769ed3379581822b705c",
+    "src/gpu/cuda/cuda_kernel_profile.h": "0735bfcd7961c0d858700532fb5d6f7db54701ceab220a6e9f96d36b0f78db8e",
+    "src/gpu/cuda/cuda_kernels.cu": "bb00a047e25b5b956a2e1a094c67113200889e040e2122c08da34eb842708d04",
+    "src/gpu/cuda/cuda_kernels.h": "bc681f2a55ea74d3790ed830194e83167595268a55d90e37758529e76f0d9052",
+    "src/gpu/cuda/cuda_primitives.cpp": "1d450617ae2c64a11a25f1b64d5efb2df96fdb3e7f6747a147492fe8b8d34e34",
+    "src/gpu/cuda/cuda_profile_limits.h": "e9dd0e7b013126701f55e379421b319e95bac4185a20e39f5eaf4febd1c1ed8d",
+    "src/gpu/cuda/cuda_profile_storage_plan.h": "6d55c87bb5f59b5862db07fecf93640e0aa75a8f3433a13a50c1667c15ee9c4e",
+    "src/gpu/cuda/cuda_profiling.cpp": "44c712a40082a53d16fd985d7827592383a7f2142e068ebc9f8463557846028a",
+    "src/gpu/cuda/cuda_resource_internal.h": "3d06a5a86b332cf46c235621a1fc990e38a4f7aff1e42f36d1c457045cec0505",
+    "src/gpu/cuda/cuda_sparse_ac_kernels.cu": "6f5059029d77fab01731849ce24491e4c4c4377a4879c5416670738d6cc8fcd0",
+    "src/gpu/cuda/cuda_sparse_ac_kernels.h": "c3972520dabd47b12453e0caf40b9226d4f7e1d355d1dfa9729e5d632de7844d",
+    "src/gpu/cuda/cuda_storage_plan.h": "015874edba59ac77bfd372e8ad38b2f8bd2a9c3166899c8c26ce86fd478c2c18",
+    "src/gpu/image.cpp": "870f7c1fabe3ff62ef04793434b9d87187f1d3b94284721b35ed8df9298f3969",
+    "src/gpu/image.h": "f03b4e41afe376a4b18fe8305857bcd0b9e31709bdc4110285468f3dd8e4d0f8",
+    "src/gpu/metal/ac_population_reduction_internal.h": "6d1261505cdb0ecb94c2600ec799374a778688e80adc7f81f796bcfea30aa4d9",
+    "src/gpu/metal/kernels/ac_strategy.metal": "6cf8e34a4782fccf15951f64a34082fb10e078679a37a44f26bf84d3b50dbda9",
+    "src/gpu/metal/kernels/ac_strategy_select.metal": "fecbc72fe3b7ecf968d245cb569c71fca9def5c6305368475b6d4da0382453d9",
+    "src/gpu/metal/kernels/ac_tokenization.metal": "45ef5fb43c0aa5a1c765c295594b768438177e888164c448c55fde91c7c140d1",
+    "src/gpu/metal/kernels/aq_postprocess.metal": "3b435464aa8cd0d516e502d7c666789eaad74af1c4de7c38984e4a9ac43da157",
+    "src/gpu/metal/kernels/aq_quantization.h": "1686c9fd6e5dcc125a999cdcc961280940bbf6de7827351e50d8c779764ada09",
+    "src/gpu/metal/kernels/aq_reconstruction.metal": "498304160c8d172e263544756ad447bd0895a1594dccdecd804573fe51ee7c8a",
+    "src/gpu/metal/kernels/aq_reduction.metal": "552784059d0a0caee8a3b45b49cff73629692232c207e5cdb1a4f447dd21be65",
+    "src/gpu/metal/kernels/aq_strategy_dispatch.h": "6d61ae58ecb8feb2b5fb7b0ed4ac10788c6dc48d9309f72a3caf0e3b24840b6f",
+    "src/gpu/metal/kernels/aq_strategy_metadata.metal": "17c5cb366d3d4a84f7e00e5daec17564a41adf365d202b8f7aa357bf3d446ace",
+    "src/gpu/metal/kernels/butteraugli.metal": "2e1988113a744083b2b904bd2765793143b69aeee035590c217a5917ded9be59",
+    "src/gpu/metal/kernels/dc_processing.h": "9bf71ee492a5cbf855624f1b0164ab556f920e7fcd97a3ffe245ea99a3fb520a",
+    "src/gpu/metal/kernels/dct.metal": "ff31c76fefeb27d35a69805bc5df414395dde54afcbd7111e51c7d3821171e1d",
+    "src/gpu/metal/kernels/dct_basis.h": "1b86ded6448096dd912c7fd532779971508680addc7360efffe8fb76062b6be8",
+    "src/gpu/metal/kernels/primitives.metal": "ce3f01c7e2b08f75e13575811840cf271b7029db69999372d3f79b8c65f6007b",
+    "src/gpu/metal/metal_ac_strategy.cpp": "16503accc4affe8e36d0d0f8371573e0b5869ce9c56ebda0a65be13e2e3ef96f",
+    "src/gpu/metal/metal_ac_tokenization.cpp": "c0d03f6043acbdb0b709855bc0e462a7f8393adbdc57365b9a0ad1c007ebeaa1",
+    "src/gpu/metal/metal_aq_butteraugli.cpp": "229aed033ea0ad583b9dbeb9fdd0401f4dd9896a43256a68845398ec78cb5a89",
+    "src/gpu/metal/metal_aq_butteraugli_test.h": "03efaf7a3cb44fc8e4ed9cabe12aed7921449c174a757f4469ac16a9508865e9",
+    "src/gpu/metal/metal_aq_evaluation.cpp": "8af3119ed2fe2f9c0d7708523732b5aa52e2b9a86e95d255807ad37eabc03c18",
+    "src/gpu/metal/metal_aq_evaluation_internal.h": "bbdf8a2dad0e6780dd15ffc73e0e695f735273faea3d202a85196eb59cfa36a6",
+    "src/gpu/metal/metal_aq_evaluation_profile.h": "5d2c73fe22b7d54f5beb290c9c138b4309df89ce90b31a4e793a0eca69765fa7",
+    "src/gpu/metal/metal_aq_evaluation_test.h": "068beeb4822197f5a37f8cfb08547a223a96b7a0aacbc8072f95e92f370d48b2",
+    "src/gpu/metal/metal_aq_host_storage_plan.cpp": "f5e588bfb4870cc24e5f4064f91f341cb0527d62af45c5fb4d4d567492e14b15",
+    "src/gpu/metal/metal_aq_host_storage_plan.h": "a924fbb9e8cd75d6c62df8d081f619d819d14c41efa5b81e56395388dc402a2f",
+    "src/gpu/metal/metal_aq_postprocess.cpp": "d9bd10f75c7b9976ec09623d0a5368e67f0603089718dc5365c99d21bffdcbde",
+    "src/gpu/metal/metal_aq_postprocess_test.h": "8a705e412780d9ad0018e64bce7f3ecb97059895c959566f281ba4d139604ebf",
+    "src/gpu/metal/metal_aq_profile_storage_plan.cpp": "aee7544c0c0493de734478755517758d96ffc3834db1d185a9ed58c28e052541",
+    "src/gpu/metal/metal_aq_profile_storage_plan.h": "c8d93f083b26ffa972733b592b7571dbbb5d81876318ded21948cdf4252af4e1",
+    "src/gpu/metal/metal_aq_reconstruction.cpp": "fd7522d40f1e4c106c054dccdd8f90b8b6522f5a5ac980076a24cc74de49e3e2",
+    "src/gpu/metal/metal_aq_reconstruction_test.h": "29044a0d5a455eba9f9ab9cdaea0d2e30f0414724e7e9946e40f15c1fc757c31",
+    "src/gpu/metal/metal_aq_strategy_dispatch.cpp": "01152545cf6fdbf9c7362fe3bc555ee0f0dbfbeadd4bfc610e0f055caf477459",
+    "src/gpu/metal/metal_aq_strategy_metadata.cpp": "1e3891936d882677b237851aeb913e8835b1a423d532cb688b33a7605e77ebb1",
+    "src/gpu/metal/metal_aq_strategy_metadata.h": "a48332d3d668ff4352f72e4b7e1b00beeadda036186056936dbde1a7920392fb",
+    "src/gpu/metal/metal_backend.cpp": "7aed4eaca06ccff2863c6a868301da09c8bda2bef4eda94a38989d2ef8ea175b",
+    "src/gpu/metal/metal_backend.h": "ab273e0e9254378bddff3999a9797f0d224d7415239e78b46b34134a276ce462",
+    "src/gpu/metal/metal_backend_internal.h": "a25137bca923c950610fcb7760c0fcf35590c93ecb848c773e539b3db43d99fb",
+    "src/gpu/metal/metal_butteraugli.cpp": "dbcc76e337ac7f77112ac30316698b3d672a5cdb553eab03e3bfad20a693a5dd",
+    "src/gpu/metal/metal_butteraugli_encoding.h": "7d7e2ae7483524786b3a54b9b27b085f2b278bc23ba9020914fe4db47d4e588e",
+    "src/gpu/metal/metal_butteraugli_test.h": "9c71ff404b63f59fca300a9f3263ec7e7cadae8e100650267809faf3e154f819",
+    "src/gpu/metal/metal_cpp_impl.cpp": "a4bd70dcc01ccefce22bc01009e8ea498d6ae261533fc39d02d835e460cc6a21",
+    "src/gpu/metal/metal_dc_processing_internal.h": "e5316aa339e7e64b7faee53ba71f2935d741344802718813e4bc28023b298896",
+    "src/gpu/metal/metal_embedded_library.cpp": "a69883b5d616ea8465b2827bc48d7e43196cc644f3f6cf4daa5a6dcd782132fb",
+    "src/gpu/metal/metal_embedded_library_internal.h": "b492c9fbdef741e3c930b14f8823c59b35a4420b8e45e0957f7baaa2654ced03",
+    "src/gpu/metal/metal_primitives.cpp": "f4b9299af97e25b70174aff6e6c8df303180674d981eb2a6a3ef0860d3d71641",
+    "src/gpu/metal/metal_status.h": "a8f90b494df4937a2b5570a93a74f005b71e1384d48b5d244d573ed009ce5a54",
+    "src/gpu/metal/metal_storage_plan.cpp": "fa32061a5e7708c063984229a589e9ae25616c773b386b601624bca2decb9456",
+    "src/gpu/metal/metal_storage_plan.h": "2f41dc69b868d7db7b945a7466879602ddde6bbe5e99c47cbfd72d750e5e3429",
+    "src/gpu/metal/metal_submission.cpp": "dc6b487e2c5a7175c733c318a22dfff4c1d5ebf683f494a706e0ac099bcae9ca",
+    "src/gpu/metal/metal_submission_storage_plan.cpp": "48cc3fa46cb6f52153d72ac651d4a734da72bbccaa303306b03368a3555bada9",
+    "src/gpu/metal/metal_submission_storage_plan.h": "e6ba19ede6f6c9eea8fb63c1c8c62bf26c49490dfbae14e3b9ad3c937df7b3fa",
+    "src/gpu/ops/ac_strategy.h": "90dff27e528511796cddbc863cdf3bf8323096c6bc847d12e30721ad47d41815",
+    "src/gpu/ops/ac_strategy_capture_internal.h": "6ce872d46f1c5de173dcc9a8264d78a272df798546899290e3c2b72f6a70fc15",
+    "src/gpu/ops/ac_strategy_search.cpp": "3fb5b235f30fffbe5de85262d797a465edb2cbc5f5e1bd85ee59e903e6fb6f11",
+    "src/gpu/ops/ac_strategy_search.h": "d65d56cd0a81446775439fe641343af600635c58d0dc96c62f8827aaff519b6f",
+    "src/gpu/ops/ac_strategy_search_profile_internal.h": "8f3a6e5b551e2b9e72bdb8727462bdf54362f4696a664fd499ee57ec6e4a4ab5",
+    "src/gpu/ops/ac_strategy_search_test.h": "ffe75a531a6c81f52657557563b7dcdca159de4941f913b6bb328a0084e0139b",
+    "src/gpu/ops/ac_strategy_selection.h": "5b89f2db224d4d4cfa8ee8d7252c8f367d118262247ef4d0f561638bab9733d3",
+    "src/gpu/ops/ac_strategy_storage_plan.cpp": "a69777974321a2540f22734a2ff41529af64647b43c56095e968e1bd87b60f6f",
+    "src/gpu/ops/ac_strategy_storage_plan.h": "aef06c009f7e3b3fa4752f72885b9f4d0abdc98152d3370beab1cb45400125fa",
+    "src/gpu/ops/adaptive_quantization.cpp": "ae7136426621e2658cf2ae6de35a7f61ec331cb5c0ef20de2171d4f3b1b6fe8c",
+    "src/gpu/ops/adaptive_quantization.h": "badb22780e3d0f511417eb034b5f9e3a096e33fea87cfd723bd6c4c224eaf5e3",
+    "src/gpu/ops/adaptive_quantization_profile_internal.h": "b403fb4a0d6b2cf9fd167cb7559efcd32728072337dc60fe1cc24f445ffc77f1",
+    "src/gpu/ops/aq_evaluation.h": "b7af7b1a4dd73940ee73eb150c2a33e77fe7618b55e19c9432e377c13e1427e1",
+    "src/gpu/ops/aq_evaluation_internal.h": "246d581469f64f6fb1fd235241f18fab8af8dee5999350606b839de6611c382c",
+    "src/gpu/ops/butteraugli.cpp": "11353a975188514d9a3b55d1c779b02c11242e77cc01f1c008b6b67a3d823410",
+    "src/gpu/ops/butteraugli.h": "704b29a0b13b2272de46958fefbcf924529488da0e43c2e0bd38e3acf2462741",
+    "src/gpu/ops/gaborish.cpp": "498ac68e4ee4c51157ffe1a8e86b20d36d862b63a6b4bc3bcc507f29d931f106",
+    "src/gpu/ops/gaborish.h": "e2c748e1af297dcb19a0a0a84f22cba774bfbb0d8ecebb14bdc7ad10c7d92533",
+    "src/gpu/ops/gaborish_profile_internal.h": "f4a6505087ffa616578a77928454875e86b8efe0e0bd073101cbca8fe8e83c4d",
+    "src/gpu/ops/gpu_execution_profile_internal.h": "533244c11bdc4d804b2eeefec83956dd5aa952e614da50dda35681620f471653",
+    "src/gpu/ops/input_preparation.h": "a3c36215edf65ba0e5ddc3c65e020ccc241851ce88decbeef9f3a0da7e0a5f6d",
+    "src/gpu/ops/primitives.h": "a85c8a1efd0f6947a1cdce69f5085b89d7b27b22c3d1fe8149fd7fa30bd96933",
+    "src/gpu/ops/profile_storage_plan.cpp": "d0b82db7e95b13ea2b7ecd9c581335dcb01f3a652d26f801f853531434c04a0c",
+    "src/gpu/ops/profile_storage_plan.h": "9ea9af81b6c65fb02c32bcbcff24a32331fd94faa30251be4404069833b9775c",
+    "src/gpu/ops/quantization_pipeline.cpp": "ae1cffee1ce553a976eb058c2de1f23394eb332892b3f4b30e67487fb930ec09",
+    "src/gpu/ops/quantization_pipeline.h": "535c0bf0ec83d3b0e7fc964fed7752ebea551ef2eb1338036a4d635e0f3d7a39",
+    "src/gpu/ops/quantization_pipeline_profile_internal.h": "0b716ae84291baf5372fb06ea6539d0cec1ad3089d6c8d3082d4c2d79071b6f1",
+    "src/gpu/ops/resident_input.h": "a4a92ac3b219f1ce25c606676f1b60c25e2373dbc332064bb4237cdf5da6f907",
+    "src/gpu/ops/transform.h": "7ef723ad97c2a0552acef417d83dac390f04ee03f589b29ba3e0994f387a878b",
+    "src/gpu/scratch.cpp": "759a4afaa9b6985780812876c403e3878808482972dd47d4a8fddbdbae2f62e3",
+    "src/gpu/scratch.h": "06576f40a257a9bd60377909a5d5853fab2bc5a4ae7fe9f04cb883d759596594",
+    "src/gpu/submission.h": "d1ac1c39b74c4730dbbaadc6f25680256f0fc095b1b845fbbf7d6d5e17baa782",
+    "src/io/pfm.cpp": "223af0796f02acb7d78991b9cbbb758a0d97e301a7c78a9dc3715710fef07f56",
+    "src/io/pfm.h": "8bcf4fecb6c4a377e76610e6b75c15e0bb3a6dc5be58c43cdd80e60c90ca74f7",
+    "src/util/fast_math.h": "a223c24fd0e994377f0ed6601f67f91877e41495a7afd8108a74757606cccf65"
+  },
+  "candidate_sources": {
+    "cmake/BuildPinnedDjxl.cmake": "7f752e81668dd3ed3de8123d7cba3773f1a69af6ddc9b004d718264d3ca61654",
+    "cmake/CheckStorageToolchain.cmake": "8bd908ad89ca298e1f4fb16e74ff160ed0b3d85aa1582efc9f8091c1cf761de7",
+    "cmake/InstalledHeaders.cmake": "6a2d420e32568897d1d4093ad3f00b9a934689fc88f66a28c075cdaf26dacbc7",
+    "cmake/RunCodestreamCliTest.cmake": "d546d093d61c9ec2a3558b38bdab5a85569075fd19ccf57fc90f1913454de0fe",
+    "cmake/test_installed_consumer.cmake": "cd1f2a33876552c2ba91d5b848f11c401004c1e62b68461fb5f7e35bd5f2bb6b",
+    "CMakeLists.txt": "e7a975d34c980c33d91b6593e533f87645fda5bf4bc1198d1e7ca3bc1e90f4b3",
+    "src/c_api/gjxl.cpp": "0c7dbeadc18e566f0b16cb760dd91d46443c3a4e126996b27f42b6273853c53f",
+    "src/c_api/image_conversion.cpp": "07fb765dd2fb33b3a42069e03979e56a82dd15dfaffa7d404ba6cddb6927d5c7",
+    "src/c_api/image_conversion.h": "ab95b8833ba9d7ff0ac12472e1d22f5281269b649c6f69ac590a34b4731e933e",
+    "src/codec/ac_strategy.cpp": "0d40666f752bfc4615c38a025d0f7d081ea5ac3aa9fac9968ae02987e75a2def",
+    "src/codec/ac_strategy.h": "80d10863b94c2717b2480593e7b72f350317ff01be74c56832ac8eac41f61e65",
+    "src/codec/ac_strategy_search_internal.h": "d56b8414546a892254ca3d5e40711add42fb53bc15991b4112c54b4826711ba7",
+    "src/codec/ac_strategy_search_policy.h": "51f47690d514c7427d9e42d95aabddfb21b1d0fc9212d6dd52118f437762615e",
+    "src/codec/ac_strategy_storage_plan.cpp": "15c2fb75f515a02412e8e2ceda892c44b2a1b3c24fba63db0f139674ecf705f7",
+    "src/codec/ac_strategy_storage_plan.h": "dc8c8af1ade13bbd9b51a366318f6543b475d11d5d5c3f09e5df65cbccdb3753",
+    "src/codec/adaptive_quantization.cpp": "3a60709cd5412f43d39d02f2b94b89935bf793c084331912cfb4f36df2d84fe7",
+    "src/codec/adaptive_quantization.h": "00f5afa962dbc8778918f802ec0f061534507caaa1f4c1a1d9acb5cf8007958a",
+    "src/codec/adaptive_quantization_internal.h": "03f04d9411daf2771bf8594a801f2284aae766099850d660ab03a32840d1e140",
+    "src/codec/adaptive_quantization_storage_plan.cpp": "a53f59286a2304e39bedb6eb5f603633e5bcbb613303bd63ec271d4bff45be5d",
+    "src/codec/adaptive_quantization_storage_plan.h": "7d6f1b9ddba85c43fd7488a306e08bcc4a1897d518a7dadcfb6b6d4d722b9c79",
+    "src/codec/butteraugli.cpp": "5395b16424bc40e7b6c9ffdad18999e0d1e8c59c6a00d4e2c325da22e901c482",
+    "src/codec/butteraugli.h": "53579dca83c8a9f03a2cbd0d92ebe082d2808b9cb08035f69bf5460aa60f4baa",
+    "src/codec/butteraugli_distance_internal.cpp": "1230506f5a3232ceff417cdb66a349f63f77242b96b27db79c5f2bf6563013c9",
+    "src/codec/butteraugli_distance_internal.h": "2ac5f7c8beb5567bd3cabe286ac4da64719b0c99a657fc76ffa68a2fcca5ba90",
+    "src/codec/butteraugli_internal.cpp": "fb807a3a1f6c42320b4fce7524272b4954c38e7a54bd6983d7d575ba17d57681",
+    "src/codec/butteraugli_internal.h": "33bec7e060e8d9b88ab8205b9559532ac3708f4e4771b750c55c54b52adcd561",
+    "src/codec/chroma_from_luma.cpp": "72b101d4d86ec7d588136ecb0da7d5f9591d3292e123f54bf20ff899d4252b15",
+    "src/codec/chroma_from_luma.h": "0c0781762bf10873c88f160ec6df9c4058478bc72e2bac408601f4f3582ac088",
+    "src/codec/chroma_from_luma_internal.h": "48d11bae334914bc289f42d78be7937a874a5e5ea210f689ed1898cfaab429f6",
+    "src/codec/codestream.cpp": "a9746a2dfbe057e5cff2a004e300e7e7ce4b3d061c5ccb8766bf6eda2776501e",
+    "src/codec/codestream.h": "9a7de6cd8058871bf3d9cf792865bc9c6f221a61e2a31f03c28d6dc9b1c054c8",
+    "src/codec/coefficient_order_population_internal.h": "c7b6237b81d501593db4e3e08b0531fcc36fe82b567e961fd632c775e40888a8",
+    "src/codec/color_transform.cpp": "e62cf4ca1fb6be395c20cc5c2939b52b2ef948af25439fb6eeabcc21070cad59",
+    "src/codec/color_transform.h": "3c7f490f6c0e009270c3b923c842dee7a79cda16a76f9e34f6972eb7b5ac8c4a",
+    "src/codec/color_transform_internal.h": "f0fbf7265861514128ff6f70d3cf8cc85c0bb365811b9e3ff84340a7eca362c2",
+    "src/codec/convolution.cpp": "032d60407e0779298abfa921e1564024323c4e820f9e6872ca8687bddfb6c8ea",
+    "src/codec/convolution.h": "ba178e054f7a7513514731b60dfa69fbdf6cc478c82a1781620845c5829d5319",
+    "src/codec/dc_conversion.cpp": "2735b06aff59175ea2be150986ac7d550fa73730160a1fcde5fb481d8ae53b9e",
+    "src/codec/dc_conversion.h": "c3fce951c4dd74c4167a427d74413f94ceabe1835043a9ffff4d9226f2b863ab",
+    "src/codec/dc_prediction.h": "9ba1cc3e7ac4beb280af63796621c511ac262e199c06a9395a3763dc88fe9ef9",
+    "src/codec/dc_quantization.h": "87a66324e7d2c429e66b35aa401f63a2c02f60d6b74c9592d6c9a9319cf21f3b",
+    "src/codec/dc_smoothing.cpp": "704dac6d1663aae4aa1dedcea5f79a7388b206c638b9ea5537afb62e222ff781",
+    "src/codec/dc_smoothing.h": "82ee031b7f38d24d29c2582d867d3eb99aff16a179523047fff02ed9cdfae674",
+    "src/codec/dct.cpp": "4e24d6ad2179d6609346fa23220a903961d6cbaeecc2a256c7923b91b1f77429",
+    "src/codec/dct.h": "424b0272739657dc7a01d6e29ae3f6bce327f7f5570de491b0f29ac8a8b4c087",
+    "src/codec/dct_internal.h": "9460e2965a7db3b5347a2dad0bea7a7854319067dca364215b346b026ce4ff0d",
+    "src/codec/epf.cpp": "07d4dd050ac4b791feaa28d282bac2f92d7e93d11c58cb3f9b0066fe58bca38a",
+    "src/codec/epf.h": "59ba022a50c11eea0e808581cae97d8a66d9c3cd83cd2affd4014daf891248ed",
+    "src/codec/frontend_dispatch_internal.h": "546cbb29deadd176e997a1d2bcc7ff8275f50f38c4a370bfbab8ae1792e81018",
+    "src/codec/frontend_storage_plan.cpp": "9970ca2ebd7b36cef4b961baf7f1c101d9ed6e004ab9615e235caa5f259717db",
+    "src/codec/frontend_storage_plan.h": "c5e0e4bdbdbeaf50e1bf35bff194d581202136b4f4a7f756a7083921e69a3375",
+    "src/codec/gaborish.cpp": "c6518de853896e0156cd64804314111b18958cae5c96447e9aa778638bd453b6",
+    "src/codec/gaborish.h": "5eb9b2e9a4b1750cfda6392a076a7d2c855044ae7b2864e47169f25e88a430a0",
+    "src/codec/gaborish_internal.h": "4b3e915db50cf54c40361776e50389527a5464334a02077b8ed69d18b59eb3b0",
+    "src/codec/host_metadata_internal.h": "9a470ddbaa17d3814346963838bf2ba9e99058fd918503e0b7862817e9838186",
+    "src/codec/loop_filter.cpp": "fd0b9e10ef97c79915ae5467f6f00ef946dbbee0f9f5be9b69bd4a79d1e425a7",
+    "src/codec/loop_filter.h": "b771743116d1d9a11470078e7bc4c7364e93c4ca0e42aea6e60ec3288df206cb",
+    "src/codec/maximum_error.cpp": "730ca02f4672bd0da627d21cff50063e730b464e548f8b0df0a40c15ce5728a1",
+    "src/codec/maximum_error.h": "aed8a5af4da68c1c3f14b13249a05407a3af7de9c03ad782eb35100fc2195cc8",
+    "src/codec/modular/prediction.h": "269ddda3293bdf350bd7f584a6e116c69d1c77ac2c71d58c89b908baa85cea51",
+    "src/codec/perceptual_storage_plan.cpp": "516993529f8fadc4b32533325ace73544bbc56b09ccf3f73c831fa1b34531896",
+    "src/codec/perceptual_storage_plan.h": "c83c42592fac46601b8bd59a41122b4694533e4c7dfb7668e3ca56dcd7f96490",
+    "src/codec/prepared_coefficients_internal.h": "4088f4830707b2e4a1c4ab58a6e84680767a35b104a4a532892ab5dfefa1ccc2",
+    "src/codec/quantization.cpp": "fc2b413eaf5e6f9d826e9cbb59b94fdc0f943205d8ce2f7876347e2900287f17",
+    "src/codec/quantization.h": "36ae3508f528ccbff74a6aa4f0e7337ae79e016f54c04510144ddc879fc1d4c3",
+    "src/codec/quantization_pipeline.cpp": "8769e93d16cde640247d9728acc3157846ac0755481dc32bc53485c9e4cc708a",
+    "src/codec/quantization_pipeline.h": "09cd00f536e472f15f9d01cf1a4847cb2145a37410aecb5894f514345baeca93",
+    "src/codec/quantization_pipeline_internal.h": "9aff7b8601b1a95195038168f7ac4ff8537c37311b7f569420c2ca2a26dc23e3",
+    "src/codec/quantization_tables_generated.h": "19640dfad9358ed1ddd6b14bd518ff4bcd72106e65e85570cabed23ab08fbfa8",
+    "src/codec/reconstruction.cpp": "a5d1a3e6f76366487119bce76bb82e6d52871a231b3de7d2fc5a4076186378e3",
+    "src/codec/reconstruction.h": "b8ee616644c9192f87d34d0e89a712c1df32c0f309b2dae463aebbf4770af12a",
+    "src/codec/reconstruction_internal.h": "389c7027d05eb5a871c8617854ee095789e8c75a09acffb7071bbdeea3bfd5b7",
+    "src/codec/sparse_coefficients.h": "589b8f5fe02cf236349786fb5e29ff11357758e248ab8f865400fa2f8e29ecde",
+    "src/codec/vardct/dc_prediction_internal.h": "2909ae7d5e0db6defbcf19fa3d06b013967b16fbf0e080270271470440a7d89f",
+    "src/codec/vardct/dc_quantization.cpp": "7a38be0dbaf84e8c3c17cd4b4dc9a79172383848cc28b1fb12ce6c8dbd32b541",
+    "src/codec/vardct_frame.cpp": "3a138abd94caf6d131925f1b5b1cb5232f71c6df9d24af10e8233cf261f38f92",
+    "src/codec/vardct_frame.h": "ef4eb5650e12d5484adc9f128f1ea5588603195189fa7a76038feb50ff551599",
+    "src/codec/vardct_frame_internal.h": "e07f4a1a5ebe3a4700050ebd0c342961374e2b03fb4b671ec254e836cceea6ce",
+    "src/codec/vardct_frame_view_internal.h": "39847ab0461d90460574d51f20ea44e9fb003dcde428ce16e2ed93d1f060f29f",
+    "src/codestream/ac_group.cpp": "641c8d661617522937fb2317e08fc8470c85926117319e22abc25c1949a337cf",
+    "src/codestream/ac_group.h": "674a60dbaea658f513a63174265ee73b603209d744c9e354831e5818f6271bbb",
+    "src/codestream/ac_tokenization_provider_internal.h": "af85c0c67d82756ecfe01a644f333757b03ded0981db56a8bdc1fc448e9a19a7",
+    "src/codestream/ans.cpp": "7fcf10cc57b0efbdc4f5e4cca964ec7e4f77372354e6f4d7e55e01cfd948397f",
+    "src/codestream/ans_internal.h": "31fd72035901d24af86e0364507d4292956e84756f354245f8de5491f0484dcc",
+    "src/codestream/ans_reverse_bits_internal.h": "7755277802c5038129e43afa8ce58e5aca3e9c3c926525e0a4e23706f0603588",
+    "src/codestream/batch_workflow.cpp": "21d807c3db1ec1a0ca0e69ad0fa9372a6b37802a3f33e6dde8e285e2c9b48ce0",
+    "src/codestream/batch_workflow.h": "0f2eed6ec4efef4cfff5fa1ec79ea575308abbb17ca3e6efbdff7492798332f7",
+    "src/codestream/batch_workflow_test.h": "bb448308833b2cf4fd235e42fbad903a6d17764b5470c8c6ee3725306d8d33e3",
+    "src/codestream/bit_writer.cpp": "2f48df89ca348070a1a753f7fdbaa313e5e942b07e226e9d1f80e61988d2e2f1",
+    "src/codestream/bit_writer.h": "6667a494e62b59c5fadb42c8a494ceb7b996a2147d84191c7df25fd7c5e5bb0d",
+    "src/codestream/block_context_map.cpp": "2d17ae5ef92f7516d8cfee5ad11aa58bef56789a68b1dd6a4e6592a177270882",
+    "src/codestream/block_context_map.h": "c248e9f0154e0b27735485a76c22cbfdffae080d7c37bd34445bf93f5f0a923c",
+    "src/codestream/coefficient_order.cpp": "41aba78f4ae1e56747d205c5153e55ccc7a9a2c7b8bdcb1f54e03c06536e7128",
+    "src/codestream/coefficient_order.h": "eb8574971e052b00bc2e6fc669e15cb9ef22bdd2a33874ddc25855efcddc2d6c",
+    "src/codestream/compatibility_workflow_storage_plan.cpp": "1c54479aefe04630e86e1b4d2d567c2ddde733390d7b1d73a6329245e65cdac6",
+    "src/codestream/compatibility_workflow_storage_plan.h": "05a716ad3a4b25e71c31716f92b741d224a1245da0b4239e6b93d9eafc3f398f",
+    "src/codestream/context_map.cpp": "11423672b15ec3d0b47b409d2721d992c62e0326b7b9efaca9d6d55ef4fe03a3",
+    "src/codestream/context_map_internal.h": "75bdbddf6c7d52c182d8daa9d02eb2bed1b76db8961007576fc78adccdeffd8e",
+    "src/codestream/cpu_workflow_storage_plan.cpp": "38b0670b693adddd632e53bcd635ccfe2c1e3fea837ebd28d71822624f14b72c",
+    "src/codestream/cpu_workflow_storage_plan.h": "991187078bcf2ddf11ba2006ec123ba8cbbbb35fc6dc23942ed46ac2d8a22b08",
+    "src/codestream/cuda_workflow_storage_plan.cpp": "df0762a05b0b9b91e9acb725db5339c263c20f3a4915f238e2494db5ca5318a3",
+    "src/codestream/cuda_workflow_storage_plan.h": "044689dbd4b908fb34443c4a305b719b80a6e7e00fadf5ff1a1889d2d68b7345",
+    "src/codestream/dc_context_tree_internal.h": "334f5d12a6182f209189b48fed7c03c0d9233a3613acf000d08a4fecafad90ec",
+    "src/codestream/dc_group.h": "e49a15b512dd0d64a48c2788542a9003cb6f6190fdfd340625b6a4e73f52b2a4",
+    "src/codestream/dc_prediction.h": "34f4b180a8164ff212f6c5312eb0906969f3c500951b15a950d1c4835c2a9939",
+    "src/codestream/encoder.h": "5cf871b96d515100ad6120122eac1eb1f576ec54b76b9b9384a37eac78ef81cb",
+    "src/codestream/encoder_internal.h": "85eaa3e546f1f16fb31314f7464c404c2ea60a1fd361220663da40f3b7784eef",
+    "src/codestream/encoding_result_internal.h": "10ad4cfaa911d7edee373eeb924c1707873706fd2145ad56d7ff087a9b651a48",
+    "src/codestream/entropy.cpp": "cac45ce3ce92fa872a8d08922ca80bfaf9f5e320d9f96de19058c4174a726f91",
+    "src/codestream/entropy.h": "e9f803bb7ab6a31979ca016c6603edeff01fe93216ffb2eeb67d8c9d0fed699c",
+    "src/codestream/entropy_behavior.h": "0a4216a1e3de2351462e8fdd32cc73d30a0f72ee82c79890dc6e3dce3b881365",
+    "src/codestream/entropy_internal.h": "800d93708b3450d253b68c4c9c220442c652407f4254dce44d98c90de620e909",
+    "src/codestream/entropy_readiness_internal.h": "23f1d42132e096495d20ce59ebccea0b396f17f70304e566b2fbf0c877f22fb1",
+    "src/codestream/entropy_storage_plan.cpp": "7a3b114dbeb1201efdf51bc7ab51d01d7753907cc39a7c2f7d4a2254249d6a1b",
+    "src/codestream/entropy_storage_plan.h": "a784a7e7c9b4a953a0c8464bb06b03152fc232366ea8b0832de1bed00eed2d84",
+    "src/codestream/fields_internal.h": "4eaab4360c01adacbc9121eef801dca2dfc5e9a6113196e1ec2ccb28344abf2e",
+    "src/codestream/headers.cpp": "99d89fc31e0cd1ab67b3a8e193822e89541bc6c705ba4d8a4d002082d75730cd",
+    "src/codestream/headers.h": "8d62de35a1333cdc889b3f946e20a5c180eb330a3518283d8194d03aa7f6eb3d",
+    "src/codestream/huffman.cpp": "484c1501d91d5588146b8dc5ace85bceeff62e57581f6738f6d070bb96a44772",
+    "src/codestream/huffman.h": "7c1ee89955e9f12c93180cba24122006a5a8846390c724fe2819e870f14e6a53",
+    "src/codestream/modular/stream_encoder.cpp": "29d9c0739830b4e6c00ab12d26da9ad038e49e1f9fcbe8446ff78e97d00c3193",
+    "src/codestream/modular/stream_encoder.h": "c73893edf587b7439df5ca00a0b402d97de0b7cf69bce5bb19d5c157186d385b",
+    "src/codestream/modular/stream_types.h": "941efddc2d51b1f8d623f62e498077ba08132a86fd8275acfe8b2591fd26ab64",
+    "src/codestream/modular/tree_codec.cpp": "fc96afdb00c6197f51e29083774cdc309607401c58fe6975cb6d93389cc45090",
+    "src/codestream/modular/tree_codec.h": "5a223dd20ed113a51ed183427b5dcae1e32bb948678b3510e3cc4559d9070b32",
+    "src/codestream/parallel_sections_internal.h": "ba7c08046b1750931b0cf25e90dcdfb97e9c58744505a242714f3b6ad1b03f83",
+    "src/codestream/profile_internal.h": "d6d28350224df11df49af65995d1f3eb49be739225e5c2ae0a02854ee9f3af84",
+    "src/codestream/rate_control.cpp": "75ee6ffb52820cfa57d2919b13ea13771b1d92c317bf3c8e1b8754ee566b28b0",
+    "src/codestream/rate_control_internal.h": "d16c5c6abc4a0f12ae80d8eace73afb680dd29f7b1af784cfa95649e3ec831ee",
+    "src/codestream/representation_storage_plan.h": "5ff5d7f38b965c385bf1dd26258018a2f3c84dabb8a1b020424957ec12d0e458",
+    "src/codestream/resident_workflow_storage_plan.cpp": "e46435de6ae74ce2643ccaaf37eafff538f25440b9dbd08aa1aeac7b3f69aed8",
+    "src/codestream/resident_workflow_storage_plan.h": "81970b810f0ae6ba28e71ed04b988fc7754986f699525605e8c04cd77a25fe8c",
+    "src/codestream/sections.cpp": "c5b633f3b9418ea050f3d94865f6cb38139bfb68653d3997c57078030e0b46a0",
+    "src/codestream/sections.h": "0bf3a97ee499b71efecc1fc6c4e57964b97db11e099c2a3d0eda54e19e245ef4",
+    "src/codestream/serializer_storage_plan.cpp": "fca1958a84b5ecae05722c9adaf02109e83fa7b7711fcb41f79f4f368643f162",
+    "src/codestream/serializer_storage_plan.h": "4eebf980893890cccde569cd5daafc5eccd0024c2e688e3a9b79fa33f28e76c4",
+    "src/codestream/simple_ac_context.h": "642fabc9a42823fa00e5696964b6060b66f3a8785672d3942ccfbe3ef02c79f7",
+    "src/codestream/storage.h": "f29809485275d5a81fe33561427c89d8565490b080bf0c706114b8e1e13d992d",
+    "src/codestream/token_storage_plan.cpp": "f2f19e4a1dac4daa2ad611f876aeb955674ebb55e2da5c97c592c401e373e4e6",
+    "src/codestream/token_storage_plan.h": "66989527869524fb4fac15fe83f4863251091031d59fd22926a38a669e126977",
+    "src/codestream/vardct/dc_context_tree.cpp": "e72f43b13ba6d2f55de713f9c792069d9b4fc77f70094df2562ac50836ac9a81",
+    "src/codestream/vardct/dc_context_tree_legacy.inc": "fae03778c78819a22deafb432f1ff33e6fba6bac1372aeb41a4ebae756a44912",
+    "src/codestream/vardct/dc_group.cpp": "bb6f23e867c83305947830c829f32490658e0e1070303cd743cf9f1a8d05e90d",
+    "src/codestream/vardct/encoder.cpp": "9defdff9bd9be17c26eba9457d2f27afed5834ec75c20acaf638b416d3585bd4",
+    "src/codestream/vardct/headers.cpp": "06271a770128d694fcda49d260853fe2430169381724e51e1a90e5b78076e393",
+    "src/codestream/vardct/weighted_dc.cpp": "2541455f15b278cbc33b251b39e6b6605d6da6adeccf27664db31abdebf84777",
+    "src/codestream/weighted_dc.h": "bdf7bf4ef5aaa9111f3d82be3d99c40c7a63964652e7ded9dadbf7b206592ba7",
+    "src/codestream/workflow.cpp": "9f57863b5db94e2c786d5b0439db103caafceb63e1f76b32099e908e5e81402b",
+    "src/codestream/workflow.h": "7b98092d2e9530679c860fe60f4c1fa9cad4360da52187335c1c04eea0696c2d",
+    "src/codestream/workflow_admission.h": "4b3ec4d533a655804cdfc973695c35d297c8478d7232c80a6ded447c9b8d6444",
+    "src/codestream/workflow_admission_test.h": "108569feabd8952b48c0b7031fcf3a1a5a4237c803e255bb3e0616f6e9f285dd",
+    "src/codestream/workflow_internal.h": "3340f13d645138b70339dbe8943f3df0b7c2d9e06740247e335664e4ea1dba32",
+    "src/codestream/workflow_lifetime_test.h": "3753800ca1befaeb663728b42cc5252e82500eb85d86b0d73454022768564229",
+    "src/codestream/workflow_publication_storage_plan.h": "aec3c5e820b042afafdf047d61e17bab6954bc8648b0bcb90152f80ed728fcdd",
+    "src/codestream/workflow_storage_plan.cpp": "1621537fc3d98d594980b082de2f13f3d0781f524c0f6c52612555e96315ae23",
+    "src/codestream/workflow_storage_plan.h": "0569dd9eeccf1b7e07fbba05af995c7807df7c00d8f461b9e32c8fafdf5e87ba",
+    "src/core/ac_strategy.h": "b35b13f4cc4711ff5c62ba0ccabbb2234430aa0e7244268e2c016b8d8f8f06f9",
+    "src/core/block_grid.h": "9fa0dd147052334bd6435e6ae74a3a4d2d0a945bbd2c70cf639f007ecd088c46",
+    "src/core/cpu_budget.h": "2bafd21c555c93b2bd8b7856257027b6860710ee7c1b8db5d767b2f5ff7e32cd",
+    "src/core/cpu_execution.h": "96cccd72d191df309fa902fe1b6e5c888f9cd346543f055dab0f6e93ea3cbc69",
+    "src/core/execution_domain.h": "d7a0459b2ef6681d093177c8a7c51a0000c2cc772094a32591398ff0ec77d7ef",
+    "src/core/frame_geometry.h": "2a6854e0d0734f45e58dca9aa3b94400a795639fd61ba21f52f2993a18d96366",
+    "src/core/geometry.h": "70ded8bb9cbde4ecb478162ff7b0b173433c9319640899ef0602f6eb15ac4a33",
+    "src/core/host_storage_bound.h": "73d4e209eaae7e8267b302af290e26a40685cacd99fcb02b4bd2b7ce6ecfc72e",
+    "src/core/image.h": "ccdb5c5caca4528a1fa1843e5088c88e0a3f835873180d451fd4641d0168d604",
+    "src/core/image_buffer.h": "19db5581cf522b994787c5a99d4b64ade4a160b4b401f55227e91e75270d0959",
+    "src/core/image_ops.h": "02c82661b086b937ade577c12a3c6ac53f628b19f648673e13b523b7f57e244c",
+    "src/core/managed_allocator.h": "aebd7e4f7c54bf5187cd7a693e07914bd89450bbe5b352ad25560bdf802561fa",
+    "src/core/managed_publication.h": "f788e1a2375fc65bc3b0d7a70d10af2a9dc5db17678892c91803eaf31e504951",
+    "src/core/overwrite_array.h": "8292c135edbb5d5d5f18d81a0fdb27f809b2814effcfb2a7fa3a892d65681bf3",
+    "src/core/parallel_work_internal.h": "11493492ab61f53a01fb38552fb214c69f86bae2c7c8d1b401d647c729354a2a",
+    "src/core/publication_output.h": "a864d83a0ae19c84a131972e79e04ac106abb864026baa93c1b45538586b99f5",
+    "src/core/publication_record.h": "9651c4c52ff336dd766c0175e7bc1ff6f86fee4041b56b2a92a14aaf411f04b0",
+    "src/core/publication_vector.h": "838b9ba01688abc3141229a0792224a670a48d96106029ce211dedae001d47fe",
+    "src/core/quantizer.h": "f3188c4bd1ca7e7b20b25af4514f37f3e5b9dffd552b6b438ad0c2b247297311",
+    "src/core/resource_budget.h": "a6a57f0bad8e26d551443ad13d90f94beb12b7c3fa720b39d46ac47cbf5f00e3",
+    "src/core/resource_context.h": "3b4e38cd040272f889f74b449d9935fd6093cc43a6e32d80f27492bafe312b16",
+    "src/core/status.h": "d107bdbbb4285733a90acfe69f80a9db25e7e8951ad56d6bae524384a500c33d",
+    "src/core/stdlib_storage_compat.h": "2d756cf3d7ab726123366878c1421438282108ea538e56182eef4bb3683e5c9e",
+    "src/core/thread_budget.h": "00366c5866cd520fe0b7e8453214fee3dbce6d05d2c5b41476b54aa49513d3bc",
+    "src/core/worker_launch_internal.h": "c6269e8cc59637451596033ddbeb636c943dc4e563998813d70b1a547906b365",
+    "src/gpu/backend.h": "2063a08fa7d3926f194cea9114546f8e0d56743160d2efffe91e667f69bef189",
+    "src/gpu/buffer.h": "b45f4a7c354d50941965846bc4a842d55d7a5aa3a78765b5fa1af2b909474532",
+    "src/gpu/cuda/cuda_ac_group_kernels.cu": "50210b9c9d1381416583e8411433e4a8a6843703e971d6c72c71481e44c88d05",
+    "src/gpu/cuda/cuda_ac_group_kernels.h": "0e6f40f3677a33b942d85a775fec072bc9997469b416b2f433f4f1a89a09a08d",
+    "src/gpu/cuda/cuda_ac_strategy.cpp": "03997d2eaa9fd3735a03c7017ed6b111221b339a9f55839989130291bdc8fe54",
+    "src/gpu/cuda/cuda_ac_strategy_kernels.cu": "0153079eeb00c97edf1e9debc1bf37baf2c582c22b4102fbebc7093254ed3d2b",
+    "src/gpu/cuda/cuda_aq.cpp": "ee9e19d8f1c8d4af87a358266b73b8868d82689e735e37998a8eda3fd50c9476",
+    "src/gpu/cuda/cuda_aq_butteraugli_kernels.cu": "3d2fa9fa85f663ed51be4759144a7f97cb1fc432a984e9146f68524506eb402a",
+    "src/gpu/cuda/cuda_aq_butteraugli_kernels.h": "8430f5a5cc5b89ce2dd4858c4cca3f32c78a5f417884078934fdc933c6d8477d",
+    "src/gpu/cuda/cuda_aq_cpu_order_kernels.cu": "2bad95f927e03728f39de3665a274d8b3fac6686b73da54be74d85f400b7cd02",
+    "src/gpu/cuda/cuda_aq_cpu_order_kernels.h": "f699067ae128706550d6a09f587edc17975ea5dc208033b07140d43a28dc1bc3",
+    "src/gpu/cuda/cuda_aq_exact.cpp": "ce58572b70c4c098853c89beac59d0f9f00ea1ce5d82d744a7fd2d5be2a42d87",
+    "src/gpu/cuda/cuda_aq_exact_kernels.cu": "06a83a8ecfbeddebb8345c42759e549db2dcd5e23bd40604a2047bd91f740fab",
+    "src/gpu/cuda/cuda_aq_exact_kernels.h": "fa135dbce3ef07745d22afd40be1f15c96f2b3009a070b0b47221db4252e1753",
+    "src/gpu/cuda/cuda_aq_kernels.cu": "9030732f2d262dedffde9a458e5fe15e572494d2fcf24962edd75d31c83fb942",
+    "src/gpu/cuda/cuda_aq_resident.cpp": "5ce11d9846f395f3346ad69707745a06a8481fa27e4a15d892679f1f25444819",
+    "src/gpu/cuda/cuda_aq_resident_kernels.cu": "8f2dc30603d492e308c5b82637d9afdeca8ef4c1afe1d31faf6ff575f0850d37",
+    "src/gpu/cuda/cuda_aq_resident_kernels.h": "2c688456c144ef951f28e2593c184050992c0666dd7be86a30a00f4a31399927",
+    "src/gpu/cuda/cuda_backend.cpp": "fdce64f4214c3fc40604f1055db4b510b05e1dfc4fdfbbf56e51b3ee461cd7ed",
+    "src/gpu/cuda/cuda_backend.h": "564914805cba7f3f428c7f790009a601adca219cad1d5375c4b3aaa102512023",
+    "src/gpu/cuda/cuda_backend_internal.h": "c9052b0345adeef0412146cfe608bf41ab6e10d54c56db4d9be81f3fb4065772",
+    "src/gpu/cuda/cuda_butteraugli.cpp": "f996126080d6a711c1072e3cc005f4f56b68fcccf294f28e202bc1b435cea6ac",
+    "src/gpu/cuda/cuda_butteraugli_internal.h": "82771bb5af79b1aee94fa980818eb363d20fe553163b9f2326a4a536d06a0be2",
+    "src/gpu/cuda/cuda_butteraugli_kernels.cu": "8abf8ba01a5b5ab7649f72b90f4fde0d415ec223980e799846f0b787a888ba54",
+    "src/gpu/cuda/cuda_butteraugli_kernels.h": "3ed609589177ace94d5565361af76de223af06801e309114b3a28f6fbe75de38",
+    "src/gpu/cuda/cuda_coefficient_order_kernels.cu": "6cc48a307391335dd1e7ccc1ab95cb0f021b866757756b0a0b5ee44da2f84e4e",
+    "src/gpu/cuda/cuda_coefficient_order_kernels.h": "eeb2afa3cd52836f49803e75f4b0c2d410d5d7eec92a75c2a9984583a23d85d1",
+    "src/gpu/cuda/cuda_compact_ac_kernels.cu": "301d46d14396141b0fdf6b2c81058855ed49aa148cedd7f99a8b9da5e829f0df",
+    "src/gpu/cuda/cuda_compact_ac_kernels.h": "2279eed496e2b899bb8588020b13327679c3031e7c6561403c2a7969cc6c7725",
+    "src/gpu/cuda/cuda_dc_processing_kernels.cu": "3b13f56e8a2c944617c8633b4b240ea8d3e5eedca91a69b1bfbbaecd0c0ba005",
+    "src/gpu/cuda/cuda_dc_processing_kernels.h": "63d263cb397d2cbfac47bdf0647c7a27897badf1fdbc6a2aa2db7b742886a59d",
+    "src/gpu/cuda/cuda_direct_ac_pack_kernels.cu": "3a7dc63ecbc46a2d0fb6e5e322c1e04bbbfd7be10e2997695ae1109800acb0c8",
+    "src/gpu/cuda/cuda_direct_ac_pack_kernels.h": "1ccf98055e760d7b66e928abf9be12a900911e5984b395c43cc24fe9be706583",
+    "src/gpu/cuda/cuda_input_preparation.cpp": "d956b14c5d67d70993b106c890ded79c4aec8e5a1303769ed3379581822b705c",
+    "src/gpu/cuda/cuda_kernel_profile.h": "0735bfcd7961c0d858700532fb5d6f7db54701ceab220a6e9f96d36b0f78db8e",
+    "src/gpu/cuda/cuda_kernels.cu": "bb00a047e25b5b956a2e1a094c67113200889e040e2122c08da34eb842708d04",
+    "src/gpu/cuda/cuda_kernels.h": "bc681f2a55ea74d3790ed830194e83167595268a55d90e37758529e76f0d9052",
+    "src/gpu/cuda/cuda_primitives.cpp": "1d450617ae2c64a11a25f1b64d5efb2df96fdb3e7f6747a147492fe8b8d34e34",
+    "src/gpu/cuda/cuda_profile_limits.h": "e9dd0e7b013126701f55e379421b319e95bac4185a20e39f5eaf4febd1c1ed8d",
+    "src/gpu/cuda/cuda_profile_storage_plan.h": "6d55c87bb5f59b5862db07fecf93640e0aa75a8f3433a13a50c1667c15ee9c4e",
+    "src/gpu/cuda/cuda_profiling.cpp": "44c712a40082a53d16fd985d7827592383a7f2142e068ebc9f8463557846028a",
+    "src/gpu/cuda/cuda_resource_internal.h": "3d06a5a86b332cf46c235621a1fc990e38a4f7aff1e42f36d1c457045cec0505",
+    "src/gpu/cuda/cuda_sparse_ac_kernels.cu": "6f5059029d77fab01731849ce24491e4c4c4377a4879c5416670738d6cc8fcd0",
+    "src/gpu/cuda/cuda_sparse_ac_kernels.h": "c3972520dabd47b12453e0caf40b9226d4f7e1d355d1dfa9729e5d632de7844d",
+    "src/gpu/cuda/cuda_storage_plan.h": "015874edba59ac77bfd372e8ad38b2f8bd2a9c3166899c8c26ce86fd478c2c18",
+    "src/gpu/image.cpp": "870f7c1fabe3ff62ef04793434b9d87187f1d3b94284721b35ed8df9298f3969",
+    "src/gpu/image.h": "f03b4e41afe376a4b18fe8305857bcd0b9e31709bdc4110285468f3dd8e4d0f8",
+    "src/gpu/metal/ac_population_reduction_internal.h": "6d1261505cdb0ecb94c2600ec799374a778688e80adc7f81f796bcfea30aa4d9",
+    "src/gpu/metal/kernels/ac_strategy.metal": "6cf8e34a4782fccf15951f64a34082fb10e078679a37a44f26bf84d3b50dbda9",
+    "src/gpu/metal/kernels/ac_strategy_select.metal": "fecbc72fe3b7ecf968d245cb569c71fca9def5c6305368475b6d4da0382453d9",
+    "src/gpu/metal/kernels/ac_tokenization.metal": "45ef5fb43c0aa5a1c765c295594b768438177e888164c448c55fde91c7c140d1",
+    "src/gpu/metal/kernels/aq_postprocess.metal": "3b435464aa8cd0d516e502d7c666789eaad74af1c4de7c38984e4a9ac43da157",
+    "src/gpu/metal/kernels/aq_quantization.h": "1686c9fd6e5dcc125a999cdcc961280940bbf6de7827351e50d8c779764ada09",
+    "src/gpu/metal/kernels/aq_reconstruction.metal": "498304160c8d172e263544756ad447bd0895a1594dccdecd804573fe51ee7c8a",
+    "src/gpu/metal/kernels/aq_reduction.metal": "552784059d0a0caee8a3b45b49cff73629692232c207e5cdb1a4f447dd21be65",
+    "src/gpu/metal/kernels/aq_strategy_dispatch.h": "6d61ae58ecb8feb2b5fb7b0ed4ac10788c6dc48d9309f72a3caf0e3b24840b6f",
+    "src/gpu/metal/kernels/aq_strategy_metadata.metal": "17c5cb366d3d4a84f7e00e5daec17564a41adf365d202b8f7aa357bf3d446ace",
+    "src/gpu/metal/kernels/butteraugli.metal": "2e1988113a744083b2b904bd2765793143b69aeee035590c217a5917ded9be59",
+    "src/gpu/metal/kernels/dc_processing.h": "9bf71ee492a5cbf855624f1b0164ab556f920e7fcd97a3ffe245ea99a3fb520a",
+    "src/gpu/metal/kernels/dct.metal": "ff31c76fefeb27d35a69805bc5df414395dde54afcbd7111e51c7d3821171e1d",
+    "src/gpu/metal/kernels/dct_basis.h": "1b86ded6448096dd912c7fd532779971508680addc7360efffe8fb76062b6be8",
+    "src/gpu/metal/kernels/primitives.metal": "ce3f01c7e2b08f75e13575811840cf271b7029db69999372d3f79b8c65f6007b",
+    "src/gpu/metal/metal_ac_strategy.cpp": "16503accc4affe8e36d0d0f8371573e0b5869ce9c56ebda0a65be13e2e3ef96f",
+    "src/gpu/metal/metal_ac_tokenization.cpp": "c0d03f6043acbdb0b709855bc0e462a7f8393adbdc57365b9a0ad1c007ebeaa1",
+    "src/gpu/metal/metal_aq_butteraugli.cpp": "229aed033ea0ad583b9dbeb9fdd0401f4dd9896a43256a68845398ec78cb5a89",
+    "src/gpu/metal/metal_aq_butteraugli_test.h": "03efaf7a3cb44fc8e4ed9cabe12aed7921449c174a757f4469ac16a9508865e9",
+    "src/gpu/metal/metal_aq_evaluation.cpp": "8af3119ed2fe2f9c0d7708523732b5aa52e2b9a86e95d255807ad37eabc03c18",
+    "src/gpu/metal/metal_aq_evaluation_internal.h": "bbdf8a2dad0e6780dd15ffc73e0e695f735273faea3d202a85196eb59cfa36a6",
+    "src/gpu/metal/metal_aq_evaluation_profile.h": "5d2c73fe22b7d54f5beb290c9c138b4309df89ce90b31a4e793a0eca69765fa7",
+    "src/gpu/metal/metal_aq_evaluation_test.h": "068beeb4822197f5a37f8cfb08547a223a96b7a0aacbc8072f95e92f370d48b2",
+    "src/gpu/metal/metal_aq_host_storage_plan.cpp": "f5e588bfb4870cc24e5f4064f91f341cb0527d62af45c5fb4d4d567492e14b15",
+    "src/gpu/metal/metal_aq_host_storage_plan.h": "a924fbb9e8cd75d6c62df8d081f619d819d14c41efa5b81e56395388dc402a2f",
+    "src/gpu/metal/metal_aq_postprocess.cpp": "d9bd10f75c7b9976ec09623d0a5368e67f0603089718dc5365c99d21bffdcbde",
+    "src/gpu/metal/metal_aq_postprocess_test.h": "8a705e412780d9ad0018e64bce7f3ecb97059895c959566f281ba4d139604ebf",
+    "src/gpu/metal/metal_aq_profile_storage_plan.cpp": "aee7544c0c0493de734478755517758d96ffc3834db1d185a9ed58c28e052541",
+    "src/gpu/metal/metal_aq_profile_storage_plan.h": "c8d93f083b26ffa972733b592b7571dbbb5d81876318ded21948cdf4252af4e1",
+    "src/gpu/metal/metal_aq_reconstruction.cpp": "fd7522d40f1e4c106c054dccdd8f90b8b6522f5a5ac980076a24cc74de49e3e2",
+    "src/gpu/metal/metal_aq_reconstruction_test.h": "29044a0d5a455eba9f9ab9cdaea0d2e30f0414724e7e9946e40f15c1fc757c31",
+    "src/gpu/metal/metal_aq_strategy_dispatch.cpp": "01152545cf6fdbf9c7362fe3bc555ee0f0dbfbeadd4bfc610e0f055caf477459",
+    "src/gpu/metal/metal_aq_strategy_metadata.cpp": "1e3891936d882677b237851aeb913e8835b1a423d532cb688b33a7605e77ebb1",
+    "src/gpu/metal/metal_aq_strategy_metadata.h": "a48332d3d668ff4352f72e4b7e1b00beeadda036186056936dbde1a7920392fb",
+    "src/gpu/metal/metal_backend.cpp": "7aed4eaca06ccff2863c6a868301da09c8bda2bef4eda94a38989d2ef8ea175b",
+    "src/gpu/metal/metal_backend.h": "ab273e0e9254378bddff3999a9797f0d224d7415239e78b46b34134a276ce462",
+    "src/gpu/metal/metal_backend_internal.h": "a25137bca923c950610fcb7760c0fcf35590c93ecb848c773e539b3db43d99fb",
+    "src/gpu/metal/metal_butteraugli.cpp": "dbcc76e337ac7f77112ac30316698b3d672a5cdb553eab03e3bfad20a693a5dd",
+    "src/gpu/metal/metal_butteraugli_encoding.h": "7d7e2ae7483524786b3a54b9b27b085f2b278bc23ba9020914fe4db47d4e588e",
+    "src/gpu/metal/metal_butteraugli_test.h": "9c71ff404b63f59fca300a9f3263ec7e7cadae8e100650267809faf3e154f819",
+    "src/gpu/metal/metal_cpp_impl.cpp": "a4bd70dcc01ccefce22bc01009e8ea498d6ae261533fc39d02d835e460cc6a21",
+    "src/gpu/metal/metal_dc_processing_internal.h": "e5316aa339e7e64b7faee53ba71f2935d741344802718813e4bc28023b298896",
+    "src/gpu/metal/metal_embedded_library.cpp": "a69883b5d616ea8465b2827bc48d7e43196cc644f3f6cf4daa5a6dcd782132fb",
+    "src/gpu/metal/metal_embedded_library_internal.h": "b492c9fbdef741e3c930b14f8823c59b35a4420b8e45e0957f7baaa2654ced03",
+    "src/gpu/metal/metal_primitives.cpp": "f4b9299af97e25b70174aff6e6c8df303180674d981eb2a6a3ef0860d3d71641",
+    "src/gpu/metal/metal_status.h": "a8f90b494df4937a2b5570a93a74f005b71e1384d48b5d244d573ed009ce5a54",
+    "src/gpu/metal/metal_storage_plan.cpp": "fa32061a5e7708c063984229a589e9ae25616c773b386b601624bca2decb9456",
+    "src/gpu/metal/metal_storage_plan.h": "2f41dc69b868d7db7b945a7466879602ddde6bbe5e99c47cbfd72d750e5e3429",
+    "src/gpu/metal/metal_submission.cpp": "dc6b487e2c5a7175c733c318a22dfff4c1d5ebf683f494a706e0ac099bcae9ca",
+    "src/gpu/metal/metal_submission_storage_plan.cpp": "48cc3fa46cb6f52153d72ac651d4a734da72bbccaa303306b03368a3555bada9",
+    "src/gpu/metal/metal_submission_storage_plan.h": "e6ba19ede6f6c9eea8fb63c1c8c62bf26c49490dfbae14e3b9ad3c937df7b3fa",
+    "src/gpu/ops/ac_strategy.h": "90dff27e528511796cddbc863cdf3bf8323096c6bc847d12e30721ad47d41815",
+    "src/gpu/ops/ac_strategy_capture_internal.h": "6ce872d46f1c5de173dcc9a8264d78a272df798546899290e3c2b72f6a70fc15",
+    "src/gpu/ops/ac_strategy_search.cpp": "3fb5b235f30fffbe5de85262d797a465edb2cbc5f5e1bd85ee59e903e6fb6f11",
+    "src/gpu/ops/ac_strategy_search.h": "d65d56cd0a81446775439fe641343af600635c58d0dc96c62f8827aaff519b6f",
+    "src/gpu/ops/ac_strategy_search_profile_internal.h": "8f3a6e5b551e2b9e72bdb8727462bdf54362f4696a664fd499ee57ec6e4a4ab5",
+    "src/gpu/ops/ac_strategy_search_test.h": "ffe75a531a6c81f52657557563b7dcdca159de4941f913b6bb328a0084e0139b",
+    "src/gpu/ops/ac_strategy_selection.h": "5b89f2db224d4d4cfa8ee8d7252c8f367d118262247ef4d0f561638bab9733d3",
+    "src/gpu/ops/ac_strategy_storage_plan.cpp": "a69777974321a2540f22734a2ff41529af64647b43c56095e968e1bd87b60f6f",
+    "src/gpu/ops/ac_strategy_storage_plan.h": "aef06c009f7e3b3fa4752f72885b9f4d0abdc98152d3370beab1cb45400125fa",
+    "src/gpu/ops/adaptive_quantization.cpp": "ae7136426621e2658cf2ae6de35a7f61ec331cb5c0ef20de2171d4f3b1b6fe8c",
+    "src/gpu/ops/adaptive_quantization.h": "badb22780e3d0f511417eb034b5f9e3a096e33fea87cfd723bd6c4c224eaf5e3",
+    "src/gpu/ops/adaptive_quantization_profile_internal.h": "b403fb4a0d6b2cf9fd167cb7559efcd32728072337dc60fe1cc24f445ffc77f1",
+    "src/gpu/ops/aq_evaluation.h": "b7af7b1a4dd73940ee73eb150c2a33e77fe7618b55e19c9432e377c13e1427e1",
+    "src/gpu/ops/aq_evaluation_internal.h": "246d581469f64f6fb1fd235241f18fab8af8dee5999350606b839de6611c382c",
+    "src/gpu/ops/butteraugli.cpp": "11353a975188514d9a3b55d1c779b02c11242e77cc01f1c008b6b67a3d823410",
+    "src/gpu/ops/butteraugli.h": "704b29a0b13b2272de46958fefbcf924529488da0e43c2e0bd38e3acf2462741",
+    "src/gpu/ops/gaborish.cpp": "498ac68e4ee4c51157ffe1a8e86b20d36d862b63a6b4bc3bcc507f29d931f106",
+    "src/gpu/ops/gaborish.h": "e2c748e1af297dcb19a0a0a84f22cba774bfbb0d8ecebb14bdc7ad10c7d92533",
+    "src/gpu/ops/gaborish_profile_internal.h": "f4a6505087ffa616578a77928454875e86b8efe0e0bd073101cbca8fe8e83c4d",
+    "src/gpu/ops/gpu_execution_profile_internal.h": "533244c11bdc4d804b2eeefec83956dd5aa952e614da50dda35681620f471653",
+    "src/gpu/ops/input_preparation.h": "a3c36215edf65ba0e5ddc3c65e020ccc241851ce88decbeef9f3a0da7e0a5f6d",
+    "src/gpu/ops/primitives.h": "a85c8a1efd0f6947a1cdce69f5085b89d7b27b22c3d1fe8149fd7fa30bd96933",
+    "src/gpu/ops/profile_storage_plan.cpp": "d0b82db7e95b13ea2b7ecd9c581335dcb01f3a652d26f801f853531434c04a0c",
+    "src/gpu/ops/profile_storage_plan.h": "9ea9af81b6c65fb02c32bcbcff24a32331fd94faa30251be4404069833b9775c",
+    "src/gpu/ops/quantization_pipeline.cpp": "ae1cffee1ce553a976eb058c2de1f23394eb332892b3f4b30e67487fb930ec09",
+    "src/gpu/ops/quantization_pipeline.h": "535c0bf0ec83d3b0e7fc964fed7752ebea551ef2eb1338036a4d635e0f3d7a39",
+    "src/gpu/ops/quantization_pipeline_profile_internal.h": "0b716ae84291baf5372fb06ea6539d0cec1ad3089d6c8d3082d4c2d79071b6f1",
+    "src/gpu/ops/resident_input.h": "a4a92ac3b219f1ce25c606676f1b60c25e2373dbc332064bb4237cdf5da6f907",
+    "src/gpu/ops/transform.h": "7ef723ad97c2a0552acef417d83dac390f04ee03f589b29ba3e0994f387a878b",
+    "src/gpu/scratch.cpp": "759a4afaa9b6985780812876c403e3878808482972dd47d4a8fddbdbae2f62e3",
+    "src/gpu/scratch.h": "06576f40a257a9bd60377909a5d5853fab2bc5a4ae7fe9f04cb883d759596594",
+    "src/gpu/submission.h": "d1ac1c39b74c4730dbbaadc6f25680256f0fc095b1b845fbbf7d6d5e17baa782",
+    "src/io/pfm.cpp": "223af0796f02acb7d78991b9cbbb758a0d97e301a7c78a9dc3715710fef07f56",
+    "src/io/pfm.h": "8bcf4fecb6c4a377e76610e6b75c15e0bb3a6dc5be58c43cdd80e60c90ca74f7",
+    "src/util/fast_math.h": "a223c24fd0e994377f0ed6601f67f91877e41495a7afd8108a74757606cccf65"
+  },
+  "changed_source_paths": [
+    "CMakeLists.txt",
+    "src/codec/dc_quantization.cpp",
+    "src/codec/modular/prediction.h",
+    "src/codec/vardct/dc_prediction_internal.h",
+    "src/codec/vardct/dc_quantization.cpp",
+    "src/codec/weighted_dc_predictor_internal.h",
+    "src/codestream/dc_context_tree.cpp",
+    "src/codestream/dc_context_tree_legacy.inc",
+    "src/codestream/dc_group.cpp",
+    "src/codestream/encoder.cpp",
+    "src/codestream/entropy.cpp",
+    "src/codestream/entropy_internal.h",
+    "src/codestream/fields_internal.h",
+    "src/codestream/headers.cpp",
+    "src/codestream/modular/stream_encoder.cpp",
+    "src/codestream/modular/stream_encoder.h",
+    "src/codestream/modular/stream_types.h",
+    "src/codestream/modular/tree_codec.cpp",
+    "src/codestream/modular/tree_codec.h",
+    "src/codestream/vardct/dc_context_tree.cpp",
+    "src/codestream/vardct/dc_context_tree_legacy.inc",
+    "src/codestream/vardct/dc_group.cpp",
+    "src/codestream/vardct/encoder.cpp",
+    "src/codestream/vardct/headers.cpp",
+    "src/codestream/vardct/weighted_dc.cpp",
+    "src/codestream/weighted_dc.cpp"
+  ],
+  "modular_include_closure": [
+    "codec/modular/prediction.h",
+    "codestream/bit_writer.h",
+    "codestream/context_map_internal.h",
+    "codestream/entropy.h",
+    "codestream/entropy_internal.h",
+    "codestream/entropy_storage_plan.h",
+    "codestream/modular/stream_encoder.cpp",
+    "codestream/modular/stream_encoder.h",
+    "codestream/modular/stream_types.h",
+    "codestream/modular/tree_codec.cpp",
+    "codestream/modular/tree_codec.h",
+    "codestream/storage.h",
+    "core/host_storage_bound.h",
+    "core/managed_allocator.h",
+    "core/publication_vector.h",
+    "core/resource_budget.h",
+    "core/resource_context.h",
+    "core/status.h",
+    "core/stdlib_storage_compat.h"
+  ],
+  "binaries_and_libraries": {
+    "baseline-capture/modular_extraction_capture.exe": "cd726fe6048088cc2f90eea32ee69c740399102661d7a1cec526e07db1f7af52",
+    "candidate-capture/modular_extraction_capture.exe": "4e639a72a2c9496e0edd7aa25e5917bd81632fda1bd0256322a82524a30044ae",
+    "pinned-libjxl-x64/tools/djxl.exe": "9b796af5e6c4e38e26b9eeb703f9cc4a6bb21c7080b35fa5abeec503b0dc8dd3",
+    "pinned-libjxl-x64/tools/jxlinfo.exe": "40b5985d3516c40e3f2a06a2322125b93670e72a3080c3b63635f53ce249bac6",
+    "pinned-libjxl-x64/tools/jxl.dll": "b9f17629eb459938fc63eb788d0925a8535f5e18d8751afdc67e1373f8910af4",
+    "baseline/gjxl_codec.lib": "7afb95f6e6aa6659b9a40f046a80678bacff860f040fe3239cc5feac839da95a",
+    "baseline/gjxl_codestream.lib": "40d49692666603bd3b68f7f81dcecadb64c9cf027976427cf4b7d92fae075d27",
+    "candidate/gjxl_codec.lib": "f1a67e023bb5c325732d567a409fdd0d915e91f1b9715fa5894c83e52ac7b648",
+    "candidate/gjxl_codestream.lib": "9a2fccb064edcac91c69edf74d5e532ea6e4b20bdefa580b0b82d6aef09e82c1",
+    "candidate/CMakeFiles/gjxl_dc_processing_oracle_test.dir/tests/dc_processing_oracle_test.cpp.obj": "29f0cfe784e65f87a50775eeac963a815a17919a53004562bbadd993f63a9e4d"
+  },
+  "tools": {
+    "tools/modular_extraction/capture.cpp": "5f38e2f3c3f37fe1bf07de5f85a574db33678c325fd1a395cc46d19a7d752c09",
+    "tools/modular_extraction/CMakeLists.txt": "abb5500ec93a44b5dab0f83ac36ba7b90b8cd0707d5c8cd8bda514caacb1e692",
+    "tools/modular_extraction/evidence.py": "2185f12683f64e40d09349d0ebfebdddbcaff2517375f0640c4132fd8d82abe6",
+    "tools/modular_extraction/measure.py": "1ef88d040a5707f2721b69198ed27f2a3293effbffed31799537bc0396560c40",
+    "tools/modular_extraction/prepare_photo.py": "8a69ff68f6297c21dfb4f86c9071ef9f6a7b6fcfcd6281ffc2917a9b0b7c10a3",
+    "tools/modular_extraction/README.md": "c0c00ef33ae8090c608e7184e08227378c0b684924aae32f308d50570baba4b3",
+    "tools/modular_extraction/record.py": "7d38e86269dea58ac9f103d42cdc08196ae4c96a9607297dd817700be5687484"
+  },
+  "msvc_packages": [
+    {
+      "id": "Microsoft.VC.14.37.17.7.CRT.Headers.base",
+      "version": "14.37.32822",
+      "fileName": "Microsoft.VC.14.37.17.7.CRT.Headers.base.vsix",
+      "sha256": "7ee45c7ad2768696538d31339d81145b74d1b486ae5ced84590d9a69f71b719a",
+      "size": 3513041,
+      "url": "https://download.visualstudio.microsoft.com/download/pr/d20d6abb-e5de-4a09-ad32-653cf6018975/7ee45c7ad2768696538d31339d81145b74d1b486ae5ced84590d9a69f71b719a/Microsoft.VC.14.37.17.7.CRT.Headers.base.vsix",
+      "signer": {
+        "$ref": "1"
+      }
+    },
+    {
+      "id": "Microsoft.VC.14.37.17.7.CRT.x64.Desktop.base",
+      "version": "14.37.32826",
+      "fileName": "Microsoft.VC.14.37.17.7.CRT.x64.Desktop.base.vsix",
+      "sha256": "0a257ee75544fcaa727d8a8963c3bb53746044c9119c0255f66c3520db2d32c9",
+      "size": 46322366,
+      "url": "https://download.visualstudio.microsoft.com/download/pr/47b236ad-5505-4752-9d2b-5cf9795528bc/0a257ee75544fcaa727d8a8963c3bb53746044c9119c0255f66c3520db2d32c9/Microsoft.VC.14.37.17.7.CRT.x64.Desktop.base.vsix",
+      "signer": {
+        "$ref": "1"
+      }
+    },
+    {
+      "id": "Microsoft.VC.14.37.17.7.CRT.x64.Store.base",
+      "version": "14.37.32826",
+      "fileName": "Microsoft.VC.14.37.17.7.CRT.x64.Store.base.vsix",
+      "sha256": "f2ccd38a0654666c81a16cbb30c5244968539d9db458309e8c5d5c43bd8564ab",
+      "size": 25348099,
+      "url": "https://download.visualstudio.microsoft.com/download/pr/47b236ad-5505-4752-9d2b-5cf9795528bc/f2ccd38a0654666c81a16cbb30c5244968539d9db458309e8c5d5c43bd8564ab/Microsoft.VC.14.37.17.7.CRT.x64.Store.base.vsix",
+      "signer": {
+        "$ref": "1"
+      }
+    },
+    {
+      "id": "Microsoft.VC.14.37.17.7.Tools.HostX64.TargetX64.base",
+      "version": "14.37.32826",
+      "fileName": "Microsoft.VC.14.37.17.7.Tools.HostX64.TargetX64.base.vsix",
+      "sha256": "37722825bee31043bee81038c487fbcc08daa026129c59419ecf6deb8f2607fe",
+      "size": 19884235,
+      "url": "https://download.visualstudio.microsoft.com/download/pr/47b236ad-5505-4752-9d2b-5cf9795528bc/37722825bee31043bee81038c487fbcc08daa026129c59419ecf6deb8f2607fe/Microsoft.VC.14.37.17.7.Tools.HostX64.TargetX64.base.vsix",
+      "signer": {
+        "$ref": "1"
+      }
+    },
+    {
+      "id": "Microsoft.VC.14.37.17.7.Tools.HostX64.TargetX64.Res.base",
+      "version": "14.37.32826",
+      "fileName": "Microsoft.VC.14.37.17.7.Tools.HostX64.TargetX64.Res.base.enu.vsix",
+      "sha256": "48ceca2648ce95b85c46fd755c2a9aa5b73c43e4cf186363e3f2cf32067a3bd5",
+      "size": 218291,
+      "url": "https://download.visualstudio.microsoft.com/download/pr/47b236ad-5505-4752-9d2b-5cf9795528bc/48ceca2648ce95b85c46fd755c2a9aa5b73c43e4cf186363e3f2cf32067a3bd5/Microsoft.VC.14.37.17.7.Tools.HostX64.TargetX64.Res.base.enu.vsix",
+      "signer": {
+        "$ref": "1"
+      }
+    }
+  ],
+  "photo": {
+    "source": "third_party\\libjxl\\testdata\\external\\wesaturate\\500px\\tmshre_riaphotographs_srgb8.png",
+    "source_sha256": "fa85b95a14533303b64d9015537a6f21e50094dcc42ca9c48f93ed242a9781f6",
+    "preparation": "five horizontal copies; exact sRGB transfer to float32 linear RGB",
+    "extent": [
+      2500,
+      500
+    ],
+    "pfm_sha256": "11ec841a615c918c05c92717f9ee88bd4c1c7ca6199d0de4e688f7396c7e7845"
+  },
+  "baseline_oracle_link_arguments": [
+    "/nologo",
+    "/machine:x64",
+    "/subsystem:console",
+    "/out:build/modular-phase1/baseline-dc-processing-oracle.exe",
+    "build/modular-phase1/candidate/CMakeFiles/gjxl_dc_processing_oracle_test.dir/tests/dc_processing_oracle_test.cpp.obj",
+    "build/modular-phase1/baseline/gjxl_codec.lib",
+    "C:\\Users\\hocbu\\GitHub\\gjxl\\build\\modular-phase1\\pinned-libjxl-x64/lib/jxl-internal.lib",
+    "C:\\Users\\hocbu\\GitHub\\gjxl\\build\\modular-phase1\\pinned-libjxl-x64/third_party/highway/hwy.lib",
+    "C:\\Users\\hocbu\\GitHub\\gjxl\\build\\modular-phase1\\pinned-libjxl-x64/lib/jxl_cms.lib",
+    "C:\\Users\\hocbu\\GitHub\\gjxl\\build\\modular-phase1\\pinned-libjxl-x64/third_party/brotli/brotlienc.lib",
+    "C:\\Users\\hocbu\\GitHub\\gjxl\\build\\modular-phase1\\pinned-libjxl-x64/third_party/brotli/brotlidec.lib",
+    "C:\\Users\\hocbu\\GitHub\\gjxl\\build\\modular-phase1\\pinned-libjxl-x64/third_party/brotli/brotlicommon.lib",
+    "kernel32.lib",
+    "user32.lib",
+    "gdi32.lib",
+    "winspool.lib",
+    "shell32.lib",
+    "ole32.lib",
+    "oleaut32.lib",
+    "uuid.lib",
+    "comdlg32.lib",
+    "advapi32.lib"
+  ],
+  "logs": {
+    "baseline-build-all.log": {
+      "sha256": "175ea9ea66d7fb4256bb4735d8578215d5c9b62d071899b5f4c32f5b4b4a9652",
+      "bytes": 50313
+    },
+    "baseline-tests.log": {
+      "sha256": "1b5966c9a2b55d2752a944771b602a2488c60ba5f649e6a91e96ede5e11cec4a",
+      "bytes": 31101
+    },
+    "candidate-build-2.log": {
+      "sha256": "266e2965104100a82a87364098f4d7fee5f97710321a9a24d643317272aa3c0c",
+      "bytes": 35900
+    },
+    "candidate-tests.log": {
+      "sha256": "98d640a3e76073b2e53597d69cd44f4c8d8fc3f7a61bfe68631c684b05e60504",
+      "bytes": 31696
+    },
+    "candidate-final-focused.log": {
+      "sha256": "6ddc22616efdb3145e59af11f49e102b226d1d14cf4a2359d6033668f70b9ee9",
+      "bytes": 568
+    },
+    "final-owner-test.log": {
+      "sha256": "b16d5b1650601e0408e7aa96a259bca59ff461de841a071a66d7ed0ba32b10e8",
+      "bytes": 357
+    },
+    "baseline-dc-oracle.log": {
+      "sha256": "69712bf56435314bffa1f1567be655432243d763315be778cff6f8aac0a96fea",
+      "bytes": 132
+    },
+    "candidate-focused-tests.log": {
+      "sha256": "661162bbc02b5c4e7696334908b0aa9d0004d24af8b7dd2b314465fe58487fd6",
+      "bytes": 1408
+    },
+    "baseline-conformance.log": {
+      "sha256": "a6efa22a9314f55980d5b0816a6bb479127363e48d338e336378debe6b8178a3",
+      "bytes": 2423
+    },
+    "candidate-conformance.log": {
+      "sha256": "a6efa22a9314f55980d5b0816a6bb479127363e48d338e336378debe6b8178a3",
+      "bytes": 2423
+    },
+    "pinned-decoder-verified.log": {
+      "sha256": "ef16c0a5c01cc98de13ef6d3622a18fec95c071af55f0c30f0fb669408582098",
+      "bytes": 2206
+    }
+  },
+  "test_results": {
+    "baseline": [
+      {
+        "name": "planning_recipes",
+        "status": "passed",
+        "seconds": "4.78258",
+        "detail": ""
+      },
+      {
+        "name": "resident_qualification_controller",
+        "status": "passed",
+        "seconds": "4.83179",
+        "detail": ""
+      },
+      {
+        "name": "stdlib_storage_compat",
+        "status": "passed",
+        "seconds": "4.64956",
+        "detail": ""
+      },
+      {
+        "name": "stdlib_storage_compat_cxx23",
+        "status": "passed",
+        "seconds": "2.50249",
+        "detail": ""
+      },
+      {
+        "name": "storage_toolchain",
+        "status": "passed",
+        "seconds": "15.4591",
+        "detail": ""
+      },
+      {
+        "name": "bit_writer_append",
+        "status": "passed",
+        "seconds": "2.35105",
+        "detail": ""
+      },
+      {
+        "name": "bit_writer_word",
+        "status": "passed",
+        "seconds": "2.34867",
+        "detail": ""
+      },
+      {
+        "name": "ans_bit_emission",
+        "status": "passed",
+        "seconds": "1.17347",
+        "detail": ""
+      },
+      {
+        "name": "bit_writer",
+        "status": "passed",
+        "seconds": "0.180757",
+        "detail": ""
+      },
+      {
+        "name": "entropy",
+        "status": "passed",
+        "seconds": "0.66216",
+        "detail": ""
+      },
+      {
+        "name": "context_map",
+        "status": "passed",
+        "seconds": "2.16976",
+        "detail": ""
+      },
+      {
+        "name": "ans_reverse_bits",
+        "status": "passed",
+        "seconds": "1.69357",
+        "detail": ""
+      },
+      {
+        "name": "sections",
+        "status": "passed",
+        "seconds": "0.122472",
+        "detail": ""
+      },
+      {
+        "name": "dc_group",
+        "status": "passed",
+        "seconds": "0.293747",
+        "detail": ""
+      },
+      {
+        "name": "weighted_dc",
+        "status": "passed",
+        "seconds": "0.732467",
+        "detail": ""
+      },
+      {
+        "name": "ac_group",
+        "status": "passed",
+        "seconds": "2.47781",
+        "detail": ""
+      },
+      {
+        "name": "coefficient_order",
+        "status": "passed",
+        "seconds": "1.16311",
+        "detail": ""
+      },
+      {
+        "name": "dc_parallel_tokenization",
+        "status": "passed",
+        "seconds": "0.540789",
+        "detail": ""
+      },
+      {
+        "name": "ac_direct_tokenization",
+        "status": "passed",
+        "seconds": "5.46554",
+        "detail": ""
+      },
+      {
+        "name": "ac_population_reduction",
+        "status": "passed",
+        "seconds": "2.47642",
+        "detail": ""
+      },
+      {
+        "name": "token_storage_plan",
+        "status": "passed",
+        "seconds": "0.537346",
+        "detail": ""
+      },
+      {
+        "name": "entropy_storage_plan",
+        "status": "passed",
+        "seconds": "6.02541",
+        "detail": ""
+      },
+      {
+        "name": "representation_storage_plan",
+        "status": "passed",
+        "seconds": "0.394826",
+        "detail": ""
+      },
+      {
+        "name": "serializer_storage_plan",
+        "status": "passed",
+        "seconds": "86.597",
+        "detail": ""
+      },
+      {
+        "name": "ac_section_validation",
+        "status": "passed",
+        "seconds": "0.327025",
+        "detail": ""
+      },
+      {
+        "name": "compact_vardct_frame",
+        "status": "passed",
+        "seconds": "6.46974",
+        "detail": ""
+      },
+      {
+        "name": "compact_frame_allocation",
+        "status": "passed",
+        "seconds": "2.58199",
+        "detail": ""
+      },
+      {
+        "name": "frame_validation",
+        "status": "passed",
+        "seconds": "5.58011",
+        "detail": ""
+      },
+      {
+        "name": "sparse_coefficients",
+        "status": "passed",
+        "seconds": "0.195507",
+        "detail": ""
+      },
+      {
+        "name": "sparse_vardct_frame",
+        "status": "passed",
+        "seconds": "30.0061",
+        "detail": ""
+      },
+      {
+        "name": "sparse_frame_allocation",
+        "status": "passed",
+        "seconds": "2.13449",
+        "detail": ""
+      },
+      {
+        "name": "quantization_storage",
+        "status": "passed",
+        "seconds": "0.112901",
+        "detail": ""
+      },
+      {
+        "name": "block_context_map",
+        "status": "passed",
+        "seconds": "0.0858716",
+        "detail": ""
+      },
+      {
+        "name": "codestream_encoder",
+        "status": "passed",
+        "seconds": "33.8889",
+        "detail": ""
+      },
+      {
+        "name": "codestream_workflow",
+        "status": "passed",
+        "seconds": "16.6751",
+        "detail": ""
+      },
+      {
+        "name": "codestream_batch_workflow",
+        "status": "passed",
+        "seconds": "0.497113",
+        "detail": ""
+      },
+      {
+        "name": "batch_lifecycle_cpu",
+        "status": "passed",
+        "seconds": "0.307659",
+        "detail": ""
+      },
+      {
+        "name": "batch_scheduling_cpu",
+        "status": "passed",
+        "seconds": "0.212554",
+        "detail": ""
+      },
+      {
+        "name": "parallel_work",
+        "status": "passed",
+        "seconds": "0.0767917",
+        "detail": ""
+      },
+      {
+        "name": "worker_launch_failure_startup",
+        "status": "passed",
+        "seconds": "0.0775016",
+        "detail": ""
+      },
+      {
+        "name": "worker_launch_failure_forward",
+        "status": "passed",
+        "seconds": "3.73061",
+        "detail": ""
+      },
+      {
+        "name": "worker_launch_failure_cpu_color",
+        "status": "passed",
+        "seconds": "52.8184",
+        "detail": ""
+      },
+      {
+        "name": "worker_launch_failure_cpu_aq",
+        "status": "passed",
+        "seconds": "55.6453",
+        "detail": ""
+      },
+      {
+        "name": "worker_launch_failure_cpu_orders",
+        "status": "passed",
+        "seconds": "66.5763",
+        "detail": ""
+      },
+      {
+        "name": "worker_launch_failure_cpu_sections",
+        "status": "passed",
+        "seconds": "65.2694",
+        "detail": ""
+      },
+      {
+        "name": "worker_launch_failure_cpu_drains",
+        "status": "passed",
+        "seconds": "22.4105",
+        "detail": ""
+      },
+      {
+        "name": "rate_control_search",
+        "status": "passed",
+        "seconds": "0.0953251",
+        "detail": ""
+      },
+      {
+        "name": "rate_control_probe",
+        "status": "passed",
+        "seconds": "0.194116",
+        "detail": ""
+      },
+      {
+        "name": "codestream_cli",
+        "status": "passed",
+        "seconds": "1.54956",
+        "detail": ""
+      },
+      {
+        "name": "codestream_sample_generated",
+        "status": "passed",
+        "seconds": "0.229138",
+        "detail": ""
+      },
+      {
+        "name": "c_api_image_conversion",
+        "status": "passed",
+        "seconds": "0.20255",
+        "detail": ""
+      },
+      {
+        "name": "c_api",
+        "status": "passed",
+        "seconds": "0.594611",
+        "detail": ""
+      },
+      {
+        "name": "c_api_cpp",
+        "status": "passed",
+        "seconds": "0.109021",
+        "detail": ""
+      },
+      {
+        "name": "pfm",
+        "status": "passed",
+        "seconds": "0.296923",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli_primitives",
+        "status": "passed",
+        "seconds": "0.120006",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli_stages",
+        "status": "passed",
+        "seconds": "0.0988681",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli_distance",
+        "status": "passed",
+        "seconds": "0.133531",
+        "detail": ""
+      },
+      {
+        "name": "core_geometry",
+        "status": "passed",
+        "seconds": "0.136185",
+        "detail": ""
+      },
+      {
+        "name": "resource_budget",
+        "status": "passed",
+        "seconds": "0.17886",
+        "detail": ""
+      },
+      {
+        "name": "cpu_budget",
+        "status": "passed",
+        "seconds": "0.19904",
+        "detail": ""
+      },
+      {
+        "name": "cpu_execution",
+        "status": "passed",
+        "seconds": "0.124604",
+        "detail": ""
+      },
+      {
+        "name": "entropy_readiness",
+        "status": "passed",
+        "seconds": "0.115403",
+        "detail": ""
+      },
+      {
+        "name": "earlier_dc_contract",
+        "status": "not_run",
+        "seconds": "0",
+        "detail": ""
+      },
+      {
+        "name": "entropy_readiness_contract",
+        "status": "not_run",
+        "seconds": "0",
+        "detail": ""
+      },
+      {
+        "name": "workflow_cpu_coordination_cpu",
+        "status": "passed",
+        "seconds": "43.0148",
+        "detail": ""
+      },
+      {
+        "name": "managed_allocator",
+        "status": "passed",
+        "seconds": "0.134307",
+        "detail": ""
+      },
+      {
+        "name": "serializer_storage",
+        "status": "passed",
+        "seconds": "0.173354",
+        "detail": ""
+      },
+      {
+        "name": "frontend_storage",
+        "status": "passed",
+        "seconds": "0.122732",
+        "detail": ""
+      },
+      {
+        "name": "frontend_storage_plan",
+        "status": "passed",
+        "seconds": "2.27838",
+        "detail": ""
+      },
+      {
+        "name": "frontend_field_storage_plan",
+        "status": "passed",
+        "seconds": "12.8505",
+        "detail": ""
+      },
+      {
+        "name": "perceptual_storage_plan",
+        "status": "passed",
+        "seconds": "14.2197",
+        "detail": ""
+      },
+      {
+        "name": "publication_storage",
+        "status": "passed",
+        "seconds": "0.115785",
+        "detail": ""
+      },
+      {
+        "name": "workflow_publication",
+        "status": "passed",
+        "seconds": "4.35847",
+        "detail": ""
+      },
+      {
+        "name": "diagnostic_storage",
+        "status": "passed",
+        "seconds": "0.110038",
+        "detail": ""
+      },
+      {
+        "name": "ac_strategy_grid",
+        "status": "passed",
+        "seconds": "2.77203",
+        "detail": ""
+      },
+      {
+        "name": "fast_math",
+        "status": "passed",
+        "seconds": "0.178243",
+        "detail": ""
+      },
+      {
+        "name": "dct_reference",
+        "status": "passed",
+        "seconds": "0.156097",
+        "detail": ""
+      },
+      {
+        "name": "cpu_dct",
+        "status": "passed",
+        "seconds": "0.145283",
+        "detail": ""
+      },
+      {
+        "name": "ac_strategy_cost",
+        "status": "passed",
+        "seconds": "0.146516",
+        "detail": ""
+      },
+      {
+        "name": "ac_strategy_search",
+        "status": "passed",
+        "seconds": "0.376982",
+        "detail": ""
+      },
+      {
+        "name": "quantization",
+        "status": "passed",
+        "seconds": "0.113779",
+        "detail": ""
+      },
+      {
+        "name": "quantization_adjustment",
+        "status": "passed",
+        "seconds": "0.0983655",
+        "detail": ""
+      },
+      {
+        "name": "maximum_error",
+        "status": "passed",
+        "seconds": "0.350925",
+        "detail": ""
+      },
+      {
+        "name": "dc_conversion",
+        "status": "passed",
+        "seconds": "0.0962382",
+        "detail": ""
+      },
+      {
+        "name": "dc_quantization",
+        "status": "passed",
+        "seconds": "0.0844116",
+        "detail": ""
+      },
+      {
+        "name": "dc_processing",
+        "status": "passed",
+        "seconds": "0.213275",
+        "detail": ""
+      },
+      {
+        "name": "cpu_workflow_storage_plan",
+        "status": "passed",
+        "seconds": "116.91",
+        "detail": ""
+      },
+      {
+        "name": "cpu_workflow_legacy_dc_tree",
+        "status": "passed",
+        "seconds": "115.515",
+        "detail": ""
+      },
+      {
+        "name": "dc_context_tree",
+        "status": "passed",
+        "seconds": "1.497",
+        "detail": ""
+      },
+      {
+        "name": "adaptive_quantization",
+        "status": "passed",
+        "seconds": "0.169425",
+        "detail": ""
+      },
+      {
+        "name": "adaptive_quantization_loop",
+        "status": "passed",
+        "seconds": "0.184851",
+        "detail": ""
+      },
+      {
+        "name": "color_transform",
+        "status": "passed",
+        "seconds": "0.168083",
+        "detail": ""
+      },
+      {
+        "name": "quantization_pipeline",
+        "status": "passed",
+        "seconds": "0.408716",
+        "detail": ""
+      },
+      {
+        "name": "quantization_pipeline_uniform",
+        "status": "passed",
+        "seconds": "0.0620007",
+        "detail": ""
+      },
+      {
+        "name": "quantization_pipeline_search_policy",
+        "status": "passed",
+        "seconds": "0.0594557",
+        "detail": ""
+      },
+      {
+        "name": "low_effort_strategy_policy",
+        "status": "passed",
+        "seconds": "0.121383",
+        "detail": ""
+      },
+      {
+        "name": "dc_policy",
+        "status": "passed",
+        "seconds": "3.99579",
+        "detail": ""
+      },
+      {
+        "name": "gaborish",
+        "status": "passed",
+        "seconds": "0.129425",
+        "detail": ""
+      },
+      {
+        "name": "chroma_from_luma",
+        "status": "passed",
+        "seconds": "0.185252",
+        "detail": ""
+      },
+      {
+        "name": "epf",
+        "status": "passed",
+        "seconds": "0.108074",
+        "detail": ""
+      },
+      {
+        "name": "reconstruction",
+        "status": "passed",
+        "seconds": "0.377797",
+        "detail": ""
+      },
+      {
+        "name": "overwrite_array",
+        "status": "passed",
+        "seconds": "0.129414",
+        "detail": ""
+      },
+      {
+        "name": "vardct_frame",
+        "status": "passed",
+        "seconds": "2.98406",
+        "detail": ""
+      },
+      {
+        "name": "vardct_frame_view",
+        "status": "passed",
+        "seconds": "35.5437",
+        "detail": ""
+      },
+      {
+        "name": "simple_codestream_profile",
+        "status": "passed",
+        "seconds": "0.126362",
+        "detail": ""
+      },
+      {
+        "name": "loop_filter",
+        "status": "passed",
+        "seconds": "0.117942",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli",
+        "status": "passed",
+        "seconds": "0.145144",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli_reference",
+        "status": "not_run",
+        "seconds": "0",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli_blur_differential",
+        "status": "not_run",
+        "seconds": "0",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli_frequency_differential",
+        "status": "not_run",
+        "seconds": "0",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli_distance_differential",
+        "status": "not_run",
+        "seconds": "0",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli_distance_scalar_differential",
+        "status": "not_run",
+        "seconds": "0",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli_goldens_generated",
+        "status": "failed",
+        "seconds": "0.269714",
+        "detail": "Failed"
+      },
+      {
+        "name": "quantization_tables_generated",
+        "status": "passed",
+        "seconds": "0.361314",
+        "detail": ""
+      },
+      {
+        "name": "gpu_image",
+        "status": "passed",
+        "seconds": "0.112738",
+        "detail": ""
+      },
+      {
+        "name": "ac_strategy_storage_plan",
+        "status": "passed",
+        "seconds": "1.84871",
+        "detail": ""
+      },
+      {
+        "name": "ac_strategy_host_storage_plan",
+        "status": "passed",
+        "seconds": "16.7214",
+        "detail": ""
+      },
+      {
+        "name": "profile_storage_plan",
+        "status": "passed",
+        "seconds": "0.119574",
+        "detail": ""
+      },
+      {
+        "name": "gpu_profile_json",
+        "status": "passed",
+        "seconds": "0.428347",
+        "detail": ""
+      },
+      {
+        "name": "workflow_admission_cpu",
+        "status": "passed",
+        "seconds": "1.57464",
+        "detail": ""
+      },
+      {
+        "name": "codec_install_consumer",
+        "status": "passed",
+        "seconds": "47.8628",
+        "detail": ""
+      }
+    ],
+    "candidate": [
+      {
+        "name": "planning_recipes",
+        "status": "passed",
+        "seconds": "2.22357",
+        "detail": ""
+      },
+      {
+        "name": "resident_qualification_controller",
+        "status": "passed",
+        "seconds": "4.40891",
+        "detail": ""
+      },
+      {
+        "name": "stdlib_storage_compat",
+        "status": "passed",
+        "seconds": "4.31404",
+        "detail": ""
+      },
+      {
+        "name": "stdlib_storage_compat_cxx23",
+        "status": "passed",
+        "seconds": "2.41569",
+        "detail": ""
+      },
+      {
+        "name": "storage_toolchain",
+        "status": "passed",
+        "seconds": "13.5955",
+        "detail": ""
+      },
+      {
+        "name": "bit_writer_append",
+        "status": "passed",
+        "seconds": "2.50986",
+        "detail": ""
+      },
+      {
+        "name": "bit_writer_word",
+        "status": "passed",
+        "seconds": "2.49825",
+        "detail": ""
+      },
+      {
+        "name": "ans_bit_emission",
+        "status": "passed",
+        "seconds": "0.873345",
+        "detail": ""
+      },
+      {
+        "name": "bit_writer",
+        "status": "passed",
+        "seconds": "0.176861",
+        "detail": ""
+      },
+      {
+        "name": "entropy",
+        "status": "passed",
+        "seconds": "0.512043",
+        "detail": ""
+      },
+      {
+        "name": "context_map",
+        "status": "passed",
+        "seconds": "2.05813",
+        "detail": ""
+      },
+      {
+        "name": "ans_reverse_bits",
+        "status": "passed",
+        "seconds": "1.4359",
+        "detail": ""
+      },
+      {
+        "name": "sections",
+        "status": "passed",
+        "seconds": "0.0574261",
+        "detail": ""
+      },
+      {
+        "name": "dc_group",
+        "status": "passed",
+        "seconds": "0.164028",
+        "detail": ""
+      },
+      {
+        "name": "weighted_dc",
+        "status": "passed",
+        "seconds": "0.464653",
+        "detail": ""
+      },
+      {
+        "name": "ac_group",
+        "status": "passed",
+        "seconds": "2.04211",
+        "detail": ""
+      },
+      {
+        "name": "coefficient_order",
+        "status": "passed",
+        "seconds": "3.51076",
+        "detail": ""
+      },
+      {
+        "name": "dc_parallel_tokenization",
+        "status": "passed",
+        "seconds": "0.54645",
+        "detail": ""
+      },
+      {
+        "name": "ac_direct_tokenization",
+        "status": "passed",
+        "seconds": "4.54171",
+        "detail": ""
+      },
+      {
+        "name": "ac_population_reduction",
+        "status": "passed",
+        "seconds": "3.84117",
+        "detail": ""
+      },
+      {
+        "name": "token_storage_plan",
+        "status": "passed",
+        "seconds": "0.483448",
+        "detail": ""
+      },
+      {
+        "name": "entropy_storage_plan",
+        "status": "passed",
+        "seconds": "5.74706",
+        "detail": ""
+      },
+      {
+        "name": "representation_storage_plan",
+        "status": "passed",
+        "seconds": "0.462636",
+        "detail": ""
+      },
+      {
+        "name": "serializer_storage_plan",
+        "status": "passed",
+        "seconds": "88.1508",
+        "detail": ""
+      },
+      {
+        "name": "ac_section_validation",
+        "status": "passed",
+        "seconds": "0.184392",
+        "detail": ""
+      },
+      {
+        "name": "compact_vardct_frame",
+        "status": "passed",
+        "seconds": "6.18118",
+        "detail": ""
+      },
+      {
+        "name": "compact_frame_allocation",
+        "status": "passed",
+        "seconds": "2.57577",
+        "detail": ""
+      },
+      {
+        "name": "frame_validation",
+        "status": "passed",
+        "seconds": "5.40153",
+        "detail": ""
+      },
+      {
+        "name": "sparse_coefficients",
+        "status": "passed",
+        "seconds": "0.224567",
+        "detail": ""
+      },
+      {
+        "name": "sparse_vardct_frame",
+        "status": "passed",
+        "seconds": "31.2826",
+        "detail": ""
+      },
+      {
+        "name": "sparse_frame_allocation",
+        "status": "passed",
+        "seconds": "2.02978",
+        "detail": ""
+      },
+      {
+        "name": "quantization_storage",
+        "status": "passed",
+        "seconds": "0.122375",
+        "detail": ""
+      },
+      {
+        "name": "block_context_map",
+        "status": "passed",
+        "seconds": "0.0867637",
+        "detail": ""
+      },
+      {
+        "name": "codestream_encoder",
+        "status": "passed",
+        "seconds": "35.1932",
+        "detail": ""
+      },
+      {
+        "name": "codestream_workflow",
+        "status": "passed",
+        "seconds": "17.2492",
+        "detail": ""
+      },
+      {
+        "name": "codestream_batch_workflow",
+        "status": "passed",
+        "seconds": "0.509049",
+        "detail": ""
+      },
+      {
+        "name": "batch_lifecycle_cpu",
+        "status": "passed",
+        "seconds": "0.392691",
+        "detail": ""
+      },
+      {
+        "name": "batch_scheduling_cpu",
+        "status": "passed",
+        "seconds": "0.305465",
+        "detail": ""
+      },
+      {
+        "name": "parallel_work",
+        "status": "passed",
+        "seconds": "0.125607",
+        "detail": ""
+      },
+      {
+        "name": "worker_launch_failure_startup",
+        "status": "passed",
+        "seconds": "0.11649",
+        "detail": ""
+      },
+      {
+        "name": "worker_launch_failure_forward",
+        "status": "passed",
+        "seconds": "4.1678",
+        "detail": ""
+      },
+      {
+        "name": "worker_launch_failure_cpu_color",
+        "status": "passed",
+        "seconds": "53.4337",
+        "detail": ""
+      },
+      {
+        "name": "worker_launch_failure_cpu_aq",
+        "status": "passed",
+        "seconds": "55.6813",
+        "detail": ""
+      },
+      {
+        "name": "worker_launch_failure_cpu_orders",
+        "status": "passed",
+        "seconds": "66.6639",
+        "detail": ""
+      },
+      {
+        "name": "worker_launch_failure_cpu_sections",
+        "status": "passed",
+        "seconds": "66.4363",
+        "detail": ""
+      },
+      {
+        "name": "worker_launch_failure_cpu_drains",
+        "status": "passed",
+        "seconds": "22.7315",
+        "detail": ""
+      },
+      {
+        "name": "rate_control_search",
+        "status": "passed",
+        "seconds": "0.125844",
+        "detail": ""
+      },
+      {
+        "name": "rate_control_probe",
+        "status": "passed",
+        "seconds": "0.203377",
+        "detail": ""
+      },
+      {
+        "name": "codestream_cli",
+        "status": "passed",
+        "seconds": "1.26601",
+        "detail": ""
+      },
+      {
+        "name": "codestream_sample_generated",
+        "status": "passed",
+        "seconds": "0.212936",
+        "detail": ""
+      },
+      {
+        "name": "c_api_image_conversion",
+        "status": "passed",
+        "seconds": "0.209185",
+        "detail": ""
+      },
+      {
+        "name": "c_api",
+        "status": "passed",
+        "seconds": "0.652025",
+        "detail": ""
+      },
+      {
+        "name": "c_api_cpp",
+        "status": "passed",
+        "seconds": "0.109199",
+        "detail": ""
+      },
+      {
+        "name": "pfm",
+        "status": "passed",
+        "seconds": "0.283347",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli_primitives",
+        "status": "passed",
+        "seconds": "0.112417",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli_stages",
+        "status": "passed",
+        "seconds": "0.113509",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli_distance",
+        "status": "passed",
+        "seconds": "0.131898",
+        "detail": ""
+      },
+      {
+        "name": "core_geometry",
+        "status": "passed",
+        "seconds": "0.109928",
+        "detail": ""
+      },
+      {
+        "name": "resource_budget",
+        "status": "passed",
+        "seconds": "0.140389",
+        "detail": ""
+      },
+      {
+        "name": "cpu_budget",
+        "status": "passed",
+        "seconds": "0.172147",
+        "detail": ""
+      },
+      {
+        "name": "cpu_execution",
+        "status": "passed",
+        "seconds": "0.105184",
+        "detail": ""
+      },
+      {
+        "name": "entropy_readiness",
+        "status": "passed",
+        "seconds": "0.0980896",
+        "detail": ""
+      },
+      {
+        "name": "earlier_dc_contract",
+        "status": "not_run",
+        "seconds": "0",
+        "detail": ""
+      },
+      {
+        "name": "entropy_readiness_contract",
+        "status": "not_run",
+        "seconds": "0",
+        "detail": ""
+      },
+      {
+        "name": "workflow_cpu_coordination_cpu",
+        "status": "passed",
+        "seconds": "42.6131",
+        "detail": ""
+      },
+      {
+        "name": "managed_allocator",
+        "status": "passed",
+        "seconds": "0.133224",
+        "detail": ""
+      },
+      {
+        "name": "serializer_storage",
+        "status": "passed",
+        "seconds": "0.207509",
+        "detail": ""
+      },
+      {
+        "name": "frontend_storage",
+        "status": "passed",
+        "seconds": "0.185244",
+        "detail": ""
+      },
+      {
+        "name": "frontend_storage_plan",
+        "status": "passed",
+        "seconds": "2.1845",
+        "detail": ""
+      },
+      {
+        "name": "frontend_field_storage_plan",
+        "status": "passed",
+        "seconds": "13.0038",
+        "detail": ""
+      },
+      {
+        "name": "perceptual_storage_plan",
+        "status": "passed",
+        "seconds": "14.7947",
+        "detail": ""
+      },
+      {
+        "name": "publication_storage",
+        "status": "passed",
+        "seconds": "0.100001",
+        "detail": ""
+      },
+      {
+        "name": "workflow_publication",
+        "status": "passed",
+        "seconds": "6.84989",
+        "detail": ""
+      },
+      {
+        "name": "diagnostic_storage",
+        "status": "passed",
+        "seconds": "0.133747",
+        "detail": ""
+      },
+      {
+        "name": "ac_strategy_grid",
+        "status": "passed",
+        "seconds": "3.02894",
+        "detail": ""
+      },
+      {
+        "name": "fast_math",
+        "status": "passed",
+        "seconds": "0.189797",
+        "detail": ""
+      },
+      {
+        "name": "dct_reference",
+        "status": "passed",
+        "seconds": "0.189999",
+        "detail": ""
+      },
+      {
+        "name": "cpu_dct",
+        "status": "passed",
+        "seconds": "0.200547",
+        "detail": ""
+      },
+      {
+        "name": "ac_strategy_cost",
+        "status": "passed",
+        "seconds": "0.196298",
+        "detail": ""
+      },
+      {
+        "name": "ac_strategy_search",
+        "status": "passed",
+        "seconds": "0.329202",
+        "detail": ""
+      },
+      {
+        "name": "quantization",
+        "status": "passed",
+        "seconds": "0.140574",
+        "detail": ""
+      },
+      {
+        "name": "quantization_adjustment",
+        "status": "passed",
+        "seconds": "0.174561",
+        "detail": ""
+      },
+      {
+        "name": "maximum_error",
+        "status": "passed",
+        "seconds": "0.284807",
+        "detail": ""
+      },
+      {
+        "name": "dc_conversion",
+        "status": "passed",
+        "seconds": "0.109139",
+        "detail": ""
+      },
+      {
+        "name": "dc_quantization",
+        "status": "passed",
+        "seconds": "0.0209514",
+        "detail": ""
+      },
+      {
+        "name": "dc_processing",
+        "status": "passed",
+        "seconds": "0.171386",
+        "detail": ""
+      },
+      {
+        "name": "cpu_workflow_storage_plan",
+        "status": "passed",
+        "seconds": "123.527",
+        "detail": ""
+      },
+      {
+        "name": "cpu_workflow_legacy_dc_tree",
+        "status": "passed",
+        "seconds": "125.198",
+        "detail": ""
+      },
+      {
+        "name": "dc_context_tree",
+        "status": "passed",
+        "seconds": "0.0193958",
+        "detail": ""
+      },
+      {
+        "name": "modular_stream",
+        "status": "passed",
+        "seconds": "0.0246528",
+        "detail": ""
+      },
+      {
+        "name": "dc_context_tree_oracle",
+        "status": "passed",
+        "seconds": "0.0333499",
+        "detail": ""
+      },
+      {
+        "name": "dc_processing_oracle",
+        "status": "failed",
+        "seconds": "4.94024",
+        "detail": "Failed"
+      },
+      {
+        "name": "adaptive_quantization",
+        "status": "passed",
+        "seconds": "0.181633",
+        "detail": ""
+      },
+      {
+        "name": "adaptive_quantization_loop",
+        "status": "passed",
+        "seconds": "0.166624",
+        "detail": ""
+      },
+      {
+        "name": "color_transform",
+        "status": "passed",
+        "seconds": "0.192064",
+        "detail": ""
+      },
+      {
+        "name": "quantization_pipeline",
+        "status": "passed",
+        "seconds": "0.402664",
+        "detail": ""
+      },
+      {
+        "name": "quantization_pipeline_uniform",
+        "status": "passed",
+        "seconds": "0.0593516",
+        "detail": ""
+      },
+      {
+        "name": "quantization_pipeline_search_policy",
+        "status": "passed",
+        "seconds": "0.0580179",
+        "detail": ""
+      },
+      {
+        "name": "low_effort_strategy_policy",
+        "status": "passed",
+        "seconds": "0.111115",
+        "detail": ""
+      },
+      {
+        "name": "dc_policy",
+        "status": "passed",
+        "seconds": "4.10407",
+        "detail": ""
+      },
+      {
+        "name": "gaborish",
+        "status": "passed",
+        "seconds": "0.128284",
+        "detail": ""
+      },
+      {
+        "name": "chroma_from_luma",
+        "status": "passed",
+        "seconds": "0.193421",
+        "detail": ""
+      },
+      {
+        "name": "epf",
+        "status": "passed",
+        "seconds": "0.11143",
+        "detail": ""
+      },
+      {
+        "name": "reconstruction",
+        "status": "passed",
+        "seconds": "0.404989",
+        "detail": ""
+      },
+      {
+        "name": "overwrite_array",
+        "status": "passed",
+        "seconds": "0.0937765",
+        "detail": ""
+      },
+      {
+        "name": "vardct_frame",
+        "status": "passed",
+        "seconds": "2.99073",
+        "detail": ""
+      },
+      {
+        "name": "vardct_frame_view",
+        "status": "passed",
+        "seconds": "39.6217",
+        "detail": ""
+      },
+      {
+        "name": "simple_codestream_profile",
+        "status": "passed",
+        "seconds": "0.119489",
+        "detail": ""
+      },
+      {
+        "name": "loop_filter",
+        "status": "passed",
+        "seconds": "0.136179",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli",
+        "status": "passed",
+        "seconds": "0.129054",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli_reference",
+        "status": "not_run",
+        "seconds": "0",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli_blur_differential",
+        "status": "not_run",
+        "seconds": "0",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli_frequency_differential",
+        "status": "not_run",
+        "seconds": "0",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli_distance_differential",
+        "status": "not_run",
+        "seconds": "0",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli_distance_scalar_differential",
+        "status": "not_run",
+        "seconds": "0",
+        "detail": ""
+      },
+      {
+        "name": "butteraugli_goldens_generated",
+        "status": "failed",
+        "seconds": "0.253544",
+        "detail": "Failed"
+      },
+      {
+        "name": "quantization_tables_generated",
+        "status": "passed",
+        "seconds": "0.393051",
+        "detail": ""
+      },
+      {
+        "name": "gpu_image",
+        "status": "passed",
+        "seconds": "0.108198",
+        "detail": ""
+      },
+      {
+        "name": "ac_strategy_storage_plan",
+        "status": "passed",
+        "seconds": "1.70265",
+        "detail": ""
+      },
+      {
+        "name": "ac_strategy_host_storage_plan",
+        "status": "passed",
+        "seconds": "18.363",
+        "detail": ""
+      },
+      {
+        "name": "profile_storage_plan",
+        "status": "passed",
+        "seconds": "0.131095",
+        "detail": ""
+      },
+      {
+        "name": "gpu_profile_json",
+        "status": "passed",
+        "seconds": "0.451983",
+        "detail": ""
+      },
+      {
+        "name": "workflow_admission_cpu",
+        "status": "passed",
+        "seconds": "1.71255",
+        "detail": ""
+      },
+      {
+        "name": "codec_install_consumer",
+        "status": "passed",
+        "seconds": "47.9552",
+        "detail": ""
+      }
+    ]
+  },
+  "lost_baseline_passes": [],
+  "timing_records": {
+    "timings-confirmation.json": {
+      "sha256": "59e102b77abb8b5d8a990b27cf94ee6e3f5706313361269e9bdee260cfdca7d7",
+      "binary_sha256": {
+        "baseline": "a8546d0cadb381a0927814e37b4c78df48222bce42e92bd962ab13753e6dafa4",
+        "candidate": "37d57365919a05b65ed3c2e7fad4b74cc60061958a1916b24a82d26dc8903c3f"
+      }
+    },
+    "timings-initial.json": {
+      "sha256": "45e4f4427b6f2d9be2462ca4988abe2eb3f96b15a033ee5b4636980a558e9eef",
+      "binary_sha256": {
+        "baseline": "a8546d0cadb381a0927814e37b4c78df48222bce42e92bd962ab13753e6dafa4",
+        "candidate": "37d57365919a05b65ed3c2e7fad4b74cc60061958a1916b24a82d26dc8903c3f"
+      }
+    },
+    "timings-photo.json": {
+      "sha256": "e74671e184cbfa696afbc0bbb077874f9f6d34ea8e9e890c4cf86012eeca0d7b",
+      "binary_sha256": {
+        "baseline": "cd726fe6048088cc2f90eea32ee69c740399102661d7a1cec526e07db1f7af52",
+        "candidate": "4e639a72a2c9496e0edd7aa25e5917bd81632fda1bd0256322a82524a30044ae"
+      }
+    },
+    "timings-repeated.json": {
+      "sha256": "601d6962aecebd384beeb5618eba559044e0ee0d24e4495fb1c134522fb2fb10",
+      "binary_sha256": {
+        "baseline": "a8546d0cadb381a0927814e37b4c78df48222bce42e92bd962ab13753e6dafa4",
+        "candidate": "37d57365919a05b65ed3c2e7fad4b74cc60061958a1916b24a82d26dc8903c3f"
+      }
+    }
+  },
+  "conformance": {
+    "baseline": 23,
+    "candidate": 23
+  },
+  "unrun": [
+    "Metal",
+    "CUDA",
+    "native ARM64",
+    "other operating systems",
+    "sanitizers"
+  ]
+}
