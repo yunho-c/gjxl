@@ -25,6 +25,9 @@ struct ImageMetadata {
   SourceColor color = SourceColor::kSrgb;
   bool xyb = false;
   std::optional<AlphaMetadata> alpha;
+  // A proven property of the enabled Modular transforms/predictors, not of
+  // the native plane type. Conservative unless the encoder establishes it.
+  bool modular_16_bit_buffer_sufficient = false;
   bool operator==(const ImageMetadata &) const = default;
 };
 struct VarDctFrameFields {

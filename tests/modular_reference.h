@@ -24,7 +24,10 @@ struct ParsedHeader {
   size_t group_dimension, groups, dc_groups, sections, bits_consumed;
   bool source_srgb, source_linear_srgb, final_frame;
   uint32_t passes, upsampling;
+  bool modular_16_bit_buffer_sufficient;
 };
+struct ReferenceToken { uint32_t context, value; };
+std::vector<ReferenceToken> TokenizeGradient(const IntegerImage& image, size_t stream_id);
 // Throw std::runtime_error on malformed/unsupported input. All output is local
 // until success; callers can retain previous values when testing rejection.
 std::vector<uint8_t> EncodeLossless(const IntegerImage &image);

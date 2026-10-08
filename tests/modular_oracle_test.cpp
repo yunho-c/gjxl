@@ -54,7 +54,8 @@ void HeadersAndSections() {
                     h.modular && !h.xyb && !h.floating_point && !h.gaborish &&
                     !h.epf_iterations && h.source_srgb && h.final_frame &&
                     h.passes == 1 && h.upsampling == 1 && h.group_dimension == 256 &&
-                    h.bits_consumed == writer.bits_written(),
+                    h.bits_consumed == writer.bits_written() &&
+                    !h.modular_16_bit_buffer_sufficient,
                 "Native metadata differs from pinned header parser");
           if (offset || extent.width > 4096)
             continue;
@@ -72,6 +73,20 @@ void HeadersAndSections() {
                   "TOC section size differs from pinned parser");
         }
       }
+  for (size_t offset = 0; offset < 8; ++offset) {
+    ImageMetadata rgb8{{257, 259}};
+    rgb8.modular_16_bit_buffer_sufficient = true;
+    BitWriter writer;
+    Ok(writer.WriteBits(offset, 0));
+    Ok(WriteImageHeader(rgb8, &writer));
+    Ok(WriteFrameHeader(rgb8, {}, &writer));
+    Check(ref::InspectHeaders(writer.padded_bytes(), offset).modular_16_bit_buffer_sufficient,
+          "Proven RGB8 buffer declaration was lost");
+    const size_t before = writer.bits_written();
+    rgb8.bits = 16;
+    Check(!WriteImageHeader(rgb8, &writer).ok() && writer.bits_written() == before,
+          "Unqualified buffer declaration changed output");
+  }
   for (Extent2D extent : {Extent2D{1, 1}, {256, 257}, {2049, 2049}}) {
     ModularFrameGeometry g;
     Ok(ModularFrameGeometry::Create(extent, &g));

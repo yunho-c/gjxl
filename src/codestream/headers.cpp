@@ -98,9 +98,9 @@ Status WriteImageHeader(const codec_internal::ImageMetadata &metadata,
       return s;
     if (auto s = WriteIntegerDepth(metadata.bits, &temporary); !s.ok())
       return s;
-    // A 32-bit channel buffer is allowed for every advertised source depth.
+    // The frame producer establishes buffer sufficiency for its enabled path.
     if (auto s =
-            WriteFields(&temporary, std::array{BitField{1, 0},
+            WriteFields(&temporary, std::array{BitField{1, metadata.modular_16_bit_buffer_sufficient ? 1u : 0u},
                                                BitField{2, metadata.alpha ? 1u : 0u}});
         !s.ok())
       return s;

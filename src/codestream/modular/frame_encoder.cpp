@@ -1,0 +1,81 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) 2026 Yunho Cho
+#include "codestream/modular/frame_encoder.h"
+#include "codestream/headers_internal.h"
+#include "codestream/modular/stream_encoder.h"
+#include "codestream/modular/tree_codec.h"
+#include "codestream/sections.h"
+
+namespace gjxl::modular_internal {
+using namespace codestream_internal;
+Status EncodeModularFrame(const codec_internal::ImageMetadata &metadata,
+                          const ModularStreamPlan &layout, PreparedModularTokens &&input,
+                          EntropyCodingMode mode, const ModularWorkflowStoragePlan &storage,
+                          CodestreamBuffer *out) try {
+  if (!out || input.streams.size() != layout.streams.size())
+    return Status::InvalidArgument("Invalid Modular frame handoff");
+  Storage<BitWriter> sections;
+  {
+    PreparedModularTokens tokens = std::move(input);
+    EntropyCode model;
+    if (auto s = OptimizeEntropyCode(tokens.streams, {.context_count = 1}, &model); !s.ok())
+      return s;
+    if (mode == EntropyCodingMode::kAns) {
+      EntropyCode ans;
+      if (auto s = OptimizeAnsEntropyCode(tokens.streams, model, &ans); !s.ok())
+        return s;
+      model = std::move(ans);
+    }
+    sections.resize(layout.geometry.section_count());
+    auto &global = sections[0];
+    if (auto s = global.WithMaxBits(
+            storage.maximum_global_bits,
+            [&]() -> Status {
+              if (auto s = global.WriteBits(1, 1); !s.ok())
+                return s; // default DC matrices
+              if (auto s = WriteGlobalTreeInTransaction(kGradientTreeTokens, &global); !s.ok())
+                return s;
+              if (auto s = WriteGlobalModelInTransaction(model, &global); !s.ok())
+                return s;
+              if (auto s = WriteStreamHeader({}, &global); !s.ok())
+                return s;
+              if (tokens.streams[0].size())
+                return WriteStreamTokensWithValidatedModel(tokens.streams[0], model, &global);
+              return Status::Ok();
+            });
+        !s.ok())
+      return s;
+    for (size_t i = 1; i < layout.streams.size(); ++i) {
+      if (tokens.streams[i].size() == 0)
+        continue;
+      auto &section = sections[layout.streams[i].section];
+      if (auto s = section.WithMaxBits(storage.maximum_group_bits,
+                                       [&]() -> Status {
+                                         if (auto s = WriteStreamHeader({}, &section); !s.ok())
+                                           return s;
+                                         return WriteStreamTokensWithValidatedModel(
+                                             tokens.streams[i], model, &section);
+                                       });
+          !s.ok())
+        return s;
+    }
+  } // Tokens and model are no longer live during final assembly.
+  BitWriter file;
+  if (auto s = WriteImageHeader(metadata, &file); !s.ok())
+    return s;
+  if (auto s = WriteFrameHeader(metadata, {}, &file); !s.ok())
+    return s;
+  if (auto s = WriteTocAndSections(sections, &file); !s.ok())
+    return s;
+  // Clear backing as well as elements before allocating the published copy.
+  Storage<BitWriter>().swap(sections);
+  return CodestreamBuffer::CopyFrom(file.padded_bytes(), out,
+                                    resource_budget_internal::ResourceClass::kRetainedResult);
+} catch (const resource_budget_internal::ManagedAllocationFailure &e) {
+  return e.status();
+} catch (const std::bad_alloc &) {
+  return Status::OutOfMemory("Modular frame allocation failed");
+} catch (const std::length_error &) {
+  return Status::InvalidArgument("Modular frame storage overflow");
+}
+} // namespace gjxl::modular_internal

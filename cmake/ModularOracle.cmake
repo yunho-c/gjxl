@@ -48,7 +48,11 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   target_compile_options(gjxl_modular_oracle_test PRIVATE -fno-sanitize=vptr)
 endif()
 add_test(NAME modular_oracle COMMAND gjxl_modular_oracle_test)
+add_executable(gjxl_modular_conformance_test tests/modular_conformance_test.cpp)
+target_link_libraries(gjxl_modular_conformance_test PRIVATE gjxl_codestream gjxl_modular_reference)
+add_test(NAME modular_conformance COMMAND gjxl_modular_conformance_test
+  "${CMAKE_CURRENT_BINARY_DIR}/modular-conformance")
 if(WIN32)
-  set_tests_properties(modular_oracle PROPERTIES
+  set_tests_properties(modular_oracle modular_conformance PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${GJXL_MODULAR_ORACLE_BUILD}/tools")
 endif()

@@ -4,6 +4,9 @@
 
 namespace gjxl::codec_internal {
 Status ValidateImageMetadata(const ImageMetadata &m) {
+  if (m.modular_16_bit_buffer_sufficient &&
+      (m.sample_format != SampleFormat::kUnsigned || m.bits != 8))
+    return Status::Unsupported("Unqualified Modular buffer range declaration");
   if (m.extent.empty() || m.extent.width > kMaximumImageDimension ||
       m.extent.height > kMaximumImageDimension)
     return Status::InvalidArgument("Image metadata dimensions are invalid");

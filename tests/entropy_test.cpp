@@ -1041,7 +1041,8 @@ bool CheckAnsAdaptiveModelSelection() {
         [](uint16_t frequency) { return frequency == 0; }) ||
       !gjxl::WriteEntropyCode(sparse_ans, &sparse_model).ok() ||
       !gjxl::WriteTokenStream(sparse, sparse_ans, &sparse_payload).ok() ||
-      sparse_model.bits_written() != 59 ||
+      // Single-context models omit the three-bit explicit {0} context map.
+      sparse_model.bits_written() != 56 ||
       sparse_payload.bits_written() < 32) {
     std::cerr << "ANS sparse/RLE selection fixture failed\n";
     return false;

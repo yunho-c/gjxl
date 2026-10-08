@@ -286,6 +286,7 @@ add_library(
   src/codec/frame_metadata.cpp
   src/codec/modular/image.cpp
   src/codec/modular/geometry.cpp
+  src/codec/modular/frame.cpp
   src/codec/color_transform.cpp
   src/codec/convolution.cpp
   src/codec/dc_conversion.cpp
@@ -343,6 +344,10 @@ add_library(
   src/codestream/modular/stream_encoder.cpp
   src/codestream/modular/tree_codec.cpp
   src/codestream/modular/stream_plan.cpp
+  src/codestream/modular/tokenization.cpp
+  src/codestream/modular/storage_plan.cpp
+  src/codestream/modular/frame_encoder.cpp
+  src/codestream/modular/workflow.cpp
   src/codestream/huffman.cpp
   src/codestream/rate_control.cpp
   src/codestream/cpu_workflow_storage_plan.cpp
@@ -2303,6 +2308,10 @@ if(GJXL_BUILD_TESTS)
   add_executable(gjxl_modular_foundation_test tests/modular_foundation_test.cpp)
   target_link_libraries(gjxl_modular_foundation_test PRIVATE gjxl_codestream)
   add_test(NAME modular_foundation COMMAND gjxl_modular_foundation_test)
+
+  add_executable(gjxl_modular_workflow_test tests/modular_workflow_test.cpp)
+  target_link_libraries(gjxl_modular_workflow_test PRIVATE gjxl_codestream)
+  add_test(NAME modular_workflow COMMAND gjxl_modular_workflow_test)
 
   include(cmake/ModularOracle.cmake)
 

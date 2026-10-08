@@ -1,0 +1,1044 @@
+{
+  "schema": 1,
+  "milestone": "P2.1",
+  "base_revision": "952ab2fb5320df34d460ca22a1f87fadf26a46ff",
+  "changes_uncommitted": true,
+  "reference_revision": "e8ff09762481785938d8e4e01333ed3917571161",
+  "reference_tracked_sources_clean": true,
+  "platform": "Windows ARM64 host; Release x64 binaries under emulation; MSVC 19.37.32826/STL 202305, Windows SDK 10.0.26100.0; pinned reference built with x64 clang-cl",
+  "native_configuration": {
+    "CMAKE_BUILD_TYPE": "Release",
+    "CMAKE_CXX_COMPILER": "C:/Users/hocbu/GitHub/gjxl/build/modular-phase1/toolchain/VC/Tools/MSVC/14.37.32822/bin/Hostx64/x64/cl.exe",
+    "CMAKE_CXX_FLAGS": "/DWIN32 /D_WINDOWS /EHsc",
+    "CMAKE_CXX_FLAGS_RELEASE": "/O2 /Ob2 /DNDEBUG",
+    "CMAKE_CXX_STANDARD": "20",
+    "CMAKE_C_COMPILER": "C:/Users/hocbu/GitHub/gjxl/build/modular-phase1/toolchain/VC/Tools/MSVC/14.37.32822/bin/Hostx64/x64/cl.exe",
+    "GJXL_BUILD_TESTS": "OFF",
+    "GJXL_ENABLE_CUDA": "OFF",
+    "GJXL_ENABLE_LIBJXL_REFERENCE": "OFF",
+    "GJXL_ENABLE_METAL": "OFF",
+    "CMAKE_GENERATOR": "Ninja"
+  },
+  "compiler_sha256": "37661d8479b56cd540d7462725db7a191b8b8043a7ebcd3ace6453f7b00167eb",
+  "source_sha256": {
+    "CMakeLists.txt": "6a124c6610a49768c0ff050aab11959aef1c8e2719f34484513f636811f6b0eb",
+    "cmake/ModularOracle.cmake": "fde483a7d38803cacf4af7c9ef0de7988d05315928086ea65cc0e3cf865a12c0",
+    "src/codec/frame_metadata.cpp": "7c0d925b762dfbedc428c0f676c68a6a88b3d48d5bc5b456b0ab1120f06e815d",
+    "src/codec/frame_metadata.h": "177a1644368d7c6c7a0c2ab71870f599b9973334b38401ae7824ceb84ab196dd",
+    "src/codec/modular/frame.cpp": "6627aa0566a707532422a9b27897bcdaf7629a8d40f71865880da7df2ef770ac",
+    "src/codec/modular/frame.h": "9afa55ccf59a6f448f9dd592704aeb2dcffd5db0d1646e7498375bbff8ca7b4f",
+    "src/codec/modular/gradient.h": "0e61dd2f3044d761df4f149483d79f0a0adfa4bd1b3eb2308a69420f135348cf",
+    "src/codestream/ans.cpp": "eae8837e4cfe6b99f549e99a96bca8733e91f8ea687cd3c01bf8e6f486cd48e9",
+    "src/codestream/entropy.cpp": "9ff48f6d4805f064537ddab69950673c897a5efbf16d6c15a508c29ca588fcda",
+    "src/codestream/headers.cpp": "0417f24288b70484c52384e9c45a29a88a09a81e65a37758987417eb472a0a1f",
+    "src/codestream/modular/frame_encoder.cpp": "7ee3c32359f5d7815ea5956e21cb5fe61183828acb81c702c34a062ccf4205a2",
+    "src/codestream/modular/frame_encoder.h": "c3f3412611d741d4a356a6d08d33f65be6aa52efe1de85f4550305b163c6ec17",
+    "src/codestream/modular/storage_plan.cpp": "21bfa47eddf66fcfacd8bce0090e3aeb61db3f095fcc69a59722a89d4da5ad98",
+    "src/codestream/modular/storage_plan.h": "88661099b49390222351680554344876654b8bfde994673410bf233ab98864c6",
+    "src/codestream/modular/tokenization.cpp": "79dbc007aaa29ec597f1b1a9444c3e6d7ba36340cecf8d870b1b7a44b0dc67b8",
+    "src/codestream/modular/tokenization.h": "3473cbde416f8e85b3120c4ee04734e4c16d2ce5b3d94ac425f71508d8a14261",
+    "src/codestream/modular/workflow.cpp": "15fd78eea9204cce1d7251f7b7aa305d487f8789b3e13ca684ffa585207fc854",
+    "src/codestream/modular/workflow.h": "206903265d2a2fd9779dd26393eecff0c6d3cf11f90922d68270458f81b0094e",
+    "src/codestream/workflow_admission.h": "bd07d8c34952d0ba3ea26a93f50533ed2fbfa3e2600fb588cbc5d2d1419ca134",
+    "src/codestream/workflow_admission_scope.h": "deb8b45db7a202b48e54f72f7163e76e8bbe48440bde61835f3c60ffa34258ba",
+    "tests/entropy_test.cpp": "82d1ed7f7a20011d265bc56e10ccbbf24022e02c2658ce439e5295e40499b189",
+    "tests/modular_conformance_test.cpp": "c5b9dafaa1a6c2dada19231548374106a5190a4ded785a6ca61b427cf157102e",
+    "tests/modular_oracle_test.cpp": "62ee4f69f5d850c9c04781025ece6a39116cebbbb9777cffcbb8493a65db5607",
+    "tests/modular_reference.cpp": "109f11b65243c41a6ddae3ed5c13778c6996d659f2f0e5c6cc51a6a52d3afc82",
+    "tests/modular_reference.h": "0cbdd379f184b0624ee82206c205257e9d467e558f5411fedc3594c8f4f71bdd",
+    "tests/modular_workflow_test.cpp": "853b3a1fa72636fc567dddb76383a57aab152f62a84c7a20dd68357a89e562a6"
+  },
+  "binary_sha256": {
+    "build/modular-p2.1/native/gjxl_codec.lib": "bc993f3b20a81ba9574f1eff6256a03c096417b2306b3fe8e281fd4381776d4e",
+    "build/modular-p2.1/native/gjxl_codestream.lib": "c3b25cde1934676a87a0495a347a8f374e1dcdad1bc19b158384cbfb9386755d",
+    "build/modular-p2.1/native/gjxl_encode.exe": "0f4e942171118b83da9610004b52e324aac8f6459bf8c618c1ebe3dbc23ed64e",
+    "build/modular-p2.1/native-consumer/modular_native_consumer.exe": "d774aafa0928480e7b9328433e032e61075108534a5085fa77b5e33c575e0b92",
+    "build/modular-p2.1/capture/modular_extraction_capture.exe": "675c1e86facdc5dac1996b2d398c8f06c764e43fa683fa4dbac058d39f6d89ce",
+    "build/modular-phase1/candidate/gjxl_modular_workflow_test.exe": "8ac654cf6bca8704052d5974c079985539039f7affd13c534d9cefabd2a01d3e",
+    "build/modular-phase1/candidate/gjxl_modular_conformance_test.exe": "e5cd1f1d734525b49b64dd0db2f3331d59e434947b3e26582d912939fa96b16a",
+    "build/modular-phase1/candidate/gjxl_modular_foundation_test.exe": "356c643c4fd0e4f1d4f809bc1a7ccb1f5dbae2fcc088baa30e97131febab10a6",
+    "build/modular-phase1/candidate/gjxl_modular_oracle_test.exe": "a5aa1a64898c0781356daf054323747a0117147f8f3685f3a7c1f93501c35dd3",
+    "build/modular-phase1/pinned-libjxl-x64/tools/djxl.exe": "9b796af5e6c4e38e26b9eeb703f9cc4a6bb21c7080b35fa5abeec503b0dc8dd3",
+    "build/modular-phase1/pinned-libjxl-x64/tools/jxl.dll": "b9f17629eb459938fc63eb788d0925a8535f5e18d8751afdc67e1373f8910af4"
+  },
+  "evidence_sha256": {
+    "build/modular-p2.1/final-build.log": "74c3812deac719ffc4c635659ae40a653134fdad4a002acbc31f6c587cda83d3",
+    "build/modular-p2.1/final-tests.xml": "72af0d40f8a02e486ec15754e49e392d7e279c9b28b24ea76a2d1aefeef5997c",
+    "build/modular-p2.1/final-tests.log": "d885b4510372a05c8b1f7d15eaec86b92f1290a4aa03e5ebea24453d8475b7e5",
+    "build/modular-p2.1/focused-tests.xml": "aa80a36a8eca10a903e32d1185c54d852415a47876bd2085cbf3edd9a97f1605",
+    "build/modular-p2.1/native-configure.log": "0a4f1b13e90488c2f23d0ba3f9e7dbe3d86ceaabe2b892d127190726e91cf658",
+    "build/modular-p2.1/native-build.log": "3301709e70d536e3d4e6ab74524446759da2ac896e6cc7ada8db550a0d8e2dbb",
+    "build/modular-p2.1/native-final-build.log": "d66d082cd701832bfbc076292ef244d4678664cd074c3018f4c8a3fb565170f4",
+    "build/modular-p2.1/install.log": "b3e930cb760f43722a8be81edd840385bfba7d0c90a4b9bf978a8bf8461d691b",
+    "build/modular-p2.1/capture-configure.log": "85fb9e71ee641b486b5decce9f58d54273eff833d5e968583d8d9e8f2fda1f0d",
+    "build/modular-p2.1/capture-build.log": "4e30a7aaa48375d5e03f883498f45e750c75c6113e698fef71b5047d67742eae",
+    "build/modular-p2.1/capture.log": "decfda96001f3d5e590db35519713ea288a450ce8b909afb7d7c0e53cc7bf8a3",
+    "build/modular-p2.1/photo-capture.log": "af0517317fdcfda71801ce721d6a46fff0ce43a8be19bd031f70b70626447e49",
+    "build/modular-p2.1/comparison.json": "de04ec42e7c7f344b909b8f39ac0611e7e5a61cfc118d464071fe27c33395efa",
+    "build/modular-p2.1/photo-comparison.json": "dfcbc45647cd96cddebd4817f4607c6be46b3bf24ab28ba0945c50400f415f6d",
+    "build/modular-p2.1/vardct-conformance.log": "a6efa22a9314f55980d5b0816a6bb479127363e48d338e336378debe6b8178a3",
+    "build/modular-p2.1/native-consumer-configure.log": "4aca6d372ca2746853d42b6ae99ac473d32352e4c819d1e14149515674269bb4",
+    "build/modular-p2.1/native-consumer-build.log": "8510fb20465eb536020c03c4687528f4a9cf477006012d0748fd5f968a4e8b71",
+    "build/modular-p2.1/native-consumer.log": "870503b916942c2f1d5cbd5024f34381b3d4ff091458652f2ab756ee86fdf0da",
+    "build/modular-p2.1/native-dependencies.log": "845a7ea92286c3bf252f4bcac6264202b99e7dc89e01f3dd18ba76840f4c3faf",
+    "build/modular-p2.1/include-audit.json": "066dd2878f9fb7c65094d54f61cb40644801355321a65277dfac58e60e471d45",
+    "build/modular-p2.1/package-audit.json": "6246c62435b81fc40ca1fdee944d0168df574e7293f2cabae0916d2d5d2ec1ae"
+  },
+  "resolved_profile": {
+    "source": "RGB8 sRGB, packed byte span and byte stride",
+    "frames": 1,
+    "passes": 1,
+    "group_dimension": 256,
+    "transforms": "identity",
+    "predictor": "gradient",
+    "tree_leaves": 1,
+    "offset": 0,
+    "multiplier": 1,
+    "contexts": 1,
+    "default_entropy": "prefix",
+    "explicit_entropy": [
+      "prefix",
+      "ANS"
+    ],
+    "lz77": false,
+    "modular_16_bit_buffer_sufficient": true,
+    "cpu_participants": 1,
+    "public_entry_point": false
+  },
+  "native_modular": {
+    "independent_token_cases": 153,
+    "exact_files": 306,
+    "truncated_files_rejected": 306,
+    "artifacts": "build/modular-phase1/candidate/modular-conformance",
+    "sha256": {
+      "17x1-p0-ans.jxl": "599c24816b1c44302cd4f97c362f36a54bda1c7e6d42713477e8a6395a3f0fe8",
+      "17x1-p0-prefix.jxl": "38bf2b279baad00d5897905000a29ae8c8405a50af7b16fe2da4c9ebf9a24ecd",
+      "17x1-p1-ans.jxl": "c7bb71a61da69da3883933458517fa81e7c744b53bcb39a8c3098b5fdc1288a8",
+      "17x1-p1-prefix.jxl": "8bbab5567b6ccb33b899108adaf07b724dbe907ef24f5d9afce18d04abda9743",
+      "17x1-p2-ans.jxl": "0685f9ebb579da829b7528d2d51c613edcad371611d7225a63f5bc44ced69928",
+      "17x1-p2-prefix.jxl": "35171c7b54dad35e2f7f426121d41c02cfcb8beba5fdc857d0e7b5d2a5e54417",
+      "17x1-p3-ans.jxl": "ff327a52cbd2c812641a4148f13d5aac7a107daa8a3041295a3f928e077bf512",
+      "17x1-p3-prefix.jxl": "aa54fd80b9d8b3c0c3187a6d89d0c05b5298ab6e6d37d577787c393f888e38f8",
+      "17x1-p4-ans.jxl": "73c48a59935edf2f2cbd84cdf6c6f2b723f8a47da0b0c0b8fcf2a1aa861cccde",
+      "17x1-p4-prefix.jxl": "4090bbf93c6f7de8b317024a1cdd0de12019aaa5e9823fe488a281df802de8f3",
+      "17x1-p5-ans.jxl": "d5145de80ac1738d74d34d06e1d03ba1a3b63918542267f8d2f052cd30767cae",
+      "17x1-p5-prefix.jxl": "55797584c666a0f999251e02a748df82a46ad18a6db1e02040897313ef4faffb",
+      "17x1-p6-ans.jxl": "94465700e80f98b21593994c74e001c9615bd26c81e938abb9305c695dad52f2",
+      "17x1-p6-prefix.jxl": "d780b1180341f0ed65981a6faa496cac009841ad67875c35be01275ad4d30138",
+      "17x1-p7-ans.jxl": "8c2276c979991582b004c8591ea228f6517aaddc99f20ac2b4da94494cc87d12",
+      "17x1-p7-prefix.jxl": "5abb1527d07247e1f80560392096caa4b56e4d568a893e6927f4397adbd502ee",
+      "17x19-p0-ans.jxl": "2b8d8c09aaf76195b0c3b59e85abbbd489cabc9670a01325127ec8d1e00f8cb0",
+      "17x19-p0-prefix.jxl": "77c8d5efc60ee3a38a09122a0b248c8499e22297edd24e76f8267513b45fb384",
+      "17x19-p1-ans.jxl": "3e6dec70f90302939d31fbaea8cf5af8641d2161e17867ec833bc9cf3deb0cb5",
+      "17x19-p1-prefix.jxl": "30dc6f869d20ea580db8eca411ac622c0e55ecae3a10a45e15cbeae8733f8181",
+      "17x19-p2-ans.jxl": "811a19da32bea78ea5c93535f0a5bff38eb6390135c28605cbf1b33c0b015f90",
+      "17x19-p2-prefix.jxl": "746427e5549f8c6510e8277e2dddac3aeb6cb263a7a3f161eafaa630200bf400",
+      "17x19-p3-ans.jxl": "566d50dc337c1d3f964c21b58275e8c1b8040b6296c858fcce6a49b38982ee0b",
+      "17x19-p3-prefix.jxl": "bdba76358b323e56f9113912a2ea3e4272d87bbbbdd409d92d745a168d5df9ef",
+      "17x19-p4-ans.jxl": "05956910ae41063abffa3df01eddb8ac94edc1e6e5c9f3c2c5fcc787ad2626f5",
+      "17x19-p4-prefix.jxl": "5c8e7fc50c53fdcb98caaeaf67c073ba9e32dc9a109ef467069dfd77fa5d46ee",
+      "17x19-p5-ans.jxl": "21b1ecb3fe11457cc23fec3cb086de6523e78b5124e76a905a1a47dcfe9f3b64",
+      "17x19-p5-prefix.jxl": "7f8b9a57aeaf6178cde02335bb2921df02e62998f7b623b28d2e3103f4f53742",
+      "17x19-p6-ans.jxl": "92db2ecb197d624f258dd5fea69372856d73cf469787b21a2b5b01be9234fa32",
+      "17x19-p6-prefix.jxl": "9f259b6e93064f217b4057b0f4b77e3ec2f7af0cdabb4c1d1bf82b30949c874e",
+      "17x19-p7-ans.jxl": "f3879c2fb80fcb4eb09d209885ed6e74128e873cbe6b9ad3feeae0a4836c6e14",
+      "17x19-p7-prefix.jxl": "f2d7c0dcadc4cba96c85aa8f38de94afaaa583dd8d3e11a8d50216285f3ad3ac",
+      "1x1-p0-ans.jxl": "091c6fd1120d437dc2ce54949ecd07ca53cbdc53d3a5c6002b093b29bf6a5de8",
+      "1x1-p0-prefix.jxl": "233bb89b36b7eec35937a665650770abdf3880d0774ae2bfe33e8240edf3b12d",
+      "1x1-p1-ans.jxl": "2f9e527ea727ae9a441057b4105f4c3082e41df8e9223747daab81dab78bef31",
+      "1x1-p1-prefix.jxl": "8392e7c30ff294593b6aa95134174ee9c25932287528c97c7c3458f44cea1015",
+      "1x1-p2-ans.jxl": "c4b874d0fc33da4bd13e17f4ceec83f2fd06ee880b8ec3f37530275df4a26a3d",
+      "1x1-p2-prefix.jxl": "e32a2e07bdddead4bbce3fa9a5a6ee71f0c87c53153f321c03e073ee1ac10a18",
+      "1x1-p3-ans.jxl": "2f12beadbf777f962c1f654a5e6215bf77a362d83ec2ce57e166f6f66cb0f80e",
+      "1x1-p3-prefix.jxl": "b192658958ee112a8b6b1cdd142b0d297d264193edccdfd3965776ecbd46877d",
+      "1x1-p4-ans.jxl": "2f9e527ea727ae9a441057b4105f4c3082e41df8e9223747daab81dab78bef31",
+      "1x1-p4-prefix.jxl": "8392e7c30ff294593b6aa95134174ee9c25932287528c97c7c3458f44cea1015",
+      "1x1-p5-ans.jxl": "d81f6e26682a742f7d7e00784e86db8beb21bf763dcf9eaf0ba4355e902a1476",
+      "1x1-p5-prefix.jxl": "445c3a5011c2f5394f51abde9b2940682038164b65a6dd922653cd4455226f7a",
+      "1x1-p6-ans.jxl": "5d854053cad337f5009b73dbf7ffa253f44d213679194f74f47446ecaaae2f33",
+      "1x1-p6-prefix.jxl": "847c0a18a1fb63ef569d77b7143fb242a1bf122840d2d4971883c9a69fdf20f4",
+      "1x1-p7-ans.jxl": "d81f6e26682a742f7d7e00784e86db8beb21bf763dcf9eaf0ba4355e902a1476",
+      "1x1-p7-prefix.jxl": "445c3a5011c2f5394f51abde9b2940682038164b65a6dd922653cd4455226f7a",
+      "1x17-p0-ans.jxl": "e3f520213929d04423888b48a4f79be529279db6b3a3abaadeeadf106bd823c3",
+      "1x17-p0-prefix.jxl": "10d487702d60483b1480756f931fe2773856a6d5a952acc12c58107707f775d3",
+      "1x17-p1-ans.jxl": "a130ee4c2bfe1f1a93e4b7495c95704ef42e0c71e655a12523d22691f95a19eb",
+      "1x17-p1-prefix.jxl": "25696b8f2aeedc05bded3ed51127799d22e82489827b74ce4a8df11355550838",
+      "1x17-p2-ans.jxl": "5e94f6d6eed9f98ffaee96aa40dc79bf6aaf7a24eb2189ce3a2bff93ff4fe6c7",
+      "1x17-p2-prefix.jxl": "8a28f8f71d9d5e4f8f4acfcd7b17dff480ad9a202ad7112e45b59b8a8a8f312c",
+      "1x17-p3-ans.jxl": "7cbd753fd04a1503a8ccfd56dc2c79fa21fa955afd1e0dd1852ebdb989428fe8",
+      "1x17-p3-prefix.jxl": "0db2874eeb0306add7e5c8b446a46ba93beb6167bf77665988429ddbb0ede0b9",
+      "1x17-p4-ans.jxl": "5118961c1e431cd7cb6facc3f36adce2a7f30b612d9207c9844ad728cb3baf21",
+      "1x17-p4-prefix.jxl": "e09d589320ccb8d98e91b3289f34f1e99f6bf28f8bb1bf0e501a97eb4ea6f4a3",
+      "1x17-p5-ans.jxl": "1cf1e7bdc039914b506a12d196ad74066b86638f897f529f0c60748a40b2db63",
+      "1x17-p5-prefix.jxl": "cc5ba033f47d0a071f40c72227b71715bf2dd9c4611c0782c18836c6bf0020e2",
+      "1x17-p6-ans.jxl": "c518ba5602d83dbff8541f0bd5062465d9938664762749ca44a02fec92acdb4c",
+      "1x17-p6-prefix.jxl": "bc558a8432b673870dc875d419a90695488871d0a3726c4858fa4d6e4d94bc52",
+      "1x17-p7-ans.jxl": "be706e20c041cac5380d763b3fc5aa0b9837c4228ed0e3490dff1dbe23ecde2f",
+      "1x17-p7-prefix.jxl": "3b1de842374c2fd9d0bfa387e7441b922e7a4d62136b425e1bf9e6c5de480869",
+      "1x2047-p0-ans.jxl": "a32f3eef0b549ff4396b85c4fa40a4fd6bd04e83b0c04fb53b72a1ea09d94887",
+      "1x2047-p0-prefix.jxl": "bef88f9b4397a2564ebc8275b68597dfbcbf0e40e1ca4ccd2be6ce4c58db889a",
+      "1x2047-p1-ans.jxl": "8e5fcb0f3a98ecf69db2e7b967b2d1e22076139909faf56e0a7c90a0999237db",
+      "1x2047-p1-prefix.jxl": "3fde70871827b53e61f26903e437ae7d7cbe2956bf33a363877fced78aa128e3",
+      "1x2047-p2-ans.jxl": "48edf0da4f8b444561e5865ed9e7f9b331453ebabe06298872a33ed95c8a6c5f",
+      "1x2047-p2-prefix.jxl": "497608102bc511d8a398c196083c677695f2b7d887dceb2ac2ae3d8039904862",
+      "1x2047-p3-ans.jxl": "0c0a508ba3d243298ecea0629c9c2b97f0da12f7bc6c5267e5f1bde8f168f115",
+      "1x2047-p3-prefix.jxl": "9d645385ea5d07fcabcf87ba66b3bdfd7c3018082b69a464ef8e5b4a887709ba",
+      "1x2047-p4-ans.jxl": "6d224edb8923f1220a5e5a50e60abfacc5bf8798145fbfecd90f9f94992ea07a",
+      "1x2047-p4-prefix.jxl": "7198e27d1e81110e15ebc4c113a6f48733cefc10816e43c8ee2e83a00a05339f",
+      "1x2047-p5-ans.jxl": "d7b9176aef007da8a20190ac123d76adae9e4dd8d2962df2f1b71786676eed18",
+      "1x2047-p5-prefix.jxl": "ec25571db6540e60ed730a54a95b629b4ebc4a24a79d1f75f61fa4bdebabc2c6",
+      "1x2047-p6-ans.jxl": "182acd5376b86cb1230a48795cbb478dedecca938ad1918c4b135945a4e11f81",
+      "1x2047-p6-prefix.jxl": "cac07d2ac9eba5812c1b6836cf42898bc52bc46fdf656bf45ece3e7e22ab9e89",
+      "1x2047-p7-ans.jxl": "749bf55977bf8d13144a7ccae33a79c74f4ac949cbc5b5055251755da6193ed9",
+      "1x2047-p7-prefix.jxl": "3d37c8cd44348e82e2dab36b35f906ddf0ae5a232af8b712078e2489d305ea51",
+      "1x2048-p0-ans.jxl": "c33d8f929be93aa373de642dfe16a5f8244f4cc0c756692e8d3d07be5a20fc9f",
+      "1x2048-p0-prefix.jxl": "2018574ce4ad08eee9528522413158c0eaefd00a52f02255c8a3b0ebd50a0da6",
+      "1x2048-p1-ans.jxl": "c26a0a8cc8086d793a0b8b889531e5e2080d5f484f50d009436b7bcbd3ad2dda",
+      "1x2048-p1-prefix.jxl": "73a1ef66e5f40dae2bf7ce4e98ccfc70db0bf14a5eb1b75aba5272a3f64b4a89",
+      "1x2048-p2-ans.jxl": "acafdd39a492302e2cb0b34623095d926bf11cf7b1408de0740a0cc017df2dd0",
+      "1x2048-p2-prefix.jxl": "e97a0079816d95d6be011869d5c0b38acd3c214a6519f50a66cdb62f6ef71f2e",
+      "1x2048-p3-ans.jxl": "80cfce4acd6da64476dc83a67fb18e9f0c08e5ee0e68ee0954a247e60e4ad363",
+      "1x2048-p3-prefix.jxl": "735467da5d5951a5d2ab734ce878c0d6d9cc7f1b4cebc96c4b2a4efd40ee659d",
+      "1x2048-p4-ans.jxl": "5e5fc2688557fc5d350ecd13d5dc90e6f5c6020afb0071c55ad2ebc4f02f900e",
+      "1x2048-p4-prefix.jxl": "69d921322d22875c07e2c5a17b27430f2315083b316f490b5f63c5c142889a39",
+      "1x2048-p5-ans.jxl": "34236a5390d97407ba3b26bea464dcb105ec3ca8c986820784c22dbd385bb87c",
+      "1x2048-p5-prefix.jxl": "5ffa8f841574dd14f9c3613a71bcb227adc4b41b19df432cbca482caf4423089",
+      "1x2048-p6-ans.jxl": "31ef0ef385dea99dfcc98981db12a3addb58647804654db15d6fa13811e9d269",
+      "1x2048-p6-prefix.jxl": "b2b84974174bd3f8d9d3bff5651972df2cdfbd782651a1864b4c2b00fa585367",
+      "1x2048-p7-ans.jxl": "617ed1ed9d4555122be752c836ea1977fad96a060c04bd823b291901ca5e2b56",
+      "1x2048-p7-prefix.jxl": "f4235da64db815d6c6e19adc07f8c7e9f8e04d796881a55c5f7d354b415a13ce",
+      "1x2049-p0-ans.jxl": "c85fd0624bb3f341a0273a97cf145f304b167f1f6bf63fa48f102eda89ac9b00",
+      "1x2049-p0-prefix.jxl": "7649516ac1f3366d6ef173bf9373c7ba637bcdfb1c1564625a2e1a6e9aaac8ea",
+      "1x2049-p1-ans.jxl": "7253fcc04d48a6bb55fbc802f47bcfa2245524360b911d2c372bd8b2a72d6b5c",
+      "1x2049-p1-prefix.jxl": "c15361831a5f797e370f9bf58ed8d11c9e7fddb64a23516b6c051fb8acd7a064",
+      "1x2049-p2-ans.jxl": "31a0a1136e40065aa9a5e1a8bf6f480bb9b5781f0711bdc9b450e0a3e95ed40c",
+      "1x2049-p2-prefix.jxl": "8897b98397fe32082c91031f915621d3ee11d7b738176a6f75ef54ce586c4c56",
+      "1x2049-p3-ans.jxl": "8437ea2667d5da781830eb4d8177051c57ec491cd0a8d74627c196a86949e950",
+      "1x2049-p3-prefix.jxl": "50b1e4749e97ada08ea2dff5f4d27222768aea2e5576ea0873d2d8daaec47ba4",
+      "1x2049-p4-ans.jxl": "d7b78946d6f5e8a9c0b78ff62c8fd448c1c0b0d41844bcbbfc44637c40fbad55",
+      "1x2049-p4-prefix.jxl": "ec4d93790570f10a37da43e2a6c1adc479561816b632f64baf63141948124ed8",
+      "1x2049-p5-ans.jxl": "302ec84caac5567a543a7c0f7f3dc4fdfeeedc5e870b4d0fddaaf2250d0bed93",
+      "1x2049-p5-prefix.jxl": "4b7bca95bfad17d509f5a66675f17e2b10779d8cf4fd25f5cfc97b407e879018",
+      "1x2049-p6-ans.jxl": "f248edb725a89bbc5f42df9c516c7a7cf6d8153db3f9827281a391751dd1c9fe",
+      "1x2049-p6-prefix.jxl": "5695ae9234decd5e8527669553595f1a8835d6d62b67adbf94dea84d4b21f294",
+      "1x2049-p7-ans.jxl": "0931431e9bf920513b6600e6538c24db85d8e1374864198376c72f9750bdf554",
+      "1x2049-p7-prefix.jxl": "34d3e2b559c385248ab293517f9d870cec56c61fbca1cd9e9970088ed969551a",
+      "2047x1-p0-ans.jxl": "488025148b2ce0fbe2c8dbf6904c4628ecdf98f0ea41680b60c12f74d995e134",
+      "2047x1-p0-prefix.jxl": "82d6158940dbc12cbbacf7ead7d692321d4429897a1edb24fcf6785721f650f0",
+      "2047x1-p1-ans.jxl": "9b53b26f729d7cb0c782b31bd8607fb3e0094aa0ecb2bf9358400e31cb25249a",
+      "2047x1-p1-prefix.jxl": "a753efe2ed1efe784e890b2b7388a467fa98a48e6a86318cf2a7b5dcbbf23651",
+      "2047x1-p2-ans.jxl": "e4522688c079595ca40583bbcc2cd474822e727fa63ae21ec14bb2a1ad4dcca1",
+      "2047x1-p2-prefix.jxl": "a7c40f16dbb70f0c671c4b709df17a4eee5a9c587b70e582443cadd9e8fc6e00",
+      "2047x1-p3-ans.jxl": "66b212879d215e5949cd8be1d7127dcda96e25a8d2aede1a4609f5c5cbb45d75",
+      "2047x1-p3-prefix.jxl": "dabe7e810c2af13e3bf11c84806fa4e336f93c6201d6e09fd443cea86dfaec24",
+      "2047x1-p4-ans.jxl": "35eba477d6915424de41eb4be51a93becd53544d30fdf951dfa086905e97cb7a",
+      "2047x1-p4-prefix.jxl": "aabfed2bb78445abf62b981b3da1681a6e4bfbd699126b93d7ba00a7a360253f",
+      "2047x1-p5-ans.jxl": "3bbbd134fe80e2c6fd7a8b5210167ecb76da858517f1dec82ee2021d1392e87b",
+      "2047x1-p5-prefix.jxl": "d5dfde13fabafbfc413e1d66c88934a8f9dbf9e6503002d6d052b76c834922aa",
+      "2047x1-p6-ans.jxl": "6be45939a0dc4fec445460a0396688e0636f674a5138b4e8488c079a0ff35ac8",
+      "2047x1-p6-prefix.jxl": "df9c5d7958bc86a8bd6883d70c8b1b0a9edfea3625cce6117c7ca7288d72fd8a",
+      "2047x1-p7-ans.jxl": "f38354183654652fafe7766e61483863714e0862b75d16174a01dc1dc3cd44b9",
+      "2047x1-p7-prefix.jxl": "085c9fe8c3a46938fe0829cbb48fc36374204c1c6eaac5e23e4583e35ec022b3",
+      "2048x1-p0-ans.jxl": "93904126312b373a809d8663a0d0395b6571874ce112710e0663fa61fe8842c4",
+      "2048x1-p0-prefix.jxl": "98ae7952e4b0784ac2dbb64e4ee30fddc97bbc26e954474cd8791e631287f061",
+      "2048x1-p1-ans.jxl": "2f39e85ed59cf7379e451f48395d4b817df03f51b4e1b054ae8052460501e7f9",
+      "2048x1-p1-prefix.jxl": "f37b0171f5cf66b2c34c074f799e4699320dc0e05e2d7fc4b8bd0f6e83fc388f",
+      "2048x1-p2-ans.jxl": "836650991f23fa3a69f4a92c6fdc8942754629c83598c95acfeebe8ceb96cbe9",
+      "2048x1-p2-prefix.jxl": "fb2e987858185f561b1835662a5c840962130a6d6ad06d3ae91f7f74d653383b",
+      "2048x1-p3-ans.jxl": "fe0cf18ca436ccf77671299cbff93b077d615c0e21c4fc1fe8af6931eaec0635",
+      "2048x1-p3-prefix.jxl": "33f9a138ef1677e5ff9f6f82690e6819a14235f2db774586ff2bc8781d8821d8",
+      "2048x1-p4-ans.jxl": "9269cdcae4c28ccd79f3c6246cc0fd50eb8e22aca3939cca2ed390f0bd5792d0",
+      "2048x1-p4-prefix.jxl": "ff03b2626375723d06b934501101e07146fe18ade180bf1c1ef1105b6ffa10c4",
+      "2048x1-p5-ans.jxl": "cb2a1fa7eb6eec27abbe5b86cb38c292515f5619d61d5cc4ebf9bfe01089f15e",
+      "2048x1-p5-prefix.jxl": "eafa6e0cd748212dca057d329988bae00317943567484433ec7a964a78c1cde4",
+      "2048x1-p6-ans.jxl": "3b324609329492b4403ee9cd6c623054fa8fcc2e6d47cd8ca7e08dd0c3952d27",
+      "2048x1-p6-prefix.jxl": "f16d259f3c402d699b8f2d8abf4b95af3b49ed2d1f92d4816e78dcb00be19ad8",
+      "2048x1-p7-ans.jxl": "ef3d572640f1f382ef704602cd645651a69f18b1fa7e324707c219df2b2bae96",
+      "2048x1-p7-prefix.jxl": "1b6ee0d472ce3f6cce38ba50ba50fefb50d041821d0ba9fe5a727e2877c5705b",
+      "2049x1-p0-ans.jxl": "e9c6df3c4b1a1be3caf3d4a2879f43b075dc6b6ba35c365c8d38488af4feaacd",
+      "2049x1-p0-prefix.jxl": "e3f2194dae9d3d21e8d63ae530bcd7ddfb4f072f08a6ec3aa7fcaccba0ace279",
+      "2049x1-p1-ans.jxl": "3b0c3f1556b4bf2e4f26ce337bd4657162b557e77cf7ad6027de9d90c0943b3e",
+      "2049x1-p1-prefix.jxl": "dd8d2533270ea826cf6c979e29e565015423af0db09925bca79d96ac9d04cfd0",
+      "2049x1-p2-ans.jxl": "3ca4a70194fd5acff78a51381a43677b10cbbde532b59f5349d380597ca80135",
+      "2049x1-p2-prefix.jxl": "c1c8f582e0cfa254f6dc221f494f8c631f4a1248edaf1a7e97dcf14524450f5c",
+      "2049x1-p3-ans.jxl": "e0f166b9108827674cbc128f46337a5102f67c64cd44560b96c8032c7a55e09e",
+      "2049x1-p3-prefix.jxl": "4f7551c28a0c2b2801c678bac1862bdc56ad4ccf650d07fe875f99118a7d008a",
+      "2049x1-p4-ans.jxl": "890b8281001c5f2a7c0408738576881ca850d4a03da8fbf2da78bf43643a595b",
+      "2049x1-p4-prefix.jxl": "a0d73d0c6f3e59c99dfabe912af089f653bb08e3c3410a71f2ee561c5aa85573",
+      "2049x1-p5-ans.jxl": "ab69ad9150e02752f56feeabb0a33fc8dd6c5b656c8f0f736550943bac9d14a0",
+      "2049x1-p5-prefix.jxl": "1d115d402422a08a2c891df0b656a640d31411a7cdcff0950caa4e134d0d981c",
+      "2049x1-p6-ans.jxl": "1c6c33db747be6d5747d3b98b1695e41afb647bdc48f8c3b97b381ad69c1f17a",
+      "2049x1-p6-prefix.jxl": "4e1668410bfacc020a84b7b06d6272614fda2593ed9e5fcf237a2ee7d461ff0a",
+      "2049x1-p7-ans.jxl": "5d3942f0ff26fd3579e03c86f3de0dddafe8fe0b45d0d220b06f4d5e12b8423b",
+      "2049x1-p7-prefix.jxl": "7f51d058674c78778d4c590acaf09be6d494adb31008e2d876fdb08313d7eeff",
+      "2049x2049-p6-ans.jxl": "1bc07e1d1a1dc3488c10511d600f16eafb3b5cdbc884d4d0d19149480e6d6285",
+      "2049x2049-p6-prefix.jxl": "8dc8adc7024d4b04a27086a51002e9cb1df68948d1585e0b763c62e4d4c471f9",
+      "255x257-p0-ans.jxl": "8344f5f959c793c2037c0432d53d0503d25645bb6aa4ea2ef7a281c203fd8bab",
+      "255x257-p0-prefix.jxl": "e5c4dd1fe2d6541c7a5f9916d8fdaab5d03863915d43bd0d56b327cabe284cf2",
+      "255x257-p1-ans.jxl": "5783733076cf536f14673f4c9aeda4523b23a089387cb2e34ed54f5737dff2e6",
+      "255x257-p1-prefix.jxl": "ea32ffba9ce479efa8c4b45cf0c2d6f09947a9db8baae624d80fe1339a699393",
+      "255x257-p2-ans.jxl": "ad932be29d8f7647ade38d505da84026c2783492af96a31c9ee206c5108af6b8",
+      "255x257-p2-prefix.jxl": "7b32999fc4013b9c0647e3229f5509fdf1fb65b08b78630f0b3e22d866712b42",
+      "255x257-p3-ans.jxl": "4f9751ab18ba426f6c3361dc640d8b8de8f85c5c60566248df8b600ed0424b4d",
+      "255x257-p3-prefix.jxl": "ddfbea5c14984ce0f35aba89440778424c5ba4166c7ffd19bdd5265b6ec0449a",
+      "255x257-p4-ans.jxl": "81c9ed904445a4dfde315379cd94caf1933cb6537246b6dcf6fdd843a8eb39ea",
+      "255x257-p4-prefix.jxl": "2a16096a44e31b33329ca0fa9d59fb873ed568231a88d7a49fae8cae2fa185ae",
+      "255x257-p5-ans.jxl": "bbdfdbad74a9506b914907aaf9cbc67835dde6585f3ebf4a4c9ce806a3721a09",
+      "255x257-p5-prefix.jxl": "408c859a1f11d298feb92f935eda611e6d23987b65b324c3320642e72febdccb",
+      "255x257-p6-ans.jxl": "12b98683e90195761cda2dd36e5086800f91566f956ee7b6156b12c15ab77fc1",
+      "255x257-p6-prefix.jxl": "c1a83de8735324462fa34b26e94d3e68163ec384c2b412b5136e68dc3738487b",
+      "255x257-p7-ans.jxl": "d035245dab88bf6389c6c2706e6e7811d9ddde744a6680cfe9346bf90f956d3b",
+      "255x257-p7-prefix.jxl": "4e29f4261320e81087303fd6c0b2cfcca4f62f3d00572a3f3c94368b969340b1",
+      "255x3-p0-ans.jxl": "58b9c2faa425f8df1dac97d2ff0f6544a1a0c7cad98b060611abeaf774e80f9a",
+      "255x3-p0-prefix.jxl": "aff22c0fa59e8fe463e2e08e46599a7be2227349a8d9ce91bafefe64726835f2",
+      "255x3-p1-ans.jxl": "81703ff9cacf81f786dbe3b82f22a078bfae285b75f539d793bc92957517fb95",
+      "255x3-p1-prefix.jxl": "f294b3b83912519340aa74683521fb5176b2715523545e356f8711f0a7cd9ab4",
+      "255x3-p2-ans.jxl": "c4760821ecc71a6e6fd77512731db6c2472ba973537c04dba09f1a1df3cc3ef8",
+      "255x3-p2-prefix.jxl": "48018de2a7f7fbd30f5d6431a2e99912de8c2157bb2f9bf75398f8af1e576757",
+      "255x3-p3-ans.jxl": "77532ae4f193711bc412ad9038c76ca5020f8234a773e5af994d98e964a16db4",
+      "255x3-p3-prefix.jxl": "5fd62c9160ad9f5b30853e50d7b40f1665a4a30a668c8b4066d877d309f71189",
+      "255x3-p4-ans.jxl": "0d52a8c194d77535869261f36e8b53f69fea0a995c6f0f282183969db3ea2204",
+      "255x3-p4-prefix.jxl": "172b8cf15946d26a44359d1c6147e19ddc7ea70c020ef0861bfdccf0314d8bbd",
+      "255x3-p5-ans.jxl": "4e93a89bab16c444a1d8dfba1acfec6162beadf6fd8196c41975bc3e44ac085a",
+      "255x3-p5-prefix.jxl": "7fc2dedf9c0fcd5a04f32b0acc7a77627128abd56f42e97d5e5e1eb452c5dfbf",
+      "255x3-p6-ans.jxl": "5b42820c962434819b239a6f29b3df61b87f94c333e4f3256876d3316e1b09a2",
+      "255x3-p6-prefix.jxl": "48fa9fb2fe396b8598e2c0aa0af990c59d0b570c7a4b8fb61a60693f0f590712",
+      "255x3-p7-ans.jxl": "cb17112947db7b32713851ca263934df75e5d2dd43ee4791e598a602fa41f873",
+      "255x3-p7-prefix.jxl": "e6673f041265b7a3765ad0dde2e79c706dd3dd6ce8e72c02b001d75690644faa",
+      "256x256-p0-ans.jxl": "0b05971bf5753ff3206ee3ef0a18066c557c7601d79d163d7001f44d8fc172f2",
+      "256x256-p0-prefix.jxl": "8f77c7d3f0e22f3ea5f5c9ea240237ae56129811dc3c5d347a11fbabec5e6037",
+      "256x256-p1-ans.jxl": "9c871c88fdd5704a9e21050818c36ff00c8b58f432c825e173245aadc0bcb790",
+      "256x256-p1-prefix.jxl": "8725c9a6868802b4df297bfe15edfa1cb70316d2a78d899bcdf7bf53429a33f4",
+      "256x256-p2-ans.jxl": "d3dca21018a4b76e6c0bfe45c643e6fbf3960a4ee7f1644f1219e2a51f2b9a2d",
+      "256x256-p2-prefix.jxl": "369c53696240702f1d2202cd05bc80b9eb061f071bf9f1f88c31c62cc4c9fe57",
+      "256x256-p3-ans.jxl": "556b89e0eac3db3d6ad6fb399940fcbb6e3ea278b1a2aa488fbf5568910908b1",
+      "256x256-p3-prefix.jxl": "4ac64afe0969b29047af71f29919f21b0d413a1ec27a18da709b325854bc6f6c",
+      "256x256-p4-ans.jxl": "32ace84288cc9b39e8bc408e26d06ae16b1f6093c52957f0e3ca3d7225197a8c",
+      "256x256-p4-prefix.jxl": "c325df1db6872f9805e73218d536b9ad846a4533983af5acf0f24d42d52ec1bf",
+      "256x256-p5-ans.jxl": "f122ad3cb16ce56307e25c58a0270404135d5435836a8af987a67781e451d46c",
+      "256x256-p5-prefix.jxl": "4a3bb3ff047d87198bf91f820d217439007d748f3e604613a25dbfa6c495f9eb",
+      "256x256-p6-ans.jxl": "7d801bb347950c68c5a74a8c9626033ba643c408d741d98e8f129432eae2f9d0",
+      "256x256-p6-prefix.jxl": "3099f9d29b2488e8c527c5049c3b22acd48e66bfc3f387516d7c03e902259af3",
+      "256x256-p7-ans.jxl": "9dad8bf76a81051281a06a5837bea117dd546f5cdd98937c3594a6088eaa5de4",
+      "256x256-p7-prefix.jxl": "740fbfad9ea06060f8478b001f7c598a12dfda9098063bbef856d8e6c74cf008",
+      "256x3-p0-ans.jxl": "2c4ed5c0f2f0f9aaa6e6627a2e0a039d753233cf4d395cbd031ad57b2eeca1ab",
+      "256x3-p0-prefix.jxl": "bef7d75dd119de31b8d9cfc612dd70d17a07ddb3a029855e4805698ef249dc7e",
+      "256x3-p1-ans.jxl": "c9c085b828a650ec00fb28ad2f81441565de10ccde158dce5aa1c28150e47fdc",
+      "256x3-p1-prefix.jxl": "9020aa67b30e451448533f2889e1d20eebf2748163b8d18e72f732d001126fe8",
+      "256x3-p2-ans.jxl": "29e55498df0da98105ceb96608e674136dcb940aa115414049bc130f31ae803e",
+      "256x3-p2-prefix.jxl": "3627c8f845fbd0cbdced84ea07fc5534e3c99964d151596770cf6103c9906538",
+      "256x3-p3-ans.jxl": "ce41145f8a8e3296c9950e8dcfb0f934d2b66e2c79e25ff4e739cfc834eb12fd",
+      "256x3-p3-prefix.jxl": "d6eff69db855c970f286ee378b663de019304bc1ed6df4d41203a1c47d742493",
+      "256x3-p4-ans.jxl": "e45dc8018a55c389f5db157420e173681202ddf314550b66358e9b928ff77ccc",
+      "256x3-p4-prefix.jxl": "03b63ce4b383356e56ab21dbfc32861954104494290a60ffd835ccb1e6e099fd",
+      "256x3-p5-ans.jxl": "c2f46c54d49fc5dc29a9c0116d78ab40ee6df173fddfe8e1bfb43fb27b2d7daf",
+      "256x3-p5-prefix.jxl": "d664cc396bc39deeb81bca0b9c9bdd2226d0aebb1d172222d5da2dc33394905c",
+      "256x3-p6-ans.jxl": "b0d080a6b2296e298f8bf13825a1e8d470c4648507ae2f6a2efc7180cc30396d",
+      "256x3-p6-prefix.jxl": "92eb3339b4a6b7a9ccee6629e13ec3810b37c1e677b0da371dd5a4c1d87b6d03",
+      "256x3-p7-ans.jxl": "482ba183e5aa716e3006755a4cead469b1b0c52daf986e76e332bb3c33981d06",
+      "256x3-p7-prefix.jxl": "ffb8b2959ec70b3ebaf1763080266be8b89063871582efadff0ae950a9aa472a",
+      "257x257-p0-ans.jxl": "71bfdb1af25ce82e567f13317cc27980d46f141f7f8cd1cca2b7eecb33ea3c96",
+      "257x257-p0-prefix.jxl": "7cbb0620c615598a2c436baa4dfdb8ddbf07cdf019f14d310acef3621d9592d6",
+      "257x257-p1-ans.jxl": "78f58fa2eae2d6f9cb62c8b7cb4377b3b5e9ee9a0360f8819c9dcb2275f86e84",
+      "257x257-p1-prefix.jxl": "c3b1cbccbaa66032184d5864e134f8bea9dd973dbab4228e435b12e1b82533b6",
+      "257x257-p2-ans.jxl": "b7f637bd16bf1bb2a8f31045985d8e98c785b65a3f0d3b02651ed3b08da0bbe4",
+      "257x257-p2-prefix.jxl": "c0133812aae1c94ffe467258cfc510bf2565d7557e7710fafb40566b92a0b263",
+      "257x257-p3-ans.jxl": "99b88a861f9d015410a16c19ebe9d02863e21c18d0a0d347e8d885c9acdcbae4",
+      "257x257-p3-prefix.jxl": "a7e37cfd6d3ab8fd2a0e4d818167a44f28c5e627349b69847023c70c8588cca2",
+      "257x257-p4-ans.jxl": "54be1b135694381377ac353177525eac007d264c09bc228a18eccf15d11e9fcb",
+      "257x257-p4-prefix.jxl": "daf75c3161218e028a8fb8c56f25dddb2afeb5f81db01b8a2b37c79e1fbed98e",
+      "257x257-p5-ans.jxl": "24ccd66d0868ce2bd6349f51a9c11b11882694153e599f894d6172275ed0931b",
+      "257x257-p5-prefix.jxl": "f90453e1435a1f2cacffba4853124d5b911a2031d8d170fb0375821ecabbcd27",
+      "257x257-p6-ans.jxl": "5409fa8e7102817d5d58f9f026f942348e5db50919a81567c19545f4356e39ca",
+      "257x257-p6-prefix.jxl": "d88dcdaaf89f231f634ae21852b4aa3691eb800781d88706d4f887289d4995ee",
+      "257x257-p7-ans.jxl": "6b72f3d97d652d1eaf94375d3c294ec485742d4367cddcdec2327694bb3f2b71",
+      "257x257-p7-prefix.jxl": "65e275df9d199a47752e8a86f84b10edc1a6811065aca5d3ac51b29d4b545ba1",
+      "257x3-p0-ans.jxl": "b9a961879aa60f27264f26a95b7e0e009425f59c39572d09e9495f47b4eb2fdc",
+      "257x3-p0-prefix.jxl": "7cdcd6c1ff512f664b85398af0b6091354dbc3a00ab1c5fc1e49aafba81fba98",
+      "257x3-p1-ans.jxl": "bfb20ac957ed9d492ce2f97a6ebdd61b08c6161249b494234db427bd0a70609b",
+      "257x3-p1-prefix.jxl": "99534cd2391c03d0ea6fc76cad2ca85240afd50661b67648bbf4f7f1381b5dca",
+      "257x3-p2-ans.jxl": "971e0ec8dd14fadbe71e14d3aafab2837b6537394e2870e91714e959a07a08c5",
+      "257x3-p2-prefix.jxl": "dd9f22a6284a50805ec74f75af4a2e3094a600aa86e50b61ddc8632ed8f5f21e",
+      "257x3-p3-ans.jxl": "1fec46ee717102ccdf6aa061dc4e45f57cea6d8449af71a9e0b6f7a91b0548e8",
+      "257x3-p3-prefix.jxl": "1dbca0cf6f0d705158a9d5eb5056705138074df7a683c9616ccfb594f9ccbc2b",
+      "257x3-p4-ans.jxl": "eed91287ded2bcad7535ec3c5c5dcbb3dfb3030329b9b476ac0ed3d0ec8d7e0d",
+      "257x3-p4-prefix.jxl": "d501e2ebfbdd4ea0e3400e15ead43ad7336cdfd917878ce327455203b17f514f",
+      "257x3-p5-ans.jxl": "a9ca2602398463fc2b6426baa4da5a450eebf1e80694758259e6a0811c4e6587",
+      "257x3-p5-prefix.jxl": "c061edc0c8332bc7dd576b23674a0e7eb0b2c11b2944dc2dff963670fa3adea0",
+      "257x3-p6-ans.jxl": "4b21f011a5868fbb44ebc57dbf13b0933ecca14150f3c783f5924261d244248c",
+      "257x3-p6-prefix.jxl": "eb707dc481575b56370e71595a0076aa1c52c5176acf1b1270a04e82c8d4a029",
+      "257x3-p7-ans.jxl": "4c30c8d20c63e5d0f65015713815ab1281d25a32158b6a27fdc8e1373efac3b1",
+      "257x3-p7-prefix.jxl": "3166d144d5caadfaf384963c170ec0acd946d696bc0d5e9c17b1c7720085e150",
+      "3x255-p0-ans.jxl": "7a0b6680002ba0a99ac8a71cb5a5f445f61137d7ca7a2390d917ea77bcce8e99",
+      "3x255-p0-prefix.jxl": "ecd95b52ab2834f762d35061e5b45179114eef05b8dac81e9854b4c8d0bb98f2",
+      "3x255-p1-ans.jxl": "84a83438ef0783e56a3c4b1136541d985c609a2dddac1a756794b3a4f88f755c",
+      "3x255-p1-prefix.jxl": "6243794df448553d15c3939517e27165b85e41e72b301327f025ffdd8f9dde23",
+      "3x255-p2-ans.jxl": "730f5f96f02dadd8a3acca0b57f45aef48389d93d49f7dfa79a730eb05f50977",
+      "3x255-p2-prefix.jxl": "ac178dd86578c3d15c0f72491fca2490e21567a9af1b1d2f0a8c6a5308dbd66e",
+      "3x255-p3-ans.jxl": "0e3a7ca37712a92a58ec328d25bda9de9d2ffa879ef1f1c768b0130377afb743",
+      "3x255-p3-prefix.jxl": "2f4617672ca6d7a53e19521fffcef76d993895048f73838e3928bac3c0c4f74e",
+      "3x255-p4-ans.jxl": "6e4549a4e7310c869f3c01613f277629fe222ed4363fbd65761afe85c6dd5328",
+      "3x255-p4-prefix.jxl": "2f36b779a0b8c327fac23857c7c5037e0950b141500f1b107070c1fbee6d7e81",
+      "3x255-p5-ans.jxl": "bc521b4fc9307db9dd06478506cfe70542d5fec7f68871c92b6fe16e31f71f48",
+      "3x255-p5-prefix.jxl": "3d5c9f6b9d36e5d93a69f65f3f5bda3a83f076a4db4de676d8ac40dbeab3a7af",
+      "3x255-p6-ans.jxl": "dbb67a9b3ef6c73d2b8e8bdfb49691ab6ac8a155c29f042f5368767218cbbece",
+      "3x255-p6-prefix.jxl": "2e5939a16f7fea47846a3e9d7fb6cab6602c97c8cd5edba4bdbd28240843201d",
+      "3x255-p7-ans.jxl": "8ec2de5439669bf077f697d3f9ec3e4b3a22154ce1f57bfb326b6080a9401b2b",
+      "3x255-p7-prefix.jxl": "43f12eba25d6efc2414854eb53ff6ad43dec35107b71bca3e404875bf0288e68",
+      "3x256-p0-ans.jxl": "0a6abdcc4872a10369ecc2a9c26dc26ce794474a607e6f0ad97d0cc3a5040613",
+      "3x256-p0-prefix.jxl": "6703bdbcc4afad72837eb898020594cc43b42541dc204446052c9a95f088ba50",
+      "3x256-p1-ans.jxl": "980cd083a4f785dbc2582e46e5ec2130b507f355046635b76a32135abde85f02",
+      "3x256-p1-prefix.jxl": "3e7190ce7aab1ace0cc604de32e778a97835eed89829fc246277ca9155baa33f",
+      "3x256-p2-ans.jxl": "a8d83ebb1d666920ab8582ac274c0eea24eeb9950fa4d3985a8fefa45181fefc",
+      "3x256-p2-prefix.jxl": "317322f1f8d09780812d6cfbc390dc9149ac87fbcb735369d71c200761015e34",
+      "3x256-p3-ans.jxl": "cf696a56b9e4d0372aaa06db801146d9457cb949f55b53837376859d29ecd4ea",
+      "3x256-p3-prefix.jxl": "6c22b13625815917d530adb00e567c8c1e4a20f18cbd5a628e6567c0a3639d84",
+      "3x256-p4-ans.jxl": "dad49d5dcc69b48277fb79f6b6748a7cd18888bea0b6e5a12073281d65b8977e",
+      "3x256-p4-prefix.jxl": "f7751b2f4f671258c7c237c05e2973a74821e55ea146b659bcdeaba0ec544e17",
+      "3x256-p5-ans.jxl": "e9f02f8aa9d88746be44c79ba9f5363622921391a3ce108bfa675abe8f6cd10e",
+      "3x256-p5-prefix.jxl": "17615323a7b0519ed39d070fb80533ff78a3cf413005ac5719e8a9a7cf9e44bc",
+      "3x256-p6-ans.jxl": "475f6ef20ce263ba6d81f74deb21f66fa0e9e3b8178def91f76ea88aa0ade6fb",
+      "3x256-p6-prefix.jxl": "0e2b45b027c6df64a69cb69edf443674691a14500c61a09b077da36695c9ad63",
+      "3x256-p7-ans.jxl": "3fe42980c2f8c85f49db590c4a5aa11c29eefc594d0aa2acf9befe9128e0e06c",
+      "3x256-p7-prefix.jxl": "9a577099ce6e23501f30014a34fd3f9aa95bf696ee907262cf8f7ea0d8a99aae",
+      "3x257-p0-ans.jxl": "8e5b2ded27243adc40f123c008f7d7e0b075a0c1e5eb2c42ad4311268c874406",
+      "3x257-p0-prefix.jxl": "2b746cf7077cb820d02e114ddb53426b4562ff3873acf56e79cd6280adee271a",
+      "3x257-p1-ans.jxl": "9e574bf20dc85d0e2c8c49c283f877588d5bf797c9b5d37c954e322b48959b13",
+      "3x257-p1-prefix.jxl": "6c9539e6831c0683cde246be0c949185f9438659740205df13e2a4bbb2f166bf",
+      "3x257-p2-ans.jxl": "a7268696969f579266c57bfba21b17e3e436dbd4882a6a1d0ab91491b886d2f9",
+      "3x257-p2-prefix.jxl": "fd891a1f410ecc03c9267fb3bdd7e7309bbffbe2463a6823188b2a24c8e55901",
+      "3x257-p3-ans.jxl": "bb99bdb131eb0e44ddc13a13e2b6c3d502239a0b6612cb8bae3982d8808582f5",
+      "3x257-p3-prefix.jxl": "9a612d2acb58bff8623f8dfd5d214932662e8535512cae0d75d7bf8f4a33a065",
+      "3x257-p4-ans.jxl": "66bb059d48eacd6c189e9ceef156971dd8fe188c799fbe78530560fa0bb06fd9",
+      "3x257-p4-prefix.jxl": "a2c37fbfbf325316971efc4c4b08ca032780c9eed74c672c0a37f36207e715cd",
+      "3x257-p5-ans.jxl": "54715146f817c5483c0616bfc5305e975167850619d27eeb475fb354f836c3e6",
+      "3x257-p5-prefix.jxl": "29b04bcb0d31c9e1054754e7ad75baa6102b17bb06301c994e0ab4e2695f9d31",
+      "3x257-p6-ans.jxl": "8a82ab6265913934e2987463feca2c6a9ce059f57e424e65778f35edb529448f",
+      "3x257-p6-prefix.jxl": "5411feeb8fb088fedc7d1cf24238a9b2dde8b383082c4f9805486e6054682db0",
+      "3x257-p7-ans.jxl": "d3f32b9d2b7e67ed534b0e432c90dfa7679e93055ea146c48be2b0ba3c251de1",
+      "3x257-p7-prefix.jxl": "2388ee6436e681f77fc7bbb0a675ada738567f768ab7e4cbdee5e233dc240b56"
+    }
+  },
+  "allocation_failure_positions": {
+    "prefix 1x1": 315,
+    "prefix 17x19": 350,
+    "prefix 257x3": 357,
+    "ANS 1x1": 475,
+    "ANS 17x19": 517,
+    "ANS 257x3": 523
+  },
+  "artifact_comparisons": [
+    {
+      "frozen_expected": "docs/modular-phase1/stage-comparison.json",
+      "expected_sha256": "0904b0504dd9d94f0ca778ca403e99c335ee1ce409206a937fa43ff3b67ce57e",
+      "candidate": "build/modular-p2.1/artifacts",
+      "compared": 204,
+      "mismatches": []
+    },
+    {
+      "frozen_expected": "docs/modular-phase1/photo-comparison.json",
+      "expected_sha256": "1efff42cf32347d08b910a554d95da6d02e27d427a0908e500cc2fa521e85111",
+      "candidate": "build/modular-p2.1/photo-artifacts",
+      "compared": 4,
+      "mismatches": []
+    }
+  ],
+  "checks": {
+    "native_header_cases": 248,
+    "reference_generated_integer_roundtrips": 24,
+    "vardct_decoder_conformance": "23/23",
+    "reference_disabled_build": "passed",
+    "reference_disabled_workflow_test_against_installed_libraries": "passed",
+    "installed_c_and_cpp_consumers": "passed",
+    "native_modular_include_closure_files": 47,
+    "forbidden_dependencies": [],
+    "private_headers_installed": false,
+    "production_libjxl_linkage": false
+  },
+  "final_ctest": {
+    "parallel": 4,
+    "timeout_seconds": 600,
+    "passed": 119,
+    "total": 128,
+    "outcomes": {
+      "planning_recipes": {
+        "status": "passed",
+        "seconds": 1.04614
+      },
+      "resident_qualification_controller": {
+        "status": "passed",
+        "seconds": 1.27557
+      },
+      "stdlib_storage_compat": {
+        "status": "passed",
+        "seconds": 0.0455131
+      },
+      "stdlib_storage_compat_cxx23": {
+        "status": "passed",
+        "seconds": 0.0509832
+      },
+      "storage_toolchain": {
+        "status": "passed",
+        "seconds": 31.0812
+      },
+      "bit_writer_append": {
+        "status": "passed",
+        "seconds": 1.45633
+      },
+      "bit_writer_word": {
+        "status": "passed",
+        "seconds": 2.82301
+      },
+      "ans_bit_emission": {
+        "status": "passed",
+        "seconds": 2.69987
+      },
+      "bit_writer": {
+        "status": "passed",
+        "seconds": 0.362745
+      },
+      "entropy": {
+        "status": "passed",
+        "seconds": 0.959192
+      },
+      "context_map": {
+        "status": "passed",
+        "seconds": 4.16899
+      },
+      "ans_reverse_bits": {
+        "status": "passed",
+        "seconds": 3.0324
+      },
+      "sections": {
+        "status": "passed",
+        "seconds": 0.364853
+      },
+      "dc_group": {
+        "status": "passed",
+        "seconds": 0.425678
+      },
+      "weighted_dc": {
+        "status": "passed",
+        "seconds": 2.56178
+      },
+      "ac_group": {
+        "status": "passed",
+        "seconds": 5.38213
+      },
+      "coefficient_order": {
+        "status": "passed",
+        "seconds": 1.59993
+      },
+      "dc_parallel_tokenization": {
+        "status": "passed",
+        "seconds": 0.938086
+      },
+      "ac_direct_tokenization": {
+        "status": "passed",
+        "seconds": 11.1596
+      },
+      "ac_population_reduction": {
+        "status": "passed",
+        "seconds": 4.89953
+      },
+      "token_storage_plan": {
+        "status": "passed",
+        "seconds": 0.804898
+      },
+      "entropy_storage_plan": {
+        "status": "passed",
+        "seconds": 12.7835
+      },
+      "representation_storage_plan": {
+        "status": "passed",
+        "seconds": 1.61833
+      },
+      "serializer_storage_plan": {
+        "status": "passed",
+        "seconds": 184.357
+      },
+      "ac_section_validation": {
+        "status": "passed",
+        "seconds": 0.424369
+      },
+      "compact_vardct_frame": {
+        "status": "passed",
+        "seconds": 10.9208
+      },
+      "compact_frame_allocation": {
+        "status": "passed",
+        "seconds": 5.93968
+      },
+      "frame_validation": {
+        "status": "passed",
+        "seconds": 11.3014
+      },
+      "sparse_coefficients": {
+        "status": "passed",
+        "seconds": 0.323939
+      },
+      "sparse_vardct_frame": {
+        "status": "passed",
+        "seconds": 48.0635
+      },
+      "sparse_frame_allocation": {
+        "status": "passed",
+        "seconds": 4.73954
+      },
+      "quantization_storage": {
+        "status": "passed",
+        "seconds": 0.450571
+      },
+      "block_context_map": {
+        "status": "passed",
+        "seconds": 0.134924
+      },
+      "codestream_encoder": {
+        "status": "passed",
+        "seconds": 59.3152
+      },
+      "codestream_workflow": {
+        "status": "passed",
+        "seconds": 28.1028
+      },
+      "codestream_batch_workflow": {
+        "status": "passed",
+        "seconds": 0.825654
+      },
+      "batch_lifecycle_cpu": {
+        "status": "passed",
+        "seconds": 0.586459
+      },
+      "batch_scheduling_cpu": {
+        "status": "passed",
+        "seconds": 0.539548
+      },
+      "parallel_work": {
+        "status": "passed",
+        "seconds": 0.258232
+      },
+      "worker_launch_failure_startup": {
+        "status": "passed",
+        "seconds": 0.261594
+      },
+      "worker_launch_failure_forward": {
+        "status": "passed",
+        "seconds": 5.69579
+      },
+      "worker_launch_failure_cpu_color": {
+        "status": "passed",
+        "seconds": 103.886
+      },
+      "worker_launch_failure_cpu_aq": {
+        "status": "passed",
+        "seconds": 106.678
+      },
+      "worker_launch_failure_cpu_orders": {
+        "status": "passed",
+        "seconds": 130.366
+      },
+      "worker_launch_failure_cpu_sections": {
+        "status": "passed",
+        "seconds": 131.411
+      },
+      "worker_launch_failure_cpu_drains": {
+        "status": "passed",
+        "seconds": 43.9957
+      },
+      "rate_control_search": {
+        "status": "passed",
+        "seconds": 0.469772
+      },
+      "rate_control_probe": {
+        "status": "passed",
+        "seconds": 0.32337
+      },
+      "codestream_cli": {
+        "status": "passed",
+        "seconds": 3.31532
+      },
+      "codestream_sample_generated": {
+        "status": "passed",
+        "seconds": 0.376348
+      },
+      "c_api_image_conversion": {
+        "status": "passed",
+        "seconds": 0.0438876
+      },
+      "c_api": {
+        "status": "passed",
+        "seconds": 1.1915
+      },
+      "c_api_cpp": {
+        "status": "passed",
+        "seconds": 0.207308
+      },
+      "pfm": {
+        "status": "passed",
+        "seconds": 0.335375
+      },
+      "butteraugli_primitives": {
+        "status": "passed",
+        "seconds": 0.566787
+      },
+      "butteraugli_stages": {
+        "status": "passed",
+        "seconds": 0.223954
+      },
+      "butteraugli_distance": {
+        "status": "passed",
+        "seconds": 0.203211
+      },
+      "core_geometry": {
+        "status": "passed",
+        "seconds": 0.225495
+      },
+      "resource_budget": {
+        "status": "passed",
+        "seconds": 0.148775
+      },
+      "cpu_budget": {
+        "status": "passed",
+        "seconds": 0.152973
+      },
+      "cpu_execution": {
+        "status": "passed",
+        "seconds": 0.111917
+      },
+      "entropy_readiness": {
+        "status": "passed",
+        "seconds": 0.359461
+      },
+      "earlier_dc_contract": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "entropy_readiness_contract": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "workflow_cpu_coordination_cpu": {
+        "status": "passed",
+        "seconds": 83.8724
+      },
+      "managed_allocator": {
+        "status": "passed",
+        "seconds": 0.21692
+      },
+      "serializer_storage": {
+        "status": "passed",
+        "seconds": 0.334843
+      },
+      "frontend_storage": {
+        "status": "passed",
+        "seconds": 0.329977
+      },
+      "frontend_storage_plan": {
+        "status": "passed",
+        "seconds": 4.88287
+      },
+      "frontend_field_storage_plan": {
+        "status": "passed",
+        "seconds": 23.6179
+      },
+      "perceptual_storage_plan": {
+        "status": "passed",
+        "seconds": 27.8778
+      },
+      "publication_storage": {
+        "status": "passed",
+        "seconds": 0.445766
+      },
+      "workflow_publication": {
+        "status": "passed",
+        "seconds": 11.6424
+      },
+      "diagnostic_storage": {
+        "status": "passed",
+        "seconds": 0.142428
+      },
+      "ac_strategy_grid": {
+        "status": "passed",
+        "seconds": 0.16508
+      },
+      "fast_math": {
+        "status": "passed",
+        "seconds": 0.23347
+      },
+      "dct_reference": {
+        "status": "passed",
+        "seconds": 0.14948
+      },
+      "cpu_dct": {
+        "status": "passed",
+        "seconds": 0.337018
+      },
+      "ac_strategy_cost": {
+        "status": "passed",
+        "seconds": 0.232956
+      },
+      "ac_strategy_search": {
+        "status": "passed",
+        "seconds": 0.545453
+      },
+      "quantization": {
+        "status": "passed",
+        "seconds": 0.473471
+      },
+      "quantization_adjustment": {
+        "status": "passed",
+        "seconds": 0.244839
+      },
+      "maximum_error": {
+        "status": "passed",
+        "seconds": 0.53443
+      },
+      "dc_conversion": {
+        "status": "passed",
+        "seconds": 0.32947
+      },
+      "dc_quantization": {
+        "status": "passed",
+        "seconds": 0.259409
+      },
+      "dc_processing": {
+        "status": "passed",
+        "seconds": 0.425917
+      },
+      "cpu_workflow_storage_plan": {
+        "status": "passed",
+        "seconds": 248.737
+      },
+      "cpu_workflow_legacy_dc_tree": {
+        "status": "passed",
+        "seconds": 249.017
+      },
+      "dc_context_tree": {
+        "status": "passed",
+        "seconds": 1.63356
+      },
+      "modular_stream": {
+        "status": "passed",
+        "seconds": 0.257723
+      },
+      "modular_foundation": {
+        "status": "passed",
+        "seconds": 0.370328
+      },
+      "modular_workflow": {
+        "status": "passed",
+        "seconds": 1.5006
+      },
+      "modular_oracle": {
+        "status": "passed",
+        "seconds": 0.457353
+      },
+      "modular_conformance": {
+        "status": "passed",
+        "seconds": 8.13473
+      },
+      "dc_context_tree_oracle": {
+        "status": "passed",
+        "seconds": 0.373389
+      },
+      "dc_processing_oracle": {
+        "status": "failed",
+        "seconds": 9.38466
+      },
+      "adaptive_quantization": {
+        "status": "passed",
+        "seconds": 0.437621
+      },
+      "adaptive_quantization_loop": {
+        "status": "passed",
+        "seconds": 0.457644
+      },
+      "color_transform": {
+        "status": "passed",
+        "seconds": 0.539756
+      },
+      "quantization_pipeline": {
+        "status": "passed",
+        "seconds": 0.692549
+      },
+      "quantization_pipeline_uniform": {
+        "status": "passed",
+        "seconds": 0.131389
+      },
+      "quantization_pipeline_search_policy": {
+        "status": "passed",
+        "seconds": 0.137084
+      },
+      "low_effort_strategy_policy": {
+        "status": "passed",
+        "seconds": 0.239672
+      },
+      "dc_policy": {
+        "status": "passed",
+        "seconds": 7.6828
+      },
+      "gaborish": {
+        "status": "passed",
+        "seconds": 0.331155
+      },
+      "chroma_from_luma": {
+        "status": "passed",
+        "seconds": 0.325737
+      },
+      "epf": {
+        "status": "passed",
+        "seconds": 0.246631
+      },
+      "reconstruction": {
+        "status": "passed",
+        "seconds": 0.808036
+      },
+      "overwrite_array": {
+        "status": "passed",
+        "seconds": 0.249678
+      },
+      "vardct_frame": {
+        "status": "passed",
+        "seconds": 5.42249
+      },
+      "vardct_frame_view": {
+        "status": "passed",
+        "seconds": 79.5604
+      },
+      "simple_codestream_profile": {
+        "status": "passed",
+        "seconds": 0.275125
+      },
+      "loop_filter": {
+        "status": "passed",
+        "seconds": 0.331012
+      },
+      "butteraugli": {
+        "status": "passed",
+        "seconds": 0.428221
+      },
+      "butteraugli_reference": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_blur_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_frequency_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_distance_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_distance_scalar_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_goldens_generated": {
+        "status": "failed",
+        "seconds": 0.488414
+      },
+      "quantization_tables_generated": {
+        "status": "passed",
+        "seconds": 0.558152
+      },
+      "gpu_image": {
+        "status": "passed",
+        "seconds": 0.0406883
+      },
+      "ac_strategy_storage_plan": {
+        "status": "passed",
+        "seconds": 1.88703
+      },
+      "ac_strategy_host_storage_plan": {
+        "status": "passed",
+        "seconds": 30.9027
+      },
+      "profile_storage_plan": {
+        "status": "passed",
+        "seconds": 0.352064
+      },
+      "gpu_profile_json": {
+        "status": "passed",
+        "seconds": 0.703311
+      },
+      "workflow_admission_cpu": {
+        "status": "passed",
+        "seconds": 4.6049
+      },
+      "codec_install_consumer": {
+        "status": "passed",
+        "seconds": 104.875
+      }
+    },
+    "lost_p20_passes": [],
+    "retained_failures": {
+      "earlier_dc_contract": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "entropy_readiness_contract": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "dc_processing_oracle": {
+        "status": "failed",
+        "seconds": 9.38466
+      },
+      "butteraugli_reference": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_blur_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_frequency_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_distance_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_distance_scalar_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_goldens_generated": {
+        "status": "failed",
+        "seconds": 0.488414
+      }
+    }
+  },
+  "native_consumer_cmake": "cmake_minimum_required(VERSION 3.25)\nproject(modular_native_consumer LANGUAGES CXX)\nfind_package(gjxl CONFIG REQUIRED COMPONENTS codestream)\nfile(TO_CMAKE_PATH \"${GJXL_SOURCE_DIR}\" GJXL_SOURCE_DIR)\nadd_executable(modular_native_consumer \"${GJXL_SOURCE_DIR}/tests/modular_workflow_test.cpp\")\ntarget_compile_features(modular_native_consumer PRIVATE cxx_std_20)\ntarget_include_directories(modular_native_consumer PRIVATE \"${GJXL_SOURCE_DIR}/src\")\ntarget_link_libraries(modular_native_consumer PRIVATE gjxl::codestream)\n",
+  "limits": [
+    "Private RGB8 scalar workflow only; public C++/C/Rust/CLI integration remains P2.5.",
+    "Nine preexisting failures/not-run tests retained, including the baseline-reproduced DC-processing mismatch.",
+    "No unrestricted level-5, performance or compression-ratio claim.",
+    "GPU, native ARM64, other platforms and sanitizers remain unqualified."
+  ],
+  "commands": [
+    ". ./build/modular-phase1/msvc-env.ps1",
+    "cmake --build build/modular-phase1/candidate --parallel 6 -- -k 0",
+    "ctest --test-dir build/modular-phase1/candidate --parallel 4 --timeout 600 --output-on-failure --output-junit <root>/build/modular-p2.1/final-tests.xml",
+    "cmake -S . -B build/modular-p2.1/native -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20 -DGJXL_ENABLE_METAL=OFF -DGJXL_ENABLE_CUDA=OFF -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF -DGJXL_BUILD_TESTS=OFF",
+    "cmake --build build/modular-p2.1/native --parallel 4",
+    "cmake --install build/modular-p2.1/native --prefix build/modular-p2.1/install",
+    "cmake -S tools/modular_extraction -B build/modular-p2.1/capture -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20 -DCMAKE_PREFIX_PATH=<root>/build/modular-p2.1/install -DGJXL_SOURCE_DIR=<root>",
+    "cmake --build build/modular-p2.1/capture --parallel 4",
+    "build/modular-p2.1/capture/modular_extraction_capture.exe build/modular-p2.1/artifacts 0 build/modular-phase1/photograph-tiled.pfm",
+    "python tools/modular_extraction/evidence.py build/modular-phase1/baseline-stages --candidate build/modular-p2.1/artifacts --output build/modular-p2.1/comparison.json",
+    "build/modular-p2.1/capture/modular_extraction_capture.exe build/modular-p2.1/photo-artifacts 1 build/modular-phase1/photograph-tiled.pfm photo_frame_p0,photo_frame_p1",
+    "python tools/modular_extraction/evidence.py build/modular-phase1/photo-stage-timings/round-7-baseline --candidate build/modular-p2.1/photo-artifacts --output build/modular-p2.1/photo-comparison.json",
+    "build/modular-phase1/candidate/gjxl_codestream_conformance_test.exe --decoder <root>/build/modular-phase1/pinned-libjxl-x64/tools/djxl.exe --info <root>/build/modular-phase1/pinned-libjxl-x64/tools/jxlinfo.exe --encoder <root>/build/modular-p2.1/native/gjxl_encode.exe --sample <root>/testdata/codestream_sample.pfm --artifacts <root>/build/modular-p2.1/vardct-conformance",
+    "Write native_consumer_cmake to build/modular-p2.1/native-consumer-source/CMakeLists.txt.",
+    "cmake -S build/modular-p2.1/native-consumer-source -B build/modular-p2.1/native-consumer -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20 -DCMAKE_PREFIX_PATH=<root>/build/modular-p2.1/install -DGJXL_SOURCE_DIR=<root>",
+    "cmake --build build/modular-p2.1/native-consumer --parallel 4",
+    "build/modular-p2.1/native-consumer/modular_native_consumer.exe",
+    "dumpbin /dependents build/modular-p2.1/native-consumer/modular_native_consumer.exe"
+  ]
+}

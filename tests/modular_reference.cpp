@@ -14,6 +14,8 @@
 #include "lib/jxl/image_metadata.h"
 #include "lib/jxl/memory_manager_internal.h"
 #include "lib/jxl/toc.h"
+#include "lib/jxl/modular/encoding/enc_encoding.h"
+#include "lib/jxl/modular/encoding/encoding.h"
 
 namespace gjxl::test::modular_reference {
 namespace {
@@ -190,7 +192,8 @@ ParsedHeader InspectHeaders(std::span<const uint8_t> bytes, size_t offset) {
       m.color_encoding.IsLinearSRGB(),
       frame.is_last,
       frame.passes.num_passes,
-      frame.upsampling};
+      frame.upsampling,
+      m.modular_16_bit_buffer_sufficient};
 }
 
 std::vector<uint32_t> ReadSectionSizes(std::span<const uint8_t> bytes) {
@@ -307,5 +310,28 @@ IntegerImage DecodeLossless(std::span<const uint8_t> bytes) {
       throw std::runtime_error("Reference decode failed or input is truncated");
     }
   }
+}
+std::vector<ReferenceToken> TokenizeGradient(const IntegerImage& source, size_t stream_id) {
+  Require(source.samples.size() == Count(source), "Invalid reference token source");
+  JxlMemoryManager manager;
+  Require(bool(jxl::MemoryManagerInit(&manager, nullptr)), "Reference memory manager failed");
+  auto created = jxl::Image::Create(&manager, source.width, source.height, source.bits, source.channels);
+  Require(created.ok(), "Reference channel allocation failed");
+  auto image = std::move(created).value_();
+  for (size_t c = 0; c < source.channels; ++c)
+    for (size_t y = 0; y < source.height; ++y)
+      for (size_t x = 0; x < source.width; ++x)
+        image.channel[c].Row(y)[x] = source.samples[(y * source.width + x) * source.channels + c];
+  jxl::Tree tree{jxl::PropertyDecisionNode::Leaf(jxl::Predictor::Gradient)};
+  jxl::ModularOptions options;
+  options.predictor = jxl::Predictor::Gradient;
+  jxl::GroupHeader header;
+  std::vector<jxl::Token> tokens;
+  size_t width;
+  Require(bool(jxl::ModularCompress(image, options, stream_id, tree, header, tokens, &width)),
+          "Reference gradient tokenization failed");
+  std::vector<ReferenceToken> result;
+  for (auto token : tokens) result.push_back({token.context, token.value});
+  return result;
 }
 } // namespace gjxl::test::modular_reference

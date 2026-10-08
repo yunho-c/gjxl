@@ -3,8 +3,9 @@
 Status: Phase 1 extraction implemented; see the
 [qualification record and platform limits](modular-phase1/README.md).
 [P2.0 foundations and independent reference infrastructure](modular-p2.0.md)
-are implemented. P2.1 onward remains a proposed implementation sequence;
-whole-image Modular encoding is not enabled. Originally written
+and the [P2.1 private RGB8 CPU encoder](modular-p2.1.md) are implemented.
+P2.2 onward remains a proposed implementation sequence. Whole-image Modular
+encoding is available internally; public API and CLI integration remain P2.5. Originally written
 2026-10-07 against GJXL
 `67caa6d89830f6a13c057923e34f80753a161e9d` and pinned libjxl
 `e8ff09762481785938d8e4e01333ed3917571161`.
@@ -450,6 +451,13 @@ for this lossless contract.
 
 ### P2.1: the smallest independently decodable CPU encoder
 
+Implemented as a private RGB8 workflow; see the
+[P2.1 contracts, reproduction instructions and results](modular-p2.1.md).
+The resolved baseline uses one gradient leaf (offset zero, multiplier one),
+prefix coding by default and explicitly selected ANS, with one CPU participant.
+The identity/gradient RGB8 range proof permits the 16-bit-buffer declaration;
+other metadata paths retain the conservative P2.0 declaration.
+
 Build a complete RGB8 path using no transforms, gradient prediction, a bounded
 predefined global tree, existing entropy coding and the fixed group size. Use
 the original integer samples directly; no linearization, XYB, AQ, resampling,
@@ -694,7 +702,8 @@ coverage for integer arithmetic, bounds and ownership on supported toolchains,
 and exercise representative x86-64 and ARM64 CPU builds. GPU-enabled regression
 checks require the appropriate hardware; unrun configurations remain explicitly
 unqualified. Phase 1 results are recorded in the
-[qualification report](modular-phase1/README.md); Phase 2 coverage remains
+[qualification report](modular-phase1/README.md). Phase 2 results are recorded
+for [P2.0](modular-p2.0.md) and [P2.1](modular-p2.1.md); later milestones remain
 planned.
 
 ### Compression and performance gates

@@ -2214,8 +2214,11 @@ Status codestream_internal::WriteAnsEntropyCodeModel(
     return Status::InvalidArgument("ANS entropy-code output is null");
   }
   BitWriter temporary;
-  if (Status status = WriteContextMap(code, &temporary); !status.ok()) {
-    return status;
+  // Match DecodeHistograms: the single-context map is implicit.
+  if (code.context_count > 1) {
+    if (Status status = WriteContextMap(code, &temporary); !status.ok()) {
+      return status;
+    }
   }
   if (Status status = temporary.WriteBits(1, 0); !status.ok()) {
     return status;
