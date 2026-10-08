@@ -2,7 +2,9 @@
 
 Status: Phase 1 extraction implemented; see the
 [qualification record and platform limits](modular-phase1/README.md).
-Phase 2 remains a proposed implementation sequence. Originally written
+[P2.0 foundations and independent reference infrastructure](modular-p2.0.md)
+are implemented. P2.1 onward remains a proposed implementation sequence;
+whole-image Modular encoding is not enabled. Originally written
 2026-10-07 against GJXL
 `67caa6d89830f6a13c057923e34f80753a161e9d` and pinned libjxl
 `e8ff09762481785938d8e4e01333ed3917571161`.
@@ -401,6 +403,9 @@ not an implicit Phase 2 change to the existing VarDCT profile. Raw quantization
 table support likewise remains an extension point.
 
 ### P2.0: shared metadata, channels, grouping and oracle infrastructure
+
+Implemented and qualified on the recorded Windows configuration; see the
+[P2.0 contracts, reproduction instructions and results](modular-p2.0.md).
 
 Implement the non-VarDCT image/channel representation and mode-aware header
 contracts. Use signed integer channel storage with sufficiently wide intermediate

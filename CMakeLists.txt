@@ -283,6 +283,9 @@ add_library(
   src/codec/butteraugli_distance_internal.cpp
   src/codec/butteraugli_internal.cpp
   src/codec/chroma_from_luma.cpp
+  src/codec/frame_metadata.cpp
+  src/codec/modular/image.cpp
+  src/codec/modular/geometry.cpp
   src/codec/color_transform.cpp
   src/codec/convolution.cpp
   src/codec/dc_conversion.cpp
@@ -339,6 +342,7 @@ add_library(
   src/codestream/vardct/headers.cpp
   src/codestream/modular/stream_encoder.cpp
   src/codestream/modular/tree_codec.cpp
+  src/codestream/modular/stream_plan.cpp
   src/codestream/huffman.cpp
   src/codestream/rate_control.cpp
   src/codestream/cpu_workflow_storage_plan.cpp
@@ -2295,6 +2299,12 @@ if(GJXL_BUILD_TESTS)
   add_executable(gjxl_modular_stream_test tests/modular_stream_test.cpp)
   target_link_libraries(gjxl_modular_stream_test PRIVATE gjxl_codestream)
   add_test(NAME modular_stream COMMAND gjxl_modular_stream_test)
+
+  add_executable(gjxl_modular_foundation_test tests/modular_foundation_test.cpp)
+  target_link_libraries(gjxl_modular_foundation_test PRIVATE gjxl_codestream)
+  add_test(NAME modular_foundation COMMAND gjxl_modular_foundation_test)
+
+  include(cmake/ModularOracle.cmake)
 
   # Optional direct oracle from a separately built, pinned libjxl archive.
   # These dependencies never enter the native library or installed interface.

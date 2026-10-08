@@ -7,6 +7,7 @@
 #include "codestream/headers.h"
 #include "codestream/dc_context_tree_internal.h"
 #include "codestream/fields_internal.h"
+#include "codestream/headers_internal.h"
 
 #include <algorithm>
 #include <array>
@@ -296,38 +297,9 @@ Status WriteSimpleCodestreamHeader(Extent2D frame_extent, BitWriter* writer) {
     return Status::InvalidArgument("Frame dimensions cannot be encoded");
   }
 
-  BitWriter temporary;
-  const std::array<BitField, 3> prefix = {{{8, 0xFF}, {8, 0x0A}, {1, 0}}};
-  if (Status status = WriteFields(&temporary, prefix); !status.ok()) {
-    return status;
-  }
-  if (Status status = WriteSize(
-        static_cast<uint32_t>(frame_extent.height), &temporary);
-      !status.ok()) {
-    return status;
-  }
-  if (Status status = temporary.WriteBits(3, 0); !status.ok()) {
-    return status;
-  }
-  if (Status status = WriteSize(
-        static_cast<uint32_t>(frame_extent.width), &temporary);
-      !status.ok()) {
-    return status;
-  }
-
-  // Non-default metadata: float32 linear sRGB, XYB transform, no extras.
-  const std::array<BitField, 19> metadata = {{
-    {1, 0}, {1, 0}, {1, 1}, {2, 0}, {4, 7}, {1, 0}, {2, 0},
-    {1, 1}, {1, 0}, {1, 0}, {2, 0}, {2, 1}, {2, 1}, {1, 0},
-    {2, 2}, {4, 6}, {2, 1}, {2, 0}, {1, 1},
-  }};
-  if (Status status = WriteFields(&temporary, metadata); !status.ok()) {
-    return status;
-  }
-  if (Status status = temporary.ZeroPadToByte(); !status.ok()) {
-    return status;
-  }
-  return AppendTemporary(writer, temporary);
+  const codec_internal::ImageMetadata metadata{frame_extent,
+      codec_internal::SampleFormat::kFloat, 32, codec_internal::SourceColor::kLinearSrgb, true, {}};
+  return codestream_internal::WriteImageHeader(metadata, writer);
 }
 
 Status WriteSimpleFrameHeader(
@@ -348,35 +320,11 @@ Status WriteSimpleFrameHeader(
       "Profile cannot be represented by the simple frame header");
   }
 
-  BitWriter temporary;
-  const std::array<BitField, 21> fields = {{
-    {1, 0},   // not all default
-    {2, 0},   // regular frame
-    {1, 0},   // VarDCT
-    {2, profile.adaptive_dc_smoothing ? 0u : 2u}, // flags selector
-    {profile.adaptive_dc_smoothing ? 0u : 8u,
-     profile.adaptive_dc_smoothing ? 0u : 111u}, // kSkipAdaptiveDCSmoothing
-    {2, 0},   // no upsampling
-    {3, profile.x_qm_scale},
-    {3, profile.b_qm_scale},
-    {2, 0},   // one pass
-    {1, 0},   // no custom size or origin
-    {2, 0},   // replace blend mode
-    {1, 1},   // final frame
-    {2, 0},   // no name
-    {1, profile.loop_filter.gaborish ? 1u : 0u}, // loop-filter all_default
-    {profile.loop_filter.gaborish ? 0u : 1u, 0}, // gaborish off
-    {profile.loop_filter.gaborish ? 0u : 2u, profile.loop_filter.gaborish ? 0u : 2u}, // two EPF passes
-    {profile.loop_filter.gaborish ? 0u : 1u, 0}, // default sharpness
-    {profile.loop_filter.gaborish ? 0u : 1u, 0}, // default weights
-    {profile.loop_filter.gaborish ? 0u : 1u, 0}, // default sigma
-    {profile.loop_filter.gaborish ? 0u : 2u, 0}, // loop-filter extensions
-    {2, 0},   // no extensions
-  }};
-  if (Status status = WriteFields(&temporary, fields); !status.ok()) {
-    return status;
-  }
-  return AppendTemporary(writer, temporary);
+  const codec_internal::ImageMetadata image{{1, 1},
+      codec_internal::SampleFormat::kFloat, 32, codec_internal::SourceColor::kLinearSrgb, true, {}};
+  const codec_internal::FrameMetadata frame{codec_internal::FrameEncoding::kVarDct,
+      {profile.x_qm_scale, profile.b_qm_scale, profile.adaptive_dc_smoothing, profile.loop_filter.gaborish}};
+  return codestream_internal::WriteFrameHeader(image, frame, writer);
 }
 
 Status WriteSimpleQuantizer(QuantizerParams params, BitWriter* writer) {
