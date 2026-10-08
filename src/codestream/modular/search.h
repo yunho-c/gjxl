@@ -18,5 +18,6 @@ namespace gjxl::modular_internal {
                                           ModularCodingPolicy *single, ModularCodingPolicy *split);
 [[nodiscard]] Status ComputeModularSearchStoragePlan(Extent2D extent, PackedModularFormat format,
                                                      EntropyCodingMode mode,
-                                                     ModularWorkflowStoragePlan *out);
+                                                     ModularWorkflowStoragePlan *out,
+                                                     size_t cpu_threads = 1);
 } // namespace gjxl::modular_internal

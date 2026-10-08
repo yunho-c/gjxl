@@ -46,6 +46,12 @@ int main(void) {
     output.size >= 2 && output.data[0] == 0xff && output.data[1] == 0x0a;
 
   gjxl_buffer_free(&output);
+  GJXLModularOptions modular_options;
+  if (gjxl_modular_options_init(&modular_options, sizeof(modular_options)) != GJXL_OK ||
+      gjxl_encode_modular(context, &image, &modular_options, &output) != GJXL_OK) {
+    gjxl_context_destroy(context); return EXIT_FAILURE;
+  }
+  gjxl_buffer_free(&output);
   gjxl_context_destroy(context);
   return valid && output.data == NULL && output.size == 0
     ? EXIT_SUCCESS

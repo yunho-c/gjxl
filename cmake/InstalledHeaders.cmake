@@ -10,6 +10,7 @@ set(GJXL_PUBLIC_C_HEADERS
 )
 
 set(GJXL_PUBLIC_CXX_HEADERS
+  gjxl/modular.hpp
   gjxl/execution_domain.hpp
 
   core/ac_strategy.h

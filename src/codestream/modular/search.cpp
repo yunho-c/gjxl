@@ -72,7 +72,8 @@ Status BuildTransformCandidates(Extent2D extent, PackedModularFormat format, uin
   return Status::Ok();
 }
 Status ComputeModularSearchStoragePlan(Extent2D extent, PackedModularFormat format,
-                                       EntropyCodingMode mode, ModularWorkflowStoragePlan *out) {
+                                       EntropyCodingMode mode, ModularWorkflowStoragePlan *out,
+                                       size_t cpu_threads) {
   if (!out)
     return Status::InvalidArgument("Null Modular search plan");
   ModularCodingPolicy largest;
@@ -80,9 +81,11 @@ Status ComputeModularSearchStoragePlan(Extent2D extent, PackedModularFormat form
   largest.tree.nodes[0] = {.property = 15, .left = 1, .right = 2};
   largest.tree.nodes[1].predictor = largest.tree.nodes[2].predictor = Predictor::kWeighted;
   ModularWorkflowStoragePlan plan, baseline;
-  if (auto s = ComputeModularWorkflowStoragePlan(extent, format, mode, largest, &plan); !s.ok())
+  if (auto s = ComputeModularWorkflowStoragePlan(extent, format, mode, largest, &plan, cpu_threads);
+      !s.ok())
     return s;
-  if (auto s = ComputeModularWorkflowStoragePlan(extent, format, mode, &baseline); !s.ok())
+  if (auto s = ComputeModularWorkflowStoragePlan(extent, format, mode, {}, &baseline, cpu_threads);
+      !s.ok())
     return s;
   // Training keeps prepared planes, layout, and sample records, with one WP
   // state at a time. Preparation's token allocation is conservatively retained
@@ -99,7 +102,8 @@ Status ComputeModularSearchStoragePlan(Extent2D extent, PackedModularFormat form
     return s;
   for (size_t i = 0; i < count; ++i) {
     ModularWorkflowStoragePlan candidate;
-    if (auto s = ComputeModularWorkflowStoragePlan(extent, format, mode, candidates[i], &candidate);
+    if (auto s = ComputeModularWorkflowStoragePlan(extent, format, mode, candidates[i], &candidate,
+                                                   cpu_threads);
         !s.ok())
       return s;
     plan.working.peak_bytes = std::max(plan.working.peak_bytes, candidate.working.peak_bytes);

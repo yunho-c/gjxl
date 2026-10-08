@@ -39,6 +39,7 @@
 #include "core/image_buffer.h"
 #include "core/status.h"
 #include "io/pfm.h"
+#include "modular_cli.h"
 
 namespace {
 
@@ -609,12 +610,15 @@ void PrintUsage(const char* executable) {
                "[--gpu-aq exact-coefficients|fully-resident|throughput|"
                "maximum-throughput] "
                "[--collect-final-score] "
-               "INPUT.pfm OUTPUT.jxl\n";
+               "INPUT.pfm OUTPUT.jxl\n"
+               "Lossless: --modular --input-color-space srgb [--search] [--entropy prefix|ans] [--threads N] INPUT.pgm|ppm|pam OUTPUT.jxl\n";
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
+  for (int i = 1; i < argc; ++i)
+    if (std::string_view(argv[i]) == "--modular") return RunModularCli(argc, argv, WriteAtomically);
   Options options;
   if (!ParseOptions(argc, argv, &options)) {
     PrintUsage(argv[0]);

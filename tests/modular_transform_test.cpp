@@ -160,6 +160,18 @@ void Case(Extent2D extent, PackedModularFormat format, size_t colors, ModularCod
     std::vector<uint8_t> output;
     Ok(EncodeModularImage(input, {domain, mode, policy}, &output));
     Check(ref::DecodeLossless(output) == expected, "Pinned full decode mismatch");
+    if (extent.width > 256 || extent.height > 256) {
+      ModularWorkflowStoragePlan parallel_plan;
+      Ok(ComputeModularWorkflowStoragePlan(extent, format, mode, policy, &parallel_plan, 4));
+      std::shared_ptr<const ExecutionDomain> parallel_domain;
+      Ok(ExecutionDomain::Create(
+          {.managed_memory_bytes = parallel_plan.working.peak_bytes, .cpu_participant_limit = 4},
+          &parallel_domain));
+      std::vector<uint8_t> parallel;
+      Ok(EncodeModularImage(input, {parallel_domain, mode, policy, false, 4}, &parallel));
+      Check(output == parallel, "Transformed serial/parallel bytes differ");
+    }
+
     Check(output.size() <= plan.maximum_codestream_bytes &&
               domain->snapshot().peak_backing_bytes <= plan.working.peak_bytes,
           "Transform exceeded storage bound");

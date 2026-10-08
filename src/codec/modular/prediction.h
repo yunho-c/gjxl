@@ -51,7 +51,7 @@ struct WeightedPredictorParameters {
 constexpr std::array<uint32_t, 64> Reciprocals() {
   std::array<uint32_t, 64> values{};
   for (size_t i = 0; i < values.size(); ++i)
-    values[i] = (uint32_t{1} << 24) / (i + 1);
+    values[i] = (uint32_t{1} << 24) / static_cast<uint32_t>(i + 1);
   return values;
 }
 constexpr auto kReciprocal = Reciprocals();

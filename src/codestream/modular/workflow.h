@@ -11,6 +11,7 @@ struct ModularEncodingOptions {
   EntropyCodingMode entropy = EntropyCodingMode::kPrefix;
   ModularCodingPolicy coding;
   bool search = false;
+  size_t cpu_thread_count = 1; // Serial oracle default; zero selects up to four.
 };
 [[nodiscard]] Status EncodeRgb8ModularOwned(Rgb8View input, ModularEncodingOptions options,
                                             codestream_internal::CodestreamBuffer *out);

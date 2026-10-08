@@ -21,7 +21,8 @@ struct PreparedModularTokens {
                                       const ModularStreamPlan &plan, PreparedModularTokens *out);
 [[nodiscard]] Status TokenizeModular(const ModularEncoderFrame &frame,
                                      const ModularStreamPlan &plan,
-                                     const ModularCodingPolicy &policy, PreparedModularTokens *out);
+                                     const ModularCodingPolicy &policy, PreparedModularTokens *out,
+                                     size_t participants = 1);
 // Compatibility spelling for the original private RGB8 workflow.
 [[nodiscard]] inline Status TokenizeRgb8(const ModularEncoderFrame &frame,
                                          const ModularStreamPlan &plan,

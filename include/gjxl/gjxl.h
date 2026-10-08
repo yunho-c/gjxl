@@ -155,6 +155,14 @@ typedef int32_t GJXLPixelFormat;
 enum {
   GJXL_PIXEL_FORMAT_RGB8_SRGB = 1,
   GJXL_PIXEL_FORMAT_RGBA8_SRGB = 2,
+  // Modular only. Explicit byte order; no alignment requirement.
+  GJXL_PIXEL_FORMAT_GRAY8_SRGB = 3,
+  GJXL_PIXEL_FORMAT_GRAY16_LE_SRGB = 4,
+  GJXL_PIXEL_FORMAT_GRAY16_BE_SRGB = 5,
+  GJXL_PIXEL_FORMAT_RGB16_LE_SRGB = 6,
+  GJXL_PIXEL_FORMAT_RGB16_BE_SRGB = 7,
+  GJXL_PIXEL_FORMAT_RGBA16_LE_SRGB = 8,
+  GJXL_PIXEL_FORMAT_RGBA16_BE_SRGB = 9,
 };
 
 typedef struct {
@@ -216,6 +224,23 @@ GJXL_API GJXLResult gjxl_encode(
   const GJXLImageView* image,
   const GJXLEncoderOptions* options,
   GJXLBuffer* output) GJXL_NOEXCEPT;
+
+typedef int32_t GJXLModularEntropy;
+enum { GJXL_MODULAR_ENTROPY_PREFIX = 0, GJXL_MODULAR_ENTROPY_ANS = 1 };
+typedef struct {
+  uint32_t struct_size;
+  uint32_t search; // 0 baseline, 1 bounded lossless policy search.
+  GJXLModularEntropy entropy;
+} GJXLModularOptions;
+/// Four-byte prefixes are supported; absent fields default to zero.
+GJXL_API GJXLResult gjxl_modular_options_init(GJXLModularOptions *options,
+                                              size_t caller_size) GJXL_NOEXCEPT;
+/// Exact gray/RGB/RGBA 8/16-bit encoding. Alpha is unassociated and preserved.
+/// Null options use defaults. AUTO selects CPU; forced GPU is unsupported.
+/// Uses the existing empty-output ownership contract and gjxl_buffer_free.
+GJXL_API GJXLResult gjxl_encode_modular(GJXLContext *context, const GJXLImageView *image,
+                                        const GJXLModularOptions *options,
+                                        GJXLBuffer *output) GJXL_NOEXCEPT;
 
 /// Releases an encoded buffer and resets both fields to zero.
 GJXL_API void gjxl_buffer_free(GJXLBuffer* buffer) GJXL_NOEXCEPT;

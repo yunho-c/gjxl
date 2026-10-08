@@ -678,3 +678,31 @@ Stage timings, GPU kernel choices, entropy settings, and experimental resident
 policies should remain private or enter a separately named unstable diagnostic
 API. They must not constrain future codec improvements through the stable C
 ABI.
+
+## Lossless Modular encoding
+
+Use `gjxl_encode_modular` with `GJXLModularOptions` instead of VarDCT's
+`gjxl_encode`/`GJXLEncoderOptions`. This preserves every source integer and
+unassociated alpha sample, including invisible RGB. Contexts and output ownership
+are shared; automatic execution resolves to CPU. Forced GPU Modular encoding is
+unsupported. Old VarDCT distance/quality settings never imply losslessness.
+
+```c
+GJXLModularOptions options;
+gjxl_modular_options_init(&options, sizeof(options));
+options.search = 1;
+options.entropy = GJXL_MODULAR_ENTROPY_ANS;
+GJXLBuffer output = {0};
+GJXLResult result = gjxl_encode_modular(context, &image, &options, &output);
+/* Use output on success, then release it. */
+gjxl_buffer_free(&output);
+```
+
+Modular accepts existing RGB8/RGBA8 enum values and `GRAY8_SRGB`, plus
+`GRAY16_LE_SRGB`, `GRAY16_BE_SRGB`, `RGB16_LE_SRGB`, `RGB16_BE_SRGB`,
+`RGBA16_LE_SRGB`, and `RGBA16_BE_SRGB` (all prefixed `GJXL_PIXEL_FORMAT_`).
+Strides are in bytes. The view may be unaligned; 16-bit byte order is explicit.
+RGB is source-space sRGB, gray uses its transfer curve, and alpha is unassociated.
+Null options use the baseline/prefix default. Four-byte options prefixes work;
+absent search/entropy fields default to zero. Output must be empty on entry and
+is unchanged on failure. See [P2.5](modular-p2.5.md) for qualification and limits.

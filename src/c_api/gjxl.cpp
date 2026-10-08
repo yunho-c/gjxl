@@ -20,6 +20,9 @@
 #include <vector>
 
 #include "c_api/image_conversion.h"
+#include "codestream/modular/workflow.h"
+#include "codestream/modular/search.h"
+#include "codestream/workflow_admission_scope.h"
 #include "codestream/workflow.h"
 #include "codestream/workflow_admission.h"
 #include "core/cpu_execution.h"
@@ -124,6 +127,31 @@ GJXLResult Guard(Function&& function) noexcept {
   } catch (...) {
     return Fail(GJXL_ERROR_INTERNAL, "Unknown C++ exception");
   }
+}
+
+GJXLResult PublishCodestream(const gjxl::codestream_internal::CodestreamBuffer& codestream,
+                            GJXLBuffer* output) {
+  GJXLResult result;
+  // Keep both allocations charged through the C publication copy. Member
+  // lifetime order frees the array before its ticket on any failure.
+  gjxl::resource_budget_internal::ResourceAllocation publication;
+  {
+    const gjxl::resource_budget_internal::ResourceClassScope resource_class(
+      gjxl::resource_budget_internal::ResourceClass::kRetainedResult);
+    result = TranslateStatus(gjxl::resource_budget_internal::PrepareResourceAllocation(
+      codestream.size(), codestream.size(), &publication));
+  }
+  if (result != GJXL_OK) return result;
+  gjxl::resource_budget_internal::ManagedHostAllocationCheckpointForTest(
+    gjxl::resource_budget_internal::ResourceClass::kRetainedResult);
+  auto data = std::make_unique<uint8_t[]>(codestream.size());
+  result = TranslateStatus(publication.Commit());
+  if (result != GJXL_OK) return result;
+  std::memcpy(data.get(), codestream.data(), codestream.size());
+  output->data = data.release();
+  output->size = codestream.size();
+  publication.Reset();
+  return GJXL_OK;
 }
 
 template <typename Options>
@@ -604,26 +632,104 @@ GJXLResult gjxl_encode(
                   "Encoder returned an empty codestream");
     }
 
-    // Keep both allocations charged through the C publication copy. Member
-    // lifetime order frees the array before its ticket on any failure.
-    gjxl::resource_budget_internal::ResourceAllocation publication;
-    {
-      const gjxl::resource_budget_internal::ResourceClassScope resource_class(
-        gjxl::resource_budget_internal::ResourceClass::kRetainedResult);
-      result = TranslateStatus(gjxl::resource_budget_internal::PrepareResourceAllocation(
-        codestream.size(), codestream.size(), &publication));
+    return PublishCodestream(codestream, output);
+  });
+}
+
+GJXLResult gjxl_modular_options_init(GJXLModularOptions *options, size_t caller_size) noexcept {
+  return Guard([&] { return InitializeOptions(options, caller_size, sizeof(uint32_t)); });
+}
+GJXLResult gjxl_encode_modular(GJXLContext *context, const GJXLImageView *image,
+                               const GJXLModularOptions *options, GJXLBuffer *output) noexcept {
+  return Guard([&]() -> GJXLResult {
+    using namespace gjxl;
+    namespace m = gjxl::modular_internal;
+    if (!context || !image || !output || output->data || output->size || !image->pixels ||
+        image->pixels_size > static_cast<size_t>(PTRDIFF_MAX))
+      return Fail(GJXL_ERROR_INVALID_ARGUMENT,
+                  "Invalid Modular encode arguments or nonempty output");
+    if (image->struct_size < sizeof(GJXLImageView) ||
+        (options && options->struct_size < sizeof(uint32_t)))
+      return Fail(GJXL_ERROR_INVALID_ARGUMENT, "Modular input/options prefix is too small");
+    if (context->backend != VarDctBackendPreference::kCpu &&
+        context->backend != VarDctBackendPreference::kAutomatic)
+      return Fail(GJXL_ERROR_UNSUPPORTED, "Modular GPU encoding is not implemented");
+    m::ModularEncodingOptions resolved;
+    resolved.execution_domain = context->execution_domain;
+    resolved.cpu_thread_count = context->cpu_thread_count;
+    if (options &&
+        options->struct_size >= offsetof(GJXLModularOptions, search) + sizeof(uint32_t)) {
+      if (options->search > 1)
+        return Fail(GJXL_ERROR_INVALID_ARGUMENT, "Invalid Modular search option");
+      resolved.search = options->search != 0;
     }
-    if (result != GJXL_OK) return result;
-    gjxl::resource_budget_internal::ManagedHostAllocationCheckpointForTest(
-      gjxl::resource_budget_internal::ResourceClass::kRetainedResult);
-    auto data = std::make_unique<uint8_t[]>(codestream.size());
-    result = TranslateStatus(publication.Commit());
-    if (result != GJXL_OK) return result;
-    std::memcpy(data.get(), codestream.data(), codestream.size());
-    output->data = data.release();
-    output->size = codestream.size();
-    publication.Reset();
-    return GJXL_OK;
+    if (options && options->struct_size >=
+                       offsetof(GJXLModularOptions, entropy) + sizeof(GJXLModularEntropy)) {
+      if (options->entropy != GJXL_MODULAR_ENTROPY_PREFIX &&
+          options->entropy != GJXL_MODULAR_ENTROPY_ANS)
+        return Fail(GJXL_ERROR_INVALID_ARGUMENT, "Invalid Modular entropy option");
+      resolved.entropy = options->entropy == GJXL_MODULAR_ENTROPY_PREFIX
+                             ? EntropyCodingMode::kPrefix
+                             : EntropyCodingMode::kAns;
+    }
+    m::PackedModularImageView packed{
+        {static_cast<const uint8_t *>(image->pixels), image->pixels_size},
+        {image->width, image->height},
+        image->row_stride_bytes};
+    switch (image->pixel_format) {
+    case GJXL_PIXEL_FORMAT_RGB8_SRGB:
+      packed.format = m::PackedModularFormat::kRgb8;
+      break;
+    case GJXL_PIXEL_FORMAT_RGBA8_SRGB:
+      packed.format = m::PackedModularFormat::kRgba8;
+      break;
+    case GJXL_PIXEL_FORMAT_GRAY8_SRGB:
+      packed.format = m::PackedModularFormat::kGray8;
+      break;
+    case GJXL_PIXEL_FORMAT_GRAY16_LE_SRGB:
+    case GJXL_PIXEL_FORMAT_GRAY16_BE_SRGB:
+      packed.format = m::PackedModularFormat::kGray16;
+      break;
+    case GJXL_PIXEL_FORMAT_RGB16_LE_SRGB:
+    case GJXL_PIXEL_FORMAT_RGB16_BE_SRGB:
+      packed.format = m::PackedModularFormat::kRgb16;
+      break;
+    case GJXL_PIXEL_FORMAT_RGBA16_LE_SRGB:
+    case GJXL_PIXEL_FORMAT_RGBA16_BE_SRGB:
+      packed.format = m::PackedModularFormat::kRgba16;
+      break;
+    default:
+      return Fail(GJXL_ERROR_INVALID_ARGUMENT, "Invalid Modular pixel format");
+    }
+    if (image->pixel_format == GJXL_PIXEL_FORMAT_GRAY16_BE_SRGB ||
+        image->pixel_format == GJXL_PIXEL_FORMAT_RGB16_BE_SRGB ||
+        image->pixel_format == GJXL_PIXEL_FORMAT_RGBA16_BE_SRGB)
+      packed.byte_order = m::SampleByteOrder::kBigEndian;
+    if (auto status = packed.Validate(); !status.ok())
+      return TranslateStatus(status);
+    m::ModularWorkflowStoragePlan plan;
+    auto status =
+        resolved.search
+            ? m::ComputeModularSearchStoragePlan(packed.extent, packed.format, resolved.entropy,
+                                                 &plan, resolved.cpu_thread_count)
+            : m::ComputeModularWorkflowStoragePlan(packed.extent, packed.format, resolved.entropy,
+                                                   {}, &plan, resolved.cpu_thread_count);
+    if (!status.ok())
+      return TranslateStatus(status);
+    if (plan.output.peak_bytes > SIZE_MAX - plan.working.peak_bytes)
+      return Fail(GJXL_ERROR_INVALID_ARGUMENT, "Modular publication storage overflow");
+    codestream_internal::WorkflowAdmission admission;
+    if (auto s = admission.Start(plan.working.peak_bytes + plan.output.peak_bytes,
+                                 resolved.execution_domain);
+        !s.ok())
+      return TranslateStatus(s);
+    thread_budget_internal::CpuExecutionScope cpu;
+    if (auto s = cpu.Start(resolved.execution_domain, resolved.cpu_thread_count); !s.ok())
+      return TranslateStatus(s);
+    codestream_internal::CodestreamBuffer encoded;
+    if (auto s = m::EncodeModularImageOwned(packed, resolved, &encoded); !s.ok())
+      return TranslateStatus(s);
+    return PublishCodestream(encoded, output);
   });
 }
 

@@ -245,6 +245,19 @@ void Case(const Fixture &f, const ModularCodingPolicy &policy, bool search = fal
     Check(domain->snapshot().live_capacity_bytes == 0 &&
               domain->snapshot().reserved_unbacked_bytes == 0,
           "Policy workflow leaked managed backing");
+    if (f.view().extent.width > 256 || f.view().extent.height > 256) {
+      ModularWorkflowStoragePlan parallel_plan;
+      Ok(search
+             ? ComputeModularSearchStoragePlan(f.view().extent, f.format, mode, &parallel_plan, 4)
+             : ComputeModularWorkflowStoragePlan(f.view().extent, f.format, mode, policy,
+                                                 &parallel_plan, 4));
+      std::shared_ptr<const ExecutionDomain> parallel_domain;
+      Ok(ExecutionDomain::Create(
+          {.managed_memory_bytes = parallel_plan.working.peak_bytes, .cpu_participant_limit = 4},
+          &parallel_domain));
+      Ok(EncodeModularImage(f.view(), {parallel_domain, mode, policy, search, 4}, &again));
+      Check(output == again, "Prescribed serial/parallel policy differs");
+    }
     if (search) {
       Ok(EncodeModularImage(f.view(), {domain, mode, policy, search}, &again));
       Check(output == again, "Search is nondeterministic");

@@ -7,6 +7,7 @@
 namespace gjxl::modular_internal {
 struct ModularWorkflowStoragePlan {
   ModularFrameGeometry geometry;
+  size_t participants = 1;
   size_t tokens = 0, streams = 0;
   size_t maximum_global_bits = 0, maximum_group_bits = 0;
   size_t maximum_codestream_bytes = 0;
@@ -24,5 +25,6 @@ struct ModularWorkflowStoragePlan {
 [[nodiscard]] Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat format,
                                                        EntropyCodingMode mode,
                                                        const ModularCodingPolicy &policy,
-                                                       ModularWorkflowStoragePlan *out);
+                                                       ModularWorkflowStoragePlan *out,
+                                                       size_t cpu_threads = 1);
 } // namespace gjxl::modular_internal

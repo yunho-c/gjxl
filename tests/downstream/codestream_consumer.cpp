@@ -9,11 +9,18 @@
 
 #include "codestream/batch_workflow.h"
 #include "codestream/workflow.h"
+#include "gjxl/modular.hpp"
 #if defined(GJXL_DOWNSTREAM_HAS_METAL)
 #include "gpu/metal/metal_backend.h"
 #endif
 
 int main() {
+  std::array<uint8_t, 4> rgba{17, 31, 93, 0};
+  std::vector<uint8_t> modular;
+  if (!gjxl::EncodeModularImage({rgba, {1, 1}, 4, gjxl::ModularPixelFormat::kRgba8}, {}, &modular)
+           .ok() ||
+      modular.empty())
+    return EXIT_FAILURE;
 #if defined(GJXL_DOWNSTREAM_HAS_METAL)
   std::unique_ptr<gjxl::GpuBackend> embedded_backend;
   if (!gjxl::CreateEmbeddedMetalBackend({}, &embedded_backend).ok() ||

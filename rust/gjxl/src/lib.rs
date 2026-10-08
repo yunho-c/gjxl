@@ -130,11 +130,32 @@ impl Default for EncoderOptions {
     }
 }
 
+/// Lossless Modular entropy coder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ModularEntropy {
+    #[default]
+    Prefix,
+    Ans,
+}
+/// Lossless controls, independent of VarDCT quality/distance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ModularOptions {
+    pub search: bool,
+    pub entropy: ModularEntropy,
+}
+
 /// Packed nonlinear-sRGB pixel layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PixelFormat {
     Rgb8Srgb,
     Rgba8Srgb,
+    Gray8Srgb,
+    Gray16LeSrgb,
+    Gray16BeSrgb,
+    Rgb16LeSrgb,
+    Rgb16BeSrgb,
+    Rgba16LeSrgb,
+    Rgba16BeSrgb,
 }
 
 impl PixelFormat {
@@ -142,6 +163,10 @@ impl PixelFormat {
         match self {
             Self::Rgb8Srgb => 3,
             Self::Rgba8Srgb => 4,
+            Self::Gray8Srgb => 1,
+            Self::Gray16LeSrgb | Self::Gray16BeSrgb => 2,
+            Self::Rgb16LeSrgb | Self::Rgb16BeSrgb => 6,
+            Self::Rgba16LeSrgb | Self::Rgba16BeSrgb => 8,
         }
     }
 
@@ -149,6 +174,13 @@ impl PixelFormat {
         match self {
             Self::Rgb8Srgb => sys::GJXL_PIXEL_FORMAT_RGB8_SRGB as sys::GJXLPixelFormat,
             Self::Rgba8Srgb => sys::GJXL_PIXEL_FORMAT_RGBA8_SRGB as sys::GJXLPixelFormat,
+            Self::Gray8Srgb => sys::GJXL_PIXEL_FORMAT_GRAY8_SRGB as sys::GJXLPixelFormat,
+            Self::Gray16LeSrgb => sys::GJXL_PIXEL_FORMAT_GRAY16_LE_SRGB as sys::GJXLPixelFormat,
+            Self::Gray16BeSrgb => sys::GJXL_PIXEL_FORMAT_GRAY16_BE_SRGB as sys::GJXLPixelFormat,
+            Self::Rgb16LeSrgb => sys::GJXL_PIXEL_FORMAT_RGB16_LE_SRGB as sys::GJXLPixelFormat,
+            Self::Rgb16BeSrgb => sys::GJXL_PIXEL_FORMAT_RGB16_BE_SRGB as sys::GJXLPixelFormat,
+            Self::Rgba16LeSrgb => sys::GJXL_PIXEL_FORMAT_RGBA16_LE_SRGB as sys::GJXLPixelFormat,
+            Self::Rgba16BeSrgb => sys::GJXL_PIXEL_FORMAT_RGBA16_BE_SRGB as sys::GJXLPixelFormat,
         }
     }
 }
@@ -313,6 +345,45 @@ impl Context {
             ));
         }
         Ok(Self { raw })
+    }
+
+    /// Encodes exact integer samples, including invisible RGB and alpha.
+    /// Automatic execution uses CPU; forced GPU contexts are unsupported.
+    pub fn encode_modular(
+        &self,
+        image: &ImageView<'_>,
+        options: ModularOptions,
+    ) -> Result<Vec<u8>> {
+        let view = sys::GJXLImageView {
+            struct_size: struct_size::<sys::GJXLImageView>()?,
+            width: image.width,
+            height: image.height,
+            pixel_format: image.format.native(),
+            pixels: image.pixels.as_ptr().cast(),
+            pixels_size: image.pixels.len(),
+            row_stride_bytes: image.row_stride_bytes,
+        };
+        let mut native = unsafe { std::mem::zeroed::<sys::GJXLModularOptions>() };
+        check(unsafe {
+            sys::gjxl_modular_options_init(
+                &mut native,
+                std::mem::size_of::<sys::GJXLModularOptions>(),
+            )
+        })?;
+        native.search = u32::from(options.search);
+        native.entropy = match options.entropy {
+            ModularEntropy::Prefix => sys::GJXL_MODULAR_ENTROPY_PREFIX,
+            ModularEntropy::Ans => sys::GJXL_MODULAR_ENTROPY_ANS,
+        } as sys::GJXLModularEntropy;
+        let mut output = NativeBuffer::empty();
+        check(unsafe { sys::gjxl_encode_modular(self.raw, &view, &native, &mut output.raw) })?;
+        if output.raw.data.is_null() || output.raw.size == 0 {
+            return Err(Error::new(
+                ErrorKind::Internal,
+                "Missing Modular codestream",
+            ));
+        }
+        Ok(unsafe { slice::from_raw_parts(output.raw.data, output.raw.size) }.to_vec())
     }
 
     pub fn encode(&self, image: &ImageView<'_>, options: EncoderOptions) -> Result<Vec<u8>> {
@@ -691,6 +762,55 @@ mod tests {
         for handle in handles {
             let encoded = handle.join().unwrap().unwrap();
             assert!(encoded.starts_with(&[0xff, 0x0a]));
+        }
+    }
+}
+
+#[cfg(test)]
+mod modular_tests {
+    use super::*;
+    #[test]
+    fn all_integer_layouts_serial_parallel() {
+        let serial = Context::with_options(ContextOptions {
+            backend: Backend::Cpu,
+            cpu_threads: Some(1),
+        })
+        .unwrap();
+        let parallel = Context::with_options(ContextOptions {
+            backend: Backend::Cpu,
+            cpu_threads: Some(4),
+        })
+        .unwrap();
+        for format in [
+            PixelFormat::Gray8Srgb,
+            PixelFormat::Rgb8Srgb,
+            PixelFormat::Rgba8Srgb,
+            PixelFormat::Gray16LeSrgb,
+            PixelFormat::Gray16BeSrgb,
+            PixelFormat::Rgb16LeSrgb,
+            PixelFormat::Rgb16BeSrgb,
+            PixelFormat::Rgba16LeSrgb,
+            PixelFormat::Rgba16BeSrgb,
+        ] {
+            let stride = 257 * format.bytes_per_pixel() + 1;
+            let pixels: Vec<u8> = (0..stride * 3).map(|i| (i * 37) as u8).collect();
+            let image = ImageView::new(257, 3, stride, &pixels, format).unwrap();
+            for entropy in [ModularEntropy::Prefix, ModularEntropy::Ans] {
+                let options = ModularOptions {
+                    search: true,
+                    entropy,
+                };
+                let a = serial.encode_modular(&image, options).unwrap();
+                let b = parallel.encode_modular(&image, options).unwrap();
+                assert_eq!(a, b);
+                assert_eq!(&a[..2], &[0xff, 0x0a]);
+                if let Some(directory) = std::env::var_os("GJXL_MODULAR_TEST_ARTIFACTS") {
+                    let directory = std::path::PathBuf::from(directory);
+                    std::fs::create_dir_all(&directory).unwrap();
+                    std::fs::write(directory.join(format!("{format:?}-{entropy:?}.jxl")), &a)
+                        .unwrap();
+                }
+            }
         }
     }
 }

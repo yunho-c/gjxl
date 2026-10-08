@@ -1,0 +1,1870 @@
+{
+  "schema": 1,
+  "milestone": "P2.5",
+  "base_revision": "d87719cc5d0fcc2b5bff99e483975d74207f3c20",
+  "changes_uncommitted": true,
+  "reference_revision": "e8ff09762481785938d8e4e01333ed3917571161",
+  "reference_tracked_sources_clean": true,
+  "platform": "Windows ARM64 host; Release x64 binaries under emulation; MSVC 19.37.32826/STL 202305, Windows SDK 10.0.26100.0; pinned reference built with x64 clang-cl",
+  "native_configuration": {
+    "CMAKE_BUILD_TYPE": "Release",
+    "CMAKE_CXX_COMPILER": "C:/Users/hocbu/GitHub/gjxl/build/modular-phase1/toolchain/VC/Tools/MSVC/14.37.32822/bin/Hostx64/x64/cl.exe",
+    "CMAKE_CXX_FLAGS": "/DWIN32 /D_WINDOWS /EHsc",
+    "CMAKE_CXX_FLAGS_RELEASE": "/O2 /Ob2 /DNDEBUG",
+    "CMAKE_CXX_STANDARD": "20",
+    "CMAKE_C_COMPILER": "C:/Users/hocbu/GitHub/gjxl/build/modular-phase1/toolchain/VC/Tools/MSVC/14.37.32822/bin/Hostx64/x64/cl.exe",
+    "GJXL_BUILD_TESTS": "OFF",
+    "GJXL_ENABLE_CUDA": "OFF",
+    "GJXL_ENABLE_LIBJXL_REFERENCE": "OFF",
+    "GJXL_ENABLE_METAL": "OFF",
+    "CMAKE_GENERATOR": "Ninja"
+  },
+  "compiler_sha256": "37661d8479b56cd540d7462725db7a191b8b8043a7ebcd3ace6453f7b00167eb",
+  "source_sha256": {
+    "CMakeLists.txt": "c3deda393a02889c602b3af9342da08bcab998f24e9ad38210a62c682e0cc72c",
+    "cmake/InstalledHeaders.cmake": "8a0005bba3aa1a6768b973ac154bb37103b27f9704d993217e19febde506b88b",
+    "cmake/ModularOracle.cmake": "12c3af2e13c717d32f8166380e5ad869b8ce49de84c182ccbb639eb4c6f6e127",
+    "include/gjxl/gjxl.h": "d6593079c753f07cd568271f1340371c6e9ce0a25194146827801fb1114a97bf",
+    "include/gjxl/modular.hpp": "5b7d4967dc34680612fa4112a017cf0bb6181e11255627fdbc34025b1f17147c",
+    "rust/gjxl/src/lib.rs": "0fc6de0b438389abc7389f353de90159ef15cfa7fca2399712398f1b864b6ba8",
+    "src/c_api/gjxl.cpp": "e7ff812d0ddd2d123a71edd82d2f04e7ed839149ee8b4a45690803d8fa2c1416",
+    "src/codec/modular/prediction.h": "1ee32fd5da106fed20e317597f128acba3848edaf774ccb540aeb87eb0c31653",
+    "src/codestream/modular/frame_encoder.cpp": "01cbaa783fcfcd40d993520b1a622d6e5fb317df6a1b10be602f7668afc3f626",
+    "src/codestream/modular/parallel.h": "3c1d7f9ac12a82a4722ac09d7c128bd14d354ec078305d2d10289805b63e3885",
+    "src/codestream/modular/public.cpp": "38c9192b1f2abf88534ff2edc4988e8c10778b7d1c1ba94821bad74e226e9cfb",
+    "src/codestream/modular/search.cpp": "e545e170b2294b17b996ac055e7f73efa5a3b988896187ace874912559601e35",
+    "src/codestream/modular/search.h": "0a6eab9a840539505520fd04aafe903a53a4d8ec0e5a140359d9fbad0aa934a1",
+    "src/codestream/modular/storage_plan.cpp": "2c51aa07d0ee0de314a1ab8aec44544019ec773dcffe9d256cf59ccd1e75f84c",
+    "src/codestream/modular/storage_plan.h": "7fe2b0159c693d2de1ca190c6f80d98c33d6dcb8e2ddf598b9b72c533525e496",
+    "src/codestream/modular/tokenization.cpp": "54dfad900aefee03979c1cbc59f1ca0faac04430c691b649e39df758586ab5be",
+    "src/codestream/modular/tokenization.h": "6d5b98a23ec1982f7f24d5454ebbfe13ca5df7a74669c26e8c70cfeb9ab36b4c",
+    "src/codestream/modular/workflow.cpp": "8b9518aebe83d56ebe21cb73a732429d6cef88417747bb3c95ea536938718748",
+    "src/codestream/modular/workflow.h": "794d09acbe9c89afe6d4a47759cf2ff1469817e98d55777d91ba2a52291f77df",
+    "src/core/worker_launch_internal.h": "a5142658c040ba09be1c962369daa6aa50af838cf2e9059c7fe04c322e7fbe04",
+    "src/io/pnm.cpp": "24e2f453109803f6efc9984fea49f8b43d3f6de74f732b3c0d9d9b8f8cad3a61",
+    "src/io/pnm.h": "7f7e14b5c68c2e29c646969b9b507d24bb41753a492201b7ca2e1785f177327a",
+    "tests/downstream/c_api_consumer.c": "5fb1b2ead23738e9336a2b7038ff0603a472678daaefcbaa757a7c7d452b26af",
+    "tests/downstream/codestream_consumer.cpp": "2a4c95b672f7cc9bc5b2fd18c8c3e14771656a3bb1db4a237d5f882b5f7b3fc6",
+    "tests/modular_api_test.cpp": "95fb27809d44281125483bfd3f4b7a5680c2df646b6fa6b5865f8d6488bec035",
+    "tests/modular_cli_test.py": "e70309f8c195ad44dc28cbb8869c8ef9e33b65bd2d4bce702e0f69164fb4da66",
+    "tests/modular_policy_test.cpp": "191d4fb6e17ac7f2eb04969baa03866ee96a33c609221ceaf40e95f56f958393",
+    "tests/modular_transform_test.cpp": "427b80d32f5964df73a402aae01c10744c06edcf7a0b19594a4cc45132d0ebb8",
+    "tools/gjxl_encode.cpp": "5d48b2988cbbe0cded3213b492cc72fe1e6c553d97b41efeed552a38ed191994",
+    "tools/modular_cli.cpp": "8f2a48cdb406f5e93a2678e939396b754f991f08c85ed985e5affbf8c43357b4",
+    "tools/modular_cli.h": "8e0213f997e95bf4edee2736c9f64f696b7cdab0950b245ca6ea577162998e9a"
+  },
+  "binary_sha256": {
+    "build/modular-p2.5/native/gjxl_codec.lib": "a57e6756053f76b8d21a86ff799c2dc1a51376ba6b6b1f2fda494412533cfc1c",
+    "build/modular-p2.5/native/gjxl_codestream.lib": "242b9e75f607fd04cdb33817673bf412f000c76b6633667a077b7649c3ffe385",
+    "build/modular-p2.5/native/gjxl_encode.exe": "c03a7a3caec4e7d4aad51d203836c152192d9d9dbb954d3cf1f516300c94cc10",
+    "build/modular-p2.5/native-consumer/modular_native_consumer.exe": "e88bb13b654f5564eed8a5fc4efd9137f6f7e5a52f7c892dc51d600fde65e0f9",
+    "build/modular-p2.5/capture/modular_extraction_capture.exe": "9a498f95053f3f9ed639e1f36c571b5cfa1f50cb2290ab079a619b3e0dbb33ee",
+    "build/modular-phase1/candidate/gjxl_modular_workflow_test.exe": "53e5aa527583274676674dea78d33106aca326708c18b836fcb577415f042f6c",
+    "build/modular-phase1/candidate/gjxl_modular_conformance_test.exe": "d766e0771915c9a3a734604225f189e8bca39a93de9720d26fea8d99aac5fa54",
+    "build/modular-phase1/candidate/gjxl_modular_foundation_test.exe": "a369afe5d6af3a76cc2b848f14b0c24d2c2484ca7f661ca09ecb9d1099a649d5",
+    "build/modular-phase1/candidate/gjxl_modular_oracle_test.exe": "d528df56bcdf717d5e048583fd6ef3e5e807347c29421058c1904d8706f2d0a6",
+    "build/modular-phase1/pinned-libjxl-x64/tools/djxl.exe": "9b796af5e6c4e38e26b9eeb703f9cc4a6bb21c7080b35fa5abeec503b0dc8dd3",
+    "build/modular-phase1/pinned-libjxl-x64/tools/jxl.dll": "b9f17629eb459938fc63eb788d0925a8535f5e18d8751afdc67e1373f8910af4",
+    "build/modular-phase1/candidate/gjxl_modular_policy_test.exe": "822df1f316e5c50ad171561b414ae63f12ba9512190fb10a0e3df55b78909bd3",
+    "build/modular-phase1/candidate/gjxl_modular_transform_test.exe": "60d55ab787c3c422d0f62c3d20a6f610f65ceb38cca36f4915fd919410c5612b",
+    "build/modular-phase1/candidate/gjxl_modular_api_test.exe": "b92e2728ab17fb0f76b85cf5346542c8a17ee285909885da6be956a830624344",
+    "build/modular-phase1/candidate/gjxl_c_api_test.exe": "abd3b3675e6a2e3b84f2502baf7901ea9298c89519e1427822b1ac222051a103",
+    "rust/target/debug/deps/gjxl-133d64519fd1859f.exe": "44f22ce9a8a18b7a956f5ba5cefa172be523afd61d892a4794f1e78878483209"
+  },
+  "evidence_sha256": {
+    "build/modular-p2.5/api-tests.log": "4e287813fc9a319e02b8af5f2fa28611113fc8880649cd7357d1d15300a7e8d4",
+    "build/modular-p2.5/boundaries.json": "5a7385d14da8aba5d0c371686cacbe797ad202bca82d862dc6bc67890bc592b6",
+    "build/modular-p2.5/capture-build.log": "e42fda54d30d4e3e2cd143af1b5da7c47aa6e0c1bd3fd452094d167e9e95803a",
+    "build/modular-p2.5/capture.log": "e66b8e764eb57cf997e5f067aa5d16a04c7564f4e0bbcef7c3e8a8b4b5c7700e",
+    "build/modular-p2.5/comparison.json": "fc6f3fe5e8ecaca81a43b24edc23362096d4cf88dd7ca5efdfd612e6445bb263",
+    "build/modular-p2.5/final-build.log": "e2c0fa1121381ea5264fd61a62ae6c5e20126f030dd8cfbac2f90d629c33e2ae",
+    "build/modular-p2.5/final-focused-tests.log": "7214f7b50fc77913b6f841e26b62c072e6be7151c00554a96ab2fc2922916010",
+    "build/modular-p2.5/final-focused-tests.xml": "1e78b1ae484056b254cf49af5296e6292d966335a2867d5bcdd373f25fa2c4af",
+    "build/modular-p2.5/final-rebuild.log": "f7c168652017580d46b41b7c06210323d91c886d2373c851972250d27897106f",
+    "build/modular-p2.5/final-tests.log": "2d2db57b21a3d47184b163f14f25d1f8d87431ce8edf57d1576db59cdc944ae1",
+    "build/modular-p2.5/final-tests.xml": "256e0f56712aaf390d57ba0efaf2995ea2071852362974cedd6c41c4d436dfa3",
+    "build/modular-p2.5/native-build.log": "c0dba0ecf56770393526046becee7144f639a0c0efc48002b60311a8ca466176",
+    "build/modular-p2.5/native-configure.log": "afc2c7b6ae867c845f73f2e69c2093881861eb5cecca146c99887f2590b1b4a3",
+    "build/modular-p2.5/native-consumer-build.log": "92719ec490a9583ccabc9991cfd509431e49a4e5ed4cab2c7cb46e2c1d77ed2d",
+    "build/modular-p2.5/native-consumer.log": "89506b92b89a720f32c9ef81005c55969b3051229c9ff8050dcac8010a59de86",
+    "build/modular-p2.5/native-dependents.log": "f495f70db16a73961eb497b9e938e828f3223e953bb0b5eaa97f372ca7166d44",
+    "build/modular-p2.5/native-final-build.log": "346828e197b2bd786628834b5dda38124f01f1b22e5c1ded1031e2c817c00486",
+    "build/modular-p2.5/native-final-install.log": "9615d9ffcd74b724b35e1eed7e85f6f895d9c33df74015d4dfd3ba468a16ade1",
+    "build/modular-p2.5/native-install.log": "4381971d93e8cdd956f5b0e3d975b970661aa5d375e4c98a093abf44e85f29a1",
+    "build/modular-p2.5/photo-capture.log": "1e774d4ffbf5159cab37cf82b700f35472636aeb7d679d122286e9e6536510a5",
+    "build/modular-p2.5/photo-comparison.json": "2474270c86309194852c084f340974fc7c491909e727a23d40a90d6585c83345",
+    "build/modular-p2.5/policy-tests.log": "d34bac20cbeb4097c316fb418ff2099c0c41aff8394559ad1c626d13d5f5c6ea",
+    "build/modular-p2.5/rust-decode.json": "ebabf10faf52b82ddb442827ff530bae6ec509a72c13be8e0dcd87b5114c1104",
+    "build/modular-p2.5/rust-final-tests.log": "2dbb4e1a4b155314bd5ea51c4ddea3d811250aee5833def920abe3b4da15a966",
+    "build/modular-p2.5/rust-qualified-tests.log": "86bae8f0a02d4d8fbf3b567867c9ca5a11c3d0458c3ebefa5952f07a0187e8f0",
+    "build/modular-p2.5/rust-tests.log": "f8750a191d78cc3ee8eb885a0454fee57558d817312b97ddb66ccc0cf1f37012",
+    "build/modular-p2.5/rust-toolchain.log": "fe8d591c369c97c77e23006f82a53c9b19f84e1477dee4633be9e5000f3dd025",
+    "build/modular-p2.5/transform-tests.log": "b1790f2da505957b2747c90d04cc573826596d5a0acb704b1991417e590560f9",
+    "build/modular-p2.5/vardct-conformance.log": "a6efa22a9314f55980d5b0816a6bb479127363e48d338e336378debe6b8178a3"
+  },
+  "profile": {
+    "formats": {
+      "0": "gray8",
+      "1": "rgb8",
+      "2": "rgba8",
+      "3": "gray16",
+      "4": "rgb16",
+      "5": "rgba16"
+    },
+    "maximum_transforms": 8,
+    "maximum_channels": 64,
+    "palette": {
+      "maximum_colors": 256,
+      "channels": "1..4 adjacent ordinary channels",
+      "ordering": "signed lexicographic; unused capacity zero-filled",
+      "deltas": 0,
+      "lossy": false
+    },
+    "squeeze": {
+      "channels_per_descriptor": "1..19",
+      "axis": "explicit horizontal or vertical",
+      "residual_order": "in-place or appended",
+      "minimum_axis_length": 2,
+      "maximum_shift": 8
+    },
+    "rct": "optional first, color only",
+    "output": "single pass",
+    "default": "unchanged identity/gradient",
+    "search": "opt-in; up to four transform candidates after P2.3 candidates; complete byte cost; earlier wins ties",
+    "api": "C++, C, Rust, native PNM CLI",
+    "backend": "CPU; forced GPUs unsupported",
+    "maximum_parallel_participants": 4,
+    "parallel_stages": [
+      "stream tokenization",
+      "fixed-model group emission"
+    ],
+    "serial_stages": [
+      "transforms",
+      "training",
+      "model construction",
+      "global stream",
+      "assembly"
+    ],
+    "public_default_threads": 0,
+    "private_oracle_default_threads": 1
+  },
+  "public_api": {
+    "exact_format_order_coder_search_cases": 72,
+    "interfaces": [
+      "C++ serial",
+      "C++ parallel",
+      "C parallel"
+    ],
+    "c_publication_failure_positions": 312,
+    "worker_launch_faults": 8,
+    "mixed_domain": "4 concurrent Modular/VarDCT calls; 512 MiB, 2 participants",
+    "c_options_minimum_prefix_bytes": 4
+  },
+  "cli": {
+    "exact_files": 20,
+    "invalid_atomic_cases": 12,
+    "formats": [
+      "P5 gray",
+      "P6 RGB",
+      "P7 gray/RGB/RGBA"
+    ],
+    "maxval": [
+      255,
+      65535
+    ],
+    "byte_order": "big endian",
+    "color_declaration_required": "srgb"
+  },
+  "rust": {
+    "toolchain": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "unit_tests_passed": 12,
+    "independent_decode": {
+      "exact_files": 18,
+      "sha256": {
+        "Gray16BeSrgb-Ans.jxl": "acd86539a2b2e2555fcae985006254894fe96269ee58b6e25c2f72d4103e054e",
+        "Gray16BeSrgb-Prefix.jxl": "2add1247743027f5d7ec260e1f46c06a95600fe1dbe90a643185db28caf186ac",
+        "Gray16LeSrgb-Ans.jxl": "9244a509614eaf88cb6f42973364a12742eef61ff8c11b19ccb815b58deab979",
+        "Gray16LeSrgb-Prefix.jxl": "538950d49b4580ded913798786bd34ed31e2ab8117bf698d3b1def3f0911f1c7",
+        "Gray8Srgb-Ans.jxl": "6b0311cd7af739edea733169d9622db9ccb671a8dfab9311a2a4f3c7915cb538",
+        "Gray8Srgb-Prefix.jxl": "936e08e304f955ac53fb5ad363f7bc22a8588b685780e4f6c7919349d38d1cc9",
+        "Rgb16BeSrgb-Ans.jxl": "45a9b5aca7a969b404c30d9e93b9de23cd1da2dbc562dd49ef3d1c64852806fe",
+        "Rgb16BeSrgb-Prefix.jxl": "ae592d360e94ba74bd0ad846cb3cc0b02f4b356922cb9187ade87cbc34afd2ff",
+        "Rgb16LeSrgb-Ans.jxl": "dd29a38b07412dc68bab5a224a1aab68704f15893d4eb857dc7f01998fcc503e",
+        "Rgb16LeSrgb-Prefix.jxl": "3ef4f146ebe4bdea4773c63afff350cdb6e895cc20d7a441e5a427e991577f4a",
+        "Rgb8Srgb-Ans.jxl": "6e0f3ba193cc8bdb79bf31b383d41d9980e06e16e20389f53b0aeacde26443c3",
+        "Rgb8Srgb-Prefix.jxl": "ae8478ba6ccadcc50afd49b9670209ae4f43d433747a84e8ff98dab46b325301",
+        "Rgba16BeSrgb-Ans.jxl": "e16127280b60476790a59fe0abee35d8d006fbedd0ccec911cf36063e449aba6",
+        "Rgba16BeSrgb-Prefix.jxl": "e06c83826de20a4374700223ef226deef7f98d45f4a5a99442068e79f0090264",
+        "Rgba16LeSrgb-Ans.jxl": "11c49a2c48a8e25bbe1d81ee38a9d1dff9d19d61278759653b67d5fe3a5175b1",
+        "Rgba16LeSrgb-Prefix.jxl": "4f355099d358a326e3bb20d147fa3e576398f7b181577ea7ba9bf3db1ea1ae8e",
+        "Rgba8Srgb-Ans.jxl": "417d9276570f86ef85871cb9a9a77bbfaf7aadfdc745423a5b010fad6f73b3f0",
+        "Rgba8Srgb-Prefix.jxl": "a27e582851ea464b9f6c4e299213296413136bbad0da3324d921ffd7f26661b8"
+      }
+    },
+    "artifacts": "build/modular-p2.5/rust-artifacts"
+  },
+  "serial_parallel_oracles": {
+    "policy_stage_cases": 799,
+    "policy_files": 1646,
+    "transform_stage_cases": 313,
+    "transform_files": 626,
+    "coverage": "All multi-group cases in the existing policy and transform oracles compare exact serial and parallel bytes."
+  },
+  "frozen_modular": {
+    "default_files_unchanged": 2802,
+    "transformed_files_unchanged": 626,
+    "policy_files_unchanged": 1646,
+    "expected_records": [
+      "docs/modular-p2.2-results.json",
+      "docs/modular-p2.3-results.json",
+      "docs/modular-p2.4-results.json"
+    ],
+    "expected_sha256": {
+      "docs/modular-p2.2-results.json": "06da69d556373f4b4b92bc064bf0c9f3b4d2108ad92b9df0beead3d2fba40572",
+      "docs/modular-p2.3-results.json": "11eccbe90ce5b28e4287b04770e54dbba3370801824d5456e5246cea85410f73",
+      "docs/modular-p2.4-results.json": "453a9934aedda4c9d0b05c126cbda05256214d302f7dcc385fe30ff66c4048fd"
+    }
+  },
+  "artifact_comparisons": [
+    {
+      "expected": "docs/modular-phase1/stage-comparison.json",
+      "expected_sha256": "0904b0504dd9d94f0ca778ca403e99c335ee1ce409206a937fa43ff3b67ce57e",
+      "candidate": "build/modular-p2.5/artifacts",
+      "compared": 204,
+      "mismatches": []
+    },
+    {
+      "expected": "docs/modular-phase1/photo-comparison.json",
+      "expected_sha256": "1efff42cf32347d08b910a554d95da6d02e27d427a0908e500cc2fa521e85111",
+      "candidate": "build/modular-p2.5/photo-artifacts",
+      "compared": 4,
+      "mismatches": []
+    }
+  ],
+  "allocation_failure_cases": [
+    {
+      "case": 0,
+      "mode": "prefix",
+      "format": 1,
+      "extent": "1x1",
+      "policy": "baseline",
+      "positions": 316
+    },
+    {
+      "case": 1,
+      "mode": "prefix",
+      "format": 1,
+      "extent": "17x19",
+      "policy": "baseline",
+      "positions": 351
+    },
+    {
+      "case": 2,
+      "mode": "prefix",
+      "format": 1,
+      "extent": "257x3",
+      "policy": "baseline",
+      "positions": 358
+    },
+    {
+      "case": 3,
+      "mode": "prefix",
+      "format": 0,
+      "extent": "17x19",
+      "policy": "baseline",
+      "positions": 343
+    },
+    {
+      "case": 4,
+      "mode": "prefix",
+      "format": 0,
+      "extent": "257x3",
+      "policy": "baseline",
+      "positions": 334
+    },
+    {
+      "case": 5,
+      "mode": "prefix",
+      "format": 3,
+      "extent": "17x19",
+      "policy": "baseline",
+      "positions": 340
+    },
+    {
+      "case": 6,
+      "mode": "prefix",
+      "format": 3,
+      "extent": "257x3",
+      "policy": "baseline",
+      "positions": 346
+    },
+    {
+      "case": 7,
+      "mode": "prefix",
+      "format": 4,
+      "extent": "17x19",
+      "policy": "baseline",
+      "positions": 361
+    },
+    {
+      "case": 8,
+      "mode": "prefix",
+      "format": 4,
+      "extent": "257x3",
+      "policy": "baseline",
+      "positions": 370
+    },
+    {
+      "case": 9,
+      "mode": "prefix",
+      "format": 2,
+      "extent": "17x19",
+      "policy": "baseline",
+      "positions": 354
+    },
+    {
+      "case": 10,
+      "mode": "prefix",
+      "format": 2,
+      "extent": "257x3",
+      "policy": "baseline",
+      "positions": 363
+    },
+    {
+      "case": 11,
+      "mode": "prefix",
+      "format": 5,
+      "extent": "17x19",
+      "policy": "baseline",
+      "positions": 363
+    },
+    {
+      "case": 12,
+      "mode": "prefix",
+      "format": 5,
+      "extent": "257x3",
+      "policy": "baseline",
+      "positions": 372
+    },
+    {
+      "case": 13,
+      "mode": "ANS",
+      "format": 1,
+      "extent": "1x1",
+      "policy": "baseline",
+      "positions": 476
+    },
+    {
+      "case": 14,
+      "mode": "ANS",
+      "format": 1,
+      "extent": "17x19",
+      "policy": "baseline",
+      "positions": 518
+    },
+    {
+      "case": 15,
+      "mode": "ANS",
+      "format": 1,
+      "extent": "257x3",
+      "policy": "baseline",
+      "positions": 524
+    },
+    {
+      "case": 16,
+      "mode": "ANS",
+      "format": 0,
+      "extent": "17x19",
+      "policy": "baseline",
+      "positions": 513
+    },
+    {
+      "case": 17,
+      "mode": "ANS",
+      "format": 0,
+      "extent": "257x3",
+      "policy": "baseline",
+      "positions": 501
+    },
+    {
+      "case": 18,
+      "mode": "ANS",
+      "format": 3,
+      "extent": "17x19",
+      "policy": "baseline",
+      "positions": 505
+    },
+    {
+      "case": 19,
+      "mode": "ANS",
+      "format": 3,
+      "extent": "257x3",
+      "policy": "baseline",
+      "positions": 509
+    },
+    {
+      "case": 20,
+      "mode": "ANS",
+      "format": 4,
+      "extent": "17x19",
+      "policy": "baseline",
+      "positions": 531
+    },
+    {
+      "case": 21,
+      "mode": "ANS",
+      "format": 4,
+      "extent": "257x3",
+      "policy": "baseline",
+      "positions": 540
+    },
+    {
+      "case": 22,
+      "mode": "ANS",
+      "format": 2,
+      "extent": "17x19",
+      "policy": "baseline",
+      "positions": 525
+    },
+    {
+      "case": 23,
+      "mode": "ANS",
+      "format": 2,
+      "extent": "257x3",
+      "policy": "baseline",
+      "positions": 531
+    },
+    {
+      "case": 24,
+      "mode": "ANS",
+      "format": 5,
+      "extent": "17x19",
+      "policy": "baseline",
+      "positions": 535
+    },
+    {
+      "case": 25,
+      "mode": "ANS",
+      "format": 5,
+      "extent": "257x3",
+      "policy": "baseline",
+      "positions": 539
+    },
+    {
+      "case": 26,
+      "mode": "prefix",
+      "format": 5,
+      "extent": "17x19",
+      "policy": "prescribed",
+      "positions": 864
+    },
+    {
+      "case": 27,
+      "mode": "prefix",
+      "format": 5,
+      "extent": "257x3",
+      "policy": "prescribed",
+      "positions": 891
+    },
+    {
+      "case": 28,
+      "mode": "prefix",
+      "format": 5,
+      "extent": "17x19",
+      "policy": "search",
+      "positions": 5868
+    },
+    {
+      "case": 29,
+      "mode": "prefix",
+      "format": 5,
+      "extent": "257x3",
+      "policy": "search",
+      "positions": 5914
+    },
+    {
+      "case": 30,
+      "mode": "ANS",
+      "format": 5,
+      "extent": "17x19",
+      "policy": "prescribed",
+      "positions": 1510
+    },
+    {
+      "case": 31,
+      "mode": "ANS",
+      "format": 5,
+      "extent": "257x3",
+      "policy": "prescribed",
+      "positions": 1536
+    },
+    {
+      "case": 32,
+      "mode": "ANS",
+      "format": 5,
+      "extent": "17x19",
+      "policy": "search",
+      "positions": 9232
+    },
+    {
+      "case": 33,
+      "mode": "ANS",
+      "format": 5,
+      "extent": "257x3",
+      "policy": "search",
+      "positions": 9241
+    },
+    {
+      "case": 34,
+      "mode": "prefix",
+      "format": 5,
+      "extent": "17x19",
+      "policy": "palette",
+      "positions": 368
+    },
+    {
+      "case": 35,
+      "mode": "prefix",
+      "format": 5,
+      "extent": "257x3",
+      "policy": "palette",
+      "positions": 383
+    },
+    {
+      "case": 36,
+      "mode": "prefix",
+      "format": 5,
+      "extent": "17x19",
+      "policy": "squeeze",
+      "positions": 398
+    },
+    {
+      "case": 37,
+      "mode": "prefix",
+      "format": 5,
+      "extent": "257x3",
+      "policy": "squeeze",
+      "positions": 399
+    },
+    {
+      "case": 38,
+      "mode": "prefix",
+      "format": 5,
+      "extent": "17x19",
+      "policy": "palette+squeeze",
+      "positions": 378
+    },
+    {
+      "case": 39,
+      "mode": "ANS",
+      "format": 5,
+      "extent": "17x19",
+      "policy": "palette",
+      "positions": 548
+    },
+    {
+      "case": 40,
+      "mode": "ANS",
+      "format": 5,
+      "extent": "257x3",
+      "policy": "palette",
+      "positions": 551
+    },
+    {
+      "case": 41,
+      "mode": "ANS",
+      "format": 5,
+      "extent": "17x19",
+      "policy": "squeeze",
+      "positions": 585
+    },
+    {
+      "case": 42,
+      "mode": "ANS",
+      "format": 5,
+      "extent": "257x3",
+      "policy": "squeeze",
+      "positions": 587
+    },
+    {
+      "case": 43,
+      "mode": "ANS",
+      "format": 5,
+      "extent": "17x19",
+      "policy": "palette+squeeze",
+      "positions": 563
+    }
+  ],
+  "allocation_failure_total": 51134,
+  "final_ctest": {
+    "passed": 123,
+    "total": 132,
+    "parallel": 4,
+    "timeout_seconds": 600,
+    "outcomes": {
+      "planning_recipes": {
+        "status": "passed",
+        "seconds": 0.529935
+      },
+      "resident_qualification_controller": {
+        "status": "passed",
+        "seconds": 0.727951
+      },
+      "stdlib_storage_compat": {
+        "status": "passed",
+        "seconds": 0.0286121
+      },
+      "stdlib_storage_compat_cxx23": {
+        "status": "passed",
+        "seconds": 0.0273067
+      },
+      "storage_toolchain": {
+        "status": "passed",
+        "seconds": 14.2853
+      },
+      "bit_writer_append": {
+        "status": "passed",
+        "seconds": 0.763484
+      },
+      "bit_writer_word": {
+        "status": "passed",
+        "seconds": 2.32393
+      },
+      "ans_bit_emission": {
+        "status": "passed",
+        "seconds": 1.08111
+      },
+      "bit_writer": {
+        "status": "passed",
+        "seconds": 0.25427
+      },
+      "entropy": {
+        "status": "passed",
+        "seconds": 0.565199
+      },
+      "context_map": {
+        "status": "passed",
+        "seconds": 1.80161
+      },
+      "ans_reverse_bits": {
+        "status": "passed",
+        "seconds": 1.40569
+      },
+      "sections": {
+        "status": "passed",
+        "seconds": 0.25501
+      },
+      "dc_group": {
+        "status": "passed",
+        "seconds": 0.244293
+      },
+      "weighted_dc": {
+        "status": "passed",
+        "seconds": 0.569118
+      },
+      "ac_group": {
+        "status": "passed",
+        "seconds": 1.95251
+      },
+      "coefficient_order": {
+        "status": "passed",
+        "seconds": 0.914831
+      },
+      "dc_parallel_tokenization": {
+        "status": "passed",
+        "seconds": 0.497562
+      },
+      "ac_direct_tokenization": {
+        "status": "passed",
+        "seconds": 4.84066
+      },
+      "ac_population_reduction": {
+        "status": "passed",
+        "seconds": 2.15901
+      },
+      "token_storage_plan": {
+        "status": "passed",
+        "seconds": 1.57727
+      },
+      "entropy_storage_plan": {
+        "status": "passed",
+        "seconds": 5.19044
+      },
+      "representation_storage_plan": {
+        "status": "passed",
+        "seconds": 0.330091
+      },
+      "serializer_storage_plan": {
+        "status": "passed",
+        "seconds": 80.4978
+      },
+      "ac_section_validation": {
+        "status": "passed",
+        "seconds": 0.28319
+      },
+      "compact_vardct_frame": {
+        "status": "passed",
+        "seconds": 5.98551
+      },
+      "compact_frame_allocation": {
+        "status": "passed",
+        "seconds": 2.40364
+      },
+      "frame_validation": {
+        "status": "passed",
+        "seconds": 4.81019
+      },
+      "sparse_coefficients": {
+        "status": "passed",
+        "seconds": 0.282426
+      },
+      "sparse_vardct_frame": {
+        "status": "passed",
+        "seconds": 24.2098
+      },
+      "sparse_frame_allocation": {
+        "status": "passed",
+        "seconds": 1.72442
+      },
+      "quantization_storage": {
+        "status": "passed",
+        "seconds": 0.363374
+      },
+      "block_context_map": {
+        "status": "passed",
+        "seconds": 0.11775
+      },
+      "codestream_encoder": {
+        "status": "passed",
+        "seconds": 31.1661
+      },
+      "codestream_workflow": {
+        "status": "passed",
+        "seconds": 13.854
+      },
+      "codestream_batch_workflow": {
+        "status": "passed",
+        "seconds": 0.438362
+      },
+      "batch_lifecycle_cpu": {
+        "status": "passed",
+        "seconds": 0.370586
+      },
+      "batch_scheduling_cpu": {
+        "status": "passed",
+        "seconds": 0.253475
+      },
+      "parallel_work": {
+        "status": "passed",
+        "seconds": 0.194937
+      },
+      "worker_launch_failure_startup": {
+        "status": "passed",
+        "seconds": 0.0317896
+      },
+      "worker_launch_failure_forward": {
+        "status": "passed",
+        "seconds": 2.76373
+      },
+      "worker_launch_failure_cpu_color": {
+        "status": "passed",
+        "seconds": 50.8204
+      },
+      "worker_launch_failure_cpu_aq": {
+        "status": "passed",
+        "seconds": 52.0718
+      },
+      "worker_launch_failure_cpu_orders": {
+        "status": "passed",
+        "seconds": 64.4233
+      },
+      "worker_launch_failure_cpu_sections": {
+        "status": "passed",
+        "seconds": 64.0501
+      },
+      "worker_launch_failure_cpu_drains": {
+        "status": "passed",
+        "seconds": 21.0683
+      },
+      "rate_control_search": {
+        "status": "passed",
+        "seconds": 0.283317
+      },
+      "rate_control_probe": {
+        "status": "passed",
+        "seconds": 0.282367
+      },
+      "codestream_cli": {
+        "status": "passed",
+        "seconds": 1.16106
+      },
+      "codestream_sample_generated": {
+        "status": "passed",
+        "seconds": 0.236618
+      },
+      "c_api_image_conversion": {
+        "status": "passed",
+        "seconds": 0.132208
+      },
+      "c_api": {
+        "status": "passed",
+        "seconds": 0.609848
+      },
+      "c_api_cpp": {
+        "status": "passed",
+        "seconds": 0.179912
+      },
+      "pfm": {
+        "status": "passed",
+        "seconds": 0.248816
+      },
+      "butteraugli_primitives": {
+        "status": "passed",
+        "seconds": 0.296106
+      },
+      "butteraugli_stages": {
+        "status": "passed",
+        "seconds": 0.277533
+      },
+      "butteraugli_distance": {
+        "status": "passed",
+        "seconds": 0.294951
+      },
+      "core_geometry": {
+        "status": "passed",
+        "seconds": 0.11431
+      },
+      "resource_budget": {
+        "status": "passed",
+        "seconds": 0.101915
+      },
+      "cpu_budget": {
+        "status": "passed",
+        "seconds": 0.130433
+      },
+      "cpu_execution": {
+        "status": "passed",
+        "seconds": 0.0951533
+      },
+      "entropy_readiness": {
+        "status": "passed",
+        "seconds": 0.384101
+      },
+      "earlier_dc_contract": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "entropy_readiness_contract": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "workflow_cpu_coordination_cpu": {
+        "status": "passed",
+        "seconds": 42.8504
+      },
+      "managed_allocator": {
+        "status": "passed",
+        "seconds": 0.186415
+      },
+      "serializer_storage": {
+        "status": "passed",
+        "seconds": 0.30892
+      },
+      "frontend_storage": {
+        "status": "passed",
+        "seconds": 0.285283
+      },
+      "frontend_storage_plan": {
+        "status": "passed",
+        "seconds": 3.6095
+      },
+      "frontend_field_storage_plan": {
+        "status": "passed",
+        "seconds": 12.3361
+      },
+      "perceptual_storage_plan": {
+        "status": "passed",
+        "seconds": 13.8805
+      },
+      "publication_storage": {
+        "status": "passed",
+        "seconds": 0.18685
+      },
+      "workflow_publication": {
+        "status": "passed",
+        "seconds": 4.27629
+      },
+      "diagnostic_storage": {
+        "status": "passed",
+        "seconds": 0.192484
+      },
+      "ac_strategy_grid": {
+        "status": "passed",
+        "seconds": 0.0431135
+      },
+      "fast_math": {
+        "status": "passed",
+        "seconds": 0.188163
+      },
+      "dct_reference": {
+        "status": "passed",
+        "seconds": 0.102212
+      },
+      "cpu_dct": {
+        "status": "passed",
+        "seconds": 0.292843
+      },
+      "ac_strategy_cost": {
+        "status": "passed",
+        "seconds": 0.187078
+      },
+      "ac_strategy_search": {
+        "status": "passed",
+        "seconds": 0.362572
+      },
+      "quantization": {
+        "status": "passed",
+        "seconds": 0.295605
+      },
+      "quantization_adjustment": {
+        "status": "passed",
+        "seconds": 0.172771
+      },
+      "maximum_error": {
+        "status": "passed",
+        "seconds": 0.297228
+      },
+      "dc_conversion": {
+        "status": "passed",
+        "seconds": 0.286911
+      },
+      "dc_quantization": {
+        "status": "passed",
+        "seconds": 0.100989
+      },
+      "dc_processing": {
+        "status": "passed",
+        "seconds": 0.203504
+      },
+      "cpu_workflow_storage_plan": {
+        "status": "passed",
+        "seconds": 122.168
+      },
+      "cpu_workflow_legacy_dc_tree": {
+        "status": "passed",
+        "seconds": 121.879
+      },
+      "dc_context_tree": {
+        "status": "passed",
+        "seconds": 1.48041
+      },
+      "modular_stream": {
+        "status": "passed",
+        "seconds": 0.106336
+      },
+      "modular_foundation": {
+        "status": "passed",
+        "seconds": 0.114662
+      },
+      "modular_workflow": {
+        "status": "passed",
+        "seconds": 198.218
+      },
+      "modular_oracle": {
+        "status": "passed",
+        "seconds": 0.194942
+      },
+      "modular_conformance": {
+        "status": "passed",
+        "seconds": 36.1537
+      },
+      "modular_policy": {
+        "status": "passed",
+        "seconds": 7.28712
+      },
+      "modular_transform": {
+        "status": "passed",
+        "seconds": 10.0397
+      },
+      "modular_api": {
+        "status": "passed",
+        "seconds": 2.47848
+      },
+      "modular_cli": {
+        "status": "passed",
+        "seconds": 1.97027
+      },
+      "dc_context_tree_oracle": {
+        "status": "passed",
+        "seconds": 0.288389
+      },
+      "dc_processing_oracle": {
+        "status": "failed",
+        "seconds": 4.37884
+      },
+      "adaptive_quantization": {
+        "status": "passed",
+        "seconds": 0.374005
+      },
+      "adaptive_quantization_loop": {
+        "status": "passed",
+        "seconds": 0.283281
+      },
+      "color_transform": {
+        "status": "passed",
+        "seconds": 0.115796
+      },
+      "quantization_pipeline": {
+        "status": "passed",
+        "seconds": 0.368165
+      },
+      "quantization_pipeline_uniform": {
+        "status": "passed",
+        "seconds": 0.123563
+      },
+      "quantization_pipeline_search_policy": {
+        "status": "passed",
+        "seconds": 0.0967402
+      },
+      "low_effort_strategy_policy": {
+        "status": "passed",
+        "seconds": 0.206074
+      },
+      "dc_policy": {
+        "status": "passed",
+        "seconds": 3.84575
+      },
+      "gaborish": {
+        "status": "passed",
+        "seconds": 0.123404
+      },
+      "chroma_from_luma": {
+        "status": "passed",
+        "seconds": 0.183227
+      },
+      "epf": {
+        "status": "passed",
+        "seconds": 0.178657
+      },
+      "reconstruction": {
+        "status": "passed",
+        "seconds": 0.398313
+      },
+      "overwrite_array": {
+        "status": "passed",
+        "seconds": 0.182109
+      },
+      "vardct_frame": {
+        "status": "passed",
+        "seconds": 2.84898
+      },
+      "vardct_frame_view": {
+        "status": "passed",
+        "seconds": 35.8458
+      },
+      "simple_codestream_profile": {
+        "status": "passed",
+        "seconds": 0.263505
+      },
+      "loop_filter": {
+        "status": "passed",
+        "seconds": 0.190131
+      },
+      "butteraugli": {
+        "status": "passed",
+        "seconds": 0.292115
+      },
+      "butteraugli_reference": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_blur_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_frequency_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_distance_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_distance_scalar_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_goldens_generated": {
+        "status": "failed",
+        "seconds": 0.21351
+      },
+      "quantization_tables_generated": {
+        "status": "passed",
+        "seconds": 0.277756
+      },
+      "gpu_image": {
+        "status": "passed",
+        "seconds": 0.0344204
+      },
+      "ac_strategy_storage_plan": {
+        "status": "passed",
+        "seconds": 2.07824
+      },
+      "ac_strategy_host_storage_plan": {
+        "status": "passed",
+        "seconds": 15.4294
+      },
+      "profile_storage_plan": {
+        "status": "passed",
+        "seconds": 0.299616
+      },
+      "gpu_profile_json": {
+        "status": "passed",
+        "seconds": 0.363466
+      },
+      "workflow_admission_cpu": {
+        "status": "passed",
+        "seconds": 1.46612
+      },
+      "codec_install_consumer": {
+        "status": "passed",
+        "seconds": 48.9608
+      }
+    },
+    "retained_failures": {
+      "earlier_dc_contract": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "entropy_readiness_contract": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "dc_processing_oracle": {
+        "status": "failed",
+        "seconds": 4.37884
+      },
+      "butteraugli_reference": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_blur_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_frequency_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_distance_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_distance_scalar_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_goldens_generated": {
+        "status": "failed",
+        "seconds": 0.21351
+      }
+    },
+    "lost_p24_passes": [],
+    "broad_outcomes": {
+      "planning_recipes": {
+        "status": "passed",
+        "seconds": 0.529935
+      },
+      "resident_qualification_controller": {
+        "status": "passed",
+        "seconds": 0.727951
+      },
+      "stdlib_storage_compat": {
+        "status": "passed",
+        "seconds": 0.0286121
+      },
+      "stdlib_storage_compat_cxx23": {
+        "status": "passed",
+        "seconds": 0.0273067
+      },
+      "storage_toolchain": {
+        "status": "failed",
+        "seconds": 0.667545
+      },
+      "bit_writer_append": {
+        "status": "passed",
+        "seconds": 0.763484
+      },
+      "bit_writer_word": {
+        "status": "passed",
+        "seconds": 2.32393
+      },
+      "ans_bit_emission": {
+        "status": "passed",
+        "seconds": 1.08111
+      },
+      "bit_writer": {
+        "status": "passed",
+        "seconds": 0.25427
+      },
+      "entropy": {
+        "status": "passed",
+        "seconds": 0.565199
+      },
+      "context_map": {
+        "status": "passed",
+        "seconds": 1.80161
+      },
+      "ans_reverse_bits": {
+        "status": "passed",
+        "seconds": 1.40569
+      },
+      "sections": {
+        "status": "passed",
+        "seconds": 0.25501
+      },
+      "dc_group": {
+        "status": "passed",
+        "seconds": 0.244293
+      },
+      "weighted_dc": {
+        "status": "passed",
+        "seconds": 0.569118
+      },
+      "ac_group": {
+        "status": "passed",
+        "seconds": 1.95251
+      },
+      "coefficient_order": {
+        "status": "passed",
+        "seconds": 0.914831
+      },
+      "dc_parallel_tokenization": {
+        "status": "passed",
+        "seconds": 0.497562
+      },
+      "ac_direct_tokenization": {
+        "status": "passed",
+        "seconds": 4.84066
+      },
+      "ac_population_reduction": {
+        "status": "passed",
+        "seconds": 2.15901
+      },
+      "token_storage_plan": {
+        "status": "passed",
+        "seconds": 1.57727
+      },
+      "entropy_storage_plan": {
+        "status": "passed",
+        "seconds": 5.19044
+      },
+      "representation_storage_plan": {
+        "status": "passed",
+        "seconds": 0.330091
+      },
+      "serializer_storage_plan": {
+        "status": "passed",
+        "seconds": 80.4978
+      },
+      "ac_section_validation": {
+        "status": "passed",
+        "seconds": 0.28319
+      },
+      "compact_vardct_frame": {
+        "status": "passed",
+        "seconds": 5.98551
+      },
+      "compact_frame_allocation": {
+        "status": "passed",
+        "seconds": 2.40364
+      },
+      "frame_validation": {
+        "status": "passed",
+        "seconds": 4.81019
+      },
+      "sparse_coefficients": {
+        "status": "passed",
+        "seconds": 0.282426
+      },
+      "sparse_vardct_frame": {
+        "status": "passed",
+        "seconds": 24.2098
+      },
+      "sparse_frame_allocation": {
+        "status": "passed",
+        "seconds": 1.72442
+      },
+      "quantization_storage": {
+        "status": "passed",
+        "seconds": 0.363374
+      },
+      "block_context_map": {
+        "status": "passed",
+        "seconds": 0.11775
+      },
+      "codestream_encoder": {
+        "status": "passed",
+        "seconds": 31.1661
+      },
+      "codestream_workflow": {
+        "status": "passed",
+        "seconds": 13.854
+      },
+      "codestream_batch_workflow": {
+        "status": "passed",
+        "seconds": 0.438362
+      },
+      "batch_lifecycle_cpu": {
+        "status": "passed",
+        "seconds": 0.370586
+      },
+      "batch_scheduling_cpu": {
+        "status": "passed",
+        "seconds": 0.253475
+      },
+      "parallel_work": {
+        "status": "passed",
+        "seconds": 0.194937
+      },
+      "worker_launch_failure_startup": {
+        "status": "passed",
+        "seconds": 0.0317896
+      },
+      "worker_launch_failure_forward": {
+        "status": "passed",
+        "seconds": 2.76373
+      },
+      "worker_launch_failure_cpu_color": {
+        "status": "passed",
+        "seconds": 50.8204
+      },
+      "worker_launch_failure_cpu_aq": {
+        "status": "passed",
+        "seconds": 52.0718
+      },
+      "worker_launch_failure_cpu_orders": {
+        "status": "passed",
+        "seconds": 64.4233
+      },
+      "worker_launch_failure_cpu_sections": {
+        "status": "passed",
+        "seconds": 64.0501
+      },
+      "worker_launch_failure_cpu_drains": {
+        "status": "passed",
+        "seconds": 21.0683
+      },
+      "rate_control_search": {
+        "status": "passed",
+        "seconds": 0.283317
+      },
+      "rate_control_probe": {
+        "status": "passed",
+        "seconds": 0.282367
+      },
+      "codestream_cli": {
+        "status": "passed",
+        "seconds": 1.16106
+      },
+      "codestream_sample_generated": {
+        "status": "passed",
+        "seconds": 0.236618
+      },
+      "c_api_image_conversion": {
+        "status": "passed",
+        "seconds": 0.132208
+      },
+      "c_api": {
+        "status": "passed",
+        "seconds": 0.573702
+      },
+      "c_api_cpp": {
+        "status": "passed",
+        "seconds": 0.179912
+      },
+      "pfm": {
+        "status": "passed",
+        "seconds": 0.248816
+      },
+      "butteraugli_primitives": {
+        "status": "passed",
+        "seconds": 0.296106
+      },
+      "butteraugli_stages": {
+        "status": "passed",
+        "seconds": 0.277533
+      },
+      "butteraugli_distance": {
+        "status": "passed",
+        "seconds": 0.294951
+      },
+      "core_geometry": {
+        "status": "passed",
+        "seconds": 0.11431
+      },
+      "resource_budget": {
+        "status": "passed",
+        "seconds": 0.101915
+      },
+      "cpu_budget": {
+        "status": "passed",
+        "seconds": 0.130433
+      },
+      "cpu_execution": {
+        "status": "passed",
+        "seconds": 0.0951533
+      },
+      "entropy_readiness": {
+        "status": "passed",
+        "seconds": 0.384101
+      },
+      "earlier_dc_contract": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "entropy_readiness_contract": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "workflow_cpu_coordination_cpu": {
+        "status": "passed",
+        "seconds": 42.8504
+      },
+      "managed_allocator": {
+        "status": "passed",
+        "seconds": 0.186415
+      },
+      "serializer_storage": {
+        "status": "passed",
+        "seconds": 0.30892
+      },
+      "frontend_storage": {
+        "status": "passed",
+        "seconds": 0.285283
+      },
+      "frontend_storage_plan": {
+        "status": "passed",
+        "seconds": 3.6095
+      },
+      "frontend_field_storage_plan": {
+        "status": "passed",
+        "seconds": 12.3361
+      },
+      "perceptual_storage_plan": {
+        "status": "passed",
+        "seconds": 13.8805
+      },
+      "publication_storage": {
+        "status": "passed",
+        "seconds": 0.18685
+      },
+      "workflow_publication": {
+        "status": "passed",
+        "seconds": 4.27629
+      },
+      "diagnostic_storage": {
+        "status": "passed",
+        "seconds": 0.192484
+      },
+      "ac_strategy_grid": {
+        "status": "passed",
+        "seconds": 0.0431135
+      },
+      "fast_math": {
+        "status": "passed",
+        "seconds": 0.188163
+      },
+      "dct_reference": {
+        "status": "passed",
+        "seconds": 0.102212
+      },
+      "cpu_dct": {
+        "status": "passed",
+        "seconds": 0.292843
+      },
+      "ac_strategy_cost": {
+        "status": "passed",
+        "seconds": 0.187078
+      },
+      "ac_strategy_search": {
+        "status": "passed",
+        "seconds": 0.362572
+      },
+      "quantization": {
+        "status": "passed",
+        "seconds": 0.295605
+      },
+      "quantization_adjustment": {
+        "status": "passed",
+        "seconds": 0.172771
+      },
+      "maximum_error": {
+        "status": "passed",
+        "seconds": 0.297228
+      },
+      "dc_conversion": {
+        "status": "passed",
+        "seconds": 0.286911
+      },
+      "dc_quantization": {
+        "status": "passed",
+        "seconds": 0.100989
+      },
+      "dc_processing": {
+        "status": "passed",
+        "seconds": 0.203504
+      },
+      "cpu_workflow_storage_plan": {
+        "status": "passed",
+        "seconds": 122.168
+      },
+      "cpu_workflow_legacy_dc_tree": {
+        "status": "passed",
+        "seconds": 121.879
+      },
+      "dc_context_tree": {
+        "status": "passed",
+        "seconds": 1.48041
+      },
+      "modular_stream": {
+        "status": "passed",
+        "seconds": 0.207989
+      },
+      "modular_foundation": {
+        "status": "passed",
+        "seconds": 0.213905
+      },
+      "modular_workflow": {
+        "status": "passed",
+        "seconds": 198.218
+      },
+      "modular_oracle": {
+        "status": "passed",
+        "seconds": 0.191425
+      },
+      "modular_conformance": {
+        "status": "passed",
+        "seconds": 35.6815
+      },
+      "modular_policy": {
+        "status": "passed",
+        "seconds": 6.70593
+      },
+      "modular_transform": {
+        "status": "passed",
+        "seconds": 9.94036
+      },
+      "modular_api": {
+        "status": "passed",
+        "seconds": 2.32483
+      },
+      "modular_cli": {
+        "status": "passed",
+        "seconds": 1.7808
+      },
+      "dc_context_tree_oracle": {
+        "status": "passed",
+        "seconds": 0.288389
+      },
+      "dc_processing_oracle": {
+        "status": "failed",
+        "seconds": 4.37884
+      },
+      "adaptive_quantization": {
+        "status": "passed",
+        "seconds": 0.374005
+      },
+      "adaptive_quantization_loop": {
+        "status": "passed",
+        "seconds": 0.283281
+      },
+      "color_transform": {
+        "status": "passed",
+        "seconds": 0.115796
+      },
+      "quantization_pipeline": {
+        "status": "passed",
+        "seconds": 0.368165
+      },
+      "quantization_pipeline_uniform": {
+        "status": "passed",
+        "seconds": 0.123563
+      },
+      "quantization_pipeline_search_policy": {
+        "status": "passed",
+        "seconds": 0.0967402
+      },
+      "low_effort_strategy_policy": {
+        "status": "passed",
+        "seconds": 0.206074
+      },
+      "dc_policy": {
+        "status": "passed",
+        "seconds": 3.84575
+      },
+      "gaborish": {
+        "status": "passed",
+        "seconds": 0.123404
+      },
+      "chroma_from_luma": {
+        "status": "passed",
+        "seconds": 0.183227
+      },
+      "epf": {
+        "status": "passed",
+        "seconds": 0.178657
+      },
+      "reconstruction": {
+        "status": "passed",
+        "seconds": 0.398313
+      },
+      "overwrite_array": {
+        "status": "passed",
+        "seconds": 0.182109
+      },
+      "vardct_frame": {
+        "status": "passed",
+        "seconds": 2.84898
+      },
+      "vardct_frame_view": {
+        "status": "passed",
+        "seconds": 35.8458
+      },
+      "simple_codestream_profile": {
+        "status": "passed",
+        "seconds": 0.263505
+      },
+      "loop_filter": {
+        "status": "passed",
+        "seconds": 0.190131
+      },
+      "butteraugli": {
+        "status": "passed",
+        "seconds": 0.292115
+      },
+      "butteraugli_reference": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_blur_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_frequency_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_distance_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_distance_scalar_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_goldens_generated": {
+        "status": "failed",
+        "seconds": 0.21351
+      },
+      "quantization_tables_generated": {
+        "status": "passed",
+        "seconds": 0.277756
+      },
+      "gpu_image": {
+        "status": "passed",
+        "seconds": 0.0344204
+      },
+      "ac_strategy_storage_plan": {
+        "status": "passed",
+        "seconds": 2.07824
+      },
+      "ac_strategy_host_storage_plan": {
+        "status": "passed",
+        "seconds": 15.4294
+      },
+      "profile_storage_plan": {
+        "status": "passed",
+        "seconds": 0.299616
+      },
+      "gpu_profile_json": {
+        "status": "passed",
+        "seconds": 0.363466
+      },
+      "workflow_admission_cpu": {
+        "status": "passed",
+        "seconds": 1.46612
+      },
+      "codec_install_consumer": {
+        "status": "failed",
+        "seconds": 2.15287
+      }
+    },
+    "final_focused_outcomes": {
+      "storage_toolchain": {
+        "status": "passed",
+        "seconds": 14.2853
+      },
+      "c_api": {
+        "status": "passed",
+        "seconds": 0.609848
+      },
+      "modular_stream": {
+        "status": "passed",
+        "seconds": 0.106336
+      },
+      "modular_foundation": {
+        "status": "passed",
+        "seconds": 0.114662
+      },
+      "modular_oracle": {
+        "status": "passed",
+        "seconds": 0.194942
+      },
+      "modular_conformance": {
+        "status": "passed",
+        "seconds": 36.1537
+      },
+      "modular_policy": {
+        "status": "passed",
+        "seconds": 7.28712
+      },
+      "modular_transform": {
+        "status": "passed",
+        "seconds": 10.0397
+      },
+      "modular_api": {
+        "status": "passed",
+        "seconds": 2.47848
+      },
+      "modular_cli": {
+        "status": "passed",
+        "seconds": 1.97027
+      },
+      "codec_install_consumer": {
+        "status": "passed",
+        "seconds": 48.9608
+      }
+    },
+    "environment_correction": "Initial broad CTest was launched without msvc-env.ps1: storage_toolchain lacked standard headers and codec_install_consumer lacked kernel32.lib. Both passed in the final configured-environment 11-test rerun, which also qualified the shared C publication helper and final headers."
+  },
+  "boundaries": {
+    "native_modular_include_closure": [
+      "include/gjxl/modular.hpp",
+      "src/codec/frame_metadata.h",
+      "src/codec/modular/coding.h",
+      "src/codec/modular/frame.cpp",
+      "src/codec/modular/frame.h",
+      "src/codec/modular/geometry.cpp",
+      "src/codec/modular/geometry.h",
+      "src/codec/modular/gradient.h",
+      "src/codec/modular/image.cpp",
+      "src/codec/modular/image.h",
+      "src/codec/modular/prediction.h",
+      "src/codec/modular/scalar_prediction.h",
+      "src/codec/modular/transform/operations.h",
+      "src/codec/modular/transform/palette.cpp",
+      "src/codec/modular/transform/rct.h",
+      "src/codec/modular/transform/squeeze.cpp",
+      "src/codec/modular/transform/transform.cpp",
+      "src/codec/modular/transform/transform.h",
+      "src/codec/modular/tree.h",
+      "src/codec/modular/tree_learning.cpp",
+      "src/codec/modular/tree_learning.h",
+      "src/codestream/bit_writer.h",
+      "src/codestream/context_map_internal.h",
+      "src/codestream/entropy.h",
+      "src/codestream/entropy_internal.h",
+      "src/codestream/entropy_storage_plan.h",
+      "src/codestream/headers_internal.h",
+      "src/codestream/modular/frame_encoder.cpp",
+      "src/codestream/modular/frame_encoder.h",
+      "src/codestream/modular/parallel.h",
+      "src/codestream/modular/public.cpp",
+      "src/codestream/modular/search.cpp",
+      "src/codestream/modular/search.h",
+      "src/codestream/modular/storage_plan.cpp",
+      "src/codestream/modular/storage_plan.h",
+      "src/codestream/modular/stream_encoder.cpp",
+      "src/codestream/modular/stream_encoder.h",
+      "src/codestream/modular/stream_plan.cpp",
+      "src/codestream/modular/stream_plan.h",
+      "src/codestream/modular/stream_types.h",
+      "src/codestream/modular/tokenization.cpp",
+      "src/codestream/modular/tokenization.h",
+      "src/codestream/modular/tree_codec.cpp",
+      "src/codestream/modular/tree_codec.h",
+      "src/codestream/modular/workflow.cpp",
+      "src/codestream/modular/workflow.h",
+      "src/codestream/sections.h",
+      "src/codestream/storage.h",
+      "src/codestream/workflow_admission_scope.h",
+      "src/codestream/workflow_admission_test.h",
+      "src/core/cpu_budget.h",
+      "src/core/cpu_execution.h",
+      "src/core/execution_domain.h",
+      "src/core/geometry.h",
+      "src/core/host_storage_bound.h",
+      "src/core/managed_allocator.h",
+      "src/core/parallel_work_internal.h",
+      "src/core/publication_output.h",
+      "src/core/publication_vector.h",
+      "src/core/resource_budget.h",
+      "src/core/resource_context.h",
+      "src/core/status.h",
+      "src/core/stdlib_storage_compat.h",
+      "src/core/thread_budget.h",
+      "src/core/worker_launch_internal.h"
+    ],
+    "public_modular_header": "gjxl/modular.hpp",
+    "private_modular_headers_installed": false,
+    "reference_exports": false,
+    "installed_files": 90
+  },
+  "checks": {
+    "reference_disabled_build_and_install": "passed",
+    "installed_workflow_consumer": "passed",
+    "installed_c_cpp_consumers_and_relocation": "passed",
+    "pinned_vardct_conformance": "23/23 passed",
+    "git_diff_check": "passed"
+  },
+  "limits": [
+    "Public scalar CPU profile with at most four participants; GPU remains future work.",
+    "No metadata transforms, empty squeeze residuals, implicit squeeze programs, delta/lossy palettes or responsive passes.",
+    "Integer PNM CLI requires an explicit sRGB declaration; existing float-image wrappers are not lossless input routes.",
+    "Nine baseline failed/not-run tests and eight build failures remain.",
+    "GPU, native ARM64, other platforms, sanitizers and corpus throughput unqualified."
+  ],
+  "commands": [
+    ". ./build/modular-phase1/msvc-env.ps1",
+    "cmake --build build/modular-phase1/candidate --parallel 6 -- -k 0",
+    "ctest --test-dir build/modular-phase1/candidate --parallel 4 --timeout 600 --output-on-failure --output-junit <root>/build/modular-p2.5/final-tests.xml",
+    "cmake -S . -B build/modular-p2.5/native -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20 -DGJXL_ENABLE_METAL=OFF -DGJXL_ENABLE_CUDA=OFF -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF -DGJXL_BUILD_TESTS=OFF",
+    "cmake --build build/modular-p2.5/native --parallel 4",
+    "cmake --install build/modular-p2.5/native --prefix build/modular-p2.5/install",
+    "cmake -S tools/modular_extraction -B build/modular-p2.5/capture -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20 -DCMAKE_PREFIX_PATH=<root>/build/modular-p2.5/install -DGJXL_SOURCE_DIR=<root>",
+    "cmake --build build/modular-p2.5/capture --parallel 4",
+    "build/modular-p2.5/capture/modular_extraction_capture.exe build/modular-p2.5/artifacts 0 build/modular-phase1/photograph-tiled.pfm",
+    "python tools/modular_extraction/evidence.py build/modular-phase1/baseline-stages --candidate build/modular-p2.5/artifacts --output build/modular-p2.5/comparison.json",
+    "build/modular-p2.5/capture/modular_extraction_capture.exe build/modular-p2.5/photo-artifacts 1 build/modular-phase1/photograph-tiled.pfm photo_frame_p0,photo_frame_p1",
+    "python tools/modular_extraction/evidence.py build/modular-phase1/photo-stage-timings/round-7-baseline --candidate build/modular-p2.5/photo-artifacts --output build/modular-p2.5/photo-comparison.json",
+    "build/modular-phase1/candidate/gjxl_codestream_conformance_test.exe --decoder <root>/build/modular-phase1/pinned-libjxl-x64/tools/djxl.exe --info <root>/build/modular-phase1/pinned-libjxl-x64/tools/jxlinfo.exe --encoder <root>/build/modular-p2.5/native/gjxl_encode.exe --sample <root>/testdata/codestream_sample.pfm --artifacts <root>/build/modular-p2.5/vardct-conformance",
+    "Write native_consumer_cmake to build/modular-p2.5/native-consumer-source/CMakeLists.txt.",
+    "cmake -S build/modular-p2.5/native-consumer-source -B build/modular-p2.5/native-consumer -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20 -DCMAKE_PREFIX_PATH=<root>/build/modular-p2.5/install -DGJXL_SOURCE_DIR=<root>",
+    "cmake --build build/modular-p2.5/native-consumer --parallel 4",
+    "build/modular-p2.5/native-consumer/modular_native_consumer.exe",
+    "dumpbin /dependents build/modular-p2.5/native-consumer/modular_native_consumer.exe",
+    "cmake --build build/modular-phase1/candidate --target gjxl_modular_workflow_test gjxl_modular_conformance_test gjxl_modular_foundation_test gjxl_modular_oracle_test --parallel 4",
+    "cmake --build build/modular-phase1/candidate --target gjxl_modular_policy_test --parallel 4",
+    "With pinned-libjxl-x64/tools on PATH: build/modular-phase1/candidate/gjxl_modular_policy_test.exe build/modular-phase1/candidate/modular-policy > build/modular-p2.5/policy-tests.log",
+    "cmake --build build/modular-phase1/candidate --target gjxl_modular_transform_test --parallel 4",
+    "With pinned tools on PATH: build/modular-phase1/candidate/gjxl_modular_transform_test.exe build/modular-phase1/candidate/modular-transform palette",
+    "With pinned tools on PATH: build/modular-phase1/candidate/gjxl_modular_transform_test.exe build/modular-phase1/candidate/modular-transform > build/modular-p2.5/transform-tests.log",
+    ". ./build/modular-phase1/msvc-env.ps1 (required before build and compiler/installed-consumer tests)",
+    "cmake --build build/modular-phase1/candidate --parallel 6 -- -k 0",
+    "ctest --test-dir build/modular-phase1/candidate -R '^modular_(api|cli|policy|transform|conformance|stream|foundation|oracle)$|^c_api$|^storage_toolchain$|^codec_install_consumer$' --parallel 4 --timeout 600 --output-on-failure --output-junit <root>/build/modular-p2.5/final-focused-tests.xml",
+    "cargo +stable-x86_64-pc-windows-msvc test --manifest-path rust/Cargo.toml --workspace (MSVC env, CMAKE_GENERATOR=Ninja, CC=CXX=portable cl.exe, LIBCLANG_PATH=VS LLVM x64 bin, GJXL_MODULAR_TEST_ARTIFACTS=<root>/build/modular-p2.5/rust-artifacts)",
+    "gjxl_modular_api_test.exe --check-file <encoded.jxl> <expected uint16 LE samples> <width> <height> <channels> <bits> (all 18 Rust artifacts)"
+  ],
+  "native_consumer_cmake": "cmake_minimum_required(VERSION 3.25)\nproject(modular_native_consumer LANGUAGES CXX)\nfind_package(gjxl CONFIG REQUIRED COMPONENTS codestream)\nfile(TO_CMAKE_PATH \"${GJXL_SOURCE_DIR}\" GJXL_SOURCE_DIR)\nadd_executable(modular_native_consumer \"${GJXL_SOURCE_DIR}/tests/modular_workflow_test.cpp\")\ntarget_compile_features(modular_native_consumer PRIVATE cxx_std_20)\ntarget_include_directories(modular_native_consumer PRIVATE \"${GJXL_SOURCE_DIR}/src\")\ntarget_link_libraries(modular_native_consumer PRIVATE gjxl::codestream)\n"
+}

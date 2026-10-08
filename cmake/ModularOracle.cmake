@@ -80,3 +80,19 @@ if(WIN32)
   set_tests_properties(modular_transform PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${GJXL_MODULAR_ORACLE_BUILD}/tools")
 endif()
+
+add_executable(gjxl_modular_api_test tests/modular_api_test.cpp)
+target_link_libraries(gjxl_modular_api_test PRIVATE gjxl_c gjxl_codestream gjxl_modular_reference)
+add_test(NAME modular_api COMMAND gjxl_modular_api_test)
+if(WIN32)
+  set_tests_properties(modular_api PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${GJXL_MODULAR_ORACLE_BUILD}/tools")
+endif()
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME modular_cli COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/modular_cli_test.py"
+    "$<TARGET_FILE:gjxl_encode>" "$<TARGET_FILE:gjxl_modular_api_test>" "${CMAKE_CURRENT_BINARY_DIR}/modular-cli")
+  if(WIN32)
+    set_tests_properties(modular_cli PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${GJXL_MODULAR_ORACLE_BUILD}/tools")
+  endif()
+endif()

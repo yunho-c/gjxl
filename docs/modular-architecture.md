@@ -5,10 +5,11 @@ Status: Phase 1 extraction implemented; see the
 [P2.0 foundations and independent reference infrastructure](modular-p2.0.md),
 the [P2.1 private RGB8 CPU encoder](modular-p2.1.md),
 [P2.2 integer formats and alpha preservation](modular-p2.2.md),
-[P2.3 scalar predictors, RCT and bounded global policy](modular-p2.3.md), and
-[P2.4 exact palette and scalar squeeze](modular-p2.4.md) are implemented.
-P2.5 onward remains a proposed implementation sequence. Whole-image Modular
-encoding is available internally; public API and CLI integration remain P2.5. Originally written
+[P2.3 scalar predictors, RCT and bounded global policy](modular-p2.3.md),
+[P2.4 exact palette and scalar squeeze](modular-p2.4.md), and
+[P2.5 CPU scheduling and public integration](modular-p2.5.md) are implemented.
+P2.6 remains the CPU-oracle freeze and GPU-boundary milestone. Whole-image Modular
+encoding is available through C++, C, Rust and the integer-input CLI. Originally written
 2026-10-07 against GJXL
 `67caa6d89830f6a13c057923e34f80753a161e9d` and pinned libjxl
 `e8ff09762481785938d8e4e01333ed3917571161`.
@@ -625,6 +626,13 @@ allocations cannot leave partially changed images or published output.
 
 ### P2.5: CPU scheduling, API and tooling integration
 
+Implemented; see the [public API, scheduling and qualification record](modular-p2.5.md).
+The installed `gjxl/modular.hpp` entry point keeps algorithm types private.
+Tokenization and fixed-model group emission use admitted workers with canonical
+output placement; the private one-thread workflow remains the CPU oracle.
+The C and Rust APIs preserve source integer samples, and the native CLI reads
+binary PGM/PPM/PAM with an explicit sRGB declaration.
+
 Keep the serial implementation callable as the CPU oracle. Add admitted CPU
 parallelism over independent streams/groups using fixed model data and
 participant-local predictor state. Global training, model merging and output
@@ -755,7 +763,7 @@ checks require the appropriate hardware; unrun configurations remain explicitly
 unqualified. Phase 1 results are recorded in the
 [qualification report](modular-phase1/README.md). Phase 2 results are recorded
 for [P2.0](modular-p2.0.md), [P2.1](modular-p2.1.md) and
-[P2.2](modular-p2.2.md), [P2.3](modular-p2.3.md) and [P2.4](modular-p2.4.md); later milestones remain
+[P2.2](modular-p2.2.md), [P2.3](modular-p2.3.md) and [P2.4](modular-p2.4.md) and [P2.5](modular-p2.5.md); later milestones remain
 planned.
 
 ### Compression and performance gates

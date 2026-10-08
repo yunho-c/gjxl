@@ -352,6 +352,7 @@ add_library(
   src/codestream/modular/tokenization.cpp
   src/codestream/modular/storage_plan.cpp
   src/codestream/modular/frame_encoder.cpp
+  src/codestream/modular/public.cpp
   src/codestream/modular/workflow.cpp
   src/codestream/huffman.cpp
   src/codestream/rate_control.cpp
@@ -371,6 +372,7 @@ if(GJXL_ENABLE_METAL)
 endif()
 
 add_library(gjxl::codestream ALIAS gjxl_codestream)
+target_include_directories(gjxl_codestream PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>)
 
 set_target_properties(
   gjxl_codestream
@@ -465,6 +467,8 @@ target_link_libraries(
 add_executable(
   gjxl_encode
   tools/gjxl_encode.cpp
+  tools/modular_cli.cpp
+  src/io/pnm.cpp
 )
 
 target_link_libraries(

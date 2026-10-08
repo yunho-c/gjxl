@@ -12,6 +12,7 @@ names are unchanged.
 
 | Consumer interface | Headers | CMake target |
 | --- | --- | --- |
+| Lossless Modular C++ workflow | `gjxl/modular.hpp` | `gjxl::codestream` |
 | C API | `gjxl/gjxl.h` | `gjxl::c` |
 | C/C++ execution-domain bridge | `gjxl/execution_domain.hpp` | `gjxl::c` plus the relevant C++ target |
 | Core values, images and execution domain | Public `core/` entries in the manifest | `gjxl::core` |
@@ -81,3 +82,7 @@ An in-place install over an older package can retain obsolete headers: CMake
 does not uninstall files removed from this manifest. Use a fresh prefix or
 remove the old package through its packaging/uninstall mechanism when replacing
 such an installation.
+
+The Modular workflow publishes only source views, options and summary types. Its
+transform/tree/predictor algorithms, worker machinery and storage planners remain
+private. See [P2.5](modular-p2.5.md) for the lossless API and format contract.

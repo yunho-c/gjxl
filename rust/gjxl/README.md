@@ -33,3 +33,24 @@ ordinary rounding and disable smoothing regardless of effort, set
 `dc_quantization: gjxl::DcQuantization::Round` and
 `adaptive_dc_smoothing: Some(false)`. Previous explicit boolean smoothing values
 must now be wrapped in `Some(...)`. See [the DC policy](../../docs/dc-processing.md).
+
+## Lossless Modular
+
+`Context::encode_modular` preserves integer samples and unassociated alpha; it
+uses CPU for automatic execution. This is independent of `encode` and its VarDCT
+quality/distance controls.
+
+```rust
+let image = gjxl::ImageView::new(width, height, stride_bytes, &pixels,
+                                gjxl::PixelFormat::Rgba16BeSrgb)?;
+let encoded = context.encode_modular(&image, gjxl::ModularOptions {
+    search: true,
+    entropy: gjxl::ModularEntropy::Ans,
+})?;
+```
+
+Use `Gray8Srgb`, `Rgb8Srgb`, `Rgba8Srgb`, or the `Gray16`, `Rgb16`, `Rgba16`
+variants ending in `LeSrgb`/`BeSrgb`. Buffers are byte slices with explicit byte
+order; padded rows and unaligned data are supported. Source colors are sRGB (or
+its gray transfer function); no float conversion or alpha premultiplication is
+performed. Bindgen includes the new sized C options and entry point automatically.

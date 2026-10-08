@@ -6,6 +6,7 @@
 #include "codestream/modular/stream_encoder.h"
 #include "codestream/sections.h"
 #include <algorithm>
+#include "codestream/modular/parallel.h"
 
 namespace gjxl::modular_internal {
 using namespace codestream_internal;
@@ -29,7 +30,7 @@ Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat fo
 }
 Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat format,
                                          EntropyCodingMode mode, const ModularCodingPolicy &policy,
-                                         ModularWorkflowStoragePlan *out) {
+                                         ModularWorkflowStoragePlan *out, size_t cpu_threads) {
   if (!out)
     return Status::InvalidArgument("Null Modular workflow plan");
   if (mode != EntropyCodingMode::kPrefix && mode != EntropyCodingMode::kAns)
@@ -41,7 +42,10 @@ Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat fo
     return s;
   const size_t contexts = tree_layout.leaves;
   const size_t tree_tokens = 5 * contexts + 2 * (policy.tree.size - contexts);
+  if (cpu_threads > 256)
+    return Status::InvalidArgument("Invalid Modular CPU thread count");
   ModularWorkflowStoragePlan p;
+  p.participants = ModularParticipants(cpu_threads);
   if (auto s = ModularFrameGeometry::Create(extent, &p.geometry); !s.ok())
     return s;
   ModularInputProfile profile;
@@ -102,12 +106,14 @@ Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat fo
       !tokens.AddVector<EntropyTokenStreamView>(p.streams, VectorCapacityPolicy::kFreshExact))
     return Overflow();
   p.preparation = tokens;
+  if (!p.preparation.AddVector<size_t>(p.streams + 1, VectorCapacityPolicy::kFreshExact))
+    return Overflow();
   if (!p.preparation.Add(image))
     return Overflow();
 
   if (tree_layout.weighted) {
     const size_t width = maximum_width;
-    for (size_t i = 0; i < 5; ++i)
+    for (size_t i = 0; i < 5 * p.participants; ++i)
       if (!p.preparation.AddVector<uint32_t>((width + 2) * 2, VectorCapacityPolicy::kFreshExact))
         return Overflow();
   }
@@ -183,7 +189,7 @@ Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat fo
   }
   p.emission = tokens;
   if (!p.emission.Add(model.owned) || !p.emission.Add(sections) || !p.emission.Add(tree.scratch) ||
-      !p.emission.Add(model.write_scratch) || !p.emission.Add(payload.scratch))
+      !p.emission.Add(model.write_scratch) || !p.emission.Add(payload.scratch, p.participants))
     return Overflow();
 
   // Assembly retains sections; headers have bounded temporary writers. TOC
@@ -210,6 +216,13 @@ Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat fo
   p.publication = layout.owned;
   if (!p.publication.Add(file_writer) || !p.publication.Add(p.output))
     return Overflow();
+  if (p.participants > 1) {
+    HostStorageBound workers;
+    if (!workers.AddVector<Status>(p.streams, VectorCapacityPolicy::kFreshExact) ||
+        !workers.AddVector<std::thread>(p.participants - 1, VectorCapacityPolicy::kFreshExact) ||
+        !p.preparation.Add(workers) || !p.emission.Add(workers))
+      return Overflow();
+  }
   p.working = p.output;
   for (auto phase : {p.preparation, p.modeling, p.emission, p.assembly, p.publication})
     p.working.peak_bytes = std::max(p.working.peak_bytes, phase.peak_bytes);

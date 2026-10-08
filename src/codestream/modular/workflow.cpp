@@ -20,17 +20,18 @@ Status Encode(PackedModularImageView input, ModularEncodingOptions options,
   if (options.search)
     return EncodeSearch(input, options, output);
   ModularWorkflowStoragePlan storage;
-  if (auto s = ComputeModularWorkflowStoragePlan(input.extent, input.format, options.entropy,
-                                                 options.coding, &storage);
+  if (auto s =
+          ComputeModularWorkflowStoragePlan(input.extent, input.format, options.entropy,
+                                            options.coding, &storage, options.cpu_thread_count);
       !s.ok())
     return s;
   codestream_internal::WorkflowAdmission admission;
   if (auto s = admission.Start(storage.working.peak_bytes, options.execution_domain); !s.ok())
     return s;
   thread_budget_internal::CpuExecutionScope execution;
-  if (auto s = execution.Start(options.execution_domain, 1); !s.ok())
+  if (auto s = execution.Start(options.execution_domain, options.cpu_thread_count); !s.ok())
     return s;
-  thread_budget_internal::EncodeScope serial(1);
+  thread_budget_internal::EncodeScope threads(options.cpu_thread_count);
   resource_budget_internal::ManagedHostScope managed(
       resource_budget_internal::ResourceClass::kPreparation);
   ModularStreamPlan layout;
@@ -50,7 +51,8 @@ Status Encode(PackedModularImageView input, ModularEncodingOptions options,
             BuildModularStreamPlan(storage.geometry, shape.channels(), shape.metadata, &layout);
         !s.ok())
       return s;
-    if (auto s = TokenizeModular(frame, layout, options.coding, &tokens); !s.ok())
+    if (auto s = TokenizeModular(frame, layout, options.coding, &tokens, storage.participants);
+        !s.ok())
       return s;
   }
   codestream_internal::CodestreamBuffer candidate;
@@ -72,18 +74,19 @@ Status EncodeSearch(PackedModularImageView input, ModularEncodingOptions options
   if (options.coding != ModularCodingPolicy{})
     return Status::InvalidArgument("Search cannot override a prescribed Modular policy");
   ModularWorkflowStoragePlan storage;
-  if (auto s =
-          ComputeModularSearchStoragePlan(input.extent, input.format, options.entropy, &storage);
+  if (auto s = ComputeModularSearchStoragePlan(input.extent, input.format, options.entropy,
+                                               &storage, options.cpu_thread_count);
       !s.ok())
     return s;
   codestream_internal::WorkflowAdmission admission;
   if (auto s = admission.Start(storage.working.peak_bytes, options.execution_domain); !s.ok())
     return s;
   thread_budget_internal::CpuExecutionScope execution;
-  if (auto s = execution.Start(options.execution_domain, 1); !s.ok())
+  if (auto s = execution.Start(options.execution_domain, options.cpu_thread_count); !s.ok())
     return s;
   resource_budget_internal::ManagedHostScope managed(
       resource_budget_internal::ResourceClass::kPreparation);
+  thread_budget_internal::EncodeScope threads(options.cpu_thread_count);
   options.search = false;
   codestream_internal::CodestreamBuffer best;
   if (auto s = Encode(input, options, &best); !s.ok())

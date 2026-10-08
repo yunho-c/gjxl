@@ -5,6 +5,7 @@
 #include "codestream/modular/stream_encoder.h"
 #include "codestream/modular/tree_codec.h"
 #include "codestream/sections.h"
+#include "codestream/modular/parallel.h"
 
 namespace gjxl::modular_internal {
 using namespace codestream_internal;
@@ -18,53 +19,73 @@ Status EncodeModularFrame(const codec_internal::ImageMetadata &metadata,
   {
     PreparedModularTokens tokens = std::move(input);
     EntropyCode model;
-    if (auto s = OptimizeEntropyCode(
-            tokens.streams, {.context_count = static_cast<uint32_t>(tokens.context_count)}, &model);
-        !s.ok())
-      return s;
-    if (mode == EntropyCodingMode::kAns) {
-      EntropyCode ans;
-      if (auto s = OptimizeAnsEntropyCode(tokens.streams, model, &ans); !s.ok())
+    {
+      thread_budget_internal::EncodeScope serial(1);
+      if (auto s = OptimizeEntropyCode(
+              tokens.streams, {.context_count = static_cast<uint32_t>(tokens.context_count)},
+              &model);
+          !s.ok())
         return s;
-      model = std::move(ans);
+      if (mode == EntropyCodingMode::kAns) {
+        EntropyCode ans;
+        if (auto s = OptimizeAnsEntropyCode(tokens.streams, model, &ans); !s.ok())
+          return s;
+        model = std::move(ans);
+      }
     }
     sections.resize(layout.geometry.section_count());
-    auto &global = sections[0];
-    if (auto s = global.WithMaxBits(
-            storage.maximum_global_bits,
-            [&]() -> Status {
-              if (auto s = global.WriteBits(1, 1); !s.ok())
-                return s; // default DC matrices
-              if (auto s = WriteGlobalTreeInTransaction(
-                      std::span(tokens.tree_tokens).first(tokens.tree_token_count), &global);
-                  !s.ok())
-                return s;
-              if (auto s = WriteGlobalModelInTransaction(model, &global); !s.ok())
-                return s;
-              if (auto s = WriteCodingStreamHeader(tokens.policy.weighted, tokens.policy.rct,
-                                                   tokens.policy.transforms, &global);
-                  !s.ok())
-                return s;
-              if (tokens.streams[0].size())
-                return WriteStreamTokensWithValidatedModel(tokens.streams[0], model, &global);
-              return Status::Ok();
-            });
-        !s.ok())
-      return s;
-    for (size_t i = 1; i < layout.streams.size(); ++i) {
-      if (tokens.streams[i].size() == 0)
-        continue;
-      auto &section = sections[layout.streams[i].section];
-      if (auto s = section.WithMaxBits(
-              storage.maximum_group_bits,
+    {
+      thread_budget_internal::EncodeScope serial(1);
+      auto &global = sections[0];
+      if (auto s = global.WithMaxBits(
+              storage.maximum_global_bits,
               [&]() -> Status {
-                if (auto s = WriteCodingStreamHeader(tokens.policy.weighted, 0, &section); !s.ok())
+                if (auto s = global.WriteBits(1, 1); !s.ok())
+                  return s; // default DC matrices
+                if (auto s = WriteGlobalTreeInTransaction(
+                        std::span(tokens.tree_tokens).first(tokens.tree_token_count), &global);
+                    !s.ok())
                   return s;
-                return WriteStreamTokensWithValidatedModel(tokens.streams[i], model, &section);
+                if (auto s = WriteGlobalModelInTransaction(model, &global); !s.ok())
+                  return s;
+                if (auto s = WriteCodingStreamHeader(tokens.policy.weighted, tokens.policy.rct,
+                                                     tokens.policy.transforms, &global);
+                    !s.ok())
+                  return s;
+                if (tokens.streams[0].size())
+                  return WriteStreamTokensWithValidatedModel(tokens.streams[0], model, &global);
+                return Status::Ok();
               });
           !s.ok())
         return s;
     }
+    size_t active_streams = 0;
+    for (size_t i = 1; i < tokens.streams.size(); ++i)
+      active_streams += tokens.streams[i].size() != 0;
+    const size_t participants = std::min(storage.participants, std::max(size_t{1}, active_streams));
+    if (auto status = RunModularStreams(
+            layout.streams.size() - 1, participants,
+            thread_budget_internal::WorkerLaunchSite::kModularEmission,
+            [&](size_t index) -> Status {
+              const size_t i = index + 1;
+              if (tokens.streams[i].size() == 0)
+                return Status::Ok();
+              auto &section = sections[layout.streams[i].section];
+              if (auto s = section.WithMaxBits(
+                      storage.maximum_group_bits,
+                      [&]() -> Status {
+                        if (auto s = WriteCodingStreamHeader(tokens.policy.weighted, 0, &section);
+                            !s.ok())
+                          return s;
+                        return WriteStreamTokensWithValidatedModel(tokens.streams[i], model,
+                                                                   &section);
+                      });
+                  !s.ok())
+                return s;
+              return Status::Ok();
+            });
+        !status.ok())
+      return status;
   } // Tokens and model are no longer live during final assembly.
   BitWriter file;
   if (auto s = WriteImageHeader(metadata, &file); !s.ok())
