@@ -16,11 +16,17 @@ Status WriteStreamHeader(const ModularStreamHeader &header, BitWriter *writer) {
 
 Status WriteCodingStreamHeader(const WeightedPredictorParameters &weighted, uint8_t rct,
                                BitWriter *writer) {
+  return WriteCodingStreamHeader(weighted, rct, {}, writer);
+}
+Status WriteCodingStreamHeader(const WeightedPredictorParameters &weighted, uint8_t rct,
+                               const TransformSequence &transforms, BitWriter *writer) {
   if (!writer)
     return Status::InvalidArgument("Null Modular stream header output");
   if (!weighted.valid() || rct >= 42)
     return Status::InvalidArgument("Invalid Modular stream parameters");
-  return writer->WithMaxBits(kMaximumCodingStreamHeaderBits, [&]() -> Status {
+  if (auto s = ValidateTransforms(transforms); !s.ok())
+    return s;
+  return writer->WithMaxBits(MaximumCodingStreamHeaderBits(transforms), [&]() -> Status {
     if (auto s = writer->WriteBits(1, 1); !s.ok())
       return s;
     const bool defaults = weighted == WeightedPredictorParameters{};
@@ -34,7 +40,10 @@ Status WriteCodingStreamHeader(const WeightedPredictorParameters &weighted, uint
         if (auto s = writer->WriteBits(4, w); !s.ok())
           return s;
     }
-    if (auto s = writer->WriteBits(2, rct ? 1 : 0); !s.ok())
+    const size_t count = transforms.size + (rct != 0);
+    if (auto s =
+            count < 2 ? writer->WriteBits(2, count) : writer->WriteBits(6, 2 | ((count - 2) << 2));
+        !s.ok())
       return s;
     if (rct) {
       if (auto s = writer->WriteBits(2, 0); !s.ok())
@@ -42,13 +51,51 @@ Status WriteCodingStreamHeader(const WeightedPredictorParameters &weighted, uint
       if (auto s = writer->WriteBits(5, 0); !s.ok())
         return s; // begin_c=0
       const auto type = rct;
-      if (type == 6)
-        return writer->WriteBits(2, 0);
-      if (type < 4)
-        return writer->WriteBits(4, 1 | (uint64_t{type} << 2));
-      if (type < 18)
-        return writer->WriteBits(6, 2 | (uint64_t{type - 2u} << 2));
-      return writer->WriteBits(8, 3 | (uint64_t{type - 10u} << 2));
+      Status status = type == 6   ? writer->WriteBits(2, 0)
+                      : type < 4  ? writer->WriteBits(4, 1 | (uint64_t{type} << 2))
+                      : type < 18 ? writer->WriteBits(6, 2 | (uint64_t{type - 2u} << 2))
+                                  : writer->WriteBits(8, 3 | (uint64_t{type - 10u} << 2));
+      if (!status.ok())
+        return status;
+    }
+    auto begin = [&](uint8_t c) {
+      return c < 8 ? writer->WriteBits(5, uint64_t{c} << 2)
+                   : writer->WriteBits(8, 1 | (uint64_t{c - 8u} << 2));
+    };
+    for (size_t i = 0; i < transforms.size; ++i) {
+      const auto &t = transforms.entries[i];
+      if (t.kind == TransformKind::kPalette) {
+        if (auto s = writer->WriteBits(2, 1); !s.ok())
+          return s;
+        if (auto s = begin(t.begin); !s.ok())
+          return s;
+        if (auto s = t.count == 1   ? writer->WriteBits(2, 0)
+                     : t.count == 3 ? writer->WriteBits(2, 1)
+                     : t.count == 4 ? writer->WriteBits(2, 2)
+                                    : writer->WriteBits(15, 3 | (uint64_t{t.count - 1u} << 2));
+            !s.ok())
+          return s;
+        if (auto s = t.colors < 256 ? writer->WriteBits(10, uint64_t{t.colors} << 2)
+                                    : writer->WriteBits(12, 1);
+            !s.ok())
+          return s;
+        if (auto s = writer->WriteBits(6, 0); !s.ok())
+          return s; // no deltas, zero predictor
+      } else {
+        if (auto s = writer->WriteBits(2, 2); !s.ok())
+          return s;
+        if (auto s = writer->WriteBits(6, 1); !s.ok())
+          return s; // one explicit squeeze
+        if (auto s = writer->WriteBits(2, uint64_t{t.horizontal} | (uint64_t{t.in_place} << 1));
+            !s.ok())
+          return s;
+        if (auto s = begin(t.begin); !s.ok())
+          return s;
+        if (auto s = t.count < 4 ? writer->WriteBits(2, t.count - 1)
+                                 : writer->WriteBits(6, 3 | (uint64_t{t.count - 4u} << 2));
+            !s.ok())
+          return s;
+      }
     }
     return Status::Ok();
   });

@@ -68,3 +68,15 @@ if(WIN32)
   set_tests_properties(modular_policy PROPERTIES
     ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${GJXL_MODULAR_ORACLE_BUILD}/tools")
 endif()
+
+add_executable(gjxl_modular_transform_test tests/modular_transform_test.cpp)
+target_link_libraries(gjxl_modular_transform_test PRIVATE gjxl_codestream gjxl_modular_reference)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  target_compile_options(gjxl_modular_transform_test PRIVATE -fno-sanitize=vptr)
+endif()
+add_test(NAME modular_transform COMMAND gjxl_modular_transform_test
+  "${CMAKE_CURRENT_BINARY_DIR}/modular-transform")
+if(WIN32)
+  set_tests_properties(modular_transform PROPERTIES
+    ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${GJXL_MODULAR_ORACLE_BUILD}/tools")
+endif()

@@ -4,9 +4,10 @@ Status: Phase 1 extraction implemented; see the
 [qualification record and platform limits](modular-phase1/README.md).
 [P2.0 foundations and independent reference infrastructure](modular-p2.0.md),
 the [P2.1 private RGB8 CPU encoder](modular-p2.1.md),
-[P2.2 integer formats and alpha preservation](modular-p2.2.md), and
-[P2.3 scalar predictors, RCT and bounded global policy](modular-p2.3.md) are implemented.
-P2.4 onward remains a proposed implementation sequence. Whole-image Modular
+[P2.2 integer formats and alpha preservation](modular-p2.2.md),
+[P2.3 scalar predictors, RCT and bounded global policy](modular-p2.3.md), and
+[P2.4 exact palette and scalar squeeze](modular-p2.4.md) are implemented.
+P2.5 onward remains a proposed implementation sequence. Whole-image Modular
 encoding is available internally; public API and CLI integration remain P2.5. Originally written
 2026-10-07 against GJXL
 `67caa6d89830f6a13c057923e34f80753a161e9d` and pinned libjxl
@@ -582,6 +583,16 @@ heuristic choices or compressed bytes is not a requirement.
 
 ### P2.4: palette and squeeze as separate CPU milestones
 
+Implemented in the private serial CPU workflow. See the
+[P2.4 architecture, capability and qualification record](modular-p2.4.md).
+The descriptors and allocation-free shape planner live in `codec/modular/transform`,
+with separate palette and squeeze implementations and reverse-order inversion.
+Frame preparation publishes immutable transformed planes; codestream planning and
+tokenization consume those shapes. Bounded transform selection remains in
+`codestream/modular/search.*` and complete-file orchestration in `workflow.cpp`.
+The initial limits are eight descriptors, 64 channels, exact palettes of up to 256
+entries, and explicit nonempty squeeze splits of ordinary channels.
+
 Implement and qualify palette before squeeze. Each transform needs:
 
 - an explicit descriptor, validation and metadata/channel-shape application;
@@ -744,7 +755,7 @@ checks require the appropriate hardware; unrun configurations remain explicitly
 unqualified. Phase 1 results are recorded in the
 [qualification report](modular-phase1/README.md). Phase 2 results are recorded
 for [P2.0](modular-p2.0.md), [P2.1](modular-p2.1.md) and
-[P2.2](modular-p2.2.md) and [P2.3](modular-p2.3.md); later milestones remain
+[P2.2](modular-p2.2.md), [P2.3](modular-p2.3.md) and [P2.4](modular-p2.4.md); later milestones remain
 planned.
 
 ### Compression and performance gates

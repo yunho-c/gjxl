@@ -313,7 +313,7 @@ void Workflow(Extent2D extent, EntropyCodingMode mode, bool faults,
   Empty(*small);
   if (faults) {
     size_t failure_count = 0;
-    for (; failure_count < 10000; ++failure_count) {
+    for (; failure_count < 30000; ++failure_count) {
       ArmManagedHostAllocationFailureAfterForTest(failure_count);
       status = EncodeModularImage(view, options, &output);
       const bool pending = ManagedHostAllocationFailurePendingForTest();
@@ -327,7 +327,7 @@ void Workflow(Extent2D extent, EntropyCodingMode mode, bool faults,
                 output == std::vector<uint8_t>({7, 8, 9}),
             "Allocation failure changed output or status");
     }
-    Check(failure_count > 10 && failure_count < 10000, "Allocation sweep did not finish");
+    Check(failure_count > 10 && failure_count < 30000, "Allocation sweep did not finish");
     std::cout << "allocation failures " << (mode == EntropyCodingMode::kPrefix ? "prefix " : "ANS ")
               << "format " << static_cast<int>(format) << ' ' << extent.width << 'x'
               << extent.height << " policy "
@@ -341,11 +341,81 @@ void Workflow(Extent2D extent, EntropyCodingMode mode, bool faults,
         "Recovery, determinism or input immutability failed");
   Empty(*domain);
 }
+void TransformValidation() {
+  ModularInputProfile profile;
+  Ok(ResolveModularInput({257, 3}, PackedModularFormat::kRgba16, &profile));
+  for (unsigned error = 0; error < 10; ++error) {
+    ModularCodingPolicy policy;
+    policy.transforms.size = 1;
+    auto &t = policy.transforms.entries[0];
+    t = {TransformKind::kPalette, 0, 4, 256};
+    switch (error) {
+    case 0:
+      policy.transforms.size = kMaximumTransforms + 1;
+      break;
+    case 1:
+      t.count = 0;
+      break;
+    case 2:
+      t.count = 5;
+      break;
+    case 3:
+      t.colors = 0;
+      break;
+    case 4:
+      t.colors = 257;
+      break;
+    case 5:
+      t.begin = 4;
+      break;
+    case 6:
+      t.kind = static_cast<TransformKind>(255);
+      break;
+    case 7:
+      t = {TransformKind::kSqueeze, 0, 20};
+      break;
+    case 8:
+      t = {TransformKind::kSqueeze, 3, 2};
+      break;
+    case 9:
+      policy.transforms.size = 2;
+      policy.transforms.entries[1] = {TransformKind::kSqueeze, 0, 1}; // metadata
+      break;
+    }
+    ModularWorkflowStoragePlan storage;
+    ArmNextManagedHostAllocationFailureForTest();
+    Check(!ComputeModularWorkflowStoragePlan({257, 3}, PackedModularFormat::kRgba16,
+                                             EntropyCodingMode::kPrefix, policy, &storage)
+                  .ok() &&
+              ManagedHostAllocationFailurePendingForTest(),
+          "Invalid transform allocated or passed validation");
+    DisarmManagedHostAllocationFailureForTest();
+  }
+  ModularImage input, output;
+  const ChannelDescriptor descriptor{{257, 1}};
+  Ok(ModularImage::Create({&descriptor, 1}, 0, &input));
+  Ok(ModularImage::Create({&descriptor, 1}, 0, &output));
+  for (size_t i = 0; i < 257; ++i)
+    input.samples(0)[i] = static_cast<int32_t>(i);
+  output.samples(0)[0] = 73;
+  TransformSequence sequence;
+  sequence.size = 1;
+  sequence.entries[0] = {TransformKind::kPalette, 0, 1, 256};
+  Check(!ForwardTransforms(input, sequence, &output).ok() && output.samples(0)[0] == 73,
+        "Excess palette colors changed output");
+  input.samples(0)[0] = INT32_MAX;
+  input.samples(0)[1] = INT32_MIN;
+  sequence.entries[0] = {TransformKind::kSqueeze, 0, 1};
+  Check(!ForwardTransforms(input, sequence, &output).ok() && output.samples(0)[0] == 73 &&
+            input.samples(0)[0] == INT32_MAX,
+        "Squeeze overflow was not atomic");
+}
 } // namespace
 int main() try {
   Validation();
   FormatValidation();
   PolicyValidation();
+  TransformValidation();
   SharedDomain();
   for (const auto mode : {EntropyCodingMode::kPrefix, EntropyCodingMode::kAns}) {
     Workflow({1, 1}, mode, true);
@@ -372,6 +442,21 @@ int main() try {
     Workflow({257, 3}, mode, true, PackedModularFormat::kRgba16, policy);
     Workflow({17, 19}, mode, true, PackedModularFormat::kRgba16, {}, true);
     Workflow({257, 3}, mode, true, PackedModularFormat::kRgba16, {}, true);
+  }
+  for (auto mode : {EntropyCodingMode::kPrefix, EntropyCodingMode::kAns}) {
+    ModularCodingPolicy policy;
+    policy.transforms.size = 1;
+    policy.transforms.entries[0] = {TransformKind::kPalette, 0, 4, 256};
+    Workflow({17, 19}, mode, true, PackedModularFormat::kRgba16, policy);
+    Workflow({257, 3}, mode, true, PackedModularFormat::kRgba16, policy);
+    policy.transforms.entries[0] = {TransformKind::kSqueeze, 0, 4, 1, true, false};
+    policy.transforms.size = 2;
+    policy.transforms.entries[1] = {TransformKind::kSqueeze, 0, 4, 1, false, true};
+    Workflow({17, 19}, mode, true, PackedModularFormat::kRgba16, policy);
+    Workflow({257, 3}, mode, true, PackedModularFormat::kRgba16, policy);
+    policy.transforms.entries[0] = {TransformKind::kPalette, 0, 4, 256};
+    policy.transforms.entries[1] = {TransformKind::kSqueeze, 1, 1, 1, true, false};
+    Workflow({17, 19}, mode, true, PackedModularFormat::kRgba16, policy);
   }
   std::cout << "Modular workflow contracts passed\n";
 } catch (const std::exception &e) {

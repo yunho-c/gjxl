@@ -12,10 +12,15 @@ Status TokenizeModular(const ModularEncoderFrame &frame, const ModularStreamPlan
                        const ModularCodingPolicy &policy, PreparedModularTokens *out) try {
   const auto extent = frame.metadata().extent;
   const size_t channels = frame.image().channel_count();
-  size_t area;
-  if (!out || (channels != 1 && channels != 3 && channels != 4) ||
-      plan.geometry.source() != extent || !extent.try_area(&area) || area > SIZE_MAX / channels)
-    return Status::InvalidArgument("Invalid Modular identity tokenization input");
+  size_t total = 0;
+  if (!out || !channels || plan.geometry.source() != extent)
+    return Status::InvalidArgument("Invalid Modular tokenization input");
+  for (size_t c = 0; c < channels; ++c) {
+    size_t area;
+    if (!frame.image().view(c).descriptor.extent.try_area(&area) || area > SIZE_MAX - total)
+      return Status::InvalidArgument("Modular token count overflow");
+    total += area;
+  }
   if (auto s = ValidateCodingPolicy(policy); !s.ok())
     return s;
   TreeLayout tree_layout;
@@ -39,7 +44,7 @@ Status TokenizeModular(const ModularEncoderFrame &frame, const ModularStreamPlan
     } else
       tree_token(0, PackSigned(node.split));
   }
-  result.tokens.resize(channels * area);
+  result.tokens.resize(total);
   result.streams.resize(plan.streams.size());
   size_t next = 0;
   for (size_t i = 0; i < plan.streams.size(); ++i) {

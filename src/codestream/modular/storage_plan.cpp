@@ -47,21 +47,57 @@ Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat fo
   ModularInputProfile profile;
   if (auto s = ResolveModularInput(extent, format, &profile); !s.ok())
     return s;
-  const size_t channels = profile.channel_count;
-  if (policy.rct && channels < 3)
+  if (policy.rct && profile.channel_count < 3)
     return Status::InvalidArgument("RCT requires color channels");
   size_t area;
-  if (!extent.try_area(&area) || uint64_t{area} > (uint64_t{1} << 40) || area > SIZE_MAX / channels)
+  if (!extent.try_area(&area) || uint64_t{area} > (uint64_t{1} << 40))
     return Overflow();
-  p.tokens = channels * area;
-  const auto descriptors = profile.channels();
+  std::array<ChannelShape, kMaximumTransforms + 1> shapes;
+  if (auto s = PlanTransforms(profile.channels(), 0, policy.transforms, &shapes); !s.ok())
+    return s;
+  const auto &shape = shapes[policy.transforms.size];
+  const auto descriptors = shape.channels();
+  size_t global_tokens = 0, dc_tokens = 0, group_tokens = 0, maximum_width = 0;
+  bool global_prefix = true;
+  p.tokens = 0;
+  for (size_t c = 0; c < descriptors.size(); ++c) {
+    const auto ch = descriptors[c];
+    size_t area;
+    if (!ch.extent.try_area(&area) || !AddBits(area, &p.tokens))
+      return Overflow();
+    const bool is_global =
+        c < shape.metadata || (global_prefix && ch.extent.width <= kGroupDimension &&
+                               ch.extent.height <= kGroupDimension);
+    if (is_global) {
+      if (!AddBits(area, &global_tokens))
+        return Overflow();
+      maximum_width = std::max(maximum_width, ch.extent.width);
+    } else {
+      global_prefix = false;
+      const bool dc = std::min(ch.hshift, ch.vshift) >= 3;
+      const size_t dimension = dc ? 2048 : kGroupDimension;
+      const size_t w = std::min(ch.extent.width, dimension >> ch.hshift);
+      const size_t h = std::min(ch.extent.height, dimension >> ch.vshift);
+      if (!AddBits(w * h, dc ? &dc_tokens : &group_tokens))
+        return Overflow();
+      maximum_width = std::max(maximum_width, w);
+    }
+  }
   ModularStreamStoragePlan layout;
-  if (auto s = ComputeModularStreamStoragePlan(p.geometry, descriptors, 0, &layout); !s.ok())
+  if (auto s = ComputeModularStreamStoragePlan(p.geometry, descriptors, shape.metadata, &layout);
+      !s.ok())
     return s;
   p.streams = layout.streams;
   HostStorageBound image, tokens = layout.owned;
-  if (auto s = ComputeModularImageStorageBound(descriptors, 0, &image); !s.ok())
-    return s;
+  // Conservative live overlap: borrowed original plus every replacement stage.
+  for (size_t i = 0; i <= policy.transforms.size; ++i) {
+    HostStorageBound stage;
+    if (auto s = ComputeModularImageStorageBound(shapes[i].channels(), shapes[i].metadata, &stage);
+        !s.ok())
+      return s;
+    if (!image.Add(stage))
+      return Overflow();
+  }
   if (!tokens.AddVector<EntropyToken>(p.tokens, VectorCapacityPolicy::kFreshExact) ||
       !tokens.AddVector<EntropyTokenStreamView>(p.streams, VectorCapacityPolicy::kFreshExact))
     return Overflow();
@@ -70,7 +106,7 @@ Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat fo
     return Overflow();
 
   if (tree_layout.weighted) {
-    const size_t width = std::min(extent.width, kGroupDimension);
+    const size_t width = maximum_width;
     for (size_t i = 0; i < 5; ++i)
       if (!p.preparation.AddVector<uint32_t>((width + 2) * 2, VectorCapacityPolicy::kFreshExact))
         return Overflow();
@@ -104,7 +140,7 @@ Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat fo
   EntropyTokenEmissionStoragePlan payload;
   const bool global = p.geometry.group_count() == 1;
   const size_t maximum_stream_tokens =
-      global ? p.tokens : channels * kGroupDimension * kGroupDimension;
+      global ? p.tokens : std::max({global_tokens, dc_tokens, group_tokens});
   if (auto s = ComputeGlobalTreeStoragePlan(tree_tokens, &tree); !s.ok())
     return s;
   if (auto s = ComputeEntropyModelStoragePlan(mode, contexts, contexts, &model); !s.ok())
@@ -116,11 +152,12 @@ Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat fo
   p.maximum_global_bits = 1;
   if (!AddBits(tree.maximum_bits, &p.maximum_global_bits) ||
       !AddBits(1 + model.maximum_bits, &p.maximum_global_bits) ||
-      !AddBits(kMaximumCodingStreamHeaderBits + 7, &p.maximum_global_bits) ||
-      (global && !AddBits(payload.maximum_bits, &p.maximum_global_bits)))
+      !AddBits(MaximumCodingStreamHeaderBits(policy.transforms) + 7, &p.maximum_global_bits) ||
+      ((global || global_tokens) && !AddBits(payload.maximum_bits, &p.maximum_global_bits)))
     return Overflow();
   p.maximum_group_bits = global ? 0 : payload.maximum_bits;
-  if (!global && !AddBits(kMaximumCodingStreamHeaderBits + 7, &p.maximum_group_bits))
+  if (!global &&
+      !AddBits(MaximumCodingStreamHeaderBits(policy.transforms) + 7, &p.maximum_group_bits))
     return Overflow();
   if (p.maximum_global_bits / 8 + 1 > kMaximumTocSectionSize ||
       p.maximum_group_bits / 8 + 1 > kMaximumTocSectionSize)
@@ -137,9 +174,11 @@ Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat fo
   if (!global) {
     if (auto s = ComputeEntropyWriterStorageBound(p.maximum_group_bits, &group_writer); !s.ok())
       return s;
-    if (!sections.Add(group_writer, p.geometry.group_count()) ||
-        p.maximum_group_bits > SIZE_MAX / p.geometry.group_count() ||
-        !AddBits(p.maximum_group_bits * p.geometry.group_count(), &section_bits))
+    const size_t non_global_sections =
+        p.geometry.group_count() + (dc_tokens ? p.geometry.dc_group_count() : 0);
+    if (!sections.Add(group_writer, non_global_sections) ||
+        p.maximum_group_bits > SIZE_MAX / non_global_sections ||
+        !AddBits(p.maximum_group_bits * non_global_sections, &section_bits))
       return Overflow();
   }
   p.emission = tokens;

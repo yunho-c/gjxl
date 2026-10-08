@@ -38,15 +38,17 @@ Status Encode(PackedModularImageView input, ModularEncodingOptions options,
   codec_internal::ImageMetadata metadata;
   {
     ModularEncoderFrame frame;
-    if (auto s = ModularEncoderFrame::Prepare(input, options.coding.rct, &frame); !s.ok())
+    if (auto s = ModularEncoderFrame::Prepare(input, options.coding, &frame); !s.ok())
       return s;
     metadata = frame.metadata();
     if (options.coding != ModularCodingPolicy{})
       metadata.modular_16_bit_buffer_sufficient = false;
-    ModularInputProfile profile;
-    if (auto s = ResolveModularInput(input.extent, input.format, &profile); !s.ok())
+    ChannelShape shape;
+    if (auto s = DescribeImage(frame.image(), &shape); !s.ok())
       return s;
-    if (auto s = BuildModularStreamPlan(storage.geometry, profile.channels(), 0, &layout); !s.ok())
+    if (auto s =
+            BuildModularStreamPlan(storage.geometry, shape.channels(), shape.metadata, &layout);
+        !s.ok())
       return s;
     if (auto s = TokenizeModular(frame, layout, options.coding, &tokens); !s.ok())
       return s;
@@ -117,6 +119,23 @@ Status EncodeSearch(PackedModularImageView input, ModularEncodingOptions options
       if (candidate.view().size() < best.view().size())
         best = std::move(candidate);
     }
+  }
+  uint16_t palette_colors;
+  if (auto s = ProbePalette(input, &palette_colors); !s.ok())
+    return s;
+  std::array<ModularCodingPolicy, 4> candidates;
+  size_t count;
+  if (auto s =
+          BuildTransformCandidates(input.extent, input.format, palette_colors, &candidates, &count);
+      !s.ok())
+    return s;
+  for (size_t i = 0; i < count; ++i) {
+    options.coding = candidates[i];
+    codestream_internal::CodestreamBuffer candidate;
+    if (auto s = Encode(input, options, &candidate); !s.ok())
+      return s;
+    if (candidate.view().size() < best.view().size())
+      best = std::move(candidate);
   }
   output.Publish(std::move(best));
   return Status::Ok();

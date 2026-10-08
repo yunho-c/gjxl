@@ -117,4 +117,29 @@ Status ModularEncoderFrame::Prepare(PackedModularImageView input, uint8_t rct,
   *out = std::move(frame);
   return Status::Ok();
 }
+Status ModularEncoderFrame::Prepare(PackedModularImageView input, const ModularCodingPolicy &policy,
+                                    ModularEncoderFrame *out) {
+  if (!out)
+    return Status::InvalidArgument("Null Modular frame output");
+  if (auto s = ValidateCodingPolicy(policy); !s.ok())
+    return s;
+  ModularInputProfile profile;
+  if (auto s = ResolveModularInput(input.extent, input.format, &profile); !s.ok())
+    return s;
+  std::array<ChannelShape, kMaximumTransforms + 1> shapes;
+  if (auto s = PlanTransforms(profile.channels(), 0, policy.transforms, &shapes); !s.ok())
+    return s;
+  ModularEncoderFrame frame;
+  if (auto s = Prepare(input, policy.rct, &frame); !s.ok())
+    return s;
+  if (policy.transforms.size) {
+    ModularImage transformed;
+    if (auto s = ForwardTransforms(frame.image_, policy.transforms, &transformed); !s.ok())
+      return s;
+    frame.image_ = std::move(transformed);
+    frame.metadata_.modular_16_bit_buffer_sufficient = false;
+  }
+  *out = std::move(frame);
+  return Status::Ok();
+}
 } // namespace gjxl::modular_internal

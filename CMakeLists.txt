@@ -287,6 +287,9 @@ add_library(
   src/codec/modular/image.cpp
   src/codec/modular/geometry.cpp
   src/codec/modular/tree_learning.cpp
+  src/codec/modular/transform/transform.cpp
+  src/codec/modular/transform/palette.cpp
+  src/codec/modular/transform/squeeze.cpp
   src/codec/modular/frame.cpp
   src/codec/color_transform.cpp
   src/codec/convolution.cpp

@@ -40,13 +40,15 @@ struct Rgb8View {
   [[nodiscard]] PackedModularImageView packed() const { return {bytes, extent, row_stride}; }
 };
 [[nodiscard]] std::array<ChannelDescriptor, 3> Rgb8Channels(Extent2D extent);
-// Completed identity frame. No writer/model/search state or mutable plane API.
+// Completed transformed frame. No writer/model/search state or mutable plane API.
 class ModularEncoderFrame {
 public:
   [[nodiscard]] static Status Prepare(Rgb8View input, ModularEncoderFrame *out);
   [[nodiscard]] static Status Prepare(PackedModularImageView input, ModularEncoderFrame *out);
   [[nodiscard]] static Status Prepare(PackedModularImageView input, uint8_t rct,
                                       ModularEncoderFrame *out);
+  [[nodiscard]] static Status Prepare(PackedModularImageView input,
+                                      const ModularCodingPolicy &policy, ModularEncoderFrame *out);
   [[nodiscard]] const codec_internal::ImageMetadata &metadata() const { return metadata_; }
   [[nodiscard]] const ModularImage &image() const { return image_; }
 

@@ -41,8 +41,8 @@ Status EncodeModularFrame(const codec_internal::ImageMetadata &metadata,
                 return s;
               if (auto s = WriteGlobalModelInTransaction(model, &global); !s.ok())
                 return s;
-              if (auto s =
-                      WriteCodingStreamHeader(tokens.policy.weighted, tokens.policy.rct, &global);
+              if (auto s = WriteCodingStreamHeader(tokens.policy.weighted, tokens.policy.rct,
+                                                   tokens.policy.transforms, &global);
                   !s.ok())
                 return s;
               if (tokens.streams[0].size())
