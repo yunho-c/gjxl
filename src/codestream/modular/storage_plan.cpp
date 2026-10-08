@@ -3,6 +3,7 @@
 #include "codestream/modular/storage_plan.h"
 #include "codestream/headers_internal.h"
 #include "codestream/modular/tree_codec.h"
+#include "codestream/modular/stream_encoder.h"
 #include "codestream/sections.h"
 #include <algorithm>
 
@@ -24,10 +25,22 @@ Status ComputeModularWorkflowStoragePlan(Extent2D extent, EntropyCodingMode mode
 }
 Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat format,
                                          EntropyCodingMode mode, ModularWorkflowStoragePlan *out) {
+  return ComputeModularWorkflowStoragePlan(extent, format, mode, {}, out);
+}
+Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat format,
+                                         EntropyCodingMode mode, const ModularCodingPolicy &policy,
+                                         ModularWorkflowStoragePlan *out) {
   if (!out)
     return Status::InvalidArgument("Null Modular workflow plan");
   if (mode != EntropyCodingMode::kPrefix && mode != EntropyCodingMode::kAns)
     return Status::Unsupported("Unsupported Modular entropy mode");
+  if (auto s = ValidateCodingPolicy(policy); !s.ok())
+    return s;
+  TreeLayout tree_layout;
+  if (auto s = ValidateTree(policy.tree, &tree_layout); !s.ok())
+    return s;
+  const size_t contexts = tree_layout.leaves;
+  const size_t tree_tokens = 5 * contexts + 2 * (policy.tree.size - contexts);
   ModularWorkflowStoragePlan p;
   if (auto s = ModularFrameGeometry::Create(extent, &p.geometry); !s.ok())
     return s;
@@ -35,6 +48,8 @@ Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat fo
   if (auto s = ResolveModularInput(extent, format, &profile); !s.ok())
     return s;
   const size_t channels = profile.channel_count;
+  if (policy.rct && channels < 3)
+    return Status::InvalidArgument("RCT requires color channels");
   size_t area;
   if (!extent.try_area(&area) || uint64_t{area} > (uint64_t{1} << 40) || area > SIZE_MAX / channels)
     return Overflow();
@@ -54,10 +69,16 @@ Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat fo
   if (!p.preparation.Add(image))
     return Overflow();
 
+  if (tree_layout.weighted) {
+    const size_t width = std::min(extent.width, kGroupDimension);
+    for (size_t i = 0; i < 5; ++i)
+      if (!p.preparation.AddVector<uint32_t>((width + 2) * 2, VectorCapacityPolicy::kFreshExact))
+        return Overflow();
+  }
   EntropyOptimizationStoragePlan prefix, ans;
   const EntropyOptimizationStorageOptions options{.policy = EntropyStoragePolicy::kPrefix,
                                                   .tokens = p.tokens,
-                                                  .contexts = 1,
+                                                  .contexts = contexts,
                                                   .sections = p.streams,
                                                   .return_cost = false};
   if (auto s = ComputeEntropyOptimizationStoragePlan(options, &prefix); !s.ok())
@@ -84,9 +105,9 @@ Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat fo
   const bool global = p.geometry.group_count() == 1;
   const size_t maximum_stream_tokens =
       global ? p.tokens : channels * kGroupDimension * kGroupDimension;
-  if (auto s = ComputeGlobalTreeStoragePlan(kGradientTreeTokens.size(), &tree); !s.ok())
+  if (auto s = ComputeGlobalTreeStoragePlan(tree_tokens, &tree); !s.ok())
     return s;
-  if (auto s = ComputeEntropyModelStoragePlan(mode, 1, 1, &model); !s.ok())
+  if (auto s = ComputeEntropyModelStoragePlan(mode, contexts, contexts, &model); !s.ok())
     return s;
   if (auto s = ComputeEntropyTokenEmissionStoragePlan(mode, maximum_stream_tokens, &payload);
       !s.ok())
@@ -95,11 +116,11 @@ Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat fo
   p.maximum_global_bits = 1;
   if (!AddBits(tree.maximum_bits, &p.maximum_global_bits) ||
       !AddBits(1 + model.maximum_bits, &p.maximum_global_bits) ||
-      !AddBits(4 + 7, &p.maximum_global_bits) ||
+      !AddBits(kMaximumCodingStreamHeaderBits + 7, &p.maximum_global_bits) ||
       (global && !AddBits(payload.maximum_bits, &p.maximum_global_bits)))
     return Overflow();
   p.maximum_group_bits = global ? 0 : payload.maximum_bits;
-  if (!global && !AddBits(4 + 7, &p.maximum_group_bits))
+  if (!global && !AddBits(kMaximumCodingStreamHeaderBits + 7, &p.maximum_group_bits))
     return Overflow();
   if (p.maximum_global_bits / 8 + 1 > kMaximumTocSectionSize ||
       p.maximum_group_bits / 8 + 1 > kMaximumTocSectionSize)

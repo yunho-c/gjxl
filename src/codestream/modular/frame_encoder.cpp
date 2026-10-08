@@ -18,7 +18,9 @@ Status EncodeModularFrame(const codec_internal::ImageMetadata &metadata,
   {
     PreparedModularTokens tokens = std::move(input);
     EntropyCode model;
-    if (auto s = OptimizeEntropyCode(tokens.streams, {.context_count = 1}, &model); !s.ok())
+    if (auto s = OptimizeEntropyCode(
+            tokens.streams, {.context_count = static_cast<uint32_t>(tokens.context_count)}, &model);
+        !s.ok())
       return s;
     if (mode == EntropyCodingMode::kAns) {
       EntropyCode ans;
@@ -33,11 +35,15 @@ Status EncodeModularFrame(const codec_internal::ImageMetadata &metadata,
             [&]() -> Status {
               if (auto s = global.WriteBits(1, 1); !s.ok())
                 return s; // default DC matrices
-              if (auto s = WriteGlobalTreeInTransaction(kGradientTreeTokens, &global); !s.ok())
+              if (auto s = WriteGlobalTreeInTransaction(
+                      std::span(tokens.tree_tokens).first(tokens.tree_token_count), &global);
+                  !s.ok())
                 return s;
               if (auto s = WriteGlobalModelInTransaction(model, &global); !s.ok())
                 return s;
-              if (auto s = WriteStreamHeader({}, &global); !s.ok())
+              if (auto s =
+                      WriteCodingStreamHeader(tokens.policy.weighted, tokens.policy.rct, &global);
+                  !s.ok())
                 return s;
               if (tokens.streams[0].size())
                 return WriteStreamTokensWithValidatedModel(tokens.streams[0], model, &global);
@@ -49,13 +55,13 @@ Status EncodeModularFrame(const codec_internal::ImageMetadata &metadata,
       if (tokens.streams[i].size() == 0)
         continue;
       auto &section = sections[layout.streams[i].section];
-      if (auto s = section.WithMaxBits(storage.maximum_group_bits,
-                                       [&]() -> Status {
-                                         if (auto s = WriteStreamHeader({}, &section); !s.ok())
-                                           return s;
-                                         return WriteStreamTokensWithValidatedModel(
-                                             tokens.streams[i], model, &section);
-                                       });
+      if (auto s = section.WithMaxBits(
+              storage.maximum_group_bits,
+              [&]() -> Status {
+                if (auto s = WriteCodingStreamHeader(tokens.policy.weighted, 0, &section); !s.ok())
+                  return s;
+                return WriteStreamTokensWithValidatedModel(tokens.streams[i], model, &section);
+              });
           !s.ok())
         return s;
     }

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 #include "codec/modular/frame.h"
 #include "codec/modular/geometry.h"
+#include "codec/modular/transform/rct.h"
 #include <limits>
 
 namespace gjxl::modular_internal {
@@ -28,8 +29,7 @@ Status ResolveModularInput(Extent2D extent, PackedModularFormat format, ModularI
     return Status::InvalidArgument("Invalid packed Modular format");
   }
   const bool wide = format == PackedModularFormat::kGray16 ||
-                    format == PackedModularFormat::kRgb16 ||
-                    format == PackedModularFormat::kRgba16;
+                    format == PackedModularFormat::kRgb16 || format == PackedModularFormat::kRgba16;
   p.bytes_per_sample = wide ? 2 : 1;
   p.metadata.bits = static_cast<uint8_t>(8 * p.bytes_per_sample);
   p.metadata.modular_16_bit_buffer_sufficient = p.metadata.bits == 8;
@@ -72,6 +72,10 @@ Status ModularEncoderFrame::Prepare(Rgb8View input, ModularEncoderFrame *out) {
   return Prepare(input.packed(), out);
 }
 Status ModularEncoderFrame::Prepare(PackedModularImageView input, ModularEncoderFrame *out) {
+  return Prepare(input, 0, out);
+}
+Status ModularEncoderFrame::Prepare(PackedModularImageView input, uint8_t rct,
+                                    ModularEncoderFrame *out) {
   if (!out)
     return Status::InvalidArgument("Null Modular frame output");
   if (auto s = input.Validate(); !s.ok())
@@ -80,15 +84,19 @@ Status ModularEncoderFrame::Prepare(PackedModularImageView input, ModularEncoder
   ModularInputProfile profile;
   if (auto s = ResolveModularInput(input.extent, input.format, &profile); !s.ok())
     return s;
+  if (rct >= 42 || (rct && profile.channel_count < 3))
+    return Status::InvalidArgument("RCT requires three color channels and a valid type");
   frame.metadata_ = profile.metadata;
+  if (rct)
+    frame.metadata_.modular_16_bit_buffer_sufficient = false;
   if (auto s = ModularImage::Create(profile.channels(), 0, &frame.image_); !s.ok())
     return s;
   for (size_t c = 0; c < profile.channel_count; ++c) {
     auto samples = frame.image_.samples(c);
     for (size_t y = 0; y < input.extent.height; ++y)
       for (size_t x = 0; x < input.extent.width; ++x) {
-        const size_t i = y * input.row_stride +
-                         (profile.channel_count * x + c) * profile.bytes_per_sample;
+        const size_t i =
+            y * input.row_stride + (profile.channel_count * x + c) * profile.bytes_per_sample;
         uint32_t value = input.bytes[i];
         if (profile.bytes_per_sample == 2)
           value = input.byte_order == SampleByteOrder::kLittleEndian
@@ -96,6 +104,15 @@ Status ModularEncoderFrame::Prepare(PackedModularImageView input, ModularEncoder
                       : (value << 8) | input.bytes[i + 1];
         samples[y * input.extent.width + x] = static_cast<int32_t>(value);
       }
+  }
+  if (rct) {
+    auto a = frame.image_.samples(0), b = frame.image_.samples(1), c = frame.image_.samples(2);
+    for (size_t i = 0; i < a.size(); ++i) {
+      const auto transformed = ForwardRct({a[i], b[i], c[i]}, rct);
+      a[i] = transformed[0];
+      b[i] = transformed[1];
+      c[i] = transformed[2];
+    }
   }
   *out = std::move(frame);
   return Status::Ok();

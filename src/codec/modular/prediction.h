@@ -15,9 +15,38 @@
 
 namespace gjxl::modular_internal {
 
-// Only the predictors used by the existing embedded streams are exposed here.
-// Values match the Modular predictor IDs; other IDs/parameters are Phase 2.
-enum class Predictor : uint8_t { kGradient = 5, kWeighted = 6, kInvalid = 255 };
+// Wire predictor IDs; encoder-only libjxl search pseudo-predictors are excluded.
+enum class Predictor : uint8_t {
+  kZero,
+  kLeft,
+  kTop,
+  kAverage0,
+  kSelect,
+  kGradient,
+  kWeighted,
+  kTopRight,
+  kTopLeft,
+  kLeftLeft,
+  kAverage1,
+  kAverage2,
+  kAverage3,
+  kAverage4,
+  kInvalid = 255
+};
+struct WeightedPredictorParameters {
+  std::array<uint8_t, 7> coefficients{16, 10, 7, 7, 7, 0, 0};
+  std::array<uint8_t, 4> weights{13, 12, 12, 12};
+  [[nodiscard]] constexpr bool valid() const {
+    for (auto p : coefficients)
+      if (p > 31)
+        return false;
+    for (auto w : weights)
+      if (w > 15)
+        return false;
+    return true;
+  }
+  bool operator==(const WeightedPredictorParameters &) const = default;
+};
 
 constexpr std::array<uint32_t, 64> Reciprocals() {
   std::array<uint32_t, 64> values{};
@@ -27,13 +56,12 @@ constexpr std::array<uint32_t, 64> Reciprocals() {
 }
 constexpr auto kReciprocal = Reciprocals();
 
-template <resource_budget_internal::ResourceClass Owner>
-class WeightedPredictor {
+template <resource_budget_internal::ResourceClass Owner> class WeightedPredictor {
 public:
   // The caller validates width and plans five two-row arrays before allocation.
   // Owner stays explicit: preparation and serialization have distinct charges.
-  explicit WeightedPredictor(size_t width)
-      : width_(width), error_((width + 2) * 2) {
+  explicit WeightedPredictor(size_t width, WeightedPredictorParameters parameters = {})
+      : width_(width), parameters_(parameters), error_((width + 2) * 2) {
     for (auto &errors : prediction_errors_)
       errors.resize((width + 2) * 2);
   }
@@ -44,25 +72,22 @@ public:
     predictions_ = {};
     prediction_ = 0;
   }
-  std::pair<int64_t, int64_t> Predict(size_t x, size_t y, int64_t n, int64_t w,
-                                      int64_t ne, int64_t nw, int64_t nn) {
+  std::pair<int64_t, int64_t> Predict(size_t x, size_t y, int64_t n, int64_t w, int64_t ne,
+                                      int64_t nw, int64_t nn) {
     const size_t current = (y & 1) ? 0 : width_ + 2;
     const size_t previous = (y & 1) ? width_ + 2 : 0;
     const size_t north = previous + x;
     const size_t northeast = x + 1 < width_ ? north + 1 : north;
     const size_t northwest = x ? north - 1 : north;
     std::array<uint32_t, 4> weights{};
-    constexpr std::array<uint32_t, 4> max_weights = {13, 12, 12, 12};
+    const auto &max_weights = parameters_.weights;
     uint32_t weight_sum = 0;
     for (size_t i = 0; i < 4; ++i) {
       // These additions have the decoder's unsigned 32-bit semantics.
-      const uint32_t error = prediction_errors_[i][north] +
-                             prediction_errors_[i][northeast] +
+      const uint32_t error = prediction_errors_[i][north] + prediction_errors_[i][northeast] +
                              prediction_errors_[i][northwest];
-      const int shift = std::max(
-          0, static_cast<int>(std::bit_width(uint64_t{error} + 1)) - 6);
-      weights[i] =
-          4 + ((max_weights[i] * kReciprocal[error >> shift]) >> shift);
+      const int shift = std::max(0, static_cast<int>(std::bit_width(uint64_t{error} + 1)) - 6);
+      weights[i] = 4 + ((max_weights[i] * kReciprocal[error >> shift]) >> shift);
       weight_sum += weights[i];
     }
     const unsigned log_weight = std::bit_width(weight_sum) - 1;
@@ -72,8 +97,7 @@ public:
       weight_sum += weight;
     }
     const int64_t ew = x ? error_[current + x - 1] : 0;
-    const int64_t en = error_[north], enw = error_[northwest],
-                  ene = error_[northeast];
+    const int64_t en = error_[north], enw = error_[northwest], ene = error_[northeast];
     int64_t property = ew;
     for (const auto error : {en, enw, ene})
       if (std::abs(error) > std::abs(property))
@@ -84,16 +108,17 @@ public:
     nw *= 8;
     nn *= 8;
     predictions_[0] = w + ne - n;
-    predictions_[1] = n - (((en + ew + ene) * 16) >> 5);
-    predictions_[2] = w - (((en + ew + enw) * 10) >> 5);
-    predictions_[3] = n - (((enw + en + ene) * 7) >> 5);
+    const auto &p = parameters_.coefficients;
+    predictions_[1] = n - (((en + ew + ene) * p[0]) >> 5);
+    predictions_[2] = w - (((en + ew + enw) * p[1]) >> 5);
+    predictions_[3] =
+        n - ((enw * p[2] + en * p[3] + ene * p[4] + (nn - n) * p[5] + (nw - w) * p[6]) >> 5);
     int64_t sum = (weight_sum >> 1) - 1;
     for (size_t i = 0; i < 4; ++i)
       sum += predictions_[i] * weights[i];
     prediction_ = (sum * kReciprocal[weight_sum - 1]) >> 24;
     if (((en ^ ew) | (en ^ enw)) <= 0)
-      prediction_ =
-          std::clamp(prediction_, std::min({w, ne, n}), std::max({w, ne, n}));
+      prediction_ = std::clamp(prediction_, std::min({w, ne, n}), std::max({w, ne, n}));
     return {(prediction_ + 3) >> 3, property};
   }
   bool Update(int32_t value, size_t x, size_t y) {
@@ -101,8 +126,7 @@ public:
     const size_t previous = (y & 1) ? width_ + 2 : 0;
     const int64_t scaled = int64_t{value} * 8;
     const int64_t error = prediction_ - scaled;
-    if (error < std::numeric_limits<int32_t>::min() ||
-        error > std::numeric_limits<int32_t>::max())
+    if (error < std::numeric_limits<int32_t>::min() || error > std::numeric_limits<int32_t>::max())
       return false;
     std::array<uint32_t, 4> errors{};
     for (size_t i = 0; i < 4; ++i) {
@@ -121,10 +145,10 @@ public:
 
 private:
   size_t width_;
+  WeightedPredictorParameters parameters_;
   std::array<int64_t, 4> predictions_{};
   int64_t prediction_ = 0;
-  std::array<resource_budget_internal::ManagedVector<uint32_t, Owner>, 4>
-      prediction_errors_;
+  std::array<resource_budget_internal::ManagedVector<uint32_t, Owner>, 4> prediction_errors_;
   resource_budget_internal::ManagedVector<int32_t, Owner> error_;
 };
 

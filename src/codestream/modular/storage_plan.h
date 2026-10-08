@@ -21,4 +21,8 @@ struct ModularWorkflowStoragePlan {
 [[nodiscard]] Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat format,
                                                        EntropyCodingMode mode,
                                                        ModularWorkflowStoragePlan *out);
+[[nodiscard]] Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat format,
+                                                       EntropyCodingMode mode,
+                                                       const ModularCodingPolicy &policy,
+                                                       ModularWorkflowStoragePlan *out);
 } // namespace gjxl::modular_internal

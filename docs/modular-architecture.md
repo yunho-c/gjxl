@@ -4,8 +4,9 @@ Status: Phase 1 extraction implemented; see the
 [qualification record and platform limits](modular-phase1/README.md).
 [P2.0 foundations and independent reference infrastructure](modular-p2.0.md),
 the [P2.1 private RGB8 CPU encoder](modular-p2.1.md),
-and [P2.2 integer formats and alpha preservation](modular-p2.2.md) are implemented.
-P2.3 onward remains a proposed implementation sequence. Whole-image Modular
+[P2.2 integer formats and alpha preservation](modular-p2.2.md), and
+[P2.3 scalar predictors, RCT and bounded global policy](modular-p2.3.md) are implemented.
+P2.4 onward remains a proposed implementation sequence. Whole-image Modular
 encoding is available internally; public API and CLI integration remain P2.5. Originally written
 2026-10-07 against GJXL
 `67caa6d89830f6a13c057923e34f80753a161e9d` and pinned libjxl
@@ -92,7 +93,9 @@ src/
     vardct/                       DCT, quantization, strategy, VarDCT frame
     modular/
       image.*                     owned integer channels and borrowed views
-      prediction.*                predictor arithmetic and state
+      prediction.*                weighted predictor parameters and state
+      scalar_prediction.h         scalar neighborhoods and predictor arithmetic
+      coding.h                    resolved Modular coding policy
       tree.*                      tree data, properties and evaluation
       tree_learning.*             CPU encoder policy
       transform/                  RCT, palette, squeeze and inverse references
@@ -116,7 +119,8 @@ src/
       tokenization.*              channel scans producing entropy tokens
       stream_encoder.*            reusable stream/global model emission
       frame_encoder.*             whole-image Modular section assembly
-      workflow.*                  Modular preparation and CPU dispatch
+      workflow.*                  Modular preparation, selection and CPU dispatch
+      search.*                    canonical training samples and search bounds
       *_storage_plan.*            stream, serializer and workflow bounds
   gpu/
     ops/, metal/, cuda/           existing organization; kernels added later
@@ -527,6 +531,23 @@ match the request. Original VarDCT validation and output remain unchanged.
 
 ### P2.3: scalar prediction, reversible color and tree/model policy
 
+Implemented with an explicitly bounded global-tree policy; see the
+[P2.3 capability, search, resource and qualification record](modular-p2.3.md).
+`ModularCodingPolicy` prescribes all 14 wire predictors, custom weighted parameters,
+RCT types 0..41 on the first three color planes, and validated trees of at most
+31 nodes/16 leaves. Properties 0..15, signed offsets and positive signed-31-bit
+multipliers are supported. Previous-channel properties and local trees/models
+remain unsupported capabilities, rather than silently substituted policies.
+
+Private `ModularEncodingOptions::search` opts into deterministic global selection;
+the identity/gradient default is unchanged. The learner samples at most 4,096
+pixels in canonical order, proposes a single leaf and at most one split, and
+searches identity, YCoCg (RCT 6), and RCT 9. Complete encoded byte size determines
+the winner, with the baseline and earlier candidates winning ties. Search admits
+training and winner/candidate overlap before allocation. It accepts no simultaneous
+prescribed-policy override. More elaborate learning/local models are follow-up
+capability extensions, not implicit behavior of this first bounded search.
+
 Extend the scalar implementation to the JPEG XL predictor choices needed by the
 planned encoder and then qualify the remaining predictor IDs as explicit CPU
 capabilities. Add weighted-header parameter handling separately from the fixed
@@ -723,7 +744,7 @@ checks require the appropriate hardware; unrun configurations remain explicitly
 unqualified. Phase 1 results are recorded in the
 [qualification report](modular-phase1/README.md). Phase 2 results are recorded
 for [P2.0](modular-p2.0.md), [P2.1](modular-p2.1.md) and
-[P2.2](modular-p2.2.md); later milestones remain
+[P2.2](modular-p2.2.md) and [P2.3](modular-p2.3.md); later milestones remain
 planned.
 
 ### Compression and performance gates

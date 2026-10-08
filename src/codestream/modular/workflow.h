@@ -9,6 +9,8 @@ namespace gjxl::modular_internal {
 struct ModularEncodingOptions {
   std::shared_ptr<const ExecutionDomain> execution_domain;
   EntropyCodingMode entropy = EntropyCodingMode::kPrefix;
+  ModularCodingPolicy coding;
+  bool search = false;
 };
 [[nodiscard]] Status EncodeRgb8ModularOwned(Rgb8View input, ModularEncodingOptions options,
                                             codestream_internal::CodestreamBuffer *out);

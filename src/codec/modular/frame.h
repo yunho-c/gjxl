@@ -3,6 +3,7 @@
 #pragma once
 #include "codec/frame_metadata.h"
 #include "codec/modular/image.h"
+#include "codec/modular/coding.h"
 #include <array>
 
 namespace gjxl::modular_internal {
@@ -44,6 +45,8 @@ class ModularEncoderFrame {
 public:
   [[nodiscard]] static Status Prepare(Rgb8View input, ModularEncoderFrame *out);
   [[nodiscard]] static Status Prepare(PackedModularImageView input, ModularEncoderFrame *out);
+  [[nodiscard]] static Status Prepare(PackedModularImageView input, uint8_t rct,
+                                      ModularEncoderFrame *out);
   [[nodiscard]] const codec_internal::ImageMetadata &metadata() const { return metadata_; }
   [[nodiscard]] const ModularImage &image() const { return image_; }
 

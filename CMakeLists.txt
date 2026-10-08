@@ -286,6 +286,7 @@ add_library(
   src/codec/frame_metadata.cpp
   src/codec/modular/image.cpp
   src/codec/modular/geometry.cpp
+  src/codec/modular/tree_learning.cpp
   src/codec/modular/frame.cpp
   src/codec/color_transform.cpp
   src/codec/convolution.cpp
@@ -344,6 +345,7 @@ add_library(
   src/codestream/modular/stream_encoder.cpp
   src/codestream/modular/tree_codec.cpp
   src/codestream/modular/stream_plan.cpp
+  src/codestream/modular/search.cpp
   src/codestream/modular/tokenization.cpp
   src/codestream/modular/storage_plan.cpp
   src/codestream/modular/frame_encoder.cpp
