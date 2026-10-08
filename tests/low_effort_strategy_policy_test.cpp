@@ -57,7 +57,7 @@ bool CheckPolicy() {
   return true;
 }
 
-bool CheckEffort3QuantizationPolicy() {
+bool CheckLowEffortQuantizationPolicy() {
   for (int effort = 1; effort <= 10; ++effort) {
     for (auto density : {VarDctDensityMode::kDefault,
                          VarDctDensityMode::kHighDensity}) {
@@ -77,14 +77,16 @@ bool CheckEffort3QuantizationPolicy() {
             o.rate_control_mode = rate;
             o.gpu_aq_mode = mode;
             o.compression_mode = compression;
-            const bool e3 = effort == 3 && density == VarDctDensityMode::kDefault &&
+            const bool ordinary = density == VarDctDensityMode::kDefault &&
               rate != VarDctRateControlMode::kMaximumError &&
               mode != GpuAdaptiveQuantizationMode::kMaximumThroughput;
-            const auto expected = e3 ? AcCoefficientDecisionMode::kFixedRawQuant
-                                    : AcCoefficientDecisionMode::kAdjustedSharedQuant;
+            const auto expected = effort <= 4 && ordinary
+              ? AcCoefficientDecisionMode::kFixedRawQuant
+              : AcCoefficientDecisionMode::kAdjustedSharedQuant;
             if (!Check(ResolveAcCoefficientDecision(o) == expected &&
-                         ResolveAdaptiveDcSmoothing(o) == (effort >= 4 || e3),
-                       "Effort-three quantization or smoothing scope changed"))
+                         ResolveAdaptiveDcSmoothing(o) ==
+                           (effort >= 4 || (effort == 3 && ordinary)),
+                       "Low-effort quantization or smoothing scope changed"))
               return false;
             for (bool smoothing : {false, true}) {
               o.adaptive_dc_smoothing = smoothing;
@@ -237,7 +239,7 @@ bool CheckSearchStorage() {
 }  // namespace
 
 int main() {
-  return CheckPolicy() && CheckEffort3QuantizationPolicy() &&
+  return CheckPolicy() && CheckLowEffortQuantizationPolicy() &&
     CheckProviderBypass() && CheckSearchStorage()
     ? EXIT_SUCCESS : EXIT_FAILURE;
 }

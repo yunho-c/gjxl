@@ -113,7 +113,7 @@ void CheckEncoding(ConstImage3FView image, VarDctBackendPreference backend,
                    VarDctDcPrediction prediction = kDefaultDcPrediction) {
   std::vector<VarDctBatchEncodingRequest> requests;
   std::vector<std::vector<uint8_t>> expected_batch;
-  for (int effort : {3, 4, 7}) {
+  for (int effort : {1, 2, 3, 4, 7}) {
     for (auto quantization :
          {DcQuantizationMode::kAutomatic, DcQuantizationMode::kRound,
           DcQuantizationMode::kPredictionAware}) {

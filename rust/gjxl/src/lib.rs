@@ -629,7 +629,7 @@ mod tests {
         let context = Context::new(Backend::Cpu).unwrap();
         let pixels = rgba_fixture(64, 64);
         let image = ImageView::rgba8(64, 64, 256, &pixels).unwrap();
-        for effort in [3, 4, 7] {
+        for effort in [1, 2, 3, 4, 7] {
             for dc_quantization in [
                 DcQuantization::Automatic,
                 DcQuantization::Round,

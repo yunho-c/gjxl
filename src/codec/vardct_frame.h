@@ -31,7 +31,7 @@ enum class AcCoefficientDecisionMode {
   /// Applies the pinned cross-channel AdjustQuantBlockAC policy.
   kAdjustedSharedQuant,
   /// Retains the supplied raw quant and fixed Y thresholds. Used by ordinary
-  /// effort 3 and independently selectable by low-level coefficient callers.
+  /// efforts 1-4 and independently selectable by low-level coefficient callers.
   kFixedRawQuant,
 };
 

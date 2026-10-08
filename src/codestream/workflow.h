@@ -76,6 +76,8 @@ struct VarDctEncodingOptions {
   /// block; efforts 5-9 use two-block spacing for these larger families.
   /// In the ordinary policy, efforts 1-4 use DCT8, disable Gaborish, and
   /// start with a uniform quantization field and run zero AQ updates.
+  /// They retain the initial AC quantizer and fixed Y thresholds, independently
+  /// of DC quantization and smoothing. Maximum throughput keeps its own recipe.
   /// Effort 5 enables mixed-transform AC search, spatial initialization, and
   /// Gaborish with zero AQ updates. Effort 6 adds one AQ update.
   /// High-density and maximum-error overrides preserve their existing
@@ -147,7 +149,7 @@ struct VarDctEncodingOptions {
   std::optional<bool> adaptive_dc_smoothing;
 };
 
-/// Effort-three frontend policy, independent of the serializer intensity.
+/// Effort-three DC-smoothing scope, independent of the serializer intensity.
 [[nodiscard]] constexpr bool UsesOrdinaryEffort3Policy(
     const VarDctEncodingOptions& options) {
   return options.effort == 3 &&

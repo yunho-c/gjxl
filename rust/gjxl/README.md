@@ -29,8 +29,8 @@ effort-aligned behavior.
 
 DC quantization defaults to `DcQuantization::Automatic`; adaptive DC smoothing
 defaults to `None`. Prediction-aware quantization starts at effort 4; smoothing
-starts at effort 3. Effort 3 also retains the initial AC quantizer with fixed
-Y thresholds. To keep
+starts at effort 3. Efforts 1–4 retain the initial AC quantizer with fixed
+Y thresholds, independently of the DC settings. To keep
 ordinary rounding and disable smoothing regardless of effort, set
 `dc_quantization: gjxl::DcQuantization::Round` and
 `adaptive_dc_smoothing: Some(false)`. Previous explicit boolean smoothing values

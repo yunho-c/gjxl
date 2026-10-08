@@ -131,7 +131,7 @@ typedef struct {
   float distance;
   /// Speed/refinement intent in [1, 10]. Efforts 1-4 use DCT8, disable Gaborish, and start with a uniform
   /// quantization field with zero AQ updates;
-  /// effort 3 retains the initial AC quantizer with fixed Y thresholds;
+  /// ordinary efforts 1-4 retain the initial AC quantizer with fixed Y thresholds;
   /// efforts 5-10 enable mixed-transform AC-strategy search.
   /// Ordinary effort 5 retains spatial initialization and Gaborish with zero
   /// AQ updates; effort 6 adds one update. High-density and maximum-error

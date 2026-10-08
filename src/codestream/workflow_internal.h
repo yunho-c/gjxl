@@ -17,10 +17,15 @@
 
 namespace gjxl::codestream_internal {
 
-/// Ordinary e3 retains the initial AC quantizer and fixed Y thresholds.
+/// Ordinary efforts 1-4 retain the initial AC quantizer and fixed Y thresholds.
+/// DC quantization and smoothing follow their independent effort policies.
 [[nodiscard]] constexpr AcCoefficientDecisionMode ResolveAcCoefficientDecision(
   const VarDctEncodingOptions& options) noexcept {
-  return UsesOrdinaryEffort3Policy(options)
+  const bool fixed_raw = options.effort >= 1 && options.effort <= 4 &&
+    options.density_mode == VarDctDensityMode::kDefault &&
+    options.rate_control_mode != VarDctRateControlMode::kMaximumError &&
+    options.gpu_aq_mode != GpuAdaptiveQuantizationMode::kMaximumThroughput;
+  return fixed_raw
     ? AcCoefficientDecisionMode::kFixedRawQuant
     : AcCoefficientDecisionMode::kAdjustedSharedQuant;
 }

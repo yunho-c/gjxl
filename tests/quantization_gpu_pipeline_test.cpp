@@ -1590,7 +1590,7 @@ bool CheckWorkflowBackendSelection() {
   // Low-frequency conversion is part of the CPU-authoritative exact prefix.
   // With both DC controls enabled, a redundant FP32 conversion used to change
   // later AQ decisions on this fixture (537 CPU bytes versus 778 Metal bytes).
-  for (int effort : {4, 7}) {
+  for (int effort : {1, 2, 3, 4, 7}) {
     for (auto prediction : {gjxl::VarDctDcPrediction::kGradient,
                             gjxl::VarDctDcPrediction::kWeighted}) {
       for (auto quantization : {gjxl::DcQuantizationMode::kRound,

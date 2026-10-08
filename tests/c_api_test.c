@@ -379,7 +379,7 @@ static int CheckEncoding(GJXLContext* context) {
     gjxl_buffer_free(&old_dc_output);
   }
 
-  for (int effort = 3; effort <= 4; ++effort) {
+  for (int effort = 1; effort <= 4; ++effort) {
     for (int quantization = 0; quantization <= 2; ++quantization) {
       for (uint32_t smoothing = 0; smoothing <= 2; ++smoothing) {
         GJXLEncoderOptions automatic = options;
