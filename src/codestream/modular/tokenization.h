@@ -14,6 +14,11 @@ struct PreparedModularTokens {
 };
 // Plan must be the canonical BuildModularStreamPlan result for this frame.
 // Views refer to the moved token backing. Output replacement is atomic.
-[[nodiscard]] Status TokenizeRgb8(const ModularEncoderFrame &frame, const ModularStreamPlan &plan,
+[[nodiscard]] Status TokenizeIdentity(const ModularEncoderFrame &frame, const ModularStreamPlan &plan,
                                   PreparedModularTokens *out);
+// Compatibility spelling for the original private RGB8 workflow.
+[[nodiscard]] inline Status TokenizeRgb8(const ModularEncoderFrame &frame,
+                                         const ModularStreamPlan &plan, PreparedModularTokens *out) {
+  return TokenizeIdentity(frame, plan, out);
+}
 } // namespace gjxl::modular_internal

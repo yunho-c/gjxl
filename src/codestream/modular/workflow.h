@@ -14,4 +14,9 @@ struct ModularEncodingOptions {
                                             codestream_internal::CodestreamBuffer *out);
 [[nodiscard]] Status EncodeRgb8Modular(Rgb8View input, ModularEncodingOptions options,
                                        std::vector<uint8_t> *out);
+[[nodiscard]] Status EncodeModularImageOwned(PackedModularImageView input,
+                                             ModularEncodingOptions options,
+                                             codestream_internal::CodestreamBuffer *out);
+[[nodiscard]] Status EncodeModularImage(PackedModularImageView input,
+                                        ModularEncodingOptions options, std::vector<uint8_t> *out);
 } // namespace gjxl::modular_internal

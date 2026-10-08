@@ -25,6 +25,7 @@ struct ParsedHeader {
   bool source_srgb, source_linear_srgb, final_frame;
   uint32_t passes, upsampling;
   bool modular_16_bit_buffer_sufficient;
+  uint32_t alpha_dimension_shift;
 };
 struct ReferenceToken { uint32_t context, value; };
 std::vector<ReferenceToken> TokenizeGradient(const IntegerImage& image, size_t stream_id);

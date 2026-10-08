@@ -193,7 +193,8 @@ ParsedHeader InspectHeaders(std::span<const uint8_t> bytes, size_t offset) {
       frame.is_last,
       frame.passes.num_passes,
       frame.upsampling,
-      m.modular_16_bit_buffer_sufficient};
+      m.modular_16_bit_buffer_sufficient,
+      alpha ? m.extra_channel_info[0].dim_shift : 0};
 }
 
 std::vector<uint32_t> ReadSectionSizes(std::span<const uint8_t> bytes) {

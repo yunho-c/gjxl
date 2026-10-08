@@ -4,15 +4,16 @@
 #include "codec/modular/gradient.h"
 
 namespace gjxl::modular_internal {
-Status TokenizeRgb8(const ModularEncoderFrame &frame, const ModularStreamPlan &plan,
-                    PreparedModularTokens *out) try {
+Status TokenizeIdentity(const ModularEncoderFrame &frame, const ModularStreamPlan &plan,
+                        PreparedModularTokens *out) try {
   const auto extent = frame.metadata().extent;
+  const size_t channels = frame.image().channel_count();
   size_t area;
-  if (!out || frame.image().channel_count() != 3 || plan.geometry.source() != extent ||
-      !extent.try_area(&area) || area > SIZE_MAX / 3)
-    return Status::InvalidArgument("Invalid RGB8 tokenization input");
+  if (!out || (channels != 1 && channels != 3 && channels != 4) || plan.geometry.source() != extent ||
+      !extent.try_area(&area) || area > SIZE_MAX / channels)
+    return Status::InvalidArgument("Invalid Modular identity tokenization input");
   PreparedModularTokens result;
-  result.tokens.resize(3 * area);
+  result.tokens.resize(channels * area);
   result.streams.resize(plan.streams.size());
   size_t next = 0;
   for (size_t i = 0; i < plan.streams.size(); ++i) {
@@ -23,8 +24,8 @@ Status TokenizeRgb8(const ModularEncoderFrame &frame, const ModularStreamPlan &p
     const size_t begin = next;
     for (const auto &slice :
          std::span(plan.slices).subspan(stream.slice_begin, stream.slice_count)) {
-      if (slice.channel >= 3)
-        return Status::InvalidArgument("Invalid RGB8 channel index");
+      if (slice.channel >= channels)
+        return Status::InvalidArgument("Invalid Modular identity channel index");
       ModularChannelView view;
       if (auto s = BorrowChannelSlice(frame.image().view(slice.channel), slice.rect, &view);
           !s.ok())
@@ -34,6 +35,9 @@ Status TokenizeRgb8(const ModularEncoderFrame &frame, const ModularStreamPlan &p
         return Status::InvalidArgument("Overlapping Modular token count");
       for (size_t y = 0; y < h; ++y)
         for (size_t x = 0; x < w; ++x) {
+          // Identity samples and clamped predictions are [0, 2^bits-1]. For
+          // 16-bit input, residuals are [-65535,65535], packed values <=131070.
+          // Wide prediction arithmetic avoids narrowing intermediate sums.
           const int64_t residual = int64_t{view.Row(y)[x]} - GradientPrediction(view, x, y);
           result.tokens[next++] = {0, PackSigned(static_cast<int32_t>(residual))};
         }

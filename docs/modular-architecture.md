@@ -2,9 +2,10 @@
 
 Status: Phase 1 extraction implemented; see the
 [qualification record and platform limits](modular-phase1/README.md).
-[P2.0 foundations and independent reference infrastructure](modular-p2.0.md)
-and the [P2.1 private RGB8 CPU encoder](modular-p2.1.md) are implemented.
-P2.2 onward remains a proposed implementation sequence. Whole-image Modular
+[P2.0 foundations and independent reference infrastructure](modular-p2.0.md),
+the [P2.1 private RGB8 CPU encoder](modular-p2.1.md),
+and [P2.2 integer formats and alpha preservation](modular-p2.2.md) are implemented.
+P2.3 onward remains a proposed implementation sequence. Whole-image Modular
 encoding is available internally; public API and CLI integration remain P2.5. Originally written
 2026-10-07 against GJXL
 `67caa6d89830f6a13c057923e34f80753a161e9d` and pinned libjxl
@@ -489,6 +490,24 @@ admission and publication accounting are present in this first workflow.
 
 ### P2.2: preserve more source formats and extra-channel semantics
 
+Implemented in the private scalar workflow; see the
+[P2.2 input contract and qualification record](modular-p2.2.md).
+`PackedModularImageView` selects Gray/RGB/unassociated RGBA at 8 or 16 bits,
+with a bounded byte span, explicit byte stride, and little-/big-endian sample
+order (default little-endian; ignored at 8 bits). Unaligned samples and odd
+strides are supported. `ResolveModularInput` supplies the allocation-free shared
+metadata/channel description for validation, preparation and storage planning.
+`EncodeModularImage[Owned]` uses the original admission/publication workflow;
+the RGB8 entry points remain forwarding adapters with identical output.
+
+Channels remain full-resolution signed 32-bit planes holding unsigned source
+values. Gray uses one color plane; RGBA uses three color planes followed by one
+same-depth, unassociated alpha plane. `TokenizeIdentity` applies the existing
+gradient leaf separately to every channel and stream. No transform, alpha
+optimization or association conversion is applied. All 8-bit identity inputs
+retain the signed-16-buffer sufficiency proof; 16-bit inputs clear that flag and
+preserve the complete unsigned range. Public APIs and CLI remain P2.5.
+
 Add grayscale, 16-bit integer input and RGBA in separate changes. Specify byte
 order and row stride for packed 16-bit input, validate buffer lengths with checked
 arithmetic, and reuse common layout validation without imposing VarDCT's opaque-
@@ -703,7 +722,8 @@ and exercise representative x86-64 and ARM64 CPU builds. GPU-enabled regression
 checks require the appropriate hardware; unrun configurations remain explicitly
 unqualified. Phase 1 results are recorded in the
 [qualification report](modular-phase1/README.md). Phase 2 results are recorded
-for [P2.0](modular-p2.0.md) and [P2.1](modular-p2.1.md); later milestones remain
+for [P2.0](modular-p2.0.md), [P2.1](modular-p2.1.md) and
+[P2.2](modular-p2.2.md); later milestones remain
 planned.
 
 ### Compression and performance gates

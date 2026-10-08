@@ -18,4 +18,7 @@ struct ModularWorkflowStoragePlan {
 // result stays charged separately in its domain during replacement.
 [[nodiscard]] Status ComputeModularWorkflowStoragePlan(Extent2D extent, EntropyCodingMode mode,
                                                        ModularWorkflowStoragePlan *out);
+[[nodiscard]] Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat format,
+                                                       EntropyCodingMode mode,
+                                                       ModularWorkflowStoragePlan *out);
 } // namespace gjxl::modular_internal

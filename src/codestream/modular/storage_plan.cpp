@@ -20,6 +20,10 @@ Status Overflow() { return Status::InvalidArgument("Modular workflow storage ove
 } // namespace
 Status ComputeModularWorkflowStoragePlan(Extent2D extent, EntropyCodingMode mode,
                                          ModularWorkflowStoragePlan *out) {
+  return ComputeModularWorkflowStoragePlan(extent, PackedModularFormat::kRgb8, mode, out);
+}
+Status ComputeModularWorkflowStoragePlan(Extent2D extent, PackedModularFormat format,
+                                         EntropyCodingMode mode, ModularWorkflowStoragePlan *out) {
   if (!out)
     return Status::InvalidArgument("Null Modular workflow plan");
   if (mode != EntropyCodingMode::kPrefix && mode != EntropyCodingMode::kAns)
@@ -27,11 +31,15 @@ Status ComputeModularWorkflowStoragePlan(Extent2D extent, EntropyCodingMode mode
   ModularWorkflowStoragePlan p;
   if (auto s = ModularFrameGeometry::Create(extent, &p.geometry); !s.ok())
     return s;
+  ModularInputProfile profile;
+  if (auto s = ResolveModularInput(extent, format, &profile); !s.ok())
+    return s;
+  const size_t channels = profile.channel_count;
   size_t area;
-  if (!extent.try_area(&area) || uint64_t{area} > (uint64_t{1} << 40) || area > SIZE_MAX / 3)
+  if (!extent.try_area(&area) || uint64_t{area} > (uint64_t{1} << 40) || area > SIZE_MAX / channels)
     return Overflow();
-  p.tokens = 3 * area;
-  const auto descriptors = Rgb8Channels(extent);
+  p.tokens = channels * area;
+  const auto descriptors = profile.channels();
   ModularStreamStoragePlan layout;
   if (auto s = ComputeModularStreamStoragePlan(p.geometry, descriptors, 0, &layout); !s.ok())
     return s;
@@ -74,7 +82,8 @@ Status ComputeModularWorkflowStoragePlan(Extent2D extent, EntropyCodingMode mode
   EntropyModelStoragePlan model;
   EntropyTokenEmissionStoragePlan payload;
   const bool global = p.geometry.group_count() == 1;
-  const size_t maximum_stream_tokens = global ? p.tokens : 3 * kGroupDimension * kGroupDimension;
+  const size_t maximum_stream_tokens =
+      global ? p.tokens : channels * kGroupDimension * kGroupDimension;
   if (auto s = ComputeGlobalTreeStoragePlan(kGradientTreeTokens.size(), &tree); !s.ok())
     return s;
   if (auto s = ComputeEntropyModelStoragePlan(mode, 1, 1, &model); !s.ok())

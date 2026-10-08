@@ -8,14 +8,15 @@
 
 namespace gjxl::modular_internal {
 namespace {
-Status Encode(Rgb8View input, ModularEncodingOptions options,
+Status Encode(PackedModularImageView input, ModularEncodingOptions options,
               resource_budget_internal::PublicationOutput<uint8_t> output) try {
   if (output == nullptr)
     return Status::InvalidArgument("Null Modular workflow output");
   if (auto s = input.Validate(); !s.ok())
     return s;
   ModularWorkflowStoragePlan storage;
-  if (auto s = ComputeModularWorkflowStoragePlan(input.extent, options.entropy, &storage); !s.ok())
+  if (auto s = ComputeModularWorkflowStoragePlan(input.extent, input.format, options.entropy, &storage);
+      !s.ok())
     return s;
   codestream_internal::WorkflowAdmission admission;
   if (auto s = admission.Start(storage.working.peak_bytes, options.execution_domain); !s.ok())
@@ -34,10 +35,13 @@ Status Encode(Rgb8View input, ModularEncodingOptions options,
     if (auto s = ModularEncoderFrame::Prepare(input, &frame); !s.ok())
       return s;
     metadata = frame.metadata();
-    if (auto s = BuildModularStreamPlan(storage.geometry, Rgb8Channels(input.extent), 0, &layout);
+    ModularInputProfile profile;
+    if (auto s = ResolveModularInput(input.extent, input.format, &profile); !s.ok())
+      return s;
+    if (auto s = BuildModularStreamPlan(storage.geometry, profile.channels(), 0, &layout);
         !s.ok())
       return s;
-    if (auto s = TokenizeRgb8(frame, layout, &tokens); !s.ok())
+    if (auto s = TokenizeIdentity(frame, layout, &tokens); !s.ok())
       return s;
   }
   codestream_internal::CodestreamBuffer candidate;
@@ -57,10 +61,18 @@ Status Encode(Rgb8View input, ModularEncodingOptions options,
 } // namespace
 Status EncodeRgb8ModularOwned(Rgb8View input, ModularEncodingOptions options,
                               codestream_internal::CodestreamBuffer *out) {
-  return Encode(input, std::move(options), out);
+  return Encode(input.packed(), std::move(options), out);
 }
 Status EncodeRgb8Modular(Rgb8View input, ModularEncodingOptions options,
                          std::vector<uint8_t> *out) {
+  return Encode(input.packed(), std::move(options), out);
+}
+Status EncodeModularImageOwned(PackedModularImageView input, ModularEncodingOptions options,
+                                codestream_internal::CodestreamBuffer *out) {
+  return Encode(input, std::move(options), out);
+}
+Status EncodeModularImage(PackedModularImageView input, ModularEncodingOptions options,
+                           std::vector<uint8_t> *out) {
   return Encode(input, std::move(options), out);
 }
 } // namespace gjxl::modular_internal
