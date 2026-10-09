@@ -424,6 +424,12 @@ class CudaBackend final : public GpuBackend,
 [[nodiscard]] Status GetCudaResidentMetadataPendingForTest(
     const PreparedAqEvaluation& prepared, bool* pending);
 
+// Compare generated records and rejection status with the general builder.
+// Does not upload or mutate prepared state; the caller must quiesce the object.
+[[nodiscard]] Status CheckCudaResidentMetadataForTest(
+    const PreparedAqEvaluation& prepared, const AcStrategyGrid& strategies,
+    ConstPlaneU8View epf_sharpness);
+
 // Internal overwrite-coverage hook. The caller must quiesce the object.
 [[nodiscard]] Status PoisonCudaResidentCoefficientReadbackForTest(
     PreparedAqEvaluation& prepared, int32_t value);

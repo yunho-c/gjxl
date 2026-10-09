@@ -6,6 +6,7 @@
 #include "codec/vardct_frame_view_internal.h"
 #include "codestream/encoder_internal.h"
 #include "cuda_sparse_resident_fixture.h"
+#include "gpu/cuda/cuda_backend_internal.h"
 #include "gpu/ops/aq_evaluation_internal.h"
 
 namespace {
@@ -123,6 +124,61 @@ void DeferredMetadata(GpuBackend &gpu) {
                "cases passed.\n";
 }
 
+void Dct8Metadata(GpuBackend& gpu) {
+  // Cross color-tile (8 blocks) and AC-group (32 blocks) boundaries on both
+  // axes, including narrow images, partial bottom/right edges and a 12 MP grid.
+  for (Extent2D extent : {Extent2D{1, 1}, {32, 32}, {33, 33}, {64, 64},
+                          {65, 63}, {63, 65}, {255, 257}, {257, 255},
+                          {257, 263}, {513, 521}, {1, 521}, {521, 1},
+                          {4243, 2828}}) {
+    Fixture f(extent);
+    auto prepared = Prepare(gpu, f, true, true, false, 0, true);
+    const size_t stride = f.blocks.width + 3;
+    std::vector<uint8_t> sharpness(stride * f.blocks.height, 255);
+    for (size_t y = 0; y < f.blocks.height; ++y)
+      for (size_t x = 0; x < f.blocks.width; ++x)
+        sharpness[y * stride + x] = static_cast<uint8_t>((x + 3 * y) % 8);
+    const auto check = [&](const AcStrategyGrid& grid) {
+      return cuda_internal::CheckCudaResidentMetadataForTest(
+          *prepared, grid, {sharpness.data(), f.blocks, stride});
+    };
+    Check(check(f.strategies));
+    // Invalid visible EPF values must fail even though row padding is ignored.
+    const size_t last = (f.blocks.height - 1) * stride + f.blocks.width - 1;
+    const uint8_t saved = sharpness[last];
+    sharpness[last] = 8;
+    Require(check(f.strategies).code() == StatusCode::kInvalidArgument,
+            "DCT8 metadata accepted invalid EPF sharpness");
+    Require(prepared->Reconfigure(f.strategies,
+                                 {sharpness.data(), f.blocks, stride}).code() ==
+                StatusCode::kInvalidArgument,
+            "DCT8 reconfiguration accepted invalid EPF sharpness");
+    bool pending = false;
+    Check(cuda_internal::GetCudaResidentMetadataPendingForTest(*prepared, &pending));
+    Require(pending, "Failed DCT8 reconfiguration published metadata");
+    sharpness[last] = saved;
+    Check(prepared->Reconfigure(f.strategies, {sharpness.data(), f.blocks, stride}));
+    AcStrategyGrid other;
+    Check(AcStrategyGrid::Create(f.blocks, &other));
+    Require(check(other).code() == StatusCode::kInvalidArgument,
+            "DCT8 metadata accepted incomplete strategies");
+    if (f.blocks.width >= 2 && f.blocks.height >= 2) {
+      Check(other.Set(0, 0, AcStrategyType::kDct16x16));
+      other.fill_empty_dct8();
+      Check(check(other));
+      Check(prepared->Reconfigure(other, {sharpness.data(), f.blocks, stride}));
+    }
+    Check(prepared->Reconfigure(f.strategies, {sharpness.data(), f.blocks, stride}));
+    other.clear();
+    Check(other.Set(0, 0, AcStrategyType::kIdentity));
+    other.fill_empty_dct8();
+    Require(check(other).code() == StatusCode::kInvalidArgument,
+            "Metadata accepted a strategy unsupported by CUDA");
+  }
+  std::cout << "CUDA DCT8 metadata matches the general builder, including edges, "
+               "strides, sampling, validation and reconfiguration.\n";
+}
+
 void Case(GpuBackend &gpu, Extent2D extent, bool gaborish, unsigned dc_policy,
           AcCoefficientDecisionMode decision) {
   Fixture f(extent);
@@ -232,6 +288,7 @@ int main() {
       return 77;
     }
     Check(status);
+    Dct8Metadata(*gpu);
     DeferredMetadata(*gpu);
     for (auto extent : {Extent2D{1, 1}, {17, 33}, {65, 67}, {257, 263}})
       for (bool gaborish : {false, true})

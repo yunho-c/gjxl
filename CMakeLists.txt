@@ -3061,6 +3061,7 @@ if(GJXL_BUILD_TESTS)
     set_tests_properties(cuda_resource PROPERTIES SKIP_RETURN_CODE 77)
     add_executable(gjxl_cuda_low_effort_test tests/cuda_low_effort_test.cpp)
     target_link_libraries(gjxl_cuda_low_effort_test PRIVATE gjxl_codestream gjxl_cuda)
+    target_include_directories(gjxl_cuda_low_effort_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
     add_test(NAME cuda_low_effort COMMAND gjxl_cuda_low_effort_test)
     set_tests_properties(cuda_low_effort PROPERTIES SKIP_RETURN_CODE 77)
 
