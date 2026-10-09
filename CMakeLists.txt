@@ -2322,6 +2322,16 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_modular_workflow_test PRIVATE gjxl_codestream)
   add_test(NAME modular_workflow COMMAND gjxl_modular_workflow_test)
 
+  add_executable(gjxl_modular_capture tools/modular_oracle/capture.cpp src/io/pnm.cpp)
+  target_link_libraries(gjxl_modular_capture PRIVATE gjxl_codestream)
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME modular_frozen_oracle COMMAND "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tools/modular_oracle/verify.py"
+      "$<TARGET_FILE:gjxl_modular_capture>" "${CMAKE_CURRENT_SOURCE_DIR}/testdata/modular"
+      "${CMAKE_CURRENT_BINARY_DIR}/modular-frozen-native")
+  endif()
+
   include(cmake/ModularOracle.cmake)
 
   # Optional direct oracle from a separately built, pinned libjxl archive.

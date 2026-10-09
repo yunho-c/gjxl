@@ -1,0 +1,2227 @@
+{
+  "schema": 1,
+  "source": "build/modular-p2.6/benchmark-final/timings.csv",
+  "artifact_sha256": {
+    "alpha16-0-0-1-resolved.bin": "706995a13ed2f972839dddcf69fc3f87733626ff369b897e068bdad9026c7e34",
+    "alpha16-0-0-4-resolved.bin": "706995a13ed2f972839dddcf69fc3f87733626ff369b897e068bdad9026c7e34",
+    "alpha16-0-1-1-resolved.bin": "f3d5045eb46cb20de1130eaaed188f4b1aab79d9b8d18f3e1dc07ebcd0d31a7e",
+    "alpha16-0-1-4-resolved.bin": "f3d5045eb46cb20de1130eaaed188f4b1aab79d9b8d18f3e1dc07ebcd0d31a7e",
+    "alpha16-1-0-1-resolved.bin": "706995a13ed2f972839dddcf69fc3f87733626ff369b897e068bdad9026c7e34",
+    "alpha16-1-0-4-resolved.bin": "706995a13ed2f972839dddcf69fc3f87733626ff369b897e068bdad9026c7e34",
+    "alpha16-1-1-1-resolved.bin": "9c20ce56e6d466b950a5e75ea5b4fc83e47dec95df578ce7344df884254facdb",
+    "alpha16-1-1-4-resolved.bin": "9c20ce56e6d466b950a5e75ea5b4fc83e47dec95df578ce7344df884254facdb",
+    "gray16-0-0-1-resolved.bin": "dcf0b61853bc240acdf74575202f27f109cc57271cde91639796e8b55dd25303",
+    "gray16-0-0-4-resolved.bin": "dcf0b61853bc240acdf74575202f27f109cc57271cde91639796e8b55dd25303",
+    "gray16-0-1-1-resolved.bin": "e6566dbe56ebfabe91e93cdf3e6112fa12812445380f893aaea8ec71e314b2a1",
+    "gray16-0-1-4-resolved.bin": "e6566dbe56ebfabe91e93cdf3e6112fa12812445380f893aaea8ec71e314b2a1",
+    "gray16-1-0-1-resolved.bin": "dcf0b61853bc240acdf74575202f27f109cc57271cde91639796e8b55dd25303",
+    "gray16-1-0-4-resolved.bin": "dcf0b61853bc240acdf74575202f27f109cc57271cde91639796e8b55dd25303",
+    "gray16-1-1-1-resolved.bin": "e6566dbe56ebfabe91e93cdf3e6112fa12812445380f893aaea8ec71e314b2a1",
+    "gray16-1-1-4-resolved.bin": "e6566dbe56ebfabe91e93cdf3e6112fa12812445380f893aaea8ec71e314b2a1",
+    "noise-0-0-1-resolved.bin": "b7f01bb5de7c7ccf399e0352a0371317c7e667428ebf98f98241a6d78e8a3f97",
+    "noise-0-0-4-resolved.bin": "b7f01bb5de7c7ccf399e0352a0371317c7e667428ebf98f98241a6d78e8a3f97",
+    "noise-0-1-1-resolved.bin": "171aa08adb9392dccdfb02f6106df1a6044ff3b09ab02308726e8c9aed577887",
+    "noise-0-1-4-resolved.bin": "171aa08adb9392dccdfb02f6106df1a6044ff3b09ab02308726e8c9aed577887",
+    "noise-1-0-1-resolved.bin": "b7f01bb5de7c7ccf399e0352a0371317c7e667428ebf98f98241a6d78e8a3f97",
+    "noise-1-0-4-resolved.bin": "b7f01bb5de7c7ccf399e0352a0371317c7e667428ebf98f98241a6d78e8a3f97",
+    "noise-1-1-1-resolved.bin": "171aa08adb9392dccdfb02f6106df1a6044ff3b09ab02308726e8c9aed577887",
+    "noise-1-1-4-resolved.bin": "171aa08adb9392dccdfb02f6106df1a6044ff3b09ab02308726e8c9aed577887",
+    "palette-0-0-1-resolved.bin": "960d08f73aaabce4a9d62421671cc890abc8f4a6bf5d35b0ea3336e205d7d5b2",
+    "palette-0-0-4-resolved.bin": "960d08f73aaabce4a9d62421671cc890abc8f4a6bf5d35b0ea3336e205d7d5b2",
+    "palette-0-1-1-resolved.bin": "960d08f73aaabce4a9d62421671cc890abc8f4a6bf5d35b0ea3336e205d7d5b2",
+    "palette-0-1-4-resolved.bin": "960d08f73aaabce4a9d62421671cc890abc8f4a6bf5d35b0ea3336e205d7d5b2",
+    "palette-1-0-1-resolved.bin": "960d08f73aaabce4a9d62421671cc890abc8f4a6bf5d35b0ea3336e205d7d5b2",
+    "palette-1-0-4-resolved.bin": "960d08f73aaabce4a9d62421671cc890abc8f4a6bf5d35b0ea3336e205d7d5b2",
+    "palette-1-1-1-resolved.bin": "960d08f73aaabce4a9d62421671cc890abc8f4a6bf5d35b0ea3336e205d7d5b2",
+    "palette-1-1-4-resolved.bin": "960d08f73aaabce4a9d62421671cc890abc8f4a6bf5d35b0ea3336e205d7d5b2",
+    "photo-0-0-1-resolved.bin": "f4ea144f5efa388f1f13905ed3e959700d0f5ac4b501f79eff156712c8ac8488",
+    "photo-0-0-4-resolved.bin": "f4ea144f5efa388f1f13905ed3e959700d0f5ac4b501f79eff156712c8ac8488",
+    "photo-0-1-1-resolved.bin": "46d45187d888461b455cfc9ac07289fbf7b45a66f15ca2138dd8723f88d387dd",
+    "photo-0-1-4-resolved.bin": "46d45187d888461b455cfc9ac07289fbf7b45a66f15ca2138dd8723f88d387dd",
+    "photo-1-0-1-resolved.bin": "f4ea144f5efa388f1f13905ed3e959700d0f5ac4b501f79eff156712c8ac8488",
+    "photo-1-0-4-resolved.bin": "f4ea144f5efa388f1f13905ed3e959700d0f5ac4b501f79eff156712c8ac8488",
+    "photo-1-1-1-resolved.bin": "46d45187d888461b455cfc9ac07289fbf7b45a66f15ca2138dd8723f88d387dd",
+    "photo-1-1-4-resolved.bin": "46d45187d888461b455cfc9ac07289fbf7b45a66f15ca2138dd8723f88d387dd",
+    "screen-0-0-1-resolved.bin": "f4ea144f5efa388f1f13905ed3e959700d0f5ac4b501f79eff156712c8ac8488",
+    "screen-0-0-4-resolved.bin": "f4ea144f5efa388f1f13905ed3e959700d0f5ac4b501f79eff156712c8ac8488",
+    "screen-0-1-1-resolved.bin": "5867b43ce8a4b7d61a015a954a101932818da15deace73fe9ad2712db5dfdd42",
+    "screen-0-1-4-resolved.bin": "5867b43ce8a4b7d61a015a954a101932818da15deace73fe9ad2712db5dfdd42",
+    "screen-1-0-1-resolved.bin": "f4ea144f5efa388f1f13905ed3e959700d0f5ac4b501f79eff156712c8ac8488",
+    "screen-1-0-4-resolved.bin": "f4ea144f5efa388f1f13905ed3e959700d0f5ac4b501f79eff156712c8ac8488",
+    "screen-1-1-1-resolved.bin": "5867b43ce8a4b7d61a015a954a101932818da15deace73fe9ad2712db5dfdd42",
+    "screen-1-1-4-resolved.bin": "5867b43ce8a4b7d61a015a954a101932818da15deace73fe9ad2712db5dfdd42",
+    "tiny-0-0-1-resolved.bin": "b7f01bb5de7c7ccf399e0352a0371317c7e667428ebf98f98241a6d78e8a3f97",
+    "tiny-0-0-4-resolved.bin": "b7f01bb5de7c7ccf399e0352a0371317c7e667428ebf98f98241a6d78e8a3f97",
+    "tiny-0-1-1-resolved.bin": "b7f01bb5de7c7ccf399e0352a0371317c7e667428ebf98f98241a6d78e8a3f97",
+    "tiny-0-1-4-resolved.bin": "b7f01bb5de7c7ccf399e0352a0371317c7e667428ebf98f98241a6d78e8a3f97",
+    "tiny-1-0-1-resolved.bin": "b7f01bb5de7c7ccf399e0352a0371317c7e667428ebf98f98241a6d78e8a3f97",
+    "tiny-1-0-4-resolved.bin": "b7f01bb5de7c7ccf399e0352a0371317c7e667428ebf98f98241a6d78e8a3f97",
+    "tiny-1-1-1-resolved.bin": "b7f01bb5de7c7ccf399e0352a0371317c7e667428ebf98f98241a6d78e8a3f97",
+    "tiny-1-1-4-resolved.bin": "b7f01bb5de7c7ccf399e0352a0371317c7e667428ebf98f98241a6d78e8a3f97",
+    "alpha16-0-0-1.jxl": "fc4e3fc9e641140fda2b07ffb4c5f4d024a62eecd0cecb213530eb125bd25210",
+    "alpha16-0-0-4.jxl": "fc4e3fc9e641140fda2b07ffb4c5f4d024a62eecd0cecb213530eb125bd25210",
+    "alpha16-0-1-1.jxl": "913d3c051e75417e0385b37e0e53d750825fde91d8b48c8223c07fb7b23d1aa2",
+    "alpha16-0-1-4.jxl": "913d3c051e75417e0385b37e0e53d750825fde91d8b48c8223c07fb7b23d1aa2",
+    "alpha16-1-0-1.jxl": "dd82964a4f69afcd8ccbad6c236f5d9f4b85157fd3f5ce328d7cf3971045a124",
+    "alpha16-1-0-4.jxl": "dd82964a4f69afcd8ccbad6c236f5d9f4b85157fd3f5ce328d7cf3971045a124",
+    "alpha16-1-1-1.jxl": "59b4bffac07bf8758e61df8cb1be213a90396dfd1463ca2fab4c025e6a638bf5",
+    "alpha16-1-1-4.jxl": "59b4bffac07bf8758e61df8cb1be213a90396dfd1463ca2fab4c025e6a638bf5",
+    "gray16-0-0-1.jxl": "d5aacaeb4e5359da711050808a856895d5fe6676dca2c2e0ec855c709895d7e1",
+    "gray16-0-0-4.jxl": "d5aacaeb4e5359da711050808a856895d5fe6676dca2c2e0ec855c709895d7e1",
+    "gray16-0-1-1.jxl": "21dd983e2bf3912913e580127ef8c6e8d8ce41d93a804c6656009b716bf6cd13",
+    "gray16-0-1-4.jxl": "21dd983e2bf3912913e580127ef8c6e8d8ce41d93a804c6656009b716bf6cd13",
+    "gray16-1-0-1.jxl": "fa5c88746f316f71d5232da3cacef01c266adaa8241cb9125c848dde9aad7c49",
+    "gray16-1-0-4.jxl": "fa5c88746f316f71d5232da3cacef01c266adaa8241cb9125c848dde9aad7c49",
+    "gray16-1-1-1.jxl": "4a11514dc3e1ec6e1e1008fbea27a06be24b9b74ed3e8354cc45e36ecd7c3d43",
+    "gray16-1-1-4.jxl": "4a11514dc3e1ec6e1e1008fbea27a06be24b9b74ed3e8354cc45e36ecd7c3d43",
+    "noise-0-0-1.jxl": "bd9b646cd5e8761f727bff382d5a11a54f21bde22e05b818f177fa85e3e3c4f6",
+    "noise-0-0-4.jxl": "bd9b646cd5e8761f727bff382d5a11a54f21bde22e05b818f177fa85e3e3c4f6",
+    "noise-0-1-1.jxl": "12f94def871d9e594a070e9f6f7ce393812dff92c6f5449844992de5bd6f6f2f",
+    "noise-0-1-4.jxl": "12f94def871d9e594a070e9f6f7ce393812dff92c6f5449844992de5bd6f6f2f",
+    "noise-1-0-1.jxl": "f4c5c7ebd885e1c883eeddc307e41936721d34b4a09248da445d91708154c594",
+    "noise-1-0-4.jxl": "f4c5c7ebd885e1c883eeddc307e41936721d34b4a09248da445d91708154c594",
+    "noise-1-1-1.jxl": "4c859bf2365a737ede721008628ba83247a055d8d1561ead99db9a3048bfe1f6",
+    "noise-1-1-4.jxl": "4c859bf2365a737ede721008628ba83247a055d8d1561ead99db9a3048bfe1f6",
+    "palette-0-0-1.jxl": "7335f1f146c40fd5d8e5eed05f241b93a2f0b8450bdd3384de520c1224b17d05",
+    "palette-0-0-4.jxl": "7335f1f146c40fd5d8e5eed05f241b93a2f0b8450bdd3384de520c1224b17d05",
+    "palette-0-1-1.jxl": "7335f1f146c40fd5d8e5eed05f241b93a2f0b8450bdd3384de520c1224b17d05",
+    "palette-0-1-4.jxl": "7335f1f146c40fd5d8e5eed05f241b93a2f0b8450bdd3384de520c1224b17d05",
+    "palette-1-0-1.jxl": "12fdadb054ca975042e50f1886e4044c3e6c1868195e4357ddf0ed6f2cd08948",
+    "palette-1-0-4.jxl": "12fdadb054ca975042e50f1886e4044c3e6c1868195e4357ddf0ed6f2cd08948",
+    "palette-1-1-1.jxl": "12fdadb054ca975042e50f1886e4044c3e6c1868195e4357ddf0ed6f2cd08948",
+    "palette-1-1-4.jxl": "12fdadb054ca975042e50f1886e4044c3e6c1868195e4357ddf0ed6f2cd08948",
+    "photo-0-0-1.jxl": "5051abfabae6b00ef6caaa232f6a2dfa76a3691fe15284020f6df511ce5cc505",
+    "photo-0-0-4.jxl": "5051abfabae6b00ef6caaa232f6a2dfa76a3691fe15284020f6df511ce5cc505",
+    "photo-0-1-1.jxl": "68526f18e0ae79fc95e5b9a96071650cf0d350278c6f031fa93cf9f2f710e40b",
+    "photo-0-1-4.jxl": "68526f18e0ae79fc95e5b9a96071650cf0d350278c6f031fa93cf9f2f710e40b",
+    "photo-1-0-1.jxl": "4e85443646b88e2008dff0300ceeac2ff23b16f45a6c131c87570a4bb50b4155",
+    "photo-1-0-4.jxl": "4e85443646b88e2008dff0300ceeac2ff23b16f45a6c131c87570a4bb50b4155",
+    "photo-1-1-1.jxl": "5cec10f660348a6bc68a390cbba125f98b65e14480964b807a53af5d1f4b49db",
+    "photo-1-1-4.jxl": "5cec10f660348a6bc68a390cbba125f98b65e14480964b807a53af5d1f4b49db",
+    "screen-0-0-1.jxl": "7647989b512ef358e7466edc86f0dcbe07ac5bad77551466ee3e389b7eab978a",
+    "screen-0-0-4.jxl": "7647989b512ef358e7466edc86f0dcbe07ac5bad77551466ee3e389b7eab978a",
+    "screen-0-1-1.jxl": "719ffdd54c7f1ddb2fa99d72c5b3bf1b1c1785ff50db12d0d9ebb42c5accc243",
+    "screen-0-1-4.jxl": "719ffdd54c7f1ddb2fa99d72c5b3bf1b1c1785ff50db12d0d9ebb42c5accc243",
+    "screen-1-0-1.jxl": "36277c966a82bfc5e83e28faaa8114c6a148eddd792619a117bd6340072b4422",
+    "screen-1-0-4.jxl": "36277c966a82bfc5e83e28faaa8114c6a148eddd792619a117bd6340072b4422",
+    "screen-1-1-1.jxl": "f4b829b15c72d04a89ffdbe34c16808f22d65923e54cf7511085f5acead59dbe",
+    "screen-1-1-4.jxl": "f4b829b15c72d04a89ffdbe34c16808f22d65923e54cf7511085f5acead59dbe",
+    "tiny-0-0-1.jxl": "c9f7bd35abc7f08771e463d37a57aced251e25bcfad124f1d94033b2bacdfac3",
+    "tiny-0-0-4.jxl": "c9f7bd35abc7f08771e463d37a57aced251e25bcfad124f1d94033b2bacdfac3",
+    "tiny-0-1-1.jxl": "c9f7bd35abc7f08771e463d37a57aced251e25bcfad124f1d94033b2bacdfac3",
+    "tiny-0-1-4.jxl": "c9f7bd35abc7f08771e463d37a57aced251e25bcfad124f1d94033b2bacdfac3",
+    "tiny-1-0-1.jxl": "f9c85e4206e1a03cc23b13b05ef1ad3f868ec3b4b5357befe9c824f0a8f85c65",
+    "tiny-1-0-4.jxl": "f9c85e4206e1a03cc23b13b05ef1ad3f868ec3b4b5357befe9c824f0a8f85c65",
+    "tiny-1-1-1.jxl": "f9c85e4206e1a03cc23b13b05ef1ad3f868ec3b4b5357befe9c824f0a8f85c65",
+    "tiny-1-1-4.jxl": "f9c85e4206e1a03cc23b13b05ef1ad3f868ec3b4b5357befe9c824f0a8f85c65"
+  },
+  "measurements": [
+    {
+      "fixture": "tiny",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0004188
+      ],
+      "warm_seconds": [
+        0.00016,
+        0.0001449,
+        0.0001435
+      ],
+      "median_seconds": 0.0001449,
+      "min_seconds": 0.0001435,
+      "max_seconds": 0.00016,
+      "mpixels_per_second": 0.006901311249137336,
+      "encoded_bytes": 21,
+      "managed_peak_bytes": 29474,
+      "planned_capacity_bytes": 277445,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 8e-07,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 1.6e-06,
+        "model": 2.16e-05,
+        "emission": 0.0001095,
+        "assembly": 3.9e-06
+      }
+    },
+    {
+      "fixture": "tiny",
+      "encoder": "libjxl-effort1",
+      "entropy": "-1",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 6,
+      "first_calls_seconds": [
+        0.0011364,
+        0.0007067
+      ],
+      "warm_seconds": [
+        0.0006767,
+        0.0006404,
+        0.0006393,
+        0.0006548,
+        0.0006523,
+        0.0006521
+      ],
+      "median_seconds": 0.0006521999999999999,
+      "min_seconds": 0.0006393,
+      "max_seconds": 0.0006767,
+      "mpixels_per_second": 0.0015332720024532356,
+      "encoded_bytes": 173,
+      "managed_peak_bytes": 0,
+      "planned_capacity_bytes": 0,
+      "encoded_candidates": 0,
+      "stage_median_seconds": {
+        "input": 0.0,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.0,
+        "model": 0.0,
+        "emission": 0.0,
+        "assembly": 0.0
+      }
+    },
+    {
+      "fixture": "tiny",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "0",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.000171
+      ],
+      "warm_seconds": [
+        0.0001512,
+        0.0001438,
+        0.0001415
+      ],
+      "median_seconds": 0.0001438,
+      "min_seconds": 0.0001415,
+      "max_seconds": 0.0001512,
+      "mpixels_per_second": 0.006954102920723227,
+      "encoded_bytes": 21,
+      "managed_peak_bytes": 29474,
+      "planned_capacity_bytes": 277730,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 6e-07,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 1.4e-06,
+        "model": 2.19e-05,
+        "emission": 0.0001087,
+        "assembly": 3.9e-06
+      }
+    },
+    {
+      "fixture": "tiny",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "1",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0009984
+      ],
+      "warm_seconds": [
+        0.0003222,
+        0.0003006,
+        0.0002994
+      ],
+      "median_seconds": 0.0003006,
+      "min_seconds": 0.0002994,
+      "max_seconds": 0.0003222,
+      "mpixels_per_second": 0.0033266799733865605,
+      "encoded_bytes": 21,
+      "managed_peak_bytes": 29558,
+      "planned_capacity_bytes": 292437,
+      "encoded_candidates": 2,
+      "stage_median_seconds": {
+        "input": 1.8e-06,
+        "transforms": 1.9e-06,
+        "training": 3e-06,
+        "tokens": 2.9e-06,
+        "model": 4.43e-05,
+        "emission": 0.00021920000000000002,
+        "assembly": 7.4e-06
+      }
+    },
+    {
+      "fixture": "tiny",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "1",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.000292
+      ],
+      "warm_seconds": [
+        0.0003,
+        0.000294,
+        0.0002921
+      ],
+      "median_seconds": 0.000294,
+      "min_seconds": 0.0002921,
+      "max_seconds": 0.0003,
+      "mpixels_per_second": 0.0034013605442176874,
+      "encoded_bytes": 21,
+      "managed_peak_bytes": 29558,
+      "planned_capacity_bytes": 305970,
+      "encoded_candidates": 2,
+      "stage_median_seconds": {
+        "input": 1.7999999999999997e-06,
+        "transforms": 1.8e-06,
+        "training": 2.9e-06,
+        "tokens": 2.8000000000000003e-06,
+        "model": 4.34e-05,
+        "emission": 0.0002146,
+        "assembly": 7.4e-06
+      }
+    },
+    {
+      "fixture": "tiny",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0008764
+      ],
+      "warm_seconds": [
+        0.0001955,
+        0.0001916,
+        0.000191
+      ],
+      "median_seconds": 0.0001916,
+      "min_seconds": 0.000191,
+      "max_seconds": 0.0001955,
+      "mpixels_per_second": 0.005219206680584552,
+      "encoded_bytes": 25,
+      "managed_peak_bytes": 39626,
+      "planned_capacity_bytes": 294814,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 6e-07,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 1.4e-06,
+        "model": 6.91e-05,
+        "emission": 0.0001095,
+        "assembly": 3.8e-06
+      }
+    },
+    {
+      "fixture": "tiny",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "0",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0002074
+      ],
+      "warm_seconds": [
+        0.0001964,
+        0.0001924,
+        0.00019
+      ],
+      "median_seconds": 0.0001924,
+      "min_seconds": 0.00019,
+      "max_seconds": 0.0001964,
+      "mpixels_per_second": 0.005197505197505198,
+      "encoded_bytes": 25,
+      "managed_peak_bytes": 39626,
+      "planned_capacity_bytes": 295135,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 6e-07,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 1.4e-06,
+        "model": 6.94e-05,
+        "emission": 0.0001096,
+        "assembly": 3.8e-06
+      }
+    },
+    {
+      "fixture": "tiny",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "1",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0004028
+      ],
+      "warm_seconds": [
+        0.0004053,
+        0.000397,
+        0.0003935
+      ],
+      "median_seconds": 0.000397,
+      "min_seconds": 0.0003935,
+      "max_seconds": 0.0004053,
+      "mpixels_per_second": 0.0025188916876574307,
+      "encoded_bytes": 25,
+      "managed_peak_bytes": 39699,
+      "planned_capacity_bytes": 319169,
+      "encoded_candidates": 2,
+      "stage_median_seconds": {
+        "input": 1.6999999999999998e-06,
+        "transforms": 1.6e-06,
+        "training": 2.9e-06,
+        "tokens": 2.8e-06,
+        "model": 0.00013890000000000002,
+        "emission": 0.00021940000000000002,
+        "assembly": 7.8e-06
+      }
+    },
+    {
+      "fixture": "tiny",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "1",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0003938
+      ],
+      "warm_seconds": [
+        0.0004005,
+        0.0003959,
+        0.0003952
+      ],
+      "median_seconds": 0.0003959,
+      "min_seconds": 0.0003952,
+      "max_seconds": 0.0004005,
+      "mpixels_per_second": 0.002525890376357666,
+      "encoded_bytes": 25,
+      "managed_peak_bytes": 39699,
+      "planned_capacity_bytes": 331690,
+      "encoded_candidates": 2,
+      "stage_median_seconds": {
+        "input": 1.9e-06,
+        "transforms": 1.7e-06,
+        "training": 2.9e-06,
+        "tokens": 2.8000000000000003e-06,
+        "model": 0.00013910000000000002,
+        "emission": 0.000219,
+        "assembly": 7.5e-06
+      }
+    },
+    {
+      "fixture": "gray16",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0065042
+      ],
+      "warm_seconds": [
+        0.0074701,
+        0.007342,
+        0.007233
+      ],
+      "median_seconds": 0.007342,
+      "min_seconds": 0.007233,
+      "max_seconds": 0.0074701,
+      "mpixels_per_second": 17.957096159084717,
+      "encoded_bytes": 48350,
+      "managed_peak_bytes": 3320764,
+      "planned_capacity_bytes": 31710859,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0002384,
+        "transforms": 0.0008684,
+        "training": 0.0,
+        "tokens": 0.001217,
+        "model": 0.0019124,
+        "emission": 0.0028432,
+        "assembly": 9.63e-05
+      }
+    },
+    {
+      "fixture": "gray16",
+      "encoder": "libjxl-effort1",
+      "entropy": "-1",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 6,
+      "first_calls_seconds": [
+        0.0015397,
+        0.0011314
+      ],
+      "warm_seconds": [
+        0.0011937,
+        0.0011377,
+        0.0010952,
+        0.0011522,
+        0.0011171,
+        0.0010686
+      ],
+      "median_seconds": 0.0011274,
+      "min_seconds": 0.0010686,
+      "max_seconds": 0.0011937,
+      "mpixels_per_second": 116.94252261841406,
+      "encoded_bytes": 149591,
+      "managed_peak_bytes": 0,
+      "planned_capacity_bytes": 0,
+      "encoded_candidates": 0,
+      "stage_median_seconds": {
+        "input": 0.0,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.0,
+        "model": 0.0,
+        "emission": 0.0,
+        "assembly": 0.0
+      }
+    },
+    {
+      "fixture": "gray16",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "0",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0064275
+      ],
+      "warm_seconds": [
+        0.0056265,
+        0.0056287,
+        0.0056209
+      ],
+      "median_seconds": 0.0056265,
+      "min_seconds": 0.0056209,
+      "max_seconds": 0.0056287,
+      "mpixels_per_second": 23.43215142628632,
+      "encoded_bytes": 48350,
+      "managed_peak_bytes": 3401089,
+      "planned_capacity_bytes": 31710859,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0002297,
+        "transforms": 0.0008442,
+        "training": 0.0,
+        "tokens": 0.0009607,
+        "model": 0.0018921,
+        "emission": 0.0014343,
+        "assembly": 6.85e-05
+      }
+    },
+    {
+      "fixture": "gray16",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "1",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0594044
+      ],
+      "warm_seconds": [
+        0.0574752,
+        0.0585355,
+        0.0587863
+      ],
+      "median_seconds": 0.0585355,
+      "min_seconds": 0.0574752,
+      "max_seconds": 0.0587863,
+      "mpixels_per_second": 2.2523255118688663,
+      "encoded_bytes": 21452,
+      "managed_peak_bytes": 3419683,
+      "planned_capacity_bytes": 34411371,
+      "encoded_candidates": 6,
+      "stage_median_seconds": {
+        "input": 0.0016665,
+        "transforms": 0.0017863,
+        "training": 0.0073556,
+        "tokens": 0.0199644,
+        "model": 0.011242900000000002,
+        "emission": 0.014452799999999998,
+        "assembly": 0.0004773
+      }
+    },
+    {
+      "fixture": "gray16",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "1",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0516756
+      ],
+      "warm_seconds": [
+        0.0447871,
+        0.0466908,
+        0.0468861
+      ],
+      "median_seconds": 0.0466908,
+      "min_seconds": 0.0447871,
+      "max_seconds": 0.0468861,
+      "mpixels_per_second": 2.8237040273458587,
+      "encoded_bytes": 21452,
+      "managed_peak_bytes": 3481734,
+      "planned_capacity_bytes": 34411371,
+      "encoded_candidates": 6,
+      "stage_median_seconds": {
+        "input": 0.0014501,
+        "transforms": 0.001745,
+        "training": 0.0075048,
+        "tokens": 0.0129814,
+        "model": 0.011485999999999998,
+        "emission": 0.0098213,
+        "assembly": 0.0005567
+      }
+    },
+    {
+      "fixture": "gray16",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0099323
+      ],
+      "warm_seconds": [
+        0.0087463,
+        0.0084662,
+        0.0083424
+      ],
+      "median_seconds": 0.0084662,
+      "min_seconds": 0.0083424,
+      "max_seconds": 0.0087463,
+      "mpixels_per_second": 15.572629987479626,
+      "encoded_bytes": 42724,
+      "managed_peak_bytes": 3380199,
+      "planned_capacity_bytes": 32876210,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0001232,
+        "transforms": 0.0007064,
+        "training": 0.0,
+        "tokens": 0.0009744,
+        "model": 0.005476,
+        "emission": 0.0009659,
+        "assembly": 9.22e-05
+      }
+    },
+    {
+      "fixture": "gray16",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "0",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.010178
+      ],
+      "warm_seconds": [
+        0.0084384,
+        0.0084506,
+        0.0093531
+      ],
+      "median_seconds": 0.0084506,
+      "min_seconds": 0.0084384,
+      "max_seconds": 0.0093531,
+      "mpixels_per_second": 15.601377416988141,
+      "encoded_bytes": 42724,
+      "managed_peak_bytes": 4262287,
+      "planned_capacity_bytes": 32876210,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0002254,
+        "transforms": 0.000769,
+        "training": 0.0,
+        "tokens": 0.0010549,
+        "model": 0.0052671,
+        "emission": 0.0009134,
+        "assembly": 0.0001189
+      }
+    },
+    {
+      "fixture": "gray16",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "1",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0752974
+      ],
+      "warm_seconds": [
+        0.0747818,
+        0.0792128,
+        0.0769312
+      ],
+      "median_seconds": 0.0769312,
+      "min_seconds": 0.0747818,
+      "max_seconds": 0.0792128,
+      "mpixels_per_second": 1.7137520277858656,
+      "encoded_bytes": 8313,
+      "managed_peak_bytes": 3464346,
+      "planned_capacity_bytes": 35639778,
+      "encoded_candidates": 6,
+      "stage_median_seconds": {
+        "input": 0.0011202999999999999,
+        "transforms": 0.0016575000000000001,
+        "training": 0.0078312,
+        "tokens": 0.0221392,
+        "model": 0.0366697,
+        "emission": 0.0063117,
+        "assembly": 0.000639
+      }
+    },
+    {
+      "fixture": "gray16",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "1",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0667769
+      ],
+      "warm_seconds": [
+        0.0675935,
+        0.0616275,
+        0.0624549
+      ],
+      "median_seconds": 0.0624549,
+      "min_seconds": 0.0616275,
+      "max_seconds": 0.0675935,
+      "mpixels_per_second": 2.1109792826503604,
+      "encoded_bytes": 8313,
+      "managed_peak_bytes": 4346434,
+      "planned_capacity_bytes": 35639778,
+      "encoded_candidates": 6,
+      "stage_median_seconds": {
+        "input": 0.0008464000000000001,
+        "transforms": 0.0014088999999999998,
+        "training": 0.0078996,
+        "tokens": 0.012541800000000002,
+        "model": 0.0342451,
+        "emission": 0.005086,
+        "assembly": 0.0003947
+      }
+    },
+    {
+      "fixture": "screen",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0362177
+      ],
+      "warm_seconds": [
+        0.0351661,
+        0.0371723,
+        0.0349387
+      ],
+      "median_seconds": 0.0351661,
+      "min_seconds": 0.0349387,
+      "max_seconds": 0.0371723,
+      "mpixels_per_second": 3.7490935872900324,
+      "encoded_bytes": 152680,
+      "managed_peak_bytes": 9952806,
+      "planned_capacity_bytes": 93958215,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0002981,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.0207856,
+        "model": 0.0046237,
+        "emission": 0.0084744,
+        "assembly": 0.0001116
+      }
+    },
+    {
+      "fixture": "screen",
+      "encoder": "libjxl-effort1",
+      "entropy": "-1",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 6,
+      "first_calls_seconds": [
+        0.0016099,
+        0.0012992
+      ],
+      "warm_seconds": [
+        0.0014251,
+        0.0014035,
+        0.0015044,
+        0.0012963,
+        0.0012777,
+        0.0020881
+      ],
+      "median_seconds": 0.0014143,
+      "min_seconds": 0.0012777,
+      "max_seconds": 0.0020881,
+      "mpixels_per_second": 93.219967475076,
+      "encoded_bytes": 8534,
+      "managed_peak_bytes": 0,
+      "planned_capacity_bytes": 0,
+      "encoded_candidates": 0,
+      "stage_median_seconds": {
+        "input": 0.0,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.0,
+        "model": 0.0,
+        "emission": 0.0,
+        "assembly": 0.0
+      }
+    },
+    {
+      "fixture": "screen",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "0",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0265648
+      ],
+      "warm_seconds": [
+        0.0225879,
+        0.0213623,
+        0.0228253
+      ],
+      "median_seconds": 0.0225879,
+      "min_seconds": 0.0213623,
+      "max_seconds": 0.0228253,
+      "mpixels_per_second": 5.83679757746404,
+      "encoded_bytes": 152680,
+      "managed_peak_bytes": 10194987,
+      "planned_capacity_bytes": 93958215,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0003613,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.01193,
+        "model": 0.0046918,
+        "emission": 0.003978,
+        "assembly": 7.75e-05
+      }
+    },
+    {
+      "fixture": "screen",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "1",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.1632992
+      ],
+      "warm_seconds": [
+        0.1628261,
+        0.1617217,
+        0.1598906
+      ],
+      "median_seconds": 0.1617217,
+      "min_seconds": 0.1598906,
+      "max_seconds": 0.1628261,
+      "mpixels_per_second": 0.8152338245269497,
+      "encoded_bytes": 17499,
+      "managed_peak_bytes": 10007540,
+      "planned_capacity_bytes": 100744156,
+      "encoded_candidates": 7,
+      "stage_median_seconds": {
+        "input": 0.0030930000000000003,
+        "transforms": 0.007382000000000001,
+        "training": 0.06171709999999999,
+        "tokens": 0.018427100000000002,
+        "model": 0.0289781,
+        "emission": 0.0402032,
+        "assembly": 0.00044800000000000005
+      }
+    },
+    {
+      "fixture": "screen",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "1",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.149338
+      ],
+      "warm_seconds": [
+        0.1629842,
+        0.1613113,
+        0.1501804
+      ],
+      "median_seconds": 0.1613113,
+      "min_seconds": 0.1501804,
+      "max_seconds": 0.1629842,
+      "mpixels_per_second": 0.8173079009344044,
+      "encoded_bytes": 17499,
+      "managed_peak_bytes": 10107235,
+      "planned_capacity_bytes": 100744156,
+      "encoded_candidates": 7,
+      "stage_median_seconds": {
+        "input": 0.0034385,
+        "transforms": 0.008017999999999999,
+        "training": 0.0699018,
+        "tokens": 0.0139461,
+        "model": 0.0331538,
+        "emission": 0.0289585,
+        "assembly": 0.0005879
+      }
+    },
+    {
+      "fixture": "screen",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0433116
+      ],
+      "warm_seconds": [
+        0.04005,
+        0.0386431,
+        0.0392153
+      ],
+      "median_seconds": 0.0392153,
+      "min_seconds": 0.0386431,
+      "max_seconds": 0.04005,
+      "mpixels_per_second": 3.3619786154893623,
+      "encoded_bytes": 149729,
+      "managed_peak_bytes": 10119173,
+      "planned_capacity_bytes": 97279839,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0003277,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.0208012,
+        "model": 0.015354,
+        "emission": 0.0026708,
+        "assembly": 6.9e-05
+      }
+    },
+    {
+      "fixture": "screen",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "0",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0286147
+      ],
+      "warm_seconds": [
+        0.0286631,
+        0.0289255,
+        0.0285927
+      ],
+      "median_seconds": 0.0286631,
+      "min_seconds": 0.0285927,
+      "max_seconds": 0.0289255,
+      "mpixels_per_second": 4.599676936549082,
+      "encoded_bytes": 149729,
+      "managed_peak_bytes": 12759661,
+      "planned_capacity_bytes": 97279839,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0003009,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.0109256,
+        "model": 0.0152718,
+        "emission": 0.0019562,
+        "assembly": 8.76e-05
+      }
+    },
+    {
+      "fixture": "screen",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "1",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.1957126
+      ],
+      "warm_seconds": [
+        0.195465,
+        0.2036823,
+        0.2135969
+      ],
+      "median_seconds": 0.2036823,
+      "min_seconds": 0.195465,
+      "max_seconds": 0.2135969,
+      "mpixels_per_second": 0.6472874668049211,
+      "encoded_bytes": 5208,
+      "managed_peak_bytes": 10125868,
+      "planned_capacity_bytes": 104215097,
+      "encoded_candidates": 7,
+      "stage_median_seconds": {
+        "input": 0.0032559000000000004,
+        "transforms": 0.008857399999999998,
+        "training": 0.0646285,
+        "tokens": 0.0189199,
+        "model": 0.09358040000000001,
+        "emission": 0.0135346,
+        "assembly": 0.0006586000000000001
+      }
+    },
+    {
+      "fixture": "screen",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "1",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.1996061
+      ],
+      "warm_seconds": [
+        0.1944057,
+        0.1853399,
+        0.1835269
+      ],
+      "median_seconds": 0.1853399,
+      "min_seconds": 0.1835269,
+      "max_seconds": 0.1944057,
+      "mpixels_per_second": 0.7113470979535438,
+      "encoded_bytes": 5208,
+      "managed_peak_bytes": 12771508,
+      "planned_capacity_bytes": 104215097,
+      "encoded_candidates": 7,
+      "stage_median_seconds": {
+        "input": 0.0029507,
+        "transforms": 0.007504200000000001,
+        "training": 0.0625534,
+        "tokens": 0.0133414,
+        "model": 0.0884874,
+        "emission": 0.009596599999999999,
+        "assembly": 0.0004618
+      }
+    },
+    {
+      "fixture": "palette",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0093195
+      ],
+      "warm_seconds": [
+        0.0089147,
+        0.008631,
+        0.0087104
+      ],
+      "median_seconds": 0.0087104,
+      "min_seconds": 0.008631,
+      "max_seconds": 0.0089147,
+      "mpixels_per_second": 15.13604426891991,
+      "encoded_bytes": 20283,
+      "managed_peak_bytes": 3698123,
+      "planned_capacity_bytes": 31740627,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0003725,
+        "transforms": 0.0033285,
+        "training": 0.0,
+        "tokens": 0.0009479,
+        "model": 0.0014681,
+        "emission": 0.0026202,
+        "assembly": 7.7e-06
+      }
+    },
+    {
+      "fixture": "palette",
+      "encoder": "libjxl-effort1",
+      "entropy": "-1",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 6,
+      "first_calls_seconds": [
+        0.0016176,
+        0.001497
+      ],
+      "warm_seconds": [
+        0.0016422,
+        0.0016969,
+        0.0020156,
+        0.0014489,
+        0.0014044,
+        0.0014082
+      ],
+      "median_seconds": 0.00154555,
+      "min_seconds": 0.0014044,
+      "max_seconds": 0.0020156,
+      "mpixels_per_second": 85.30361360033645,
+      "encoded_bytes": 21193,
+      "managed_peak_bytes": 0,
+      "planned_capacity_bytes": 0,
+      "encoded_candidates": 0,
+      "stage_median_seconds": {
+        "input": 0.0,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.0,
+        "model": 0.0,
+        "emission": 0.0,
+        "assembly": 0.0
+      }
+    },
+    {
+      "fixture": "palette",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "0",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0081008
+      ],
+      "warm_seconds": [
+        0.0090395,
+        0.0080117,
+        0.007784
+      ],
+      "median_seconds": 0.0080117,
+      "min_seconds": 0.007784,
+      "max_seconds": 0.0090395,
+      "mpixels_per_second": 16.456058015152838,
+      "encoded_bytes": 20283,
+      "managed_peak_bytes": 3726421,
+      "planned_capacity_bytes": 31740627,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0003853,
+        "transforms": 0.0032105,
+        "training": 0.0,
+        "tokens": 0.0007763,
+        "model": 0.001479,
+        "emission": 0.0020938,
+        "assembly": 1.17e-05
+      }
+    },
+    {
+      "fixture": "palette",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "1",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.2913806
+      ],
+      "warm_seconds": [
+        0.3056781,
+        0.3118473,
+        0.3001363
+      ],
+      "median_seconds": 0.3056781,
+      "min_seconds": 0.3001363,
+      "max_seconds": 0.3118473,
+      "mpixels_per_second": 0.43130665886761266,
+      "encoded_bytes": 20283,
+      "managed_peak_bytes": 13352554,
+      "planned_capacity_bytes": 134119864,
+      "encoded_candidates": 11,
+      "stage_median_seconds": {
+        "input": 0.005938700000000001,
+        "transforms": 0.0100777,
+        "training": 0.0821219,
+        "tokens": 0.0423609,
+        "model": 0.065609,
+        "emission": 0.0935181,
+        "assembly": 0.0010314
+      }
+    },
+    {
+      "fixture": "palette",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "1",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.2420607
+      ],
+      "warm_seconds": [
+        0.2372803,
+        0.2382121,
+        0.2475684
+      ],
+      "median_seconds": 0.2382121,
+      "min_seconds": 0.2372803,
+      "max_seconds": 0.2475684,
+      "mpixels_per_second": 0.5534605504926072,
+      "encoded_bytes": 20283,
+      "managed_peak_bytes": 13536472,
+      "planned_capacity_bytes": 134119864,
+      "encoded_candidates": 11,
+      "stage_median_seconds": {
+        "input": 0.005737099999999999,
+        "transforms": 0.0100191,
+        "training": 0.0812911,
+        "tokens": 0.025584,
+        "model": 0.0624362,
+        "emission": 0.0505177,
+        "assembly": 0.0008598
+      }
+    },
+    {
+      "fixture": "palette",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.011788
+      ],
+      "warm_seconds": [
+        0.0125306,
+        0.0117808,
+        0.0134012
+      ],
+      "median_seconds": 0.0125306,
+      "min_seconds": 0.0117808,
+      "max_seconds": 0.0134012,
+      "mpixels_per_second": 10.521523310934832,
+      "encoded_bytes": 13483,
+      "managed_peak_bytes": 3764699,
+      "planned_capacity_bytes": 32907002,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.000454,
+        "transforms": 0.0037355,
+        "training": 0.0,
+        "tokens": 0.0011614,
+        "model": 0.0062344,
+        "emission": 0.0008748,
+        "assembly": 1.26e-05
+      }
+    },
+    {
+      "fixture": "palette",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "0",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0132312
+      ],
+      "warm_seconds": [
+        0.0124692,
+        0.0132913,
+        0.011615
+      ],
+      "median_seconds": 0.0124692,
+      "min_seconds": 0.011615,
+      "max_seconds": 0.0132913,
+      "mpixels_per_second": 10.573332691752478,
+      "encoded_bytes": 13483,
+      "managed_peak_bytes": 4646787,
+      "planned_capacity_bytes": 32907002,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0004443,
+        "transforms": 0.0037924,
+        "training": 0.0,
+        "tokens": 0.0008563,
+        "model": 0.0054665,
+        "emission": 0.0009455,
+        "assembly": 1.8e-05
+      }
+    },
+    {
+      "fixture": "palette",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "1",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.3963853
+      ],
+      "warm_seconds": [
+        0.3821643,
+        0.3588058,
+        0.396582
+      ],
+      "median_seconds": 0.3821643,
+      "min_seconds": 0.3588058,
+      "max_seconds": 0.396582,
+      "mpixels_per_second": 0.34498512812421256,
+      "encoded_bytes": 13483,
+      "managed_peak_bytes": 13518153,
+      "planned_capacity_bytes": 138694685,
+      "encoded_candidates": 11,
+      "stage_median_seconds": {
+        "input": 0.0058808,
+        "transforms": 0.0097526,
+        "training": 0.08209229999999999,
+        "tokens": 0.04170270000000001,
+        "model": 0.1971083,
+        "emission": 0.029113100000000003,
+        "assembly": 0.0010897
+      }
+    },
+    {
+      "fixture": "palette",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "1",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.3680116
+      ],
+      "warm_seconds": [
+        0.336006,
+        0.3365449,
+        0.3698819
+      ],
+      "median_seconds": 0.3365449,
+      "min_seconds": 0.336006,
+      "max_seconds": 0.3698819,
+      "mpixels_per_second": 0.3917486195749809,
+      "encoded_bytes": 13483,
+      "managed_peak_bytes": 17045561,
+      "planned_capacity_bytes": 138694685,
+      "encoded_candidates": 11,
+      "stage_median_seconds": {
+        "input": 0.0054927,
+        "transforms": 0.009553100000000002,
+        "training": 0.0817923,
+        "tokens": 0.0251348,
+        "model": 0.1955841,
+        "emission": 0.0195832,
+        "assembly": 0.0008200999999999999
+      }
+    },
+    {
+      "fixture": "noise",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0471907
+      ],
+      "warm_seconds": [
+        0.0399188,
+        0.0401329,
+        0.0404651
+      ],
+      "median_seconds": 0.0401329,
+      "min_seconds": 0.0399188,
+      "max_seconds": 0.0404651,
+      "mpixels_per_second": 3.2851102212897647,
+      "encoded_bytes": 828702,
+      "managed_peak_bytes": 9952100,
+      "planned_capacity_bytes": 93939811,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0003256,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.0029362,
+        "model": 0.0260597,
+        "emission": 0.0105725,
+        "assembly": 0.000142
+      }
+    },
+    {
+      "fixture": "noise",
+      "encoder": "libjxl-effort1",
+      "entropy": "-1",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 6,
+      "first_calls_seconds": [
+        0.0024133,
+        0.0027154
+      ],
+      "warm_seconds": [
+        0.002753,
+        0.0023848,
+        0.0026154,
+        0.0027286,
+        0.0025943,
+        0.0023106
+      ],
+      "median_seconds": 0.0026048499999999997,
+      "min_seconds": 0.0023106,
+      "max_seconds": 0.002753,
+      "mpixels_per_second": 50.613662974835414,
+      "encoded_bytes": 1090392,
+      "managed_peak_bytes": 0,
+      "planned_capacity_bytes": 0,
+      "encoded_candidates": 0,
+      "stage_median_seconds": {
+        "input": 0.0,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.0,
+        "model": 0.0,
+        "emission": 0.0,
+        "assembly": 0.0
+      }
+    },
+    {
+      "fixture": "noise",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "0",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0352828
+      ],
+      "warm_seconds": [
+        0.0338568,
+        0.0409716,
+        0.0335821
+      ],
+      "median_seconds": 0.0338568,
+      "min_seconds": 0.0335821,
+      "max_seconds": 0.0409716,
+      "mpixels_per_second": 3.894077408378819,
+      "encoded_bytes": 828702,
+      "managed_peak_bytes": 11392982,
+      "planned_capacity_bytes": 93939811,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0004308,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.0017755,
+        "model": 0.0259372,
+        "emission": 0.0054984,
+        "assembly": 0.0001581
+      }
+    },
+    {
+      "fixture": "noise",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "1",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.4670391
+      ],
+      "warm_seconds": [
+        0.5082721,
+        0.5085825,
+        0.4539955
+      ],
+      "median_seconds": 0.5082721,
+      "min_seconds": 0.4539955,
+      "max_seconds": 0.5085825,
+      "mpixels_per_second": 0.259390590197652,
+      "encoded_bytes": 810589,
+      "managed_peak_bytes": 12603506,
+      "planned_capacity_bytes": 100744156,
+      "encoded_candidates": 10,
+      "stage_median_seconds": {
+        "input": 0.0041744,
+        "transforms": 0.0076387,
+        "training": 0.0596136,
+        "tokens": 0.0314435,
+        "model": 0.29739190000000004,
+        "emission": 0.0959275,
+        "assembly": 0.0017034000000000003
+      }
+    },
+    {
+      "fixture": "noise",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "1",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.415087
+      ],
+      "warm_seconds": [
+        0.4921116,
+        0.4188353,
+        0.4193767
+      ],
+      "median_seconds": 0.4193767,
+      "min_seconds": 0.4188353,
+      "max_seconds": 0.4921116,
+      "mpixels_per_second": 0.31437368838087576,
+      "encoded_bytes": 810589,
+      "managed_peak_bytes": 12603506,
+      "planned_capacity_bytes": 100744156,
+      "encoded_candidates": 10,
+      "stage_median_seconds": {
+        "input": 0.004714199999999999,
+        "transforms": 0.0076842,
+        "training": 0.060666300000000006,
+        "tokens": 0.020590400000000002,
+        "model": 0.2702063,
+        "emission": 0.0545007,
+        "assembly": 0.0017208999999999996
+      }
+    },
+    {
+      "fixture": "noise",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0719395
+      ],
+      "warm_seconds": [
+        0.0778328,
+        0.0768854,
+        0.0806225
+      ],
+      "median_seconds": 0.0778328,
+      "min_seconds": 0.0768854,
+      "max_seconds": 0.0806225,
+      "mpixels_per_second": 1.69390025798892,
+      "encoded_bytes": 827293,
+      "managed_peak_bytes": 10109168,
+      "planned_capacity_bytes": 97214618,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0003654,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.0033494,
+        "model": 0.0687554,
+        "emission": 0.0058074,
+        "assembly": 0.0001737
+      }
+    },
+    {
+      "fixture": "noise",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "0",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0781561
+      ],
+      "warm_seconds": [
+        0.0736163,
+        0.0722142,
+        0.0706548
+      ],
+      "median_seconds": 0.0722142,
+      "min_seconds": 0.0706548,
+      "max_seconds": 0.0736163,
+      "mpixels_per_second": 1.825693561654079,
+      "encoded_bytes": 827293,
+      "managed_peak_bytes": 12754808,
+      "planned_capacity_bytes": 97214618,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0003578,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.0019015,
+        "model": 0.0650505,
+        "emission": 0.0041023,
+        "assembly": 0.0001579
+      }
+    },
+    {
+      "fixture": "noise",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "1",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.7521031
+      ],
+      "warm_seconds": [
+        0.8338094,
+        0.7641653,
+        0.839417
+      ],
+      "median_seconds": 0.8338094,
+      "min_seconds": 0.7641653,
+      "max_seconds": 0.839417,
+      "mpixels_per_second": 0.1581188698520309,
+      "encoded_bytes": 809184,
+      "managed_peak_bytes": 12881442,
+      "planned_capacity_bytes": 104215097,
+      "encoded_candidates": 10,
+      "stage_median_seconds": {
+        "input": 0.004403999999999999,
+        "transforms": 0.0078779,
+        "training": 0.0623247,
+        "tokens": 0.0334391,
+        "model": 0.6674642999999999,
+        "emission": 0.04938999999999999,
+        "assembly": 0.0015155000000000001
+      }
+    },
+    {
+      "fixture": "noise",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "1",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.7436376
+      ],
+      "warm_seconds": [
+        0.823683,
+        0.7617462,
+        0.8101466
+      ],
+      "median_seconds": 0.8101466,
+      "min_seconds": 0.7617462,
+      "max_seconds": 0.823683,
+      "mpixels_per_second": 0.16273721324017157,
+      "encoded_bytes": 809184,
+      "managed_peak_bytes": 13582986,
+      "planned_capacity_bytes": 104215097,
+      "encoded_candidates": 10,
+      "stage_median_seconds": {
+        "input": 0.004830899999999999,
+        "transforms": 0.0076716,
+        "training": 0.06800460000000001,
+        "tokens": 0.021697900000000003,
+        "model": 0.6623659000000001,
+        "emission": 0.04266389999999999,
+        "assembly": 0.0016857
+      }
+    },
+    {
+      "fixture": "alpha16",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0559579
+      ],
+      "warm_seconds": [
+        0.0539126,
+        0.0533527,
+        0.0534313
+      ],
+      "median_seconds": 0.0534313,
+      "min_seconds": 0.0533527,
+      "max_seconds": 0.0539126,
+      "mpixels_per_second": 2.4674862861281683,
+      "encoded_bytes": 284790,
+      "managed_peak_bytes": 13270820,
+      "planned_capacity_bytes": 125074851,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0004105,
+        "transforms": 0.0022381000000000002,
+        "training": 0.0,
+        "tokens": 0.0285778,
+        "model": 0.0108432,
+        "emission": 0.0114651,
+        "assembly": 9.08e-05
+      }
+    },
+    {
+      "fixture": "alpha16",
+      "encoder": "libjxl-effort1",
+      "entropy": "-1",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 6,
+      "first_calls_seconds": [
+        0.0020082,
+        0.001761
+      ],
+      "warm_seconds": [
+        0.0018765,
+        0.0015878,
+        0.001959,
+        0.0018987,
+        0.0017155,
+        0.0016958
+      ],
+      "median_seconds": 0.0017959999999999999,
+      "min_seconds": 0.0015878,
+      "max_seconds": 0.001959,
+      "mpixels_per_second": 73.40812917594654,
+      "encoded_bytes": 307214,
+      "managed_peak_bytes": 0,
+      "planned_capacity_bytes": 0,
+      "encoded_candidates": 0,
+      "stage_median_seconds": {
+        "input": 0.0,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.0,
+        "model": 0.0,
+        "emission": 0.0,
+        "assembly": 0.0
+      }
+    },
+    {
+      "fixture": "alpha16",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "0",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.034097
+      ],
+      "warm_seconds": [
+        0.0335355,
+        0.0346681,
+        0.0348724
+      ],
+      "median_seconds": 0.0346681,
+      "min_seconds": 0.0335355,
+      "max_seconds": 0.0348724,
+      "mpixels_per_second": 3.802948531935699,
+      "encoded_bytes": 284790,
+      "managed_peak_bytes": 13697951,
+      "planned_capacity_bytes": 125074851,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0004142,
+        "transforms": 0.0023124,
+        "training": 0.0,
+        "tokens": 0.0145811,
+        "model": 0.0118742,
+        "emission": 0.0052235,
+        "assembly": 9.26e-05
+      }
+    },
+    {
+      "fixture": "alpha16",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "1",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.4745653
+      ],
+      "warm_seconds": [
+        0.4552059,
+        0.4444873,
+        0.4669601
+      ],
+      "median_seconds": 0.4552059,
+      "min_seconds": 0.4444873,
+      "max_seconds": 0.4669601,
+      "mpixels_per_second": 0.2896293743117126,
+      "encoded_bytes": 145238,
+      "managed_peak_bytes": 13673173,
+      "planned_capacity_bytes": 134119864,
+      "encoded_candidates": 10,
+      "stage_median_seconds": {
+        "input": 0.005674099999999999,
+        "transforms": 0.0067344,
+        "training": 0.0853981,
+        "tokens": 0.1932564,
+        "model": 0.06809240000000001,
+        "emission": 0.0960502,
+        "assembly": 0.0008873
+      }
+    },
+    {
+      "fixture": "alpha16",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "1",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.3416681
+      ],
+      "warm_seconds": [
+        0.3330336,
+        0.3224125,
+        0.3666173
+      ],
+      "median_seconds": 0.3330336,
+      "min_seconds": 0.3224125,
+      "max_seconds": 0.3666173,
+      "mpixels_per_second": 0.3958789743737569,
+      "encoded_bytes": 145238,
+      "managed_peak_bytes": 14036273,
+      "planned_capacity_bytes": 134119864,
+      "encoded_candidates": 10,
+      "stage_median_seconds": {
+        "input": 0.006047999999999999,
+        "transforms": 0.0063295,
+        "training": 0.0823022,
+        "tokens": 0.1185284,
+        "model": 0.0674176,
+        "emission": 0.0496693,
+        "assembly": 0.0009547000000000002
+      }
+    },
+    {
+      "fixture": "alpha16",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0729291
+      ],
+      "warm_seconds": [
+        0.0697486,
+        0.0684587,
+        0.0711057
+      ],
+      "median_seconds": 0.0697486,
+      "min_seconds": 0.0684587,
+      "max_seconds": 0.0711057,
+      "mpixels_per_second": 1.8902314885173324,
+      "encoded_bytes": 274972,
+      "managed_peak_bytes": 13488084,
+      "planned_capacity_bytes": 129451203,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0004209,
+        "transforms": 0.0024798999999999997,
+        "training": 0.0,
+        "tokens": 0.0299739,
+        "model": 0.0324016,
+        "emission": 0.0041062,
+        "assembly": 9.02e-05
+      }
+    },
+    {
+      "fixture": "alpha16",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "0",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.053729
+      ],
+      "warm_seconds": [
+        0.0551257,
+        0.0504361,
+        0.0520198
+      ],
+      "median_seconds": 0.0520198,
+      "min_seconds": 0.0504361,
+      "max_seconds": 0.0551257,
+      "mpixels_per_second": 2.5344388098377926,
+      "encoded_bytes": 274972,
+      "managed_peak_bytes": 17015492,
+      "planned_capacity_bytes": 129451203,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.00041119999999999997,
+        "transforms": 0.0021137,
+        "training": 0.0,
+        "tokens": 0.0155803,
+        "model": 0.0308102,
+        "emission": 0.0024447,
+        "assembly": 9.63e-05
+      }
+    },
+    {
+      "fixture": "alpha16",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "1",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.538374
+      ],
+      "warm_seconds": [
+        0.581962,
+        0.5350191,
+        0.540554
+      ],
+      "median_seconds": 0.540554,
+      "min_seconds": 0.5350191,
+      "max_seconds": 0.581962,
+      "mpixels_per_second": 0.2438997768955553,
+      "encoded_bytes": 109816,
+      "managed_peak_bytes": 13842566,
+      "planned_capacity_bytes": 138694685,
+      "encoded_candidates": 10,
+      "stage_median_seconds": {
+        "input": 0.005863200000000001,
+        "transforms": 0.0062647,
+        "training": 0.0813879,
+        "tokens": 0.1908927,
+        "model": 0.218405,
+        "emission": 0.0360343,
+        "assembly": 0.0009630000000000001
+      }
+    },
+    {
+      "fixture": "alpha16",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "1",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.4788803
+      ],
+      "warm_seconds": [
+        0.4532235,
+        0.4453143,
+        0.4807247
+      ],
+      "median_seconds": 0.4532235,
+      "min_seconds": 0.4453143,
+      "max_seconds": 0.4807247,
+      "mpixels_per_second": 0.29089621345759875,
+      "encoded_bytes": 109816,
+      "managed_peak_bytes": 17363102,
+      "planned_capacity_bytes": 138694685,
+      "encoded_candidates": 10,
+      "stage_median_seconds": {
+        "input": 0.0056328,
+        "transforms": 0.006106799999999999,
+        "training": 0.082091,
+        "tokens": 0.11630960000000001,
+        "model": 0.2188995,
+        "emission": 0.0230127,
+        "assembly": 0.0010452999999999999
+      }
+    },
+    {
+      "fixture": "photo",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0237663
+      ],
+      "warm_seconds": [
+        0.0203513,
+        0.020692,
+        0.0202962
+      ],
+      "median_seconds": 0.0203513,
+      "min_seconds": 0.0202962,
+      "max_seconds": 0.020692,
+      "mpixels_per_second": 3.8388211072511336,
+      "encoded_bytes": 129197,
+      "managed_peak_bytes": 4397284,
+      "planned_capacity_bytes": 55926615,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0001813,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.0115153,
+        "model": 0.0032271,
+        "emission": 0.0053665,
+        "assembly": 2.31e-05
+      }
+    },
+    {
+      "fixture": "photo",
+      "encoder": "libjxl-effort1",
+      "entropy": "-1",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 6,
+      "first_calls_seconds": [
+        0.0020636,
+        0.0019836
+      ],
+      "warm_seconds": [
+        0.0017699,
+        0.001531,
+        0.0015058,
+        0.001705,
+        0.0015396,
+        0.001507
+      ],
+      "median_seconds": 0.0015352999999999999,
+      "min_seconds": 0.0015058,
+      "max_seconds": 0.0017699,
+      "mpixels_per_second": 50.885820360841535,
+      "encoded_bytes": 129901,
+      "managed_peak_bytes": 0,
+      "planned_capacity_bytes": 0,
+      "encoded_candidates": 0,
+      "stage_median_seconds": {
+        "input": 0.0,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.0,
+        "model": 0.0,
+        "emission": 0.0,
+        "assembly": 0.0
+      }
+    },
+    {
+      "fixture": "photo",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "0",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0115994
+      ],
+      "warm_seconds": [
+        0.0126292,
+        0.0178485,
+        0.0127995
+      ],
+      "median_seconds": 0.0127995,
+      "min_seconds": 0.0126292,
+      "max_seconds": 0.0178485,
+      "mpixels_per_second": 6.1037540528926915,
+      "encoded_bytes": 129197,
+      "managed_peak_bytes": 4397284,
+      "planned_capacity_bytes": 55926615,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0002094,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.006481,
+        "model": 0.003655,
+        "emission": 0.0028995,
+        "assembly": 2.55e-05
+      }
+    },
+    {
+      "fixture": "photo",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "1",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.1337458
+      ],
+      "warm_seconds": [
+        0.1292113,
+        0.1309409,
+        0.1316893
+      ],
+      "median_seconds": 0.1309409,
+      "min_seconds": 0.1292113,
+      "max_seconds": 0.1316893,
+      "mpixels_per_second": 0.5966432184290775,
+      "encoded_bytes": 119674,
+      "managed_peak_bytes": 4523431,
+      "planned_capacity_bytes": 57585538,
+      "encoded_candidates": 7,
+      "stage_median_seconds": {
+        "input": 0.0017852,
+        "transforms": 0.0040264,
+        "training": 0.0335349,
+        "tokens": 0.0407356,
+        "model": 0.0188184,
+        "emission": 0.0304055,
+        "assembly": 0.00010889999999999999
+      }
+    },
+    {
+      "fixture": "photo",
+      "encoder": "native",
+      "entropy": "0",
+      "search": "1",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.1025036
+      ],
+      "warm_seconds": [
+        0.0956365,
+        0.0975695,
+        0.1020492
+      ],
+      "median_seconds": 0.0975695,
+      "min_seconds": 0.0956365,
+      "max_seconds": 0.1020492,
+      "mpixels_per_second": 0.8007112878512239,
+      "encoded_bytes": 119674,
+      "managed_peak_bytes": 4523431,
+      "planned_capacity_bytes": 57585538,
+      "encoded_candidates": 7,
+      "stage_median_seconds": {
+        "input": 0.0019494000000000002,
+        "transforms": 0.0043162,
+        "training": 0.0336585,
+        "tokens": 0.021138799999999996,
+        "model": 0.0195136,
+        "emission": 0.0164567,
+        "assembly": 0.00013460000000000002
+      }
+    },
+    {
+      "fixture": "photo",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "0",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.02487
+      ],
+      "warm_seconds": [
+        0.0260348,
+        0.0253899,
+        0.0265435
+      ],
+      "median_seconds": 0.0260348,
+      "min_seconds": 0.0253899,
+      "max_seconds": 0.0265435,
+      "mpixels_per_second": 3.0007912486364403,
+      "encoded_bytes": 128228,
+      "managed_peak_bytes": 4525099,
+      "planned_capacity_bytes": 57958887,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0001988,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.0124423,
+        "model": 0.0110731,
+        "emission": 0.0022171,
+        "assembly": 1.97e-05
+      }
+    },
+    {
+      "fixture": "photo",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "0",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.0210259
+      ],
+      "warm_seconds": [
+        0.0186474,
+        0.0209021,
+        0.0196394
+      ],
+      "median_seconds": 0.0196394,
+      "min_seconds": 0.0186474,
+      "max_seconds": 0.0209021,
+      "mpixels_per_second": 3.9779728504944143,
+      "encoded_bytes": 128228,
+      "managed_peak_bytes": 5164370,
+      "planned_capacity_bytes": 57958887,
+      "encoded_candidates": 1,
+      "stage_median_seconds": {
+        "input": 0.0001996,
+        "transforms": 0.0,
+        "training": 0.0,
+        "tokens": 0.0058296,
+        "model": 0.0112006,
+        "emission": 0.0020326,
+        "assembly": 2.49e-05
+      }
+    },
+    {
+      "fixture": "photo",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "1",
+      "threads": "1",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.1781006
+      ],
+      "warm_seconds": [
+        0.1675593,
+        0.1625216,
+        0.1718399
+      ],
+      "median_seconds": 0.1675593,
+      "min_seconds": 0.1625216,
+      "max_seconds": 0.1718399,
+      "mpixels_per_second": 0.46625284302333564,
+      "encoded_bytes": 118498,
+      "managed_peak_bytes": 4824459,
+      "planned_capacity_bytes": 59655660,
+      "encoded_candidates": 7,
+      "stage_median_seconds": {
+        "input": 0.0018410000000000002,
+        "transforms": 0.0039381,
+        "training": 0.0370414,
+        "tokens": 0.0422794,
+        "model": 0.0670505,
+        "emission": 0.013213899999999999,
+        "assembly": 0.0004980000000000001
+      }
+    },
+    {
+      "fixture": "photo",
+      "encoder": "native",
+      "entropy": "1",
+      "search": "1",
+      "threads": "4",
+      "warm_runs": 3,
+      "first_calls_seconds": [
+        0.1373794
+      ],
+      "warm_seconds": [
+        0.1355338,
+        0.1331012,
+        0.1434763
+      ],
+      "median_seconds": 0.1355338,
+      "min_seconds": 0.1331012,
+      "max_seconds": 0.1434763,
+      "mpixels_per_second": 0.576424478617142,
+      "encoded_bytes": 118498,
+      "managed_peak_bytes": 5285142,
+      "planned_capacity_bytes": 59655660,
+      "encoded_candidates": 7,
+      "stage_median_seconds": {
+        "input": 0.0019537,
+        "transforms": 0.0041388,
+        "training": 0.033469700000000005,
+        "tokens": 0.020028300000000002,
+        "model": 0.0661507,
+        "emission": 0.008864,
+        "assembly": 0.0001786
+      }
+    }
+  ]
+}

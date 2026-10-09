@@ -96,3 +96,21 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(modular_cli PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${GJXL_MODULAR_ORACLE_BUILD}/tools")
   endif()
 endif()
+
+add_executable(gjxl_modular_reference_capture tools/modular_oracle/capture.cpp src/io/pnm.cpp)
+target_compile_definitions(gjxl_modular_reference_capture PRIVATE GJXL_ORACLE_REFERENCE=1)
+target_include_directories(gjxl_modular_reference_capture PRIVATE tests)
+target_link_libraries(gjxl_modular_reference_capture PRIVATE gjxl_codestream gjxl_modular_reference)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+  target_compile_options(gjxl_modular_reference_capture PRIVATE -fno-sanitize=vptr)
+endif()
+if(Python3_Interpreter_FOUND)
+  add_test(NAME modular_frozen_reference COMMAND "${Python3_EXECUTABLE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/modular_oracle/verify.py"
+    "$<TARGET_FILE:gjxl_modular_reference_capture>" "${CMAKE_CURRENT_SOURCE_DIR}/testdata/modular"
+    "${CMAKE_CURRENT_BINARY_DIR}/modular-frozen-reference")
+  if(WIN32)
+    set_tests_properties(modular_frozen_reference PROPERTIES
+      ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${GJXL_MODULAR_ORACLE_BUILD}/tools")
+  endif()
+endif()

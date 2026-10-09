@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 #include "codestream/modular/frame_encoder.h"
+#include "codec/modular/profile.h"
 #include "codestream/headers_internal.h"
 #include "codestream/modular/stream_encoder.h"
 #include "codestream/modular/tree_codec.h"
@@ -20,6 +21,7 @@ Status EncodeModularFrame(const codec_internal::ImageMetadata &metadata,
     PreparedModularTokens tokens = std::move(input);
     EntropyCode model;
     {
+      ProfileScope profile_scope(ProfileStage::kModel);
       thread_budget_internal::EncodeScope serial(1);
       if (auto s = OptimizeEntropyCode(
               tokens.streams, {.context_count = static_cast<uint32_t>(tokens.context_count)},
@@ -33,6 +35,7 @@ Status EncodeModularFrame(const codec_internal::ImageMetadata &metadata,
         model = std::move(ans);
       }
     }
+    ProfileScope emission_scope(ProfileStage::kEmission);
     sections.resize(layout.geometry.section_count());
     {
       thread_budget_internal::EncodeScope serial(1);
@@ -87,6 +90,7 @@ Status EncodeModularFrame(const codec_internal::ImageMetadata &metadata,
         !status.ok())
       return status;
   } // Tokens and model are no longer live during final assembly.
+  ProfileScope assembly_scope(ProfileStage::kAssembly);
   BitWriter file;
   if (auto s = WriteImageHeader(metadata, &file); !s.ok())
     return s;

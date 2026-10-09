@@ -1,0 +1,7 @@
+{
+  "source": "third_party/libjxl/testdata/external/wesaturate/500px/tmshre_riaphotographs_srgb8.png",
+  "source_revision": "e8ff09762481785938d8e4e01333ed3917571161",
+  "source_sha256": "fa85b95a14533303b64d9015537a6f21e50094dcc42ca9c48f93ed242a9781f6",
+  "preparation": "RGB8, take pixel (4*x,4*y), no color conversion; 500x500 to 125x125",
+  "sha256": "68c361fe6605cbdacd0eca3c1b8beb897bc17f60387149d3bd09677706a9faea"
+}

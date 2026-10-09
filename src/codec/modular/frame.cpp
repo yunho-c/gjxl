@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 #include "codec/modular/frame.h"
+#include "codec/modular/profile.h"
 #include "codec/modular/geometry.h"
 #include "codec/modular/transform/rct.h"
 #include <limits>
@@ -76,6 +77,7 @@ Status ModularEncoderFrame::Prepare(PackedModularImageView input, ModularEncoder
 }
 Status ModularEncoderFrame::Prepare(PackedModularImageView input, uint8_t rct,
                                     ModularEncoderFrame *out) {
+  ProfileScope profile_scope(ProfileStage::kInput);
   if (!out)
     return Status::InvalidArgument("Null Modular frame output");
   if (auto s = input.Validate(); !s.ok())
@@ -106,6 +108,7 @@ Status ModularEncoderFrame::Prepare(PackedModularImageView input, uint8_t rct,
       }
   }
   if (rct) {
+    ProfileScope transform_scope(ProfileStage::kTransforms);
     auto a = frame.image_.samples(0), b = frame.image_.samples(1), c = frame.image_.samples(2);
     for (size_t i = 0; i < a.size(); ++i) {
       const auto transformed = ForwardRct({a[i], b[i], c[i]}, rct);
@@ -133,6 +136,7 @@ Status ModularEncoderFrame::Prepare(PackedModularImageView input, const ModularC
   if (auto s = Prepare(input, policy.rct, &frame); !s.ok())
     return s;
   if (policy.transforms.size) {
+    ProfileScope transform_scope(ProfileStage::kTransforms);
     ModularImage transformed;
     if (auto s = ForwardTransforms(frame.image_, policy.transforms, &transformed); !s.ok())
       return s;

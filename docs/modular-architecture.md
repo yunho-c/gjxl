@@ -7,8 +7,10 @@ the [P2.1 private RGB8 CPU encoder](modular-p2.1.md),
 [P2.2 integer formats and alpha preservation](modular-p2.2.md),
 [P2.3 scalar predictors, RCT and bounded global policy](modular-p2.3.md),
 [P2.4 exact palette and scalar squeeze](modular-p2.4.md), and
-[P2.5 CPU scheduling and public integration](modular-p2.5.md) are implemented.
-P2.6 remains the CPU-oracle freeze and GPU-boundary milestone. Whole-image Modular
+[P2.5 CPU scheduling and public integration](modular-p2.5.md), and
+[P2.6 frozen oracle, profiles and GPU handoff](modular-p2.6.md) are implemented.
+Phase 2 is qualified for the recorded CPU configuration, with the platform and
+baseline-failure limits in that report. Whole-image Modular
 encoding is available through C++, C, Rust and the integer-input CLI. Originally written
 2026-10-07 against GJXL
 `67caa6d89830f6a13c057923e34f80753a161e9d` and pinned libjxl
@@ -685,6 +687,12 @@ bytes match for the same resolved policy.
 
 ### P2.6: freeze the CPU oracle and establish GPU work boundaries
 
+Implemented: [fixture protocol and reproducible capture](../tools/modular_oracle/README.md),
+[versioned oracle manifest](../testdata/modular/oracle-v1.json),
+[qualification and timing baseline](modular-p2.6.md), and
+[GPU operation contracts and capability list](modular-gpu-handoff.md).
+The following requirements define the retained contract.
+
 Retain a scalar path with controlled transforms, tree, predictor and entropy
 settings. Add fixtures at stage boundaries: transformed channels, tree decisions,
 prediction/property values, residual/context tokens, populations, stream bit
@@ -763,8 +771,8 @@ checks require the appropriate hardware; unrun configurations remain explicitly
 unqualified. Phase 1 results are recorded in the
 [qualification report](modular-phase1/README.md). Phase 2 results are recorded
 for [P2.0](modular-p2.0.md), [P2.1](modular-p2.1.md) and
-[P2.2](modular-p2.2.md), [P2.3](modular-p2.3.md) and [P2.4](modular-p2.4.md) and [P2.5](modular-p2.5.md); later milestones remain
-planned.
+[P2.2](modular-p2.2.md), [P2.3](modular-p2.3.md), [P2.4](modular-p2.4.md),
+[P2.5](modular-p2.5.md), and [P2.6](modular-p2.6.md).
 
 ### Compression and performance gates
 
@@ -806,7 +814,9 @@ Phase 1 behavior change.
 
 ## After Phase 2: GPU development prerequisites
 
-GPU work starts from measured CPU stages and immutable representation contracts.
+The [GPU handoff](modular-gpu-handoff.md) specifies the implemented capability
+list, candidate operations and required boundary contracts. GPU work starts from
+measured CPU stages and immutable representation contracts.
 Place operation contracts in `gpu/ops/` and implementations in the existing
 Metal/CUDA trees only when a stage is selected for acceleration.
 

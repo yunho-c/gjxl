@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 #include "codestream/modular/workflow.h"
+#include "codec/modular/profile.h"
 #include "codestream/modular/frame_encoder.h"
 #include "codestream/modular/search.h"
 #include "codestream/workflow_admission_scope.h"
@@ -61,6 +62,10 @@ Status Encode(PackedModularImageView input, ModularEncodingOptions options,
       !s.ok())
     return s;
   output.Publish(std::move(candidate));
+  if (active_modular_profile) {
+    active_modular_profile->resolved = options.coding;
+    ++active_modular_profile->encoded_candidates;
+  }
   return Status::Ok();
 } catch (const resource_budget_internal::ManagedAllocationFailure &e) {
   return e.status();
@@ -88,6 +93,7 @@ Status EncodeSearch(PackedModularImageView input, ModularEncodingOptions options
       resource_budget_internal::ResourceClass::kPreparation);
   thread_budget_internal::EncodeScope threads(options.cpu_thread_count);
   options.search = false;
+  ModularCodingPolicy best_policy;
   codestream_internal::CodestreamBuffer best;
   if (auto s = Encode(input, options, &best); !s.ok())
     return s;
@@ -119,8 +125,10 @@ Status EncodeSearch(PackedModularImageView input, ModularEncodingOptions options
         return s;
       // Compare complete bytes, including transforms/tree/models/TOC/padding.
       // Baseline and earlier candidates win ties. Replacement releases the old winner.
-      if (candidate.view().size() < best.view().size())
+      if (candidate.view().size() < best.view().size()) {
         best = std::move(candidate);
+        if (active_modular_profile) best_policy = options.coding;
+      }
     }
   }
   uint16_t palette_colors;
@@ -137,10 +145,13 @@ Status EncodeSearch(PackedModularImageView input, ModularEncodingOptions options
     codestream_internal::CodestreamBuffer candidate;
     if (auto s = Encode(input, options, &candidate); !s.ok())
       return s;
-    if (candidate.view().size() < best.view().size())
+    if (candidate.view().size() < best.view().size()) {
       best = std::move(candidate);
+      if (active_modular_profile) best_policy = options.coding;
+    }
   }
   output.Publish(std::move(best));
+  if (active_modular_profile) active_modular_profile->resolved = best_policy;
   return Status::Ok();
 }
 } // namespace

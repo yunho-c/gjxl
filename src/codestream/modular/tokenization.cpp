@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 #include "codestream/modular/tokenization.h"
+#include "codec/modular/profile.h"
 #include "codec/modular/gradient.h"
 #include "codestream/modular/parallel.h"
 
@@ -12,6 +13,7 @@ Status TokenizeIdentity(const ModularEncoderFrame &frame, const ModularStreamPla
 Status TokenizeModular(const ModularEncoderFrame &frame, const ModularStreamPlan &plan,
                        const ModularCodingPolicy &policy, PreparedModularTokens *out,
                        size_t participants) try {
+  ProfileScope profile_scope(ProfileStage::kTokens);
   const auto extent = frame.metadata().extent;
   const size_t channels = frame.image().channel_count();
   size_t total = 0;

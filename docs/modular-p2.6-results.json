@@ -1,0 +1,966 @@
+{
+  "schema": 1,
+  "milestone": "P2.6",
+  "base_revision": "dda606d6eb23c00f136e079621619889fa9248bc",
+  "changes_uncommitted": true,
+  "reference_revision": "e8ff09762481785938d8e4e01333ed3917571161",
+  "reference_tracked_sources_clean": true,
+  "platform": "Windows ARM64 host; Release x64 binaries under emulation; MSVC 19.37.32826/STL 202305, Windows SDK 10.0.26100.0; pinned reference built with x64 clang-cl",
+  "native_configuration": {
+    "CMAKE_BUILD_TYPE": "Release",
+    "CMAKE_CXX_COMPILER": "C:/Users/hocbu/GitHub/gjxl/build/modular-phase1/toolchain/VC/Tools/MSVC/14.37.32822/bin/Hostx64/x64/cl.exe",
+    "CMAKE_CXX_FLAGS": "/DWIN32 /D_WINDOWS /EHsc",
+    "CMAKE_CXX_FLAGS_RELEASE": "/O2 /Ob2 /DNDEBUG",
+    "CMAKE_CXX_STANDARD": "20",
+    "CMAKE_C_COMPILER": "C:/Users/hocbu/GitHub/gjxl/build/modular-phase1/toolchain/VC/Tools/MSVC/14.37.32822/bin/Hostx64/x64/cl.exe",
+    "GJXL_BUILD_TESTS": "OFF",
+    "GJXL_ENABLE_CUDA": "OFF",
+    "GJXL_ENABLE_LIBJXL_REFERENCE": "OFF",
+    "GJXL_ENABLE_METAL": "OFF",
+    "CMAKE_GENERATOR": "Ninja"
+  },
+  "compiler_sha256": "37661d8479b56cd540d7462725db7a191b8b8043a7ebcd3ace6453f7b00167eb",
+  "source_sha256": {
+    "CMakeLists.txt": "46f47a001911d92b2694f3a52f82869863a211eb87ab8969277a49e6214b1f17",
+    "cmake/ModularOracle.cmake": "f4ec615c5c21ef4475f5d80e45d94858a6f15e5961d5ff6411f350134d09341a",
+    "include/gjxl/modular.hpp": "5b7d4967dc34680612fa4112a017cf0bb6181e11255627fdbc34025b1f17147c",
+    "src/codec/frame_metadata.h": "177a1644368d7c6c7a0c2ab71870f599b9973334b38401ae7824ceb84ab196dd",
+    "src/codec/modular/coding.h": "e1f2537a0875b21ca7e3c0c5d388bf17c6e6b3f31d646f299018f4fb70e60032",
+    "src/codec/modular/frame.cpp": "add401552296e294a371e5449c5c1a96b3088e9b8e531cdb304aa9ee3164edf1",
+    "src/codec/modular/frame.h": "a91913b723e3040ad876c95e304f9fad8eaa63bacad369ef64f927067f0d8ef9",
+    "src/codec/modular/geometry.cpp": "67ea98e9fd48abecc08f92201fbc050b5862b0bd6378899af05fc0cf8b853384",
+    "src/codec/modular/geometry.h": "562216ab50090168a28ca1b85cb6b625c4829c2cec5ba15efe84f50cc6e2cfb0",
+    "src/codec/modular/gradient.h": "0e61dd2f3044d761df4f149483d79f0a0adfa4bd1b3eb2308a69420f135348cf",
+    "src/codec/modular/image.cpp": "749ac9e4b35f728c18168b2283fb65a39466731895ff43ea084956e528d7053d",
+    "src/codec/modular/image.h": "9de61a699330e50b44bb2151ad2e30ed424d9d0e82cf47c067da1afb43bca351",
+    "src/codec/modular/prediction.h": "1ee32fd5da106fed20e317597f128acba3848edaf774ccb540aeb87eb0c31653",
+    "src/codec/modular/profile.h": "9f2d67f16c9fd89a6b925c775062a4ba85f6a5114f221057714eb61b30eb501e",
+    "src/codec/modular/scalar_prediction.h": "09bb74ac95fee3501ca340c3df6669efc34b71d3ffd81b29071a45ad50edfbaf",
+    "src/codec/modular/transform/operations.h": "a0d4fa9c47ddf225ea6ec8c4a47a26647546fd4fe94c1a8b62a3fd4ce1e7ba17",
+    "src/codec/modular/transform/palette.cpp": "26a31e171d7049b332d2a643ad6a0de7347c11cb9c64a968e9149ee3fbe4cb2c",
+    "src/codec/modular/transform/rct.h": "b216e452ddf1240b03cf504ee7464fd461af537ef979535ccafdb07124709f48",
+    "src/codec/modular/transform/squeeze.cpp": "9033dfffaa6a4710023991ff459f3e4689b23eae61077e06fce092a7b272834b",
+    "src/codec/modular/transform/transform.cpp": "f2fb45b0db63b0b00c627d277109d4fec38ac312ae7fba694c9693cf14283b45",
+    "src/codec/modular/transform/transform.h": "927b673398cad3cbf1f6c14266b9e488d72ef486f05ae1c65acae077600b223a",
+    "src/codec/modular/tree.h": "d75b73b799062436bb1e36dbfed771abc8fb0416b4537a89f27e6babc7779f23",
+    "src/codec/modular/tree_learning.cpp": "19957ffb1b91a8f5b7a0b4ce3e36b5aea676eb2a95226b5babe2150ea54b7b7c",
+    "src/codec/modular/tree_learning.h": "d4b40092348c9a0760d9c7af821d3ea73642e33837f46fd0bb3d3d7e84a00136",
+    "src/codestream/bit_writer.h": "6667a494e62b59c5fadb42c8a494ceb7b996a2147d84191c7df25fd7c5e5bb0d",
+    "src/codestream/context_map_internal.h": "75bdbddf6c7d52c182d8daa9d02eb2bed1b76db8961007576fc78adccdeffd8e",
+    "src/codestream/entropy.h": "e9f803bb7ab6a31979ca016c6603edeff01fe93216ffb2eeb67d8c9d0fed699c",
+    "src/codestream/entropy_internal.h": "800d93708b3450d253b68c4c9c220442c652407f4254dce44d98c90de620e909",
+    "src/codestream/entropy_storage_plan.h": "a784a7e7c9b4a953a0c8464bb06b03152fc232366ea8b0832de1bed00eed2d84",
+    "src/codestream/headers_internal.h": "ffc499d51aab390f1129ac40bcdfb9bf7d57732e446aca01da32adbb2e2ce67c",
+    "src/codestream/modular/frame_encoder.cpp": "a200458c66cc55492bb864c0c50a838c88d1c5b544052f1e2b5bd589141592cd",
+    "src/codestream/modular/frame_encoder.h": "c3f3412611d741d4a356a6d08d33f65be6aa52efe1de85f4550305b163c6ec17",
+    "src/codestream/modular/parallel.h": "3c1d7f9ac12a82a4722ac09d7c128bd14d354ec078305d2d10289805b63e3885",
+    "src/codestream/modular/public.cpp": "38c9192b1f2abf88534ff2edc4988e8c10778b7d1c1ba94821bad74e226e9cfb",
+    "src/codestream/modular/search.cpp": "3493e8304e7d38e55e6dd669ff39799071a27cc479752ac9d131e51e77db37ea",
+    "src/codestream/modular/search.h": "0a6eab9a840539505520fd04aafe903a53a4d8ec0e5a140359d9fbad0aa934a1",
+    "src/codestream/modular/storage_plan.cpp": "2c51aa07d0ee0de314a1ab8aec44544019ec773dcffe9d256cf59ccd1e75f84c",
+    "src/codestream/modular/storage_plan.h": "7fe2b0159c693d2de1ca190c6f80d98c33d6dcb8e2ddf598b9b72c533525e496",
+    "src/codestream/modular/stream_encoder.cpp": "70671ad0022ec0306dcab647ea6062d4bf2b73d33a384bb58b9e2957be5abd49",
+    "src/codestream/modular/stream_encoder.h": "63c32dd7fa3d78fdb0ed0bc67df6aeb4d2b768a2ec93ed1addbdbc83abf9de5b",
+    "src/codestream/modular/stream_plan.cpp": "d7a5650141257915835006448818632c6ae91db01a18e7e80eedf4725970d440",
+    "src/codestream/modular/stream_plan.h": "1c1355919c3d3cdb83f95848a0ef99d91ff9ca6601d257d5df4c09dba97033b3",
+    "src/codestream/modular/stream_types.h": "941efddc2d51b1f8d623f62e498077ba08132a86fd8275acfe8b2591fd26ab64",
+    "src/codestream/modular/tokenization.cpp": "46b23cf764e68c18465a809c1ed6ec15c4b8c6c4cae4ada745b8fdb0d4ff1080",
+    "src/codestream/modular/tokenization.h": "6d5b98a23ec1982f7f24d5454ebbfe13ca5df7a74669c26e8c70cfeb9ab36b4c",
+    "src/codestream/modular/tree_codec.cpp": "fc96afdb00c6197f51e29083774cdc309607401c58fe6975cb6d93389cc45090",
+    "src/codestream/modular/tree_codec.h": "5a223dd20ed113a51ed183427b5dcae1e32bb948678b3510e3cc4559d9070b32",
+    "src/codestream/modular/workflow.cpp": "baaaa7a6a2913ce88cdb5882f1b1b8422fef07df92696e696b75968c9081139e",
+    "src/codestream/modular/workflow.h": "794d09acbe9c89afe6d4a47759cf2ff1469817e98d55777d91ba2a52291f77df",
+    "src/codestream/sections.h": "0bf3a97ee499b71efecc1fc6c4e57964b97db11e099c2a3d0eda54e19e245ef4",
+    "src/codestream/storage.h": "f29809485275d5a81fe33561427c89d8565490b080bf0c706114b8e1e13d992d",
+    "src/codestream/workflow_admission_scope.h": "deb8b45db7a202b48e54f72f7163e76e8bbe48440bde61835f3c60ffa34258ba",
+    "src/codestream/workflow_admission_test.h": "108569feabd8952b48c0b7031fcf3a1a5a4237c803e255bb3e0616f6e9f285dd",
+    "src/core/cpu_budget.h": "2bafd21c555c93b2bd8b7856257027b6860710ee7c1b8db5d767b2f5ff7e32cd",
+    "src/core/cpu_execution.h": "96cccd72d191df309fa902fe1b6e5c888f9cd346543f055dab0f6e93ea3cbc69",
+    "src/core/execution_domain.h": "d7a0459b2ef6681d093177c8a7c51a0000c2cc772094a32591398ff0ec77d7ef",
+    "src/core/geometry.h": "70ded8bb9cbde4ecb478162ff7b0b173433c9319640899ef0602f6eb15ac4a33",
+    "src/core/host_storage_bound.h": "73d4e209eaae7e8267b302af290e26a40685cacd99fcb02b4bd2b7ce6ecfc72e",
+    "src/core/managed_allocator.h": "aebd7e4f7c54bf5187cd7a693e07914bd89450bbe5b352ad25560bdf802561fa",
+    "src/core/parallel_work_internal.h": "11493492ab61f53a01fb38552fb214c69f86bae2c7c8d1b401d647c729354a2a",
+    "src/core/publication_output.h": "a864d83a0ae19c84a131972e79e04ac106abb864026baa93c1b45538586b99f5",
+    "src/core/publication_vector.h": "838b9ba01688abc3141229a0792224a670a48d96106029ce211dedae001d47fe",
+    "src/core/resource_budget.h": "a6a57f0bad8e26d551443ad13d90f94beb12b7c3fa720b39d46ac47cbf5f00e3",
+    "src/core/resource_context.h": "3b4e38cd040272f889f74b449d9935fd6093cc43a6e32d80f27492bafe312b16",
+    "src/core/status.h": "d107bdbbb4285733a90acfe69f80a9db25e7e8951ad56d6bae524384a500c33d",
+    "src/core/stdlib_storage_compat.h": "2d756cf3d7ab726123366878c1421438282108ea538e56182eef4bb3683e5c9e",
+    "src/core/thread_budget.h": "00366c5866cd520fe0b7e8453214fee3dbce6d05d2c5b41476b54aa49513d3bc",
+    "src/core/worker_launch_internal.h": "a5142658c040ba09be1c962369daa6aa50af838cf2e9059c7fe04c322e7fbe04",
+    "testdata/modular/PHOTO-LICENSE.md": "f90452236dace12101a3178dc6add67cc7ce8d79a3d722967ee1a27cd0d6fca0",
+    "testdata/modular/oracle-v1.json": "609c25e7b2d3a2733b169ed5dd9549ec09d859f940e14265270755018c750543",
+    "testdata/modular/photo.json": "04e8b72f0d5f56a405cd5723722101c2f84295134cb823dd71a6dd104db65a0b",
+    "testdata/modular/photo.ppm": "68c361fe6605cbdacd0eca3c1b8beb897bc17f60387149d3bd09677706a9faea",
+    "tools/modular_oracle/CMakeLists.txt": "ca544b67771caa519eb84e7deefc547b97d70b5773c5a05426bda09ca2a7800c",
+    "tools/modular_oracle/README.md": "314b60f73e9e8c5a4a9f0c075f601aed90597e58368ce0862c624708a798aa53",
+    "tools/modular_oracle/capture.cpp": "4c5d3e438b33f7d9a490ee914e1155e6bf6e282e90a9eabc488e7bb35e3d246a",
+    "tools/modular_oracle/prepare_photo.py": "0f49492487bca97454be8cb146e5a03fd6b64b411ef3d86b3765b1dbacf11c37",
+    "tools/modular_oracle/reference.h": "77d4f71987390b50e33cec2f08404a02dd5cf417f07862998e114b5149274535",
+    "tools/modular_oracle/summarize.py": "b7388bca38ca37ff4f75ba3db3a7e4fd5b9101ddcc51fff0595d44cf821e86f4",
+    "tools/modular_oracle/verify.py": "566d63f94381aeea47175786ff8743f30f230887ceb131740bd65cc9fa5b5261"
+  },
+  "binary_sha256": {
+    "build/modular-p2.6/native/gjxl.lib": "88986d50cd4a1fba5c8d23a9037fbd66b13ee3883babc54eee827a491fb1cd2c",
+    "build/modular-p2.6/native/gjxl_codec.lib": "e82dbfb29de476fdc23168aae56dcb4ef51fe48e223ef3ee6d209aabb5a50509",
+    "build/modular-p2.6/native/gjxl_codestream.lib": "6ef8f1b61a558d955249c4ad198062e46d039a03b8c4b9bd2575882d8fc4cad4",
+    "build/modular-p2.6/native/gjxl_gpu.lib": "3464cf54200d25f33c91b845390bda1a6378d31d3af5a2be4a4ae00d7c73e6d6",
+    "build/modular-p2.6/native/gjxl_gpu_butteraugli.lib": "e8239784e94f4932b73a046caca71c814cb8580fb9e55dc4c3802658b399ee82",
+    "build/modular-p2.6/native/gjxl_gpu_ops.lib": "2b7cc10cc5ff01fbb657816cf13248b9a43fd0e9f23ef7eca9310a56eece945b",
+    "build/modular-p2.6/native/gjxl_pfm_io.lib": "ec368e191084a3215b8581534755f5865cd49b97c5a09d4e832e3823af2075dc",
+    "build/modular-p2.6/native/gjxl_encode.exe": "f93a7e418ecdb8283c7b76b2126c0785de4a9a08c4b2d2423198d2f8dbd9ff24",
+    "build/modular-p2.6/capture-native/gjxl_modular_capture.exe": "4909a63fd9da7b81189112975934f5b4d32f06924e223acd2084fc38232f1e5c",
+    "build/modular-phase1/candidate/gjxl_modular_api_test.exe": "6c84b45e92d909166cd561eaa71c03d29f12cc2b820fcafbae8d7cba5bf34892",
+    "build/modular-phase1/candidate/gjxl_modular_capture.exe": "02cd4b1510ea357eb990a881e1cee7970fcdd1b91c6a2b9af001a94a3ba61eb8",
+    "build/modular-phase1/candidate/gjxl_modular_conformance_test.exe": "c14b481cd0aa9bb4f161779db563d02c864f64ca5ffd4b90066961b595a347b8",
+    "build/modular-phase1/candidate/gjxl_modular_foundation_test.exe": "5af7ef65b86e85a143aa61fc4477eb3fb27863f31207507667312b533a51ce8a",
+    "build/modular-phase1/candidate/gjxl_modular_oracle_test.exe": "be11258134866264baa7b0f3a89c389c7ae05a5ea8466d4073b89f8f7f1b16d7",
+    "build/modular-phase1/candidate/gjxl_modular_policy_test.exe": "8573507e4d10211aad2a1b6f8519871e8b1c65b20b91c7813e4ed8e722a46ed0",
+    "build/modular-phase1/candidate/gjxl_modular_reference_capture.exe": "b0b21b88e0da0ebc6f8d9dda0811b49dee2ae609eabcb7ca52d34d367941fb59",
+    "build/modular-phase1/candidate/gjxl_modular_stream_test.exe": "491dfc0296c4e1e88fb3933c28722e84fdf5d45e0e289b6e753f2f9e6d4e5ee3",
+    "build/modular-phase1/candidate/gjxl_modular_transform_test.exe": "88a89d824e9a762433bb6efab24bed2b45267cbc1b6dca4eb78711ec5e7985ed",
+    "build/modular-phase1/candidate/gjxl_modular_workflow_test.exe": "7f6e1102f33ef134650c4c790be8d5ae244479d7d43ed803e29280c1fc1a1380"
+  },
+  "evidence_sha256": {
+    "build/modular-p2.6/benchmark-final.log": "381b1a2e02e8573b47dabfa23d25d9e5cff169eaa37c17e22c8a777487b0459a",
+    "build/modular-p2.6/build.log": "e4b1336af1e4e387c0c669dc042809f131c29a77784eee674494982bcb921944",
+    "build/modular-p2.6/capture-native-build.log": "25506993fe9feecc281877293c9bb8e5014b7b6aa1c621b4fcebdc6fb0463705",
+    "build/modular-p2.6/capture-native-configure.log": "f0074751b96e628482981d7a25860945d5ba66cd330471892ad27d1d0524bd05",
+    "build/modular-p2.6/capture-native-test.log": "2031db0c53a4bbd0582d01f728f6c6cac8f2d4f3aa6e5b5403047512d5d2dd79",
+    "build/modular-p2.6/capture-vardct-build.log": "4e30a7aaa48375d5e03f883498f45e750c75c6113e698fef71b5047d67742eae",
+    "build/modular-p2.6/capture-vardct-configure.log": "22c91fab1ef0b7c514f77cd225cd9529b9eaf7a6fb3eed55ebf2f7a29bf91b48",
+    "build/modular-p2.6/final-tests.xml": "25a90236302025240a1dfd059615e389b2e0dcece3501906ded87b0336893d07",
+    "build/modular-p2.6/initial-summary.json": "eb9ae8899461a87e59fe6a7a997330aaf93e06e8c125b2fe3292314b7aedb902",
+    "build/modular-p2.6/native-build.log": "92678049f92956ca89f845d53795407c7014282a359d01984d94b533969b911e",
+    "build/modular-p2.6/native-configure.log": "10e5ef5dcd1a706e205151d23a0dedcb5cbf0fe6a03a0eda14dd4f4ccc2b877a",
+    "build/modular-p2.6/native-install.log": "42d62f09df9c964336d410cd5e15335121595ac212e0f704106eb5393c35e539",
+    "build/modular-p2.6/rust-tests.log": "82b71aed38a2f0e71b1eb6a9ce558fae23316abf85871f73254b9cc0461b7637",
+    "build/modular-p2.6/tests.log": "e323aea18cf5ddb99c1854bcf840f7523e8fc53e3a093528de0030c9e7f2b62a",
+    "build/modular-p2.6/vardct-capture.log": "ee1ead0e5a0a8d85388b16d421d0ed299d53dc297eb8079543e1b6f72928882d",
+    "build/modular-p2.6/vardct-comparison.json": "fd88fbcd561314c2eb57a6500eb4cf9a68eb139d944bd4c228fd55abd58ae223",
+    "build/modular-p2.6/vardct-conformance.log": "a6efa22a9314f55980d5b0816a6bb479127363e48d338e336378debe6b8178a3",
+    "build/modular-p2.6/vardct-photo-capture.log": "9916a9a64ba3e3dc99dc12014a61b87119acd728e49ed0f16599d619ea3aff9b",
+    "build/modular-p2.6/vardct-photo-comparison.json": "7da5e5806c018a5cabc26445b6fd5b4bd2d005e8c0d9dcf6a0b9307e01f8eca1",
+    "docs/modular-p2.6-timings.json": "2d9e34e8a93e805eed6331a4a5f73429208eab16ef012eea41958d768f77c88c",
+    "build/modular-p2.6/benchmark-final/timings.csv": "296dfbc3f5e6644725b3a8ac2bde89c471d334b981814914d48aade7fbbf53be"
+  },
+  "frozen_oracle": {
+    "manifest": "testdata/modular/oracle-v1.json",
+    "manifest_sha256": "609c25e7b2d3a2733b169ed5dd9549ec09d859f940e14265270755018c750543",
+    "artifacts": 286,
+    "complete_files": 14,
+    "reference_stage_checks": "transformed samples and shapes, tree tokens, all predictors/properties, leaf residual/context tokens, decoded samples",
+    "native_installed_match": true
+  },
+  "frozen_regressions": {
+    "default_modular": 2802,
+    "policy_modular": 1646,
+    "transform_modular": 626,
+    "vardct": 208,
+    "mismatches": []
+  },
+  "artifact_comparisons": [
+    {
+      "expected": "docs/modular-phase1/stage-comparison.json",
+      "sha256": "0904b0504dd9d94f0ca778ca403e99c335ee1ce409206a937fa43ff3b67ce57e",
+      "compared": 204,
+      "mismatches": []
+    },
+    {
+      "expected": "docs/modular-phase1/photo-comparison.json",
+      "sha256": "1efff42cf32347d08b910a554d95da6d02e27d427a0908e500cc2fa521e85111",
+      "compared": 4,
+      "mismatches": []
+    }
+  ],
+  "final_ctest": {
+    "passed": 125,
+    "total": 134,
+    "parallel": 4,
+    "timeout_seconds": 600,
+    "outcomes": {
+      "planning_recipes": {
+        "status": "passed",
+        "seconds": 1.96361
+      },
+      "resident_qualification_controller": {
+        "status": "passed",
+        "seconds": 0.858685
+      },
+      "stdlib_storage_compat": {
+        "status": "passed",
+        "seconds": 0.0295282
+      },
+      "stdlib_storage_compat_cxx23": {
+        "status": "passed",
+        "seconds": 0.111756
+      },
+      "storage_toolchain": {
+        "status": "passed",
+        "seconds": 14.0499
+      },
+      "bit_writer_append": {
+        "status": "passed",
+        "seconds": 0.871351
+      },
+      "bit_writer_word": {
+        "status": "passed",
+        "seconds": 1.03379
+      },
+      "ans_bit_emission": {
+        "status": "passed",
+        "seconds": 1.05897
+      },
+      "bit_writer": {
+        "status": "passed",
+        "seconds": 0.248328
+      },
+      "entropy": {
+        "status": "passed",
+        "seconds": 0.600617
+      },
+      "context_map": {
+        "status": "passed",
+        "seconds": 2.84759
+      },
+      "ans_reverse_bits": {
+        "status": "passed",
+        "seconds": 1.45246
+      },
+      "sections": {
+        "status": "passed",
+        "seconds": 0.335062
+      },
+      "dc_group": {
+        "status": "passed",
+        "seconds": 0.302446
+      },
+      "weighted_dc": {
+        "status": "passed",
+        "seconds": 0.73029
+      },
+      "ac_group": {
+        "status": "passed",
+        "seconds": 2.30709
+      },
+      "coefficient_order": {
+        "status": "passed",
+        "seconds": 1.02414
+      },
+      "dc_parallel_tokenization": {
+        "status": "passed",
+        "seconds": 0.544073
+      },
+      "ac_direct_tokenization": {
+        "status": "passed",
+        "seconds": 5.88702
+      },
+      "ac_population_reduction": {
+        "status": "passed",
+        "seconds": 2.40133
+      },
+      "token_storage_plan": {
+        "status": "passed",
+        "seconds": 1.94979
+      },
+      "entropy_storage_plan": {
+        "status": "passed",
+        "seconds": 6.3983
+      },
+      "representation_storage_plan": {
+        "status": "passed",
+        "seconds": 0.466872
+      },
+      "serializer_storage_plan": {
+        "status": "passed",
+        "seconds": 112.756
+      },
+      "ac_section_validation": {
+        "status": "passed",
+        "seconds": 0.345676
+      },
+      "compact_vardct_frame": {
+        "status": "passed",
+        "seconds": 7.10069
+      },
+      "compact_frame_allocation": {
+        "status": "passed",
+        "seconds": 2.9937
+      },
+      "frame_validation": {
+        "status": "passed",
+        "seconds": 5.87647
+      },
+      "sparse_coefficients": {
+        "status": "passed",
+        "seconds": 0.30285
+      },
+      "sparse_vardct_frame": {
+        "status": "passed",
+        "seconds": 29.505
+      },
+      "sparse_frame_allocation": {
+        "status": "passed",
+        "seconds": 2.1376
+      },
+      "quantization_storage": {
+        "status": "passed",
+        "seconds": 0.302448
+      },
+      "block_context_map": {
+        "status": "passed",
+        "seconds": 0.125234
+      },
+      "codestream_encoder": {
+        "status": "passed",
+        "seconds": 33.5164
+      },
+      "codestream_workflow": {
+        "status": "passed",
+        "seconds": 14.4047
+      },
+      "codestream_batch_workflow": {
+        "status": "passed",
+        "seconds": 0.508545
+      },
+      "batch_lifecycle_cpu": {
+        "status": "passed",
+        "seconds": 0.373324
+      },
+      "batch_scheduling_cpu": {
+        "status": "passed",
+        "seconds": 0.345559
+      },
+      "parallel_work": {
+        "status": "passed",
+        "seconds": 0.201761
+      },
+      "worker_launch_failure_startup": {
+        "status": "passed",
+        "seconds": 0.0350767
+      },
+      "worker_launch_failure_forward": {
+        "status": "passed",
+        "seconds": 3.06911
+      },
+      "worker_launch_failure_cpu_color": {
+        "status": "passed",
+        "seconds": 53.1805
+      },
+      "worker_launch_failure_cpu_aq": {
+        "status": "passed",
+        "seconds": 53.5589
+      },
+      "worker_launch_failure_cpu_orders": {
+        "status": "passed",
+        "seconds": 67.9889
+      },
+      "worker_launch_failure_cpu_sections": {
+        "status": "passed",
+        "seconds": 85.6514
+      },
+      "worker_launch_failure_cpu_drains": {
+        "status": "passed",
+        "seconds": 23.8515
+      },
+      "rate_control_search": {
+        "status": "passed",
+        "seconds": 0.326889
+      },
+      "rate_control_probe": {
+        "status": "passed",
+        "seconds": 0.198604
+      },
+      "codestream_cli": {
+        "status": "passed",
+        "seconds": 1.48797
+      },
+      "codestream_sample_generated": {
+        "status": "passed",
+        "seconds": 0.250437
+      },
+      "c_api_image_conversion": {
+        "status": "passed",
+        "seconds": 0.036252
+      },
+      "c_api": {
+        "status": "passed",
+        "seconds": 0.639685
+      },
+      "c_api_cpp": {
+        "status": "passed",
+        "seconds": 0.0949751
+      },
+      "pfm": {
+        "status": "passed",
+        "seconds": 0.288868
+      },
+      "butteraugli_primitives": {
+        "status": "passed",
+        "seconds": 0.285658
+      },
+      "butteraugli_stages": {
+        "status": "passed",
+        "seconds": 0.314031
+      },
+      "butteraugli_distance": {
+        "status": "passed",
+        "seconds": 0.291241
+      },
+      "core_geometry": {
+        "status": "passed",
+        "seconds": 0.192627
+      },
+      "resource_budget": {
+        "status": "passed",
+        "seconds": 0.0371952
+      },
+      "cpu_budget": {
+        "status": "passed",
+        "seconds": 0.110705
+      },
+      "cpu_execution": {
+        "status": "passed",
+        "seconds": 0.114181
+      },
+      "entropy_readiness": {
+        "status": "passed",
+        "seconds": 0.346602
+      },
+      "earlier_dc_contract": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "entropy_readiness_contract": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "workflow_cpu_coordination_cpu": {
+        "status": "passed",
+        "seconds": 43.6802
+      },
+      "managed_allocator": {
+        "status": "passed",
+        "seconds": 0.224217
+      },
+      "serializer_storage": {
+        "status": "passed",
+        "seconds": 0.310897
+      },
+      "frontend_storage": {
+        "status": "passed",
+        "seconds": 0.289224
+      },
+      "frontend_storage_plan": {
+        "status": "passed",
+        "seconds": 2.27913
+      },
+      "frontend_field_storage_plan": {
+        "status": "passed",
+        "seconds": 13.1959
+      },
+      "perceptual_storage_plan": {
+        "status": "passed",
+        "seconds": 14.1186
+      },
+      "publication_storage": {
+        "status": "passed",
+        "seconds": 0.191619
+      },
+      "workflow_publication": {
+        "status": "passed",
+        "seconds": 4.85482
+      },
+      "diagnostic_storage": {
+        "status": "passed",
+        "seconds": 0.123169
+      },
+      "ac_strategy_grid": {
+        "status": "passed",
+        "seconds": 0.0578334
+      },
+      "fast_math": {
+        "status": "passed",
+        "seconds": 0.104731
+      },
+      "dct_reference": {
+        "status": "passed",
+        "seconds": 0.115658
+      },
+      "cpu_dct": {
+        "status": "passed",
+        "seconds": 0.273129
+      },
+      "ac_strategy_cost": {
+        "status": "passed",
+        "seconds": 0.318735
+      },
+      "ac_strategy_search": {
+        "status": "passed",
+        "seconds": 0.36313
+      },
+      "quantization": {
+        "status": "passed",
+        "seconds": 0.359103
+      },
+      "quantization_adjustment": {
+        "status": "passed",
+        "seconds": 0.423449
+      },
+      "maximum_error": {
+        "status": "passed",
+        "seconds": 0.381599
+      },
+      "dc_conversion": {
+        "status": "passed",
+        "seconds": 0.359145
+      },
+      "dc_quantization": {
+        "status": "passed",
+        "seconds": 0.111463
+      },
+      "dc_processing": {
+        "status": "passed",
+        "seconds": 0.251601
+      },
+      "cpu_workflow_storage_plan": {
+        "status": "passed",
+        "seconds": 146.626
+      },
+      "cpu_workflow_legacy_dc_tree": {
+        "status": "passed",
+        "seconds": 146.64
+      },
+      "dc_context_tree": {
+        "status": "passed",
+        "seconds": 1.62644
+      },
+      "modular_stream": {
+        "status": "passed",
+        "seconds": 0.222919
+      },
+      "modular_foundation": {
+        "status": "passed",
+        "seconds": 0.182351
+      },
+      "modular_workflow": {
+        "status": "passed",
+        "seconds": 190.806
+      },
+      "modular_frozen_oracle": {
+        "status": "passed",
+        "seconds": 5.6871
+      },
+      "modular_oracle": {
+        "status": "passed",
+        "seconds": 0.330859
+      },
+      "modular_conformance": {
+        "status": "passed",
+        "seconds": 40.5461
+      },
+      "modular_policy": {
+        "status": "passed",
+        "seconds": 8.30417
+      },
+      "modular_transform": {
+        "status": "passed",
+        "seconds": 11.7018
+      },
+      "modular_api": {
+        "status": "passed",
+        "seconds": 2.8047
+      },
+      "modular_cli": {
+        "status": "passed",
+        "seconds": 2.25832
+      },
+      "modular_frozen_reference": {
+        "status": "passed",
+        "seconds": 5.27066
+      },
+      "dc_context_tree_oracle": {
+        "status": "passed",
+        "seconds": 0.175723
+      },
+      "dc_processing_oracle": {
+        "status": "failed",
+        "seconds": 5.11112
+      },
+      "adaptive_quantization": {
+        "status": "passed",
+        "seconds": 0.301974
+      },
+      "adaptive_quantization_loop": {
+        "status": "passed",
+        "seconds": 0.310801
+      },
+      "color_transform": {
+        "status": "passed",
+        "seconds": 0.236016
+      },
+      "quantization_pipeline": {
+        "status": "passed",
+        "seconds": 0.475828
+      },
+      "quantization_pipeline_uniform": {
+        "status": "passed",
+        "seconds": 0.132912
+      },
+      "quantization_pipeline_search_policy": {
+        "status": "passed",
+        "seconds": 0.120523
+      },
+      "low_effort_strategy_policy": {
+        "status": "passed",
+        "seconds": 0.235445
+      },
+      "dc_policy": {
+        "status": "passed",
+        "seconds": 4.60162
+      },
+      "gaborish": {
+        "status": "passed",
+        "seconds": 0.203966
+      },
+      "chroma_from_luma": {
+        "status": "passed",
+        "seconds": 0.289219
+      },
+      "epf": {
+        "status": "passed",
+        "seconds": 0.192607
+      },
+      "reconstruction": {
+        "status": "passed",
+        "seconds": 0.465521
+      },
+      "overwrite_array": {
+        "status": "passed",
+        "seconds": 0.286639
+      },
+      "vardct_frame": {
+        "status": "passed",
+        "seconds": 3.21046
+      },
+      "vardct_frame_view": {
+        "status": "passed",
+        "seconds": 36.6909
+      },
+      "simple_codestream_profile": {
+        "status": "passed",
+        "seconds": 0.330693
+      },
+      "loop_filter": {
+        "status": "passed",
+        "seconds": 0.211153
+      },
+      "butteraugli": {
+        "status": "passed",
+        "seconds": 0.190178
+      },
+      "butteraugli_reference": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_blur_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_frequency_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_distance_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_distance_scalar_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_goldens_generated": {
+        "status": "failed",
+        "seconds": 0.247396
+      },
+      "quantization_tables_generated": {
+        "status": "passed",
+        "seconds": 0.345468
+      },
+      "gpu_image": {
+        "status": "passed",
+        "seconds": 0.0315104
+      },
+      "ac_strategy_storage_plan": {
+        "status": "passed",
+        "seconds": 1.78216
+      },
+      "ac_strategy_host_storage_plan": {
+        "status": "passed",
+        "seconds": 16.3445
+      },
+      "profile_storage_plan": {
+        "status": "passed",
+        "seconds": 0.328839
+      },
+      "gpu_profile_json": {
+        "status": "passed",
+        "seconds": 0.453603
+      },
+      "workflow_admission_cpu": {
+        "status": "passed",
+        "seconds": 1.61523
+      },
+      "codec_install_consumer": {
+        "status": "passed",
+        "seconds": 49.8512
+      }
+    },
+    "retained_failures": {
+      "earlier_dc_contract": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "entropy_readiness_contract": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "dc_processing_oracle": {
+        "status": "failed",
+        "seconds": 5.11112
+      },
+      "butteraugli_reference": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_blur_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_frequency_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_distance_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_distance_scalar_differential": {
+        "status": "not_run",
+        "seconds": 0.0
+      },
+      "butteraugli_goldens_generated": {
+        "status": "failed",
+        "seconds": 0.247396
+      }
+    },
+    "lost_p25_passes": []
+  },
+  "boundaries": {
+    "native_modular_include_closure": [
+      "include/gjxl/modular.hpp",
+      "src/codec/frame_metadata.h",
+      "src/codec/modular/coding.h",
+      "src/codec/modular/frame.cpp",
+      "src/codec/modular/frame.h",
+      "src/codec/modular/geometry.cpp",
+      "src/codec/modular/geometry.h",
+      "src/codec/modular/gradient.h",
+      "src/codec/modular/image.cpp",
+      "src/codec/modular/image.h",
+      "src/codec/modular/prediction.h",
+      "src/codec/modular/profile.h",
+      "src/codec/modular/scalar_prediction.h",
+      "src/codec/modular/transform/operations.h",
+      "src/codec/modular/transform/palette.cpp",
+      "src/codec/modular/transform/rct.h",
+      "src/codec/modular/transform/squeeze.cpp",
+      "src/codec/modular/transform/transform.cpp",
+      "src/codec/modular/transform/transform.h",
+      "src/codec/modular/tree.h",
+      "src/codec/modular/tree_learning.cpp",
+      "src/codec/modular/tree_learning.h",
+      "src/codestream/bit_writer.h",
+      "src/codestream/context_map_internal.h",
+      "src/codestream/entropy.h",
+      "src/codestream/entropy_internal.h",
+      "src/codestream/entropy_storage_plan.h",
+      "src/codestream/headers_internal.h",
+      "src/codestream/modular/frame_encoder.cpp",
+      "src/codestream/modular/frame_encoder.h",
+      "src/codestream/modular/parallel.h",
+      "src/codestream/modular/public.cpp",
+      "src/codestream/modular/search.cpp",
+      "src/codestream/modular/search.h",
+      "src/codestream/modular/storage_plan.cpp",
+      "src/codestream/modular/storage_plan.h",
+      "src/codestream/modular/stream_encoder.cpp",
+      "src/codestream/modular/stream_encoder.h",
+      "src/codestream/modular/stream_plan.cpp",
+      "src/codestream/modular/stream_plan.h",
+      "src/codestream/modular/stream_types.h",
+      "src/codestream/modular/tokenization.cpp",
+      "src/codestream/modular/tokenization.h",
+      "src/codestream/modular/tree_codec.cpp",
+      "src/codestream/modular/tree_codec.h",
+      "src/codestream/modular/workflow.cpp",
+      "src/codestream/modular/workflow.h",
+      "src/codestream/sections.h",
+      "src/codestream/storage.h",
+      "src/codestream/workflow_admission_scope.h",
+      "src/codestream/workflow_admission_test.h",
+      "src/core/cpu_budget.h",
+      "src/core/cpu_execution.h",
+      "src/core/execution_domain.h",
+      "src/core/geometry.h",
+      "src/core/host_storage_bound.h",
+      "src/core/managed_allocator.h",
+      "src/core/parallel_work_internal.h",
+      "src/core/publication_output.h",
+      "src/core/publication_vector.h",
+      "src/core/resource_budget.h",
+      "src/core/resource_context.h",
+      "src/core/status.h",
+      "src/core/stdlib_storage_compat.h",
+      "src/core/thread_budget.h",
+      "src/core/worker_launch_internal.h"
+    ],
+    "installed_files": [
+      "bin/gjxl_encode.exe",
+      "include/codec/ac_strategy.h",
+      "include/codec/adaptive_quantization.h",
+      "include/codec/butteraugli.h",
+      "include/codec/chroma_from_luma.h",
+      "include/codec/codestream.h",
+      "include/codec/color_transform.h",
+      "include/codec/convolution.h",
+      "include/codec/dc_conversion.h",
+      "include/codec/dc_prediction.h",
+      "include/codec/dc_quantization.h",
+      "include/codec/dc_smoothing.h",
+      "include/codec/dct.h",
+      "include/codec/epf.h",
+      "include/codec/gaborish.h",
+      "include/codec/loop_filter.h",
+      "include/codec/maximum_error.h",
+      "include/codec/quantization.h",
+      "include/codec/quantization_pipeline.h",
+      "include/codec/reconstruction.h",
+      "include/codec/sparse_coefficients.h",
+      "include/codec/vardct_frame.h",
+      "include/codestream/ac_group.h",
+      "include/codestream/batch_workflow.h",
+      "include/codestream/bit_writer.h",
+      "include/codestream/block_context_map.h",
+      "include/codestream/coefficient_order.h",
+      "include/codestream/context_map_internal.h",
+      "include/codestream/dc_group.h",
+      "include/codestream/dc_prediction.h",
+      "include/codestream/encoder.h",
+      "include/codestream/entropy.h",
+      "include/codestream/entropy_behavior.h",
+      "include/codestream/headers.h",
+      "include/codestream/huffman.h",
+      "include/codestream/sections.h",
+      "include/codestream/simple_ac_context.h",
+      "include/codestream/storage.h",
+      "include/codestream/workflow.h",
+      "include/core/ac_strategy.h",
+      "include/core/block_grid.h",
+      "include/core/cpu_budget.h",
+      "include/core/execution_domain.h",
+      "include/core/frame_geometry.h",
+      "include/core/geometry.h",
+      "include/core/image.h",
+      "include/core/image_buffer.h",
+      "include/core/image_ops.h",
+      "include/core/managed_allocator.h",
+      "include/core/overwrite_array.h",
+      "include/core/publication_output.h",
+      "include/core/publication_vector.h",
+      "include/core/quantizer.h",
+      "include/core/resource_budget.h",
+      "include/core/resource_context.h",
+      "include/core/status.h",
+      "include/core/stdlib_storage_compat.h",
+      "include/gjxl/execution_domain.hpp",
+      "include/gjxl/gjxl.h",
+      "include/gjxl/modular.hpp",
+      "include/gpu/backend.h",
+      "include/gpu/buffer.h",
+      "include/gpu/cuda/cuda_backend.h",
+      "include/gpu/image.h",
+      "include/gpu/metal/metal_backend.h",
+      "include/gpu/ops/ac_strategy.h",
+      "include/gpu/ops/ac_strategy_search.h",
+      "include/gpu/ops/ac_strategy_selection.h",
+      "include/gpu/ops/adaptive_quantization.h",
+      "include/gpu/ops/aq_evaluation.h",
+      "include/gpu/ops/butteraugli.h",
+      "include/gpu/ops/gaborish.h",
+      "include/gpu/ops/input_preparation.h",
+      "include/gpu/ops/primitives.h",
+      "include/gpu/ops/quantization_pipeline.h",
+      "include/gpu/ops/resident_input.h",
+      "include/gpu/ops/transform.h",
+      "include/gpu/scratch.h",
+      "include/gpu/submission.h",
+      "lib/cmake/gjxl/CheckStorageToolchain.cmake",
+      "lib/cmake/gjxl/gjxlConfig.cmake",
+      "lib/cmake/gjxl/gjxlConfigVersion.cmake",
+      "lib/cmake/gjxl/gjxlTargets-release.cmake",
+      "lib/cmake/gjxl/gjxlTargets.cmake",
+      "lib/gjxl.lib",
+      "lib/gjxl_codec.lib",
+      "lib/gjxl_codestream.lib",
+      "lib/gjxl_gpu.lib",
+      "lib/gjxl_gpu_butteraugli.lib",
+      "lib/gjxl_gpu_ops.lib"
+    ],
+    "private_headers_exported": false,
+    "production_libjxl_dependency": false
+  },
+  "benchmark": {
+    "summary": "docs/modular-p2.6-timings.json",
+    "native_configurations": 56,
+    "reference_configurations": 7,
+    "warm_repetitions_native": 3,
+    "first_call_per_configuration": 1,
+    "reference_effort": 1,
+    "search_and_reference_effort_equivalent": false,
+    "serial_parallel_policies_and_files_equal": true,
+    "all_resolved_policies_replay_exactly": true,
+    "managed_memory_is_rss": false,
+    "reference_memory_measured": false
+  },
+  "checks": {
+    "reference_disabled_build_install": "passed",
+    "installed_native_oracle": "286/286 passed",
+    "rust_workspace": "12/12 passed",
+    "pinned_vardct_conformance": "23/23 passed",
+    "git_diff_check": "passed"
+  },
+  "limits": [
+    "Release x64 binaries on Windows ARM64 emulation only; native ARM64/x86-64 hardware, other platforms, sanitizers and GPU-enabled builds not qualified.",
+    "Nine baseline failed/not-run tests and eight failed build targets retained.",
+    "Compact seven-category corpus establishes a baseline, not broad compression or cross-encoder parity.",
+    "Reference effort 1 and native prescribed/search settings are not equivalent policies."
+  ],
+  "commands": [
+    ". ./build/modular-phase1/msvc-env.ps1",
+    "cmake --build build/modular-phase1/candidate --parallel 6 -- -k 0",
+    "ctest --test-dir build/modular-phase1/candidate --parallel 4 --timeout 600 --output-on-failure --output-junit <root>/build/modular-p2.6/final-tests.xml",
+    "cmake -S . -B build/modular-p2.6/native -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20 -DGJXL_ENABLE_METAL=OFF -DGJXL_ENABLE_CUDA=OFF -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF -DGJXL_BUILD_TESTS=OFF",
+    "cmake --build build/modular-p2.6/native --parallel 6",
+    "cmake --install build/modular-p2.6/native --prefix build/modular-p2.6/install",
+    "cmake -S tools/modular_oracle -B build/modular-p2.6/capture-native -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20 -DCMAKE_PREFIX_PATH=<root>/build/modular-p2.6/install -DGJXL_SOURCE_DIR=<root>",
+    "cmake --build build/modular-p2.6/capture-native --parallel 4",
+    "python tools/modular_oracle/verify.py build/modular-p2.6/capture-native/gjxl_modular_capture.exe testdata/modular build/modular-p2.6/frozen-installed",
+    "python tools/modular_oracle/verify.py build/modular-phase1/candidate/gjxl_modular_reference_capture.exe testdata/modular build/modular-p2.6/final-frozen-reference (PATH prepend pinned-libjxl-x64/tools)",
+    "gjxl_modular_reference_capture.exe benchmark testdata/modular/photo.ppm build/modular-p2.6/benchmark-final 3 (PATH prepend pinned-libjxl-x64/tools)",
+    "python tools/modular_oracle/summarize.py build/modular-p2.6/benchmark-final/timings.csv docs/modular-p2.6-timings.json",
+    "cargo +stable-x86_64-pc-windows-msvc test --manifest-path rust/Cargo.toml --workspace (MSVC env; CMAKE_GENERATOR=Ninja; CC=CXX=portable cl.exe; LIBCLANG_PATH=VS LLVM x64 bin; GJXL_MODULAR_TEST_ARTIFACTS=<root>/build/modular-p2.6/rust-artifacts)",
+    "gjxl_codestream_conformance_test.exe --decoder <root>/build/modular-phase1/pinned-libjxl-x64/tools/djxl.exe --info <root>/build/modular-phase1/pinned-libjxl-x64/tools/jxlinfo.exe --encoder <root>/build/modular-p2.6/native/gjxl_encode.exe --sample <root>/testdata/codestream_sample.pfm --artifacts <root>/build/modular-p2.6/vardct-conformance"
+  ]
+}

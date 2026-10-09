@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 #include "codestream/modular/search.h"
+#include "codec/modular/profile.h"
 #include <algorithm>
 namespace gjxl::modular_internal {
 using namespace resource_budget_internal;
 Status ProbePalette(PackedModularImageView input, uint16_t *colors) {
+  ProfileScope profile_scope(ProfileStage::kTraining);
   if (!colors)
     return Status::InvalidArgument("Null palette probe output");
   if (auto s = input.Validate(); !s.ok())
@@ -121,6 +123,7 @@ Status ComputeModularSearchStoragePlan(Extent2D extent, PackedModularFormat form
 }
 Status LearnModularPolicies(const ModularEncoderFrame &frame, const ModularStreamPlan &plan,
                             uint8_t rct, ModularCodingPolicy *single, ModularCodingPolicy *split) {
+  ProfileScope profile_scope(ProfileStage::kTraining);
   if (!single || !split || rct >= 42 || plan.geometry.source() != frame.metadata().extent)
     return Status::InvalidArgument("Null Modular learned policy");
   size_t total = 0;

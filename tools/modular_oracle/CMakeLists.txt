@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: Apache-2.0
+cmake_minimum_required(VERSION 3.25)
+project(gjxl_modular_oracle LANGUAGES CXX)
+find_package(gjxl CONFIG REQUIRED COMPONENTS codestream)
+file(TO_CMAKE_PATH "${GJXL_SOURCE_DIR}" GJXL_SOURCE_DIR)
+if(NOT EXISTS "${GJXL_SOURCE_DIR}/src/codec/modular/profile.h")
+  message(FATAL_ERROR "GJXL_SOURCE_DIR must name the matching source checkout")
+endif()
+add_executable(gjxl_modular_capture capture.cpp "${GJXL_SOURCE_DIR}/src/io/pnm.cpp")
+target_compile_features(gjxl_modular_capture PRIVATE cxx_std_20)
+target_include_directories(gjxl_modular_capture PRIVATE "${GJXL_SOURCE_DIR}/src")
+target_link_libraries(gjxl_modular_capture PRIVATE gjxl::codestream)
