@@ -1,68 +1,78 @@
 #!/usr/bin/env python3
-"""Exercise the host-profile writer with fabricated counters, without a GPU."""
+"""Metal/CUDA host schemas, using fabricated profiles without a GPU."""
 import json
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 
+
+def run(output, *args):
+    return subprocess.run([sys.argv[1], str(output), *args],
+                          capture_output=True, text=True, timeout=10)
+
+
+# These contracts were captured from commit 2491a36's original writers using
+# the same fabricated profiles. Metal's writer was extracted verbatim into a
+# CPU-only harness. Compare parsed documents so whitespace is not an API.
+fixtures = Path(__file__).parent / "fixtures"
 with tempfile.TemporaryDirectory(prefix="gjxl-workflow-json-") as directory:
     root = Path(directory)
-    output = root / "nested" / "profile.json"
-    for _ in range(2):
-        result = subprocess.run([sys.argv[1], str(output)], capture_output=True, text=True)
-        assert result.returncode == 0, result.stderr
-        data = json.loads(output.read_text())
-        assert data["schema_version"] == 1
-        assert data["scope"] == "cuda-public-workflow-host-profile"
-        assert data["timing_semantics"] == "instrumented-workflow-elapsed"
-        assert data["substage_work_timing"] == "aggregate-worker-time"
-        assert data["gpu_profile_mode"] == "dispatch"
-        assert data["distance"] == 1.25 and data["device"] == 'device\n"'
-        assert data["adaptive_dc_smoothing"] is False
-        assert data["cpu_threads"] == 8 and data["effort"] == 4
-        assert data["sample_count"] == 1 and data["warmups"] == 2
-        workload = data["workloads"][0]
-        assert workload["name"] == 'fixture\n"\\\t\x01'
-        assert workload["source_width"] == 1234 and workload["source_height"] == 9
-        cuda, cpu = workload["samples"]
-        assert cuda["sample_index"] == cpu["sample_index"] == 0
-        assert cuda["backend"] == "cuda" and cpu["backend"] == "cpu"
-        phases = cuda["phase_nanoseconds"]
-        assert len(phases) == 45
-        assert all(type(v) is int and v >= 0 for v in phases.values())
-        assert phases["total"] == 9007199254740993
-        assert phases["input_resident_preparation"] == 101
-        assert phases["codestream_encoding"] == 500
-        assert phases["codestream_validation"] == 17
-        assert phases["codestream_dc_tokenization"] == 31
-        assert phases["codestream_ac_tokenization"] == 43
-        assert phases["codestream_coefficient_order_work"] == 53
-        assert phases["codestream_entropy_optimization"] == 71
-        assert phases["codestream_entropy_ans_histogram_build_work"] == 1001
-        assert phases["codestream_entropy_prefix_clustering_work"] == 1003
-        assert phases["codestream_section_token_write_work"] == 1007
-        assert phases["codestream_assembly_output_copy"] == 13
-        assert cuda["codestream_total_nanoseconds"] == 490
-        assert cuda["serializer_counters"]["coefficient_token_count"] == 12345
-        assert cuda["serializer_counters"]["ans_uint_config_candidate_count"] == 29
-        assert cuda["selected_balanced_fallback"] is True
-        assert cuda["entropy_behavior"] == "rate-optimized"
-        assert cuda["entropy_coding"] == {"dc": "ans", "ac": "prefix", "coefficient_order": "prefix"}
-        assert cuda["ac_coefficient_bytes"] == 222 and cuda["ac_storage_bytes"] == 333
-        assert cpu["entropy_coding"]["coefficient_order"] == "none"
-        assert all(v == 0 for v in cpu["phase_nanoseconds"].values())
-        assert data["workloads"][1]["samples"] == []
+    documents = {}
+    for format_name, version in [("cuda", 1), ("metal", 17)]:
+        expected = json.loads(
+            (fixtures / f"workflow_profile_{format_name}_v{version}.json").read_text())
+        output = root / format_name / "nested" / "profile.json"
+        for _ in range(2):
+            result = run(output, format_name)
+            assert result.returncode == 0, result.stderr
+            document = json.loads(output.read_text())
+            assert document == expected, format_name
+            samples = document["workloads"][0]["samples"]
+            phases = samples[0]["phase_nanoseconds"]
+            assert len(phases) == 45
+            assert all(type(v) is int for v in phases.values())
+            assert phases["total"] == 9007199254740993
+            assert phases["codestream_entropy_ans_histogram_build_work"] > phases["codestream_encoding"]
+            assert all(v == 0 for v in samples[1]["phase_nanoseconds"].values())
+            assert document["workloads"][1]["samples"] == []
+            assert not list(root.rglob("*.tmp-*"))
+        documents[format_name] = document
+
+        blocked = root / format_name / "blocked.json"
+        blocked.mkdir()
+        (blocked / "sentinel").write_text("keep")
+        result = run(blocked, format_name)
+        assert result.returncode == 1
+        assert (blocked / "sentinel").read_text() == "keep"
+        saved = output.read_bytes()
+        result = run(output / "child", format_name)
+        assert result.returncode == 1 and output.read_bytes() == saved
+
+        # Serialization failures, before publication, must also preserve output.
+        result = run(output, "fail")
+        assert result.returncode == 1
+        assert "Injected serialization failure" in result.stderr
+        assert output.read_bytes() == saved
         assert not list(root.rglob("*.tmp-*"))
-    blocked = root / "blocked.json"
-    blocked.mkdir()
-    (blocked / "sentinel").write_text("keep")
-    result = subprocess.run([sys.argv[1], str(blocked)], capture_output=True, text=True)
-    assert result.returncode == 1
-    assert (blocked / "sentinel").read_text() == "keep"
-    assert not list(root.rglob("*.tmp-*"))
-    saved = output.read_bytes()
-    result = subprocess.run([sys.argv[1], str(output / "child")], capture_output=True, text=True)
-    assert result.returncode == 1 and output.read_bytes() == saved
-    assert not list(root.rglob("*.tmp-*"))
-print("Host profile JSON values, timing semantics, locale, escaping and atomic output passed")
+
+    cuda_sample = documents["cuda"]["workloads"][0]["samples"][0]
+    metal_sample = documents["metal"]["workloads"][0]["samples"][0]
+    assert cuda_sample["phase_nanoseconds"] == metal_sample["phase_nanoseconds"]
+    assert cuda_sample["entropy_coding"] == metal_sample["entropy_coding"]
+    assert metal_sample["final_score"] == 1.2345678901234567
+    assert documents["metal"]["workloads"][0]["samples"][1]["final_score"] is None
+
+    # Cover all policy names and the ANS/custom-order variant in both adapters.
+    for variant, behavior in enumerate(["balanced", "high-density", "maximum", "rate-optimized"]):
+        for format_name in ("cuda", "metal"):
+            output = root / f"{format_name}-variant.json"
+            result = run(output, format_name, str(variant))
+            assert result.returncode == 0, result.stderr
+            sample = json.loads(output.read_text())["workloads"][0]["samples"][0]
+            assert sample["entropy_behavior"] == behavior
+            assert sample["entropy_coding"] == {"dc": "ans", "ac": "ans", "coefficient_order": "ans"}
+            if format_name == "metal":
+                assert sample["ac_tokenization"]["path"] == ("template" if variant == 2 else "direct")
+
+print("Metal/CUDA host schema compatibility, policy labels, locale and atomic output passed")

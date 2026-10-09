@@ -38,6 +38,14 @@ Both writers publish after all workloads succeed, each via atomic replacement;
 the pair of files is not a single transaction. Existing console summaries and
 GPU schema-4 output are unchanged.
 
+Both host exporters retain the same complete profile snapshot and share phase
+and entropy-coding serialization helpers. Metal schema 17 and CUDA schema 1
+keep their existing metadata and counter layouts through separate adapters.
+Host and GPU exports share locale-independent JSON file writing and atomic
+replacement. The CPU-only `workflow_profile_json` test checks both host schemas
+against fixtures captured from the pre-refactor writers at `2491a36`; it also
+checks policy labels, escaping, numeric locale handling and failure cleanup.
+
 These are existing diagnostic counters, not new instrumentation. Nested phases
 must not be added to their parents; fields ending in `_work` sum worker time
 and can exceed elapsed wall time. `codestream_total_nanoseconds` is inside the

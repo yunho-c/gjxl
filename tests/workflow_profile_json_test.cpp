@@ -16,10 +16,18 @@ struct GroupedNumbers : std::numpunct<char> {
 
 // Fabricated counters only: no encoder invocation, GPU initialization or timing.
 int main(int argc, char** argv) try {
-  if (argc != 2) return 2;
+  if (argc < 2 || argc > 4) return 2;
   using namespace gjxl;
   using namespace gjxl::benchmark;
   std::locale::global(std::locale(std::locale::classic(), new GroupedNumbers));
+  const std::string_view format = argc >= 3 ? argv[2] : "cuda";
+  if (format == "fail") {
+    WriteProfileJsonFile(argv[1], [](std::ostream& output) {
+      output << "{\"partial\":";
+      throw std::runtime_error("Injected serialization failure");
+    });
+    return 5;
+  }
   if (!ProfilePathsAlias("missing/../sample.json", "sample.json") ||
       ProfilePathsAlias("", "sample.json") ||
       ProfilePathsAlias("first.json", "second.json")) return 3;
@@ -62,12 +70,59 @@ int main(int argc, char** argv) try {
   cs.entropy_behavior = VarDctEntropyBehavior::kRateOptimized;
   cs.selected_balanced_fallback = true;
   cs.dc_entropy_is_ans = true;
-  RawCudaWorkflowWorkload workload{"fixture\n\"\\\t\x01", {1234, 9}, {}};
+  cs.dc_sample_count = 100;
+  cs.dc_leaf_count = 101;
+  cs.dc_context_count = 102;
+  cs.coefficient_tokenization_pass_count = 103;
+  cs.coefficient_context_materialization_count = 104;
+  cs.coefficient_materialized_token_count = 105;
+  cs.entropy_work.ans_histogram_candidate_count = 106;
+  cs.entropy_work.ans_alphabet_width_candidate_count = 107;
+  cs.entropy_model_bits = 108;
+  cs.entropy_token_bits = 109;
+  cs.dc_entropy_clusters = 110;
+  cs.ac_entropy_clusters = 111;
+  cs.natural_candidate_bytes = 112;
+  cs.custom_order_candidate_bytes = 113;
+  cs.balanced_candidate_bytes = 114;
+  cs.rate_candidate_bytes = 115;
+  cs.block_context_candidate_count = 116;
+  cs.compact_block_context_candidate_bytes = 117;
+  cs.selected_block_context_candidate_index = 118;
+  cs.selected_block_context_count = 119;
+  cs.selected_block_context_qf_threshold_count = 120;
+  if (argc == 4) {
+    const int variant = std::stoi(argv[3]);
+    const VarDctEntropyBehavior behaviors[] = {
+        VarDctEntropyBehavior::kBalanced, VarDctEntropyBehavior::kHighDensity,
+        VarDctEntropyBehavior::kMaximumCompression, VarDctEntropyBehavior::kRateOptimized};
+    if (variant < 0 || variant >= 4) return 6;
+    cs.entropy_behavior = behaviors[variant];
+    cs.ac_entropy_is_ans = true;
+    cs.coefficient_order_entropy_is_ans = true;
+  }
+  RawWorkflowWorkload workload{"fixture\n\"\\\t\x01", {1234, 9}, {}};
+  workload.codestream_comparison = "not-compared";
   workload.samples.push_back({0, "cuda", "gpu-only", 777, profile});
+  workload.samples.back().final_score = 1.2345678901234567;
   workload.samples.push_back({0, "cpu", "cpu-first", 888, {}});
-  const std::vector<RawCudaWorkflowWorkload> workloads{
+  std::vector<RawWorkflowWorkload> workloads{
       std::move(workload), {"empty", {1, 1}, {}}};
-  WriteCudaWorkflowSamples(argv[1], options, "device\n\"", workloads);
+  if (format == "cuda") {
+    WriteCudaWorkflowSamples(argv[1], options, "device\n\"", workloads);
+  } else if (format == "metal") {
+    workloads[0].samples[0].backend = "metal";
+    MetalWorkflowProfileJsonOptions metal_options{
+        .scope = "metal-public-workflow", .validation = "metal-only",
+        .implementation = "fixture\n\"", .ac_residual_inverse = "fused",
+        .gpu_aq = "fully-resident", .collect_final_butteraugli_score = true,
+        .density = "default", .compression = "automatic",
+        .butteraugli_target = 1.25f, .effort = 4, .cpu_thread_count = 8,
+        .warmups = 2, .samples = 1};
+    WriteMetalWorkflowSamples(argv[1], metal_options, workloads);
+  } else {
+    return 7;
+  }
   return 0;
 } catch (const std::exception& error) {
   std::cerr << error.what() << '\n';

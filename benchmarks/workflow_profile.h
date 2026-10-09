@@ -4,12 +4,34 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #include "codestream/workflow_internal.h"
 
 namespace gjxl::benchmark {
+
+// Retain the full profile once; schema adapters read it without maintaining a
+// second, hand-copied list of counters. Strings refer to benchmark literals.
+struct RawWorkflowSample {
+  size_t sample_index = 0;
+  std::string_view backend;
+  std::string_view order;
+  size_t encoded_bytes = 0;
+  codestream_internal::VarDctEncodingProfile profile;
+  std::optional<double> final_score;
+};
+
+struct RawWorkflowWorkload {
+  std::string workload;
+  Extent2D source_extent;
+  std::vector<RawWorkflowSample> samples;
+  std::string codestream_comparison;
+};
 
 // Shared Metal/CUDA names. Timings ending in _work are aggregate worker time,
 // not additive wall-clock phases; all other fields retain their nested scope.

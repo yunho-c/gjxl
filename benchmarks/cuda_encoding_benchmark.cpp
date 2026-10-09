@@ -469,7 +469,7 @@ void PrintProfile(std::string_view backend, const ProfileSamples &samples) {
 [[nodiscard]] gjxl::benchmark::RawGpuProfileWorkload RunGpuProfileWorkload(
     std::string_view name, gjxl::ConstImage3FView image,
     const CommandLineOptions& options, gjxl::GpuBackend& gpu,
-    gjxl::benchmark::RawCudaWorkflowWorkload* raw) {
+    gjxl::benchmark::RawWorkflowWorkload* raw) {
   const auto expected = Encode(image, options,
       gjxl::VarDctBackendPreference::kCuda, &gpu);
   const auto encoding_options = EncodingOptions(
@@ -530,7 +530,7 @@ gjxl::benchmark::GpuProfileJsonOptions ProfileJsonOptions(const CommandLineOptio
 
 void RunWorkload(std::string_view name, gjxl::Image3FBuffer image,
                  const CommandLineOptions &options, gjxl::GpuBackend &gpu,
-                 gjxl::benchmark::RawCudaWorkflowWorkload* raw) {
+                 gjxl::benchmark::RawWorkflowWorkload* raw) {
   for (size_t warmup = 0; warmup < options.warmups; ++warmup) {
     if (!options.gpu_only) {
       (void)Encode(image.const_view(), options,
@@ -682,9 +682,9 @@ int main(int argc, char **argv) {
                       : std::to_string(options.cpu_thread_count))
               << '\n';
     std::vector<gjxl::benchmark::RawGpuProfileWorkload> gpu_profiles;
-    std::vector<gjxl::benchmark::RawCudaWorkflowWorkload> raw_workloads;
+    std::vector<gjxl::benchmark::RawWorkflowWorkload> raw_workloads;
     const auto run = [&](std::string_view name, gjxl::Image3FBuffer image) {
-      gjxl::benchmark::RawCudaWorkflowWorkload raw{
+      gjxl::benchmark::RawWorkflowWorkload raw{
           .workload = std::string(name), .source_extent = image.extent()};
       auto* raw_output = options.raw_samples_path.empty() ? nullptr : &raw;
       if (raw_output != nullptr) {
