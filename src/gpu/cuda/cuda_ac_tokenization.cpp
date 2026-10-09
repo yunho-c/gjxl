@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <limits>
 #include <stdexcept>
@@ -155,7 +156,9 @@ Plan MakePlan(const Frame& frame, const SimpleCoefficientOrders& orders,
 
 class CudaAcTokenizer final : public AcTokenizationProvider {
  public:
-  bool SupportsEarlyEntropy() const noexcept override { return false; }
+  // Backend calls select their CUDA device on the AC worker. The synchronous
+  // serializer joins both branches before releasing this provider or its input.
+  bool SupportsEarlyEntropy() const noexcept override { return true; }
   CudaAcTokenizer(CudaBackend& backend, const DeviceBuffer& coefficients,
                   size_t offset)
       : backend_(backend), coefficients_(coefficients), offset_(offset) {}
@@ -208,7 +211,7 @@ class CudaAcTokenizer final : public AcTokenizationProvider {
       Check(backend_.CopyHostToDeviceBatch(uploads));
       Check(backend_.SubmitCompute(&Encode, this, &submission_));
       Require(submission_ != nullptr, "CUDA tokenizer returned no submission");
-      ++cuda_token_provider_begin_count;
+      std::atomic_ref<uint64_t>(*begin_count_).fetch_add(1, std::memory_order_relaxed);
       return Status::Ok();
     } catch (const Failure& failure) {
       return failure.status;
@@ -259,7 +262,7 @@ class CudaAcTokenizer final : public AcTokenizationProvider {
         Require(submission_ != nullptr,
                 "CUDA token retry returned no submission");
         Check(submission_->Wait());
-        ++cuda_token_provider_retry_count;
+        std::atomic_ref<uint64_t>(*retry_count_).fetch_add(1, std::memory_order_relaxed);
       }
       values_.ResetForOverwrite(total);
       contexts_.ResetForOverwrite(total);
@@ -378,6 +381,11 @@ class CudaAcTokenizer final : public AcTokenizationProvider {
   CudaBackend& backend_;
   const DeviceBuffer& coefficients_;
   size_t offset_;
+  // The serializer can run Begin/Finish on its AC worker. Attribute fixture
+  // observations to the creating caller, which outlives this synchronous
+  // provider and joins every reader before inspecting these counters.
+  uint64_t* begin_count_ = &cuda_token_provider_begin_count;
+  uint64_t* retry_count_ = &cuda_token_provider_retry_count;
   Plan plan_;
   std::array<std::unique_ptr<DeviceBuffer>, kBufferCount> buffers_;
   OverwriteArray<uint32_t> values_, histogram_;

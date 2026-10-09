@@ -41,9 +41,14 @@ it to OFF builds the CPU-token path only.
 
 CUDA keeps an independent device copy of final coefficients while retaining its
 native host representation for CPU order/context selection. GPU AC work overlaps
-CPU DC tokenization; entropy models and bitstream writing remain on CPU. The newer
-Metal early-entropy/earlier-DC schedule is not enabled for the CUDA provider by
-this change. The separate device-only frame/ownership prototype is not included.
+CPU DC tokenization; entropy models and bitstream writing remain on CPU.
+Eligible single-image calls also use earlier DC preparation and entropy readiness
+when the complete DC-plus-AC CPU reservation is available. See the
+[CUDA scheduling qualification](cuda-entropy-scheduling.md) for the comparison
+against the original GPU-token schedule. `GJXL_EARLY_ENTROPY=0` restores that
+schedule; `GJXL_EARLY_DC=0` disables only the earlier DC start. Batch scheduling
+stays unchanged, including explicitly enabled GPU-token batches. The separate
+device-only frame/ownership prototype is not included.
 
 Batch admission resolves the same policy as worker execution, so default batches
 do not reserve the optional GPU-token buffers. Tokenized calls account for the
@@ -58,7 +63,9 @@ No image-size threshold is inferred. Historical qualification found warm serial
 gains and mixed batch behavior, including high-effort large concurrent regressions.
 That historical study predates the current E1–E5 policies.
 
-The 2026-10-08 validation used an RTX 3060 Laptop GPU (6 GiB), CUDA 11.8,
+The original tokenization-policy validation below predates the separate earlier
+DC/entropy scheduling change. The 2026-10-08 validation used an RTX 3060 Laptop
+GPU (6 GiB), CUDA 11.8,
 MSVC 14.37 and driver 577.00. Initial validation on `96cce2d` plus this change
 passed all 168 native CUDA-build tests across the full run and targeted
 rechecks, 114 CPU-only tests, and ten CUDA memcheck/initcheck checks. After

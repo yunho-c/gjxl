@@ -165,7 +165,7 @@ int main(int argc, char** argv) {
       for (size_t c = 0; c < 3; ++c)
         for (size_t i = 0; i < image.plane(c).size(); ++i)
           image.plane(c)[i] = .05f + .8f * ((i * (c + 3)) % 127) / 127.f;
-      for (int effort : {1, 2, 3, 4, 5, 8, 9, 10}) {
+      for (int effort : {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}) {
         if (smoke && effort != 1 && effort != 5) continue;
         VarDctEncodingOptions options;
         options.backend = VarDctBackendPreference::kCuda;
