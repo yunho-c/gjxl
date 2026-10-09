@@ -32,6 +32,8 @@ struct CudaBackendOptions {
   // Exact-sized reuse preserves allocation-domain ownership and charges idle
   // backing until reused or trimmed. Driver free-page retention is disabled.
   // This is a cache limit, not a limit on live allocations.
+  // A runtime allocation OOM evicts completed buffers from this private pool
+  // and retries once. Live buffers and other libraries' pools are unchanged.
   std::optional<uint64_t> memory_pool_release_threshold_bytes;
 };
 

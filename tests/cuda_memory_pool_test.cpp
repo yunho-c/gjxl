@@ -136,6 +136,61 @@ void CheckTrimWithLiveBuffer(gjxl::GpuBackend& backend) {
     Require(value == 0x5c, "Trim invalidated live storage");
 }
 
+void CheckAllocationPressure() {
+  std::unique_ptr<gjxl::GpuBackend> backend;
+  // A distinct retention value gives this fixture its own private pool.
+  Check(gjxl::CreateCudaBackend(
+      {.memory_pool_release_threshold_bytes = (uint64_t{64} << 20) + 1},
+      &backend));
+  constexpr size_t kLiveBytes = 16384;
+  constexpr size_t kIdleBytes = 131072;
+  std::unique_ptr<gjxl::DeviceBuffer> live, idle;
+  Check(backend->Allocate(kLiveBytes, &live));
+  Check(backend->Allocate(kIdleBytes, &idle));
+  const auto* state = Buffer(*live).state();
+  if (state->memory_pool == nullptr) return;
+  gjxl::cuda_internal::ScopedCudaDevice device(state->ordinal);
+  CheckCuda(device.status());
+  auto pool = state->memory_pool;
+  CheckCuda(cudaMemsetAsync(Buffer(*live).pointer(), 0x6b, kLiveBytes,
+                            state->stream));
+  idle.reset();
+  Require(pool->cached_bytes == kIdleBytes, "Pressure fixture did not retain idle backing");
+  const auto generation = pool->cache_generation.load(std::memory_order_relaxed);
+  const auto allocations = backend->stats().successful_allocations;
+  auto* original = live.get();
+  dynamic_cast<gjxl::cuda_internal::CudaBackend&>(*backend)
+      .ArmNextAllocationFailureForTest();
+  const auto injected = backend->Allocate(kIdleBytes + 16, &live);
+  Require(injected.code() == gjxl::StatusCode::kOutOfMemory &&
+              live.get() == original && pool->cached_bytes == kIdleBytes &&
+              backend->stats().successful_allocations == allocations,
+          "Explicit failure injection was retried or changed the cache");
+  // This runtime OOM must evict idle backing even though its bounded retry
+  // cannot satisfy an exabyte-sized allocation. A small multiple of reported
+  // physical memory can succeed on drivers that support oversubscription.
+  const auto failure = backend->Allocate(std::numeric_limits<size_t>::max() / 2,
+                                         &live);
+  Require(failure.code() == gjxl::StatusCode::kOutOfMemory && live.get() == original &&
+              backend->stats().successful_allocations == allocations,
+          "Pressure failure changed output, status or successful-allocation count");
+  (void)cudaGetLastError();
+  Require(pool->cached_bytes == 0 &&
+              pool->cache_generation.load(std::memory_order_relaxed) == generation,
+          "Pressure eviction retained idle backing or invalidated live leases");
+  std::vector<unsigned char> values(kLiveBytes);
+  Check(backend->CopyDeviceToHost(*live, values.data(), values.size()));
+  for (auto value : values)
+    Require(value == 0x6b, "Pressure eviction changed live data");
+  live.reset();
+  Require(pool->cached_bytes == kLiveBytes,
+          "Live buffer could not return to cache after pressure eviction");
+  Check(backend->Allocate(kLiveBytes, &live));
+  Check(backend->CopyDeviceToHost(*live, values.data(), values.size()));
+  for (auto value : values)
+    Require(value == 0x6b, "Post-pressure exact-size reuse changed data");
+}
+
 void Run() {
   constexpr uint64_t kRetention = uint64_t{64} << 20;
 #if CUDART_VERSION >= 11020
@@ -228,6 +283,7 @@ void Run() {
   CheckOwnerLifetime();
   CheckTrimWithLiveBuffer(*a);
   CheckTrimWithLiveBuffer(*legacy);
+  CheckAllocationPressure();
   Check(gjxl::TrimCudaDeviceMemory());
 #if CUDART_VERSION >= 11030
   if (pool != nullptr) {
@@ -268,7 +324,7 @@ int main() {
   try {
     Run();
     std::cout << "CUDA memory pool ownership, reuse, concurrency, and trimming "
-                 "passed\n";
+                 "passed\n" << std::flush;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';
     return 1;

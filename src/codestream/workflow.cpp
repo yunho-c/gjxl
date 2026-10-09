@@ -1504,7 +1504,8 @@ Status codestream_internal::PrepareResidentEncodingInput(
 
 Status codestream_internal::PlanWorkflowAdmission(
     Extent2D source, const WorkflowStorageOptions &options, GpuBackend *supplied_backend,
-    bool supplied_backend_is_qualified, bool resolve_production_backend, WorkflowStoragePlan *out) {
+    bool supplied_backend_is_qualified, bool resolve_production_backend, WorkflowStoragePlan *out,
+    uint64_t *backend_selection_nanoseconds) {
   if (out == nullptr)
     return Status::InvalidArgument("Workflow admission plan output is null");
   size_t target = 0, tolerance = 0;
@@ -1533,8 +1534,12 @@ Status codestream_internal::PlanWorkflowAdmission(
   }
   GpuBackend *gpu = nullptr;
   bool metal = false;
+  const auto selection_begin = backend_selection_nanoseconds == nullptr
+      ? WorkflowClock::time_point{} : WorkflowClock::now();
   status = SelectAttemptBackend(geometry, e, supplied_backend, supplied_backend_is_qualified,
                                 resolve_production_backend, &gpu, &metal);
+  const uint64_t selection_elapsed = backend_selection_nanoseconds == nullptr
+      ? 0 : ElapsedNanoseconds(selection_begin);
   if (!status.ok())
     return status;
   if (metal)
@@ -1542,7 +1547,10 @@ Status codestream_internal::PlanWorkflowAdmission(
         ? WorkflowStorageRoute::kCuda
         : (automatic_search ? WorkflowStorageRoute::kAutomaticExactSearch
                             : WorkflowStorageRoute::kMetal);
-  return ComputeWorkflowStoragePlan(source, selected, out);
+  status = ComputeWorkflowStoragePlan(source, selected, out);
+  if (status.ok() && backend_selection_nanoseconds != nullptr)
+    *backend_selection_nanoseconds += selection_elapsed;
+  return status;
 }
 
 Status EncodeLinearRgbVarDctCodestreamImpl(
@@ -1593,7 +1601,8 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
         {options, codestream_internal::WorkflowStorageRoute::kCpu,
          codestream_internal::WorkflowStorageAdapter::kBorrowedLinearRgb, timing != nullptr,
          profile != nullptr, gpu_profiling},
-        supplied_backend, supplied_backend_is_qualified, resolve_production_backend, &plan);
+        supplied_backend, supplied_backend_is_qualified, resolve_production_backend, &plan,
+        profile == nullptr ? nullptr : &local_profile.backend_selection_nanoseconds);
     if (!status.ok())
       return status;
     admission_bytes = plan.working.peak_bytes;
@@ -1641,7 +1650,7 @@ Status EncodeLinearRgbVarDctCodestreamImpl(
     if (!status.ok()) return status;
     backend_preselected = true;
     if (profile != nullptr) {
-      local_profile.backend_selection_nanoseconds =
+      local_profile.backend_selection_nanoseconds +=
         ElapsedNanoseconds(selection_begin);
     }
   }
