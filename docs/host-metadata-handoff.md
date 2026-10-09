@@ -163,3 +163,24 @@ The isolated branch is `perf/cuda-host-metadata`. Local evidence is retained in
 `manifest.json`, `analysis.json`, `timing/plan.json`, per-process JSON/JXL files,
 independent decode hashes, `profiles/`, `recheck/` and `verification/`. The
 baseline source and build are preserved separately from the candidate.
+
+### Integration with the newer main
+
+Main advanced to `9690765` (PR #41, DCT8 metadata construction) while the original
+qualification was running. That change was merged into this branch at `fc256a9`
+without altering the reuse implementation. The original qualification above is
+for `bdb28b2` on `fb5fd36`; its binaries, hashes and results remain preserved.
+
+The integrated build passes 28 focused native checks, six opt-out checks and
+six CUDA memcheck/initcheck runs. These include the new DCT8 metadata oracle,
+frame validation/ownership, tokens, entropy scheduling, memory admission,
+profiling export and installed consumers. This is a targeted integration run,
+not a claim that the full newer 174-test suite was rerun.
+
+A separate 13-case screen covers Kodak, 12/24/48 MP inputs and E1-E5/E8, including
+all four low-effort DCT8 policies. Two balanced pairs with two warmups and three
+timed samples produce 52 processes and 156 timed encodes. Every output matches
+the corresponding independently decoded original baseline. Small timings remain
+mixed (for example, alpine12MP E1 -1.39%, E3 +2.64%, E4 -0.83%, E5 -0.43%);
+this short integration screen does not replace the broader qualification.
+Its plan, exact-byte checks, test logs and timings are in `integration-checks/`.
