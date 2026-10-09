@@ -11,7 +11,9 @@ Status ComputeCudaTokenStoragePlan(
 Status CreateCudaAcTokenizationProvider(
     GpuBackend& backend, const DeviceBuffer& coefficients, size_t offset,
     std::unique_ptr<codestream_internal::AcTokenizationProvider>* out);
-// Private fixture observations; they never influence production decisions.
+// Private fixture observations attributed to the provider's creating thread;
+// inspect only after synchronous serialization has joined its workers.
+// They never influence production decisions.
 inline thread_local uint64_t cuda_token_provider_begin_count = 0;
 inline thread_local uint64_t cuda_token_provider_retry_count = 0;
 }  // namespace gjxl::cuda_internal

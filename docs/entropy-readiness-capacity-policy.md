@@ -1,6 +1,6 @@
 # Earlier entropy readiness for single-image encoding
 
-Eligible resident Metal single-image calls use earlier entropy readiness by
+Eligible resident Metal and CUDA single-image calls use earlier entropy readiness by
 default in normal builds. No experimental build flag is required. Single-image
 APIs favor individual-image latency; use `VarDctBatchEncoder` for multiple images.
 Concurrent ordinary calls remain supported and share CPU/memory limits, but this
@@ -28,7 +28,7 @@ grant is split without returning reserved DC workers to the shared pool. Nested
 DC dispatch therefore retains its promised capacity. Reservation is nonblocking
 and does not bypass queued callers.
 
-The policy applies to the resident Metal fully-resident and throughput routes
+The policy applies to the resident Metal and CUDA fully-resident and throughput routes
 that install an AC tokenization provider. Batch calls (including a batch driver
 with one in-flight image), CPU-token routes, detailed serializer profiles,
 rate-optimized dual-representation encoding, explicit nested work, missing CPU
@@ -78,6 +78,10 @@ before return, and failed calls leave public output unchanged. Managed admission
 is a capacity bound, not a process RSS bound.
 
 ## Evidence and rollout decision
+
+The [CUDA qualification](cuda-entropy-scheduling.md) covers the later CUDA
+adoption. The Metal measurements below remain specific to their original
+hardware and source versions.
 
 The frozen [wider AC study](../reports/entropy-capacity-wide-20260927/REPORT.md)
 covered 105 inputs on one M4 Pro. Warm individual-image gains were strongest on

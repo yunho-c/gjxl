@@ -4,6 +4,7 @@
 #include "codestream/workflow_admission.h"
 #include "codestream/workflow_storage_plan.h"
 #include "core/image_buffer.h"
+#include "environment_test_utils.h"
 
 #include <cstdlib>
 #include <iostream>
@@ -12,6 +13,14 @@
 namespace {
 using namespace gjxl;
 using namespace gjxl::codestream_internal;
+using gjxl_test::SetEnvironment;
+#ifdef GJXL_TEST_CUDA_ENTROPY_READINESS
+constexpr auto kBackend = VarDctBackendPreference::kCuda;
+constexpr auto kRoute = WorkflowStorageRoute::kCuda;
+#else
+constexpr auto kBackend = VarDctBackendPreference::kMetal;
+constexpr auto kRoute = WorkflowStorageRoute::kMetal;
+#endif
 
 void Require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
@@ -21,27 +30,27 @@ void Ok(Status status) {
 }
 
 void CheckBoundedDefault() {
-  unsetenv("GJXL_GPU_TOKENIZATION");
-  unsetenv("GJXL_EARLY_ENTROPY");
-  unsetenv("GJXL_EXPERIMENT_EAGER_ENTROPY");
+  SetEnvironment("GJXL_GPU_TOKENIZATION", nullptr);
+  SetEnvironment("GJXL_EXPERIMENT_CUDA_GPU_TOKENS", nullptr);
+  SetEnvironment("GJXL_EARLY_ENTROPY", nullptr);
+  SetEnvironment("GJXL_EXPERIMENT_EAGER_ENTROPY", nullptr);
   size_t cases = 0;
   // The narrow shape crosses a DC-group boundary: CPU 2 must fall back,
   // while CPU 4 can reserve both DC participants and the AC participant.
   for (const char* setting : {static_cast<const char*>(nullptr), "0", "1"}) {
-  if (setting) setenv("GJXL_EARLY_DC", setting, 1);
-  else unsetenv("GJXL_EARLY_DC");
+  SetEnvironment("GJXL_EARLY_DC", setting);
   for (Extent2D extent : {Extent2D{273, 265}, Extent2D{2057, 17}}) {
     Image3FBuffer image(extent);
     for (size_t c = 0; c < 3; ++c)
       for (size_t i = 0; i < image.plane(c).size(); ++i)
         image.plane(c)[i] = 0.05f + 0.8f * ((i * (c + 3)) % 127) / 127.0f;
     for (int effort : {1, 4, 7})
-      for (size_t cpu : {2, 4})
+      for (size_t cpu : {1, 2, 4})
         for (auto aq : {GpuAdaptiveQuantizationMode::kFullyResident,
                         GpuAdaptiveQuantizationMode::kThroughput})
           for (bool timing : {false, true}) {
             VarDctEncodingOptions options;
-            options.backend = VarDctBackendPreference::kMetal;
+            options.backend = kBackend;
             options.effort = effort;
             options.butteraugli_target = 1.9f;
             options.cpu_thread_count = cpu;
@@ -60,16 +69,16 @@ void CheckBoundedDefault() {
               }
             };
             const WorkflowStorageOptions planning{
-                options, WorkflowStorageRoute::kMetal,
+                options, kRoute,
                 WorkflowStorageAdapter::kBorrowedLinearRgb, timing};
             WorkflowStoragePlan disabled_plan, enabled_plan;
-            setenv("GJXL_EARLY_ENTROPY", "0", 1);
+            SetEnvironment("GJXL_EARLY_ENTROPY", "0");
             Ok(ComputeWorkflowStoragePlan(extent, planning, &disabled_plan));
             std::vector<uint8_t> expected;
             VarDctEncodingSummary expected_summary;
             encode(&expected, &expected_summary);
             Ok(TrimVarDctPreparationCache());
-            unsetenv("GJXL_EARLY_ENTROPY");
+            SetEnvironment("GJXL_EARLY_ENTROPY", nullptr);
             Ok(ComputeWorkflowStoragePlan(extent, planning, &enabled_plan));
             Require(enabled_plan.working == disabled_plan.working,
                     "Readiness switch changed the conservative admission bound");
@@ -100,10 +109,10 @@ void CheckBoundedDefault() {
           }
   }
   }
-  unsetenv("GJXL_EARLY_DC");
+  SetEnvironment("GJXL_EARLY_DC", nullptr);
   std::cout << "Passed " << cases << " bounded default/opt-out/forced-on DC cases: "
       "ordinary/timing APIs, fully-resident/throughput, DC boundary, "
-      "CPU 2/4, exact planned memory caps, repeated calls and byte/summary parity.\n";
+      "CPU 1/2/4, exact planned memory caps, repeated calls and byte/summary parity.\n";
 }
 }  // namespace
 

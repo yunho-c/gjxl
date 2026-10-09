@@ -93,10 +93,13 @@ jobs:
       - name: Check CUDA tokenization ownership and policy
         run: |
           foreach ($tool in @('memcheck', 'initcheck')) {
-            foreach ($fixture in @('gjxl_cuda_token_provider_test', 'gjxl_cuda_token_workflow_test', 'gjxl_cuda_token_batch_test')) {
+            foreach ($fixture in @('gjxl_cuda_token_provider_test', 'gjxl_cuda_token_workflow_test', 'gjxl_cuda_token_batch_test', 'gjxl_cuda_entropy_readiness_test')) {
               $log = "$env:GITHUB_WORKSPACE/build/cuda-ci/$fixture-$tool.log"
-              & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool $tool --error-exitcode 86 --log-file $log "$env:GITHUB_WORKSPACE/build/cuda-ci/$fixture.exe" --smoke
+              $stdout = "$env:GITHUB_WORKSPACE/build/cuda-ci/$fixture-$tool.stdout.log"
+              & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool $tool --error-exitcode 86 --log-file $log "$env:GITHUB_WORKSPACE/build/cuda-ci/$fixture.exe" --smoke 2>&1 | Tee-Object -FilePath $stdout
               if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+              $completion = if ($fixture -eq 'gjxl_cuda_entropy_readiness_test') { 'Verified transferred-provider lifetime and caller observations.' } else { 'Verified ' }
+              if ((Get-Content $log -Raw) -notmatch 'ERROR SUMMARY: 0 errors' -or (Get-Content $stdout -Raw) -notmatch [regex]::Escape($completion)) { throw "Instrumented $fixture/$tool did not complete" }
             }
           }
       - name: Check CUDA Rust incremental rebuilds
@@ -117,3 +120,9 @@ jobs:
             build/cuda-ci/pool-*.log
             build/cuda-ci/gjxl_cuda_token*-memcheck.log
             build/cuda-ci/gjxl_cuda_token*-initcheck.log
+            build/cuda-ci/gjxl_cuda_entropy*-memcheck.log
+            build/cuda-ci/gjxl_cuda_entropy*-initcheck.log
+            build/cuda-ci/gjxl_cuda_token*-memcheck.stdout.log
+            build/cuda-ci/gjxl_cuda_token*-initcheck.stdout.log
+            build/cuda-ci/gjxl_cuda_entropy*-memcheck.stdout.log
+            build/cuda-ci/gjxl_cuda_entropy*-initcheck.stdout.log
