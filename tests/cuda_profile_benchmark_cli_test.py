@@ -69,6 +69,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="gjxl-cuda-profile-") as directory:
         root = Path(directory)
         output = root / "nested" / "profile.json"
+        host_output = root / "nested" / "host.json"
         base = ["--workload", "synthetic_128x96", "--warmups", "1", "--samples", "2",
                 "--cpu-threads", "1"]
         for mode, aq, effort in [
@@ -77,7 +78,8 @@ def main():
             ("dispatch", "throughput", 7), ("dispatch", "throughput", 10),
         ]:
             result = run(binary, *base, "--gpu-profile", mode, "--gpu-profile-output", output,
-                         "--gpu-aq", aq, "--effort", effort, "--collect-final-score")
+                         "--gpu-aq", aq, "--effort", effort, "--collect-final-score",
+                         "--raw-samples", host_output)
             if result.returncode == 77:
                 print(result.stdout)
                 return 77
@@ -92,6 +94,26 @@ def main():
             assert document["collect_final_score"] is True
             assert document["adaptive_dc_smoothing"] is None
             assert document["dc_quantization"] == "auto"
+            host = json.loads(host_output.read_text())
+            assert host["schema_version"] == 1
+            assert host["gpu_profile_mode"] == mode
+            assert host["gpu_aq"] == aq and host["effort"] == effort
+            assert host["sample_count"] == 2 and host["warmups"] == 1
+            assert len(host["workloads"]) == len(document["workloads"]) == 1
+            workload = host["workloads"][0]
+            assert workload["name"] == document["workloads"][0]["name"]
+            # The reference encode and warmups must not appear in either export.
+            assert len(workload["samples"]) == 2
+            for index, sample in enumerate(workload["samples"]):
+                assert sample["sample_index"] == index
+                assert sample["backend"] == "cuda" and sample["order"] == "gpu-only"
+                assert sample["encoded_bytes"] > 0
+                phases = sample["phase_nanoseconds"]
+                assert len(phases) == 45
+                assert phases["total"] >= phases["codestream_encoding"] > 0
+                assert 0 < sample["codestream_total_nanoseconds"] <= phases["codestream_encoding"]
+                assert phases["codestream_validation"] >= 0
+                assert phases["codestream_ac_tokenization"] > 0
 
         # Odd external dimensions and explicit DC overrides reach both encode paths.
         pfm = root / "odd.pfm"
@@ -143,11 +165,28 @@ def main():
         assert not list(root.rglob("*.tmp-*"))
 
         result = run(binary, "--workload", "synthetic_128x96", "--warmups", 0,
-                     "--samples", 1, "--gpu-aq", "exact-coefficients", "--cpu-threads", 1)
+                     "--samples", 2, "--gpu-aq", "exact-coefficients", "--cpu-threads", 1,
+                     "--raw-samples", host_output)
         assert result.returncode == 0, result.stdout + result.stderr
         assert "ratio cpu_to_cuda_total" in result.stdout
         assert "comparison=exact" in result.stdout
         assert "scope=gpu-profile" not in result.stdout
+        host = json.loads(host_output.read_text())
+        assert host["gpu_profile_mode"] == "disabled"
+        samples = host["workloads"][0]["samples"]
+        assert len(samples) == 4
+        for index in range(2):
+            pair = samples[index * 2:index * 2 + 2]
+            assert {s["backend"] for s in pair} == {"cpu", "cuda"}
+            assert all(s["sample_index"] == index for s in pair)
+            assert all(s["order"] == ("cpu-first" if index == 0 else "cuda-first") for s in pair)
+            assert pair[0]["encoded_bytes"] == pair[1]["encoded_bytes"] > 0
+
+        result = run(binary, *base, "--gpu-only", "--effort", 1, "--raw-samples", host_output)
+        assert result.returncode == 0, result.stdout + result.stderr
+        samples = json.loads(host_output.read_text())["workloads"][0]["samples"]
+        assert len(samples) == 2
+        assert all(s["backend"] == "cuda" and s["order"] == "gpu-only" for s in samples)
     print("CUDA benchmark stage/dispatch exports and failure preservation passed")
     return 0
 

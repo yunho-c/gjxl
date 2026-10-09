@@ -1,0 +1,218 @@
+{
+  "schema_version": 17,
+  "substage_work_timing": "aggregate-worker-time",
+  "scope": "metal-public-workflow",
+  "validation": "metal-only",
+  "implementation": "fixture\n\"",
+  "ac_residual_inverse": "fused",
+  "gpu_aq": "fully-resident",
+  "collect_final_score": true,
+  "density": "default",
+  "compression": "automatic",
+  "distance": 1.25,
+  "effort": 4,
+  "cpu_threads": 8,
+  "warmups": 2,
+  "sample_count": 1,
+  "workloads": [
+    {
+      "name": "fixture\n\"\\\t\u0001",
+      "source_width": 1234,
+      "source_height": 9,
+      "codestream_comparison": "not-compared",
+      "samples": [
+        {
+          "sample_index": 0,
+          "backend": "metal",
+          "peak_cpu_participants": 8,
+          "entropy_behavior": "rate-optimized",
+          "entropy_search": {
+            "uint_configs": 29,
+            "histograms": 106,
+            "alphabet_widths": 107
+          },
+          "encoded_bytes": 777,
+          "entropy_bits": {
+            "model": 108,
+            "tokens": 109
+          },
+          "entropy_clusters": {
+            "dc": 110,
+            "ac": 111
+          },
+          "entropy_coding": {
+            "dc": "ans",
+            "ac": "prefix",
+            "coefficient_order": "prefix"
+          },
+          "coefficient_order": {
+            "natural_bytes": 112,
+            "custom_bytes": 113,
+            "selected_mask": 5
+          },
+          "block_context": {
+            "candidate_count": 116,
+            "compact_bytes": 117,
+            "selected_index": 118,
+            "selected_contexts": 119,
+            "qf_thresholds": 120
+          },
+          "ac_tokenization": {
+            "path": "direct",
+            "pass_count": 103,
+            "tokens": 12345,
+            "context_materialization_count": 104,
+            "materialized_tokens": 105
+          },
+          "final_score": 1.2345678901234567,
+          "phase_nanoseconds": {
+            "total": 9007199254740993,
+            "input_preparation": 0,
+            "input_geometry_and_storage": 0,
+            "input_color_transform": 0,
+            "input_matrix_scale_stats": 0,
+            "input_resident_preparation": 101,
+            "input_quantization_preparation": 0,
+            "backend_selection": 0,
+            "quantization_pipeline": 0,
+            "codestream_encoding": 500,
+            "summary_assembly": 0,
+            "codestream_validation": 17,
+            "codestream_dc_tokenization": 31,
+            "codestream_ac_tokenization": 43,
+            "codestream_block_context_map_work": 0,
+            "codestream_coefficient_order_work": 53,
+            "codestream_coefficient_tokenization_work": 0,
+            "codestream_coefficient_context_materialization_work": 0,
+            "codestream_entropy_optimization": 71,
+            "codestream_entropy_prefix_histogram_build_work": 0,
+            "codestream_entropy_prefix_histogram_cost_work": 0,
+            "codestream_entropy_prefix_clustering_work": 1003,
+            "codestream_entropy_prefix_code_build_work": 0,
+            "codestream_entropy_prefix_value_collection_work": 0,
+            "codestream_entropy_prefix_config_search_work": 0,
+            "codestream_entropy_prefix_exact_measurement_work": 0,
+            "codestream_entropy_ans_prefix_validation_work": 0,
+            "codestream_entropy_ans_value_collection_work": 0,
+            "codestream_entropy_ans_value_aggregation_work": 0,
+            "codestream_entropy_ans_prepared_value_validation_work": 0,
+            "codestream_entropy_ans_uint_config_work": 0,
+            "codestream_entropy_ans_histogram_build_work": 1001,
+            "codestream_entropy_ans_model_build_work": 0,
+            "codestream_entropy_ans_token_cost_work": 0,
+            "codestream_entropy_selection_work": 0,
+            "codestream_section_writing": 0,
+            "codestream_section_model_and_header_work": 0,
+            "codestream_section_token_write_work": 1007,
+            "codestream_section_candidate_measure_work": 0,
+            "codestream_assembly": 0,
+            "codestream_assembly_candidate_selection": 0,
+            "codestream_assembly_section_size": 0,
+            "codestream_assembly_frame_header": 0,
+            "codestream_assembly_toc_and_sections": 0,
+            "codestream_assembly_output_copy": 13
+          }
+        },
+        {
+          "sample_index": 0,
+          "backend": "cpu",
+          "peak_cpu_participants": 0,
+          "entropy_behavior": "balanced",
+          "entropy_search": {
+            "uint_configs": 0,
+            "histograms": 0,
+            "alphabet_widths": 0
+          },
+          "encoded_bytes": 888,
+          "entropy_bits": {
+            "model": 0,
+            "tokens": 0
+          },
+          "entropy_clusters": {
+            "dc": 0,
+            "ac": 0
+          },
+          "entropy_coding": {
+            "dc": "prefix",
+            "ac": "prefix",
+            "coefficient_order": "none"
+          },
+          "coefficient_order": {
+            "natural_bytes": 0,
+            "custom_bytes": 0,
+            "selected_mask": 0
+          },
+          "block_context": {
+            "candidate_count": 0,
+            "compact_bytes": 0,
+            "selected_index": 0,
+            "selected_contexts": 0,
+            "qf_thresholds": 0
+          },
+          "ac_tokenization": {
+            "path": "direct",
+            "pass_count": 0,
+            "tokens": 0,
+            "context_materialization_count": 0,
+            "materialized_tokens": 0
+          },
+          "final_score": null,
+          "phase_nanoseconds": {
+            "total": 0,
+            "input_preparation": 0,
+            "input_geometry_and_storage": 0,
+            "input_color_transform": 0,
+            "input_matrix_scale_stats": 0,
+            "input_resident_preparation": 0,
+            "input_quantization_preparation": 0,
+            "backend_selection": 0,
+            "quantization_pipeline": 0,
+            "codestream_encoding": 0,
+            "summary_assembly": 0,
+            "codestream_validation": 0,
+            "codestream_dc_tokenization": 0,
+            "codestream_ac_tokenization": 0,
+            "codestream_block_context_map_work": 0,
+            "codestream_coefficient_order_work": 0,
+            "codestream_coefficient_tokenization_work": 0,
+            "codestream_coefficient_context_materialization_work": 0,
+            "codestream_entropy_optimization": 0,
+            "codestream_entropy_prefix_histogram_build_work": 0,
+            "codestream_entropy_prefix_histogram_cost_work": 0,
+            "codestream_entropy_prefix_clustering_work": 0,
+            "codestream_entropy_prefix_code_build_work": 0,
+            "codestream_entropy_prefix_value_collection_work": 0,
+            "codestream_entropy_prefix_config_search_work": 0,
+            "codestream_entropy_prefix_exact_measurement_work": 0,
+            "codestream_entropy_ans_prefix_validation_work": 0,
+            "codestream_entropy_ans_value_collection_work": 0,
+            "codestream_entropy_ans_value_aggregation_work": 0,
+            "codestream_entropy_ans_prepared_value_validation_work": 0,
+            "codestream_entropy_ans_uint_config_work": 0,
+            "codestream_entropy_ans_histogram_build_work": 0,
+            "codestream_entropy_ans_model_build_work": 0,
+            "codestream_entropy_ans_token_cost_work": 0,
+            "codestream_entropy_selection_work": 0,
+            "codestream_section_writing": 0,
+            "codestream_section_model_and_header_work": 0,
+            "codestream_section_token_write_work": 0,
+            "codestream_section_candidate_measure_work": 0,
+            "codestream_assembly": 0,
+            "codestream_assembly_candidate_selection": 0,
+            "codestream_assembly_section_size": 0,
+            "codestream_assembly_frame_header": 0,
+            "codestream_assembly_toc_and_sections": 0,
+            "codestream_assembly_output_copy": 0
+          }
+        }
+      ]
+    },
+    {
+      "name": "empty",
+      "source_width": 1,
+      "source_height": 1,
+      "codestream_comparison": "",
+      "samples": []
+    }
+  ]
+}

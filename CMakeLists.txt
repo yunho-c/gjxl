@@ -2774,6 +2774,13 @@ if(GJXL_BUILD_TESTS)
       "$<TARGET_FILE:gjxl_gpu_profile_json_test>")
   set_tests_properties(gpu_profile_json PROPERTIES TIMEOUT 30)
 
+  add_executable(gjxl_workflow_profile_json_test tests/workflow_profile_json_test.cpp)
+  target_link_libraries(gjxl_workflow_profile_json_test PRIVATE gjxl_gpu_ops)
+  add_test(NAME workflow_profile_json
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/workflow_profile_json_test.py"
+      "$<TARGET_FILE:gjxl_workflow_profile_json_test>")
+  set_tests_properties(workflow_profile_json PROPERTIES TIMEOUT 30)
+
   if(GJXL_ENABLE_METAL)
   add_executable(gjxl_profile_storage_plan_metal_test tests/profile_storage_plan_test.cpp)
   target_link_libraries(gjxl_profile_storage_plan_metal_test PRIVATE gjxl_gpu_ops gjxl_metal)
@@ -3054,6 +3061,7 @@ if(GJXL_BUILD_TESTS)
     set_tests_properties(cuda_resource PROPERTIES SKIP_RETURN_CODE 77)
     add_executable(gjxl_cuda_low_effort_test tests/cuda_low_effort_test.cpp)
     target_link_libraries(gjxl_cuda_low_effort_test PRIVATE gjxl_codestream gjxl_cuda)
+    target_include_directories(gjxl_cuda_low_effort_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
     add_test(NAME cuda_low_effort COMMAND gjxl_cuda_low_effort_test)
     set_tests_properties(cuda_low_effort PROPERTIES SKIP_RETURN_CODE 77)
 
@@ -3723,6 +3731,10 @@ if(GJXL_BUILD_BENCHMARKS)
           "$<TARGET_FILE:gjxl_cuda_encoding_benchmark>")
       set_tests_properties(cuda_profile_benchmark_cli PROPERTIES
         LABELS "benchmark;cli;cuda" SKIP_RETURN_CODE 77 TIMEOUT 240)
+      add_test(NAME cuda_profile_export_cli
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/cuda_profile_export_cli_test.py"
+          "$<TARGET_FILE:gjxl_cuda_encoding_benchmark>")
+      set_tests_properties(cuda_profile_export_cli PROPERTIES LABELS "benchmark;cli" TIMEOUT 30)
     endif()
   endif()
 
