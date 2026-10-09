@@ -55,6 +55,8 @@ struct VarDctBatchEncodingResult {
 /// into one GPU dispatch.
 /// Batch workers retain the original DC/AC entropy schedule, including when
 /// max_in_flight is one; the single-image early-entropy policy is not used.
+/// CUDA batches default to CPU AC tokenization, even with one worker. An
+/// explicit GPU-tokenization override retains its usual eligibility rules.
 /// Encoded bytes remain internally owned until the whole result array is
 /// published; this ownership boundary alone does not impose a memory limit.
 ///
