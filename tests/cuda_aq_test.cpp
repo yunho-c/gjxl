@@ -30,6 +30,9 @@
 #include "core/frame_geometry.h"
 #include "gpu/cuda/cuda_backend.h"
 #include "gpu/cuda/cuda_backend_internal.h"
+#ifdef GJXL_CUDA_RESIDENT_TOKEN_EXPERIMENT
+#include "gpu/cuda/cuda_ac_tokenization.h"
+#endif
 #include "gpu/ops/adaptive_quantization.h"
 #include "gpu/ops/aq_evaluation.h"
 #include "gpu/ops/aq_evaluation_internal.h"
@@ -2000,6 +2003,17 @@ bool CheckDeferredResidentMetadata(gjxl::GpuBackend &gpu,
 bool CheckPublicWorkflow(
   gjxl::GpuBackend& gpu,
   const ImageStorage& source) {
+  // Keep the AQ arena/reuse assertion exact with GPU tokenization enabled.
+  // Each completed tokenized frame owns one coefficient buffer and ten provider
+  // buffers. A bounded capacity retry replaces the two output buffers.
+  const auto token_allocations = []() -> uint64_t {
+#ifdef GJXL_CUDA_RESIDENT_TOKEN_EXPERIMENT
+    return 11 * gjxl::cuda_internal::cuda_token_provider_begin_count +
+           2 * gjxl::cuda_internal::cuda_token_provider_retry_count;
+#else
+    return 0;
+#endif
+  };
   const auto encode = [&](gjxl::GpuAdaptiveQuantizationMode mode,
                           bool collect_final_score,
                           std::vector<uint8_t>* bytes,
@@ -2017,6 +2031,7 @@ bool CheckPublicWorkflow(
   std::vector<uint8_t> resident_bytes;
   gjxl::VarDctEncodingSummary resident_summary;
   const gjxl::GpuBackendStats before_resident = gpu.stats();
+  const uint64_t before_resident_tokens = token_allocations();
   if (!Check(encode(gjxl::GpuAdaptiveQuantizationMode::kFullyResident,
                     true, &resident_bytes, &resident_summary),
       "Forced resident CUDA public workflow") || resident_bytes.empty() ||
@@ -2030,7 +2045,8 @@ bool CheckPublicWorkflow(
   }
   const gjxl::GpuBackendStats after_resident = gpu.stats();
   if (after_resident.successful_allocations !=
-      before_resident.successful_allocations + 5) {
+      before_resident.successful_allocations + 5 +
+        token_allocations() - before_resident_tokens) {
     std::cerr << "Fresh resident CUDA workflow did not use its input and "
                  "four evaluation arenas\n";
     return false;
@@ -2092,6 +2108,7 @@ bool CheckPublicWorkflow(
   std::vector<uint8_t> target_bytes;
   gjxl::VarDctEncodingSummary target_summary;
   const gjxl::GpuBackendStats before_resident_target = gpu.stats();
+  const uint64_t before_target_tokens = token_allocations();
   if (!Check(
         gjxl::codestream_internal::
           EncodeLinearRgbVarDctCodestreamWithBackendForTesting(source.View(),
@@ -2109,7 +2126,8 @@ bool CheckPublicWorkflow(
       target_summary.execution_backend != gjxl::VarDctExecutionBackend::kCuda ||
       target_summary.encode_attempt_count != 2 ||
       gpu.stats().successful_allocations !=
-        before_resident_target.successful_allocations + 5) {
+        before_resident_target.successful_allocations + 5 +
+          token_allocations() - before_target_tokens) {
     std::cerr << "Resident target attempts did not reuse prepared arenas\n";
     return false;
   }

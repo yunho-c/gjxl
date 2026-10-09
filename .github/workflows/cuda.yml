@@ -89,6 +89,16 @@ jobs:
       - name: Test CUDA Rust bindings
         working-directory: rust
         run: cargo test --workspace --features cuda
+      # Tokenizer tests are included in the normal native build above.
+      - name: Check CUDA tokenization ownership and policy
+        run: |
+          foreach ($tool in @('memcheck', 'initcheck')) {
+            foreach ($fixture in @('gjxl_cuda_token_provider_test', 'gjxl_cuda_token_workflow_test', 'gjxl_cuda_token_batch_test')) {
+              $log = "$env:GITHUB_WORKSPACE/build/cuda-ci/$fixture-$tool.log"
+              & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool $tool --error-exitcode 86 --log-file $log "$env:GITHUB_WORKSPACE/build/cuda-ci/$fixture.exe" --smoke
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            }
+          }
       - name: Check CUDA Rust incremental rebuilds
         working-directory: rust
         run: python check_native_rebuild.py --features cuda
@@ -105,3 +115,5 @@ jobs:
             build/cuda-ci/*-complete.txt
             build/cuda-ci/short-filters-*.log
             build/cuda-ci/pool-*.log
+            build/cuda-ci/gjxl_cuda_token*-memcheck.log
+            build/cuda-ci/gjxl_cuda_token*-initcheck.log

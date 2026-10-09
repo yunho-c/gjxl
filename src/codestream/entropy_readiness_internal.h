@@ -33,7 +33,8 @@ inline bool EarlierDcEnabled() {
          EntropyReadinessMode() == 3;
 }
 
-// Batch workers install this marker on the thread that enters the serializer.
+// Batch planning and workers install this marker. CUDA token selection also
+// uses it so the planned token storage agrees with execution.
 inline thread_local bool entropy_readiness_in_batch = false;
 class EntropyReadinessBatchScope {
 public:

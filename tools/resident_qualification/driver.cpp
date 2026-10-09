@@ -10,6 +10,7 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -21,6 +22,10 @@
 #include "codestream/batch_workflow.h"
 #ifdef GJXL_FINAL_SCHEDULER
 #include "codestream/workflow_admission.h"
+#if defined(GJXL_CUDA_QUALIFICATION) && __has_include("codestream/entropy_readiness_internal.h")
+#include "codestream/entropy_readiness_internal.h"
+#define GJXL_QUALIFICATION_HAS_BATCH_POLICY 1
+#endif
 #endif
 
 #include <atomic>
@@ -252,6 +257,12 @@ int main(int argc, char** argv) try {
   std::vector<gjxl::codestream_internal::WorkflowStoragePlan> plans(original.size());
   size_t maximum_single = 0;
   for (size_t i = 0; i < original.size(); ++i) {
+#ifdef GJXL_QUALIFICATION_HAS_BATCH_POLICY
+    // Match the public driver's CPU-token default when sizing CUDA batches.
+    // Older frozen revisions without this policy retain their original plans.
+    std::optional<gjxl::codestream_internal::EntropyReadinessBatchScope> batch_scope;
+    if (batch) batch_scope.emplace();
+#endif
     RequireStatus("Plan", gjxl::codestream_internal::PlanWorkflowAdmission(original[i].extent,
       {options, gjxl::codestream_internal::WorkflowStorageRoute::kCpu,
        gjxl::codestream_internal::WorkflowStorageAdapter::kBorrowedLinearRgb, true}, nullptr, false, true, &plans[i]));

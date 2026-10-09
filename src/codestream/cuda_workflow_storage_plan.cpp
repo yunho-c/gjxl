@@ -6,6 +6,10 @@
 #include "codec/coefficient_order_population_internal.h"
 #include "codec/frontend_storage_plan.h"
 #include "codestream/workflow_internal.h"
+#include "codestream/cuda_tokenization_policy.h"
+#if defined(GJXL_ENABLE_CUDA) && defined(GJXL_CUDA_RESIDENT_TOKEN_EXPERIMENT)
+#include "gpu/cuda/cuda_ac_tokenization.h"
+#endif
 #include "codestream/workflow_publication_storage_plan.h"
 #include "core/frame_geometry.h"
 #include "gpu/ops/ac_strategy_storage_plan.h"
@@ -182,20 +186,24 @@ Status ComputeCudaWorkflowStoragePlan(Extent2D source,
   p.score_count = AdaptiveQuantizationIterations(e) +
                   size_t(e.collect_final_butteraugli_score);
   const bool fixed = UseFixedDct8Strategy(e);
+  const bool cuda_tokens = UseCudaGpuTokenization(e);
   if (o.collect_gpu_profile) {
     // Reference preparation (unless evaluation-free), initial quantization,
     // optional AC search, encoding-policy setup, and the resident policy.
     // Sparse AC publication can submit one additional packing callback.
     // AQ iterations execute inside the policy callback, so they do not add
     // submissions. These bounds follow the call graph, not measured counts.
-    const size_t submissions = 4 + size_t(!fixed) + size_t(p.score_count != 0);
+    // The independent completed coefficient copy is another profiled
+    // submission, with a timed stage and no kernel dispatches.
+    const size_t submissions = 4 + size_t(!fixed) + size_t(p.score_count != 0) +
+      size_t(cuda_tokens);
     size_t id_length = cuda_internal::kCudaKernelProfileIdLength;
     for (std::string_view id : {
            "aq.prepare_reference", "aq.initial_quantization", "aq.prepare_encoding_policy",
            "aq.resident_policy", "ac_strategy.candidates", "frontend.ac_strategy",
            "frontend.prepare_evaluator", "frontend.initial_quantization",
            "frontend.reconfigure_aq", "frontend.quant_adjustment", "frontend.fixed_cfl",
-           "resident.aq", "frontend.ac_strategy.prepare", "frontend.ac_strategy.wait",
+           "resident.aq", "aq.completed_token_copy", "frontend.ac_strategy.prepare", "frontend.ac_strategy.wait",
            "frontend.ac_strategy.readback", "frontend.ac_strategy.merge"})
       id_length = std::max(id_length, id.size());
     // Launch bounds for the resident workflow (not arbitrary low-level
@@ -237,11 +245,13 @@ Status ComputeCudaWorkflowStoragePlan(Extent2D source,
     status = gpu_profile_internal::ComputeProfileStorageBound(p.profile_shape, &p.profile_output);
     if (!status.ok()) return status;
     // The parent can coexist with the largest in-flight operation capture
-    // (policy + sparse packing), one fresh resolved snapshot, and two retained
+    // (policy + optional coefficient copy + sparse packing), one fresh resolved
+    // snapshot, and two retained
     // submission recordings: policy's owner remains alive during sparse pack.
     HostStorageBound capture;
     status = gpu_profile_internal::ComputeProfileStorageBound(
-      {.submissions = 2, .stages = 2, .dispatches = child_dispatches + 1,
+      {.submissions = 2 + size_t(cuda_tokens), .stages = 2 + size_t(cuda_tokens),
+       .dispatches = child_dispatches + 1,
        .maximum_id_length = id_length}, &capture);
     if (!status.ok()) return status;
     gpu_profile_internal::SubmissionProfileStoragePlan child;
@@ -325,6 +335,16 @@ Status ComputeCudaWorkflowStoragePlan(Extent2D source,
   const size_t dense_bytes = frame.ac_coefficients * sizeof(int32_t);
   p.completed.retained_bytes -= dense_bytes;
   p.completed.peak_bytes -= dense_bytes;
+#if defined(GJXL_ENABLE_CUDA) && defined(GJXL_CUDA_RESIDENT_TOKEN_EXPERIMENT)
+  if (cuda_tokens) {
+    size_t block_count = 0;
+    if (!geometry.block_grid().blocks.try_area(&block_count) ||
+        block_count > std::numeric_limits<size_t>::max() / (192 * sizeof(int32_t)))
+      return Overflow();
+    const size_t bytes = block_count * 192 * sizeof(int32_t);
+    if (!p.completed.Add({bytes, bytes})) return Overflow();
+  }
+#endif
   if (!p.completed.Add(p.resident.native_ac) ||
       !p.completed.AddVector<size_t>(frame.ac_groups + 1, kFreshExact) ||
       !p.completed.AddVector<vardct_frame_internal::CoefficientOrderPopulation>(
@@ -342,6 +362,14 @@ Status ComputeCudaWorkflowStoragePlan(Extent2D source,
       &p.serializer);
   if (!status.ok())
     return status;
+#if defined(GJXL_ENABLE_CUDA) && defined(GJXL_CUDA_RESIDENT_TOKEN_EXPERIMENT)
+  if (cuda_tokens) {
+    HostStorageBound tokens;
+    status = cuda_internal::ComputeCudaTokenStoragePlan(source, &tokens);
+    if (!status.ok()) return status;
+    if (!p.serializer.working.Add(tokens)) return Overflow();
+  }
+#endif
   WorkflowPublicationStoragePlan publication;
   status = ComputeWorkflowPublicationStoragePlan(
       p.serializer.output, p.score_count, p.maximum_attempts, search,

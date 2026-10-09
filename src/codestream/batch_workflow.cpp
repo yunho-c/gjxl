@@ -50,6 +50,8 @@ void ObserveLifecycle(codestream_internal::BatchLifecycleEventForTesting event) 
 
 Status PlanRequest(const VarDctBatchEncodingRequest &request,
                    codestream_internal::WorkflowStoragePlan *plan) {
+  // Admission and worker execution must resolve the same tokenization policy.
+  const codestream_internal::EntropyReadinessBatchScope batch_scope;
   if (!request.linear_rgb.valid())
     return Status::InvalidArgument("VarDCT encoding input or output is invalid");
   return codestream_internal::PlanWorkflowAdmission(
