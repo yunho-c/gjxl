@@ -293,6 +293,10 @@ class CudaBackend final : public GpuBackend,
   friend class CudaPreparedAqEvaluation;
   friend class CudaPreparedExactAqEvaluation;
   friend class CudaPreparedResidentAqEvaluation;
+  friend class CudaAcTokenizer;
+#ifdef GJXL_CUDA_RESIDENT_TOKEN_EXPERIMENT
+  std::atomic<uint32_t> ac_token_capacity_hint_{0};
+#endif
   friend class CudaPreparedDeviceButteraugli;
   friend class CudaPreparedLinearRgbOpsin;
 

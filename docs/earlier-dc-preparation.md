@@ -1,12 +1,15 @@
 # Earlier DC preparation
 
-Eligible single-image Metal calls start DC preparation earlier by default in
+Eligible single-image Metal and CUDA calls start DC preparation earlier by default in
 normal builds. This extends the existing capacity-aware earlier entropy
 schedule. `GJXL_EARLY_DC=0` restores its previous DC start boundary while retaining
 earlier entropy readiness. Unset, `1`, and unrecognized values use the production
 default. Configure this process-wide control before encoding; do not change it
 while any encode or batch is active. `GJXL_EARLY_ENTROPY=0` takes precedence.
 Experimental entropy modes other than capacity-aware mode 3 also take precedence.
+
+The [CUDA qualification](cuda-entropy-scheduling.md) records the CUDA adoption
+separately from the historical Metal measurements below.
 
 The earlier fork follows frame validation and DC context-layout selection:
 

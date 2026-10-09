@@ -39,7 +39,12 @@ def validate(document, mode, samples):
                     assert stage["stage_id"] and stage["begin_timestamp"] == 0
                     assert stage["end_timestamp"] == stage["gpu_nanoseconds"] > 0
                     assert stage["timestamp_valid"] is True
-                    assert stage["dispatches"]
+                    # The completed coefficient copy is timed but has no kernel.
+                    # All other stages still require kernel dispatches.
+                    if stage["stage_id"] == "aq.completed_token_copy":
+                        assert not stage["dispatches"]
+                    else:
+                        assert stage["dispatches"]
                     previous_end = 0
                     for dispatch in stage["dispatches"]:
                         kernel = dispatch["kernel_id"]
