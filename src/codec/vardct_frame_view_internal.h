@@ -99,6 +99,8 @@ class VarDctFrameView {
 
  private:
   friend VarDctFrameView BorrowFrame(const VarDctEncoderFrame&) noexcept;
+  friend VarDctFrameView BorrowFrameWithAssemblyValidation(
+      const VarDctEncoderFrame&) noexcept;
   friend Status ValidateFrameViewForPublication(
       const VarDctFrameView&, VarDctFrameView*);
   VarDctFrameViewData data_;
@@ -129,6 +131,17 @@ class CompletedVarDctFrame {
     const VarDctEncoderFrame& frame) noexcept;
 VarDctFrameView BorrowFrame(VarDctEncoderFrame&&) = delete;
 VarDctFrameView BorrowFrame(const VarDctEncoderFrame&&) = delete;
+
+/// Reuses the structural/value guarantees established during checked assembly.
+/// Owners from other producers fall back to ordinary borrowed validation. This
+/// does not skip codec/profile support gates. The same immutable backing and
+/// lifetime contract as BorrowFrame applies; moving or assigning the owner ends
+/// all previous borrows. No validation pass, allocation, or cache is created.
+[[nodiscard]] VarDctFrameView BorrowFrameWithAssemblyValidation(
+    const VarDctEncoderFrame& frame) noexcept;
+VarDctFrameView BorrowFrameWithAssemblyValidation(VarDctEncoderFrame&&) = delete;
+VarDctFrameView BorrowFrameWithAssemblyValidation(
+    const VarDctEncoderFrame&&) = delete;
 
 /// Performs the full structural/value validation before publishing a view whose
 /// subsequent valid() calls reuse that result. All borrowed backing MUST remain

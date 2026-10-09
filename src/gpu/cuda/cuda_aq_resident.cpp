@@ -25,6 +25,7 @@
 #include "codec/codestream.h"
 #include "codec/dc_quantization.h"
 #include "codec/gaborish_internal.h"
+#include "codec/host_metadata_internal.h"
 #include "codec/quantization_tables_generated.h"
 #include "codec/vardct_frame_internal.h"
 #include "codec/vardct_frame_view_internal.h"
@@ -67,6 +68,9 @@ class CudaCompletedVarDctFrame final
   }
 #endif
   vardct_frame_internal::VarDctFrameView view() const noexcept override {
+    if (vardct_frame_internal::HostMetadataReuseEnabled()) {
+      return vardct_frame_internal::BorrowFrameWithAssemblyValidation(frame);
+    }
     return vardct_frame_internal::BorrowFrame(frame);
   }
 };

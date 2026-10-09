@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "codec/vardct_frame_view_internal.h"
+#include "codec/host_metadata_internal.h"
 #include "codestream/encoder_internal.h"
 #include "cuda_sparse_resident_fixture.h"
 #include "gpu/cuda/cuda_backend_internal.h"
@@ -52,6 +53,9 @@ std::vector<int32_t> Read(const Lease& lease) {
 }
 
 std::vector<uint8_t> Bytes(const Lease& lease) {
+  Require(lease->view().has_validated_structure() ==
+            vardct_frame_internal::HostMetadataReuseEnabled(),
+          "Token coefficient owner lost assembly proof or ignored opt-out");
   std::vector<uint8_t> bytes;
   Check(codestream_internal::EncodeVarDctCodestreamFromView(lease->view(), {},
                                                             &bytes));
