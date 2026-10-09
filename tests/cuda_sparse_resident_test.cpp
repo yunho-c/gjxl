@@ -8,6 +8,7 @@
 #include "cuda_sparse_resident_fixture.h"
 #include "codestream/encoder_internal.h"
 #include "codec/vardct_frame_view_internal.h"
+#include "codec/host_metadata_internal.h"
 #include "codec/reconstruction.h"
 #include "codec/loop_filter.h"
 namespace {
@@ -101,6 +102,9 @@ void CompletedLease() {
           {.score_history = &scores, .completed_frame = &lease}));
         Require(lease != nullptr && lease->view().valid() && scores == reference.scores,
                 "Completed lease or score publication is invalid");
+        Require(lease->view().has_validated_structure() ==
+                  vardct_frame_internal::HostMetadataReuseEnabled(),
+                "Completed lease did not honor host metadata reuse policy");
         const auto* before = lease.get();
         const auto previous_scores = scores;
         Require(prepared->EvaluateResidentButteraugliPolicy(input,
@@ -115,6 +119,17 @@ void CompletedLease() {
       std::vector<uint8_t> actual;
       Check(codestream_internal::EncodeVarDctCodestreamFromView(lease->view(), {}, &actual));
       Require(actual == expected, "Completed frame lease depended on producer lifetime or reuse");
+      std::atomic<bool> okay{true};
+      const auto read = [&] {
+        std::vector<uint8_t> bytes;
+        const VarDctCodestreamOptions options;
+        const auto status = codestream_internal::EncodeVarDctCodestreamFromView(
+          lease->view(), options, &bytes);
+        if (!status.ok() || bytes != expected) okay = false;
+      };
+      std::thread first(read), second(read);
+      first.join(); second.join();
+      Require(okay, "Concurrent completed-frame readers differed");
     }
   }
   std::cout << "Completed CUDA leases preserve native coefficients across producer reuse/destruction.\n";

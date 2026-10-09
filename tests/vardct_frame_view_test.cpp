@@ -20,10 +20,12 @@
 #include "codestream/dc_group.h"
 #include "codestream/encoder_internal.h"
 #include "core/thread_budget.h"
+#include "coefficient_order_population_fixture.h"
 
 namespace {
 using namespace gjxl;
 using vardct_frame_internal::BorrowFrame;
+using vardct_frame_internal::BorrowFrameWithAssemblyValidation;
 using vardct_frame_internal::VarDctFrameView;
 using vardct_frame_internal::VarDctFrameViewData;
 
@@ -221,6 +223,23 @@ bool CheckParity(Extent2D extent) {
   const VarDctFrameView borrowed = BorrowFrame(owned);
   const VarDctFrameView external(storage.data());
   CHECK(owned.valid() && borrowed.valid() && external.valid());
+  // The CPU coefficient producer has not established assembly provenance.
+  const auto unproven = BorrowFrameWithAssemblyValidation(owned);
+  CHECK(unproven.valid() && !unproven.has_validated_structure());
+  gjxl_test::PopulationAssembly assembly(owned);
+  VarDctEncoderFrame replacement;
+  CHECK(vardct_frame_internal::AssembleVarDctEncoderFrame(
+    assembly.Input(nullptr, false), &replacement).ok());
+  CHECK(BorrowFrameWithAssemblyValidation(replacement).has_validated_structure());
+  replacement = owned;
+  CHECK(!BorrowFrameWithAssemblyValidation(replacement).has_validated_structure());
+  CHECK(replacement.valid());
+  CHECK(vardct_frame_internal::AssembleVarDctEncoderFrame(
+    assembly.Input(nullptr, false), &replacement).ok());
+  auto unproven_copy = owned;
+  replacement = std::move(unproven_copy);
+  CHECK(!BorrowFrameWithAssemblyValidation(replacement).has_validated_structure());
+  CHECK(replacement.valid());
   CHECK(CheckConsumers(owned, external));
   CHECK(!external.has_validated_structure() && !borrowed.has_validated_structure());
   VarDctFrameView published;

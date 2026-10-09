@@ -374,6 +374,15 @@ vardct_frame_internal::VarDctFrameView vardct_frame_internal::BorrowFrame(
   return result;
 }
 
+vardct_frame_internal::VarDctFrameView
+vardct_frame_internal::BorrowFrameWithAssemblyValidation(
+  const VarDctEncoderFrame& frame) noexcept {
+  auto result = BorrowFrame(frame);
+  result.structurally_validated_ = result.native_owner_ != nullptr &&
+    frame.assembly_validation_.established;
+  return result;
+}
+
 Status vardct_frame_internal::VarDctFrameView::GetAcGroup(
   size_t group_index,
   VarDctAcGroupView* out) const {
@@ -1000,6 +1009,11 @@ Status AssembleVarDctEncoderFrameImpl(QuantizedFrameAssemblyInputT<T> input,
     // Borrowed dense assembly writes only active ranges into zeroed storage;
     // owned dense and sparse assembly exhaustively checked their input above.
     result.ac_validated_ = true;
+    // ValidateAssemblyInput established geometry, complete strategies and
+    // quantizer/profile shape. Construction checked raw quant/sharpness, finite
+    // decoder-equivalent DC, transform coverage/group boundaries and storage.
+    // Together these establish valid() without rescanning the finished owner.
+    result.assembly_validation_.established = true;
     *out = std::move(result);
     return Status::Ok();
   } catch (const resource_budget_internal::ManagedAllocationFailure& failure) {
