@@ -16,6 +16,7 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -25,6 +26,7 @@
 #include "codec/codestream.h"
 #include "codec/dc_quantization.h"
 #include "codec/gaborish_internal.h"
+#include "codec/host_metadata_internal.h"
 #include "codec/quantization_tables_generated.h"
 #include "codec/vardct_frame_internal.h"
 #include "codec/vardct_frame_view_internal.h"
@@ -39,6 +41,7 @@
 #include "gpu/cuda/cuda_backend_internal.h"
 #include "gpu/cuda/cuda_butteraugli_internal.h"
 #include "gpu/cuda/cuda_storage_plan.h"
+#include "gpu/cuda/cuda_tokenization_request.h"
 #include "gpu/cuda/cuda_coefficient_order_kernels.h"
 #include "gpu/cuda/cuda_compact_ac_kernels.h"
 #include "gpu/cuda/cuda_sparse_ac_kernels.h"
@@ -51,14 +54,24 @@ namespace gjxl::cuda_internal {
 using resource_budget_internal::ManagedVector;
 namespace {
 
-// CUDA already reads final AC into native compact/sparse owning storage.
-// Move that owner into the lease so serialization borrows without expansion,
-// and the completed result never retains an evaluator, stream, or device pool.
+// CUDA reads final AC into native compact/sparse owning storage. The private
+// token handoff additionally owns an independent packed device allocation;
+// neither representation retains the evaluator or its staging arena.
 class CudaCompletedVarDctFrame final
     : public vardct_frame_internal::CompletedVarDctFrame {
  public:
   VarDctEncoderFrame frame;
+#ifdef GJXL_CUDA_RESIDENT_TOKEN_EXPERIMENT
+  std::unique_ptr<DeviceBuffer> token_coefficients;
+  const DeviceBuffer* resident_ac_buffer(size_t* offset) const noexcept override {
+    if (offset != nullptr) *offset = 0;
+    return token_coefficients.get();
+  }
+#endif
   vardct_frame_internal::VarDctFrameView view() const noexcept override {
+    if (vardct_frame_internal::HostMetadataReuseEnabled()) {
+      return vardct_frame_internal::BorrowFrameWithAssemblyValidation(frame);
+    }
     return vardct_frame_internal::BorrowFrame(frame);
   }
 };
@@ -137,6 +150,9 @@ Status ValidateFiniteImage(ConstImage3FView image, const char* name) {
 }
 
 Status ValidateOptions(const AqEvaluationOptions& options) {
+  if (options.search_epf_sharpness) {
+    return Status::Unavailable("CUDA EPF sharpness search is not implemented");
+  }
   if (!IsValidDcQuantization({options.dc_quantization, options.dc_prediction,
                               options.profile.extra_dc_precision}) ||
       (options.dc_quantization == DcQuantizationMode::kPredictionAware &&
@@ -346,6 +362,9 @@ class CudaPreparedResidentAqEvaluation final
 
   bool metadata_pending_for_test() const noexcept { return metadata_pending_; }
 
+  Status CheckMetadataForTest(const AcStrategyGrid& strategies,
+                             ConstPlaneU8View epf_sharpness) const;
+
   Status Prepare(const AqEvaluationPreparation& preparation) {
     const resource_budget_internal::ManagedHostScope resources(
         resource_budget_internal::ResourceClass::kAqScratch);
@@ -384,9 +403,11 @@ class CudaPreparedResidentAqEvaluation final
         "CUDA resident AQ external input is incomplete");
     }
     if (preparation.coefficient_decision_mode !=
-        AcCoefficientDecisionMode::kAdjustedSharedQuant) {
-      return Status::Unavailable(
-          "CUDA resident AQ requires adjusted shared quantization");
+          AcCoefficientDecisionMode::kAdjustedSharedQuant &&
+        preparation.coefficient_decision_mode !=
+          AcCoefficientDecisionMode::kFixedRawQuant) {
+      return Status::InvalidArgument(
+          "CUDA resident AQ coefficient decision mode is invalid");
     }
     if (preparation.options.evaluation_free &&
         preparation.options.metric != AqEvaluationMetric::kButteraugli) {
@@ -481,6 +502,7 @@ class CudaPreparedResidentAqEvaluation final
     status = BuildAcReadbackLayout();
     if (!status.ok()) return status;
     options_ = preparation.options;
+    coefficient_decision_mode_ = preparation.coefficient_decision_mode;
     resident_frontend_ = resident_frontend;
     final_transform_metadata_pending_ = preparation.defer_final_transform_metadata;
     omit_initial_search_data_ = preparation.omit_initial_search_data;
@@ -1281,6 +1303,15 @@ class CudaPreparedResidentAqEvaluation final
       if (status.ok()) {
         status = Quantizer::Create(candidate_params, &candidate_quantizer);
       }
+      // Copy before sparse assembly: the compact-width sparse path can reuse
+      // the int32 reconstruction plane as its payload destination.
+#ifdef GJXL_CUDA_RESIDENT_TOKEN_EXPERIMENT
+      if (status.ok() && candidate_completed != nullptr &&
+          retain_completed_token_coefficients) {
+        status = CopyCompletedTokenCoefficients(
+            &candidate_completed->token_coefficients);
+      }
+#endif
       if (status.ok())
         status = AssembleFrame(candidate_quantizer, &candidate_frame);
       if (!status.ok()) return Invalidate(status);
@@ -1720,9 +1751,128 @@ class CudaPreparedResidentAqEvaluation final
     return Status::Ok();
   }
 
+  // The grid is complete and geometry-checked by BuildMetadata. Inspect actual
+  // cells rather than an effort hint: prepared evaluators can be reconfigured.
+  static bool IsDct8Grid(const AcStrategyGrid& strategies) {
+    const Extent2D extent = strategies.extent();
+    for (size_t y = 0; y < extent.height; ++y) {
+      for (size_t x = 0; x < extent.width; ++x) {
+        AcStrategyCell cell;
+        if (!strategies.Get(x, y, &cell).ok() || !cell.is_anchor ||
+            cell.strategy != AcStrategyType::kDct8) return false;
+      }
+    }
+    return true;
+  }
+
+  void BuildDct8Sampling(Metadata* metadata) const {
+    if (!NeedsOrderPopulation() || metadata->population_mask != 1) return;
+    metadata->sampled_dct8.resize(block_count_);
+    uint64_t a = 0x94D049BB133111EBull, b = 0xBF58476D1CE4E5B9ull;
+    // Preserve the serializer's AC-group-first random sequence and store the
+    // decisions at global row-major batch indexes, including partial groups.
+    for (size_t gy = 0; gy < block_extent_.height; gy += 32) {
+      for (size_t gx = 0; gx < block_extent_.width; gx += 32) {
+        const size_t end_y = std::min(gy + 32, block_extent_.height);
+        const size_t end_x = std::min(gx + 32, block_extent_.width);
+        for (size_t y = gy; y < end_y; ++y) {
+          for (size_t x = gx; x < end_x; ++x) {
+            const uint64_t bits = a + b, old_b = b;
+            a ^= a << 23;
+            b = a ^ old_b ^ (a >> 18) ^ (old_b >> 5);
+            a = old_b;
+            metadata->sampled_dct8[y * block_extent_.width + x] =
+                (bits >> 32) <= (UINT64_MAX >> 32) / 2;
+          }
+        }
+      }
+    }
+  }
+
+  Status BuildDct8Metadata(ConstPlaneU8View epf_sharpness,
+                           Metadata* metadata) const {
+    // All records below address the same bounded coefficient allocation. DCT8
+    // footprints cannot cross color tiles or AC groups; partial edge groups
+    // still use their actual width for packed offsets.
+    if (coefficient_count_ > std::numeric_limits<uint32_t>::max()) {
+      return Status::InvalidArgument(
+          "CUDA resident AQ coefficient metadata overflows");
+    }
+    auto& candidate = *metadata;
+    candidate.population_mask = 1;
+    for (size_t i = 0; i < kSupportedStrategies.size(); ++i) {
+      const auto* info = GetAcStrategyInfo(kSupportedStrategies[i]);
+      candidate.batches[i] = {
+          static_cast<uint32_t>(i == 0 ? 0 : block_count_),
+          static_cast<uint32_t>(i == 0 ? block_count_ : 0),
+          static_cast<uint32_t>(i == 0 ? 0 : coefficient_count_),
+          static_cast<uint32_t>(info->coefficient_count()),
+          static_cast<uint32_t>(info->pixel_extent().width),
+          static_cast<uint32_t>(info->pixel_extent().height),
+          static_cast<uint32_t>(info->covered_blocks.width),
+          static_cast<uint32_t>(info->covered_blocks.height)};
+    }
+    candidate.device_anchors.reserve(block_count_);
+    candidate.row_major_anchors.reserve(block_count_);
+    candidate.layouts.reserve(block_count_);
+    candidate.packing_offsets.reserve(block_count_);
+    candidate.epf_sharpness.resize(block_count_);
+    candidate.color_transforms.resize(block_count_);
+    candidate.color_tile_offsets.resize(tile_count_ + 1);
+    const size_t width = block_extent_.width;
+    const uint32_t channel_stride = static_cast<uint32_t>(block_count_ * 64);
+    for (size_t y = 0; y < block_extent_.height; ++y) {
+      const auto sharpness = std::span(epf_sharpness.Row(y), width);
+      if (std::ranges::any_of(sharpness, [](uint8_t v) { return v >= 8; })) {
+        return Status::InvalidArgument(
+            "CUDA resident AQ strategy or EPF value is unsupported");
+      }
+      std::copy(sharpness.begin(), sharpness.end(),
+                candidate.epf_sharpness.data() + y * width);
+      const size_t tile_y = y / 8;
+      const size_t tile_height = std::min<size_t>(8, block_extent_.height - tile_y * 8);
+      for (size_t x = 0; x < width; ++x) {
+        const size_t index = y * width + x;
+        candidate.device_anchors.push_back(
+            {static_cast<uint32_t>(x), static_cast<uint32_t>(y)});
+        candidate.row_major_anchors.push_back(
+            {x, y, AcStrategyType::kDct8, 0, index});
+        const size_t group = (y / 32) * ac_group_extent_.width + x / 32;
+        const size_t group_width = std::min<size_t>(32, width - (x / 32) * 32);
+        const size_t used = ((y % 32) * group_width + x % 32) * 64;
+        candidate.packing_offsets.push_back(group_packed_offsets_[group] + used);
+        vardct_frame_internal::QuantizedAcTransformLayout layout{
+            .block_x = x, .block_y = y, .strategy = AcStrategyType::kDct8,
+            .coefficient_count = 64};
+        for (size_t c = 0; c < 3; ++c)
+          layout.coefficient_offsets[c] =
+              (group * 3 + c) * kVarDctAcGroupCoefficientCapacity + used;
+        candidate.layouts.push_back(layout);
+
+        // Within each color tile, records retain global row-major order. The
+        // preceding tile rows cover tile_y*8 full image rows; preceding tiles
+        // in this row each cover tile_height rows (also at the bottom edge).
+        const size_t tile_x = x / 8;
+        const size_t tile = tile_y * tile_extent_.width + tile_x;
+        const size_t tile_width = std::min<size_t>(8, width - tile_x * 8);
+        const size_t tile_begin = tile_y * 8 * width + tile_x * 8 * tile_height;
+        const size_t local = (y % 8) * tile_width + x % 8;
+        if (local == 0)
+          candidate.color_tile_offsets[tile] = static_cast<uint32_t>(tile_begin);
+        candidate.color_transforms[tile_begin + local] = {
+            static_cast<uint32_t>(index * 64), channel_stride, 64,
+            static_cast<uint32_t>(AcStrategyType::kDct8),
+            static_cast<uint32_t>(index), static_cast<uint32_t>(local * 64)};
+      }
+    }
+    candidate.color_tile_offsets.back() = static_cast<uint32_t>(block_count_);
+    return Status::Ok();
+  }
+
   Status BuildMetadata(const AcStrategyGrid& strategies,
                        ConstPlaneU8View epf_sharpness,
-                       Metadata* metadata) const {
+                       Metadata* metadata,
+                       bool force_general_for_test = false) const {
     if (metadata == nullptr || !strategies.complete() ||
         strategies.extent() != block_extent_ ||
         !ValidHostPlaneLayout(epf_sharpness) ||
@@ -1733,6 +1883,13 @@ class CudaPreparedResidentAqEvaluation final
     try {
       Metadata candidate;
       candidate.strategies = strategies;
+      if (!force_general_for_test && IsDct8Grid(strategies)) {
+        Status status = BuildDct8Metadata(epf_sharpness, &candidate);
+        if (!status.ok()) return status;
+        BuildDct8Sampling(&candidate);
+        *metadata = std::move(candidate);
+        return Status::Ok();
+      }
       std::array<ManagedVector<CudaAqAnchor>, 7> grouped;
       candidate.row_major_anchors.reserve(block_count_);
       candidate.device_anchors.reserve(block_count_);
@@ -1821,28 +1978,7 @@ class CudaPreparedResidentAqEvaluation final
             "CUDA resident AQ strategies do not cover the coding image");
       }
 
-      if (NeedsOrderPopulation() && candidate.population_mask == 1) {
-        candidate.sampled_dct8.resize(block_count_);
-        uint64_t a = 0x94D049BB133111EBull, b = 0xBF58476D1CE4E5B9ull;
-        // Pure DCT8 batch indexes are global row-major. Generate selections in
-        // the CPU algorithm's AC-group-first order, then store at batch index.
-        for (size_t gy = 0; gy < block_extent_.height; gy += 32) {
-          for (size_t gx = 0; gx < block_extent_.width; gx += 32) {
-            const size_t end_y = std::min(gy + 32, block_extent_.height);
-            const size_t end_x = std::min(gx + 32, block_extent_.width);
-            for (size_t y = gy; y < end_y; ++y) {
-              for (size_t x = gx; x < end_x; ++x) {
-                const uint64_t bits = a + b, old_b = b;
-                a ^= a << 23;
-                b = a ^ old_b ^ (a >> 18) ^ (old_b >> 5);
-                a = old_b;
-                candidate.sampled_dct8[y * block_extent_.width + x] =
-                  (bits >> 32) <= (UINT64_MAX >> 32) / 2;
-              }
-            }
-          }
-        }
-      }
+      BuildDct8Sampling(&candidate);
 
       candidate.layouts.reserve(candidate.row_major_anchors.size());
       candidate.packing_offsets.resize(anchor_offset);
@@ -2328,6 +2464,9 @@ class CudaPreparedResidentAqEvaluation final
   }
 
   Status ValidateInput(AqEvaluationInput input) const {
+    if (input.epf_sharpness_search_target != 0.0f) {
+      return Status::Unavailable("CUDA EPF sharpness search is not implemented");
+    }
     const auto plane_i32_specified = [](ConstPlaneI32View plane) {
       return plane.data != nullptr || !plane.extent.empty() ||
              plane.stride != 0;
@@ -2441,6 +2580,45 @@ class CudaPreparedResidentAqEvaluation final
     population_ready_ = true;
     return Status::Ok();
   }
+
+#ifdef GJXL_CUDA_RESIDENT_TOKEN_EXPERIMENT
+  struct CompletedTokenCopy {
+    const void* source;
+    void* destination;
+    size_t bytes;
+  };
+  static cudaError_t EncodeCompletedTokenCopy(CudaBackend& backend,
+                                             const void* opaque) {
+    const auto& copy = *static_cast<const CompletedTokenCopy*>(opaque);
+    return cudaMemcpyAsync(copy.destination, copy.source, copy.bytes,
+                           cudaMemcpyDeviceToDevice, backend.state_->stream);
+  }
+  Status CopyCompletedTokenCoefficients(std::unique_ptr<DeviceBuffer>* out) {
+    const resource_budget_internal::ManagedHostScope resources(
+        resource_budget_internal::ResourceClass::kCompletedFrame);
+    if (coefficient_count_ > std::numeric_limits<size_t>::max() / sizeof(int32_t))
+      return Status::InvalidArgument("CUDA completed token coefficients overflow");
+    const size_t bytes = coefficient_count_ * sizeof(int32_t);
+    std::unique_ptr<DeviceBuffer> candidate;
+    Status status = backend_->Allocate(bytes, &candidate);
+    if (!status.ok()) return status;
+    const CompletedTokenCopy copy{
+        Pointer<const int32_t>(reconstruction_coefficients_device_),
+        CudaBackend::AsCudaBuffer(*candidate)->pointer(), bytes};
+    std::unique_ptr<GpuSubmission> submission;
+    status = backend_->SubmitCompute(
+        &EncodeCompletedTokenCopy, &copy, &submission,
+        gpu_profile_internal::GpuProfilingMode::kDisabled,
+        "aq.completed_token_copy");
+    if (!status.ok()) return status;
+    if (submission == nullptr)
+      return Status::Internal("CUDA completed token copy returned no submission");
+    status = submission->Wait();
+    if (!status.ok()) return status;
+    *out = std::move(candidate);
+    return Status::Ok();
+  }
+#endif
 
   Status AssembleFrame(const Quantizer& quantizer, VarDctEncoderFrame* frame) {
     if (compact_active_ && (compact_flags_ & 1u) == 0)
@@ -2702,7 +2880,8 @@ class CudaPreparedResidentAqEvaluation final
         QuantizationMatrixMultiplier(options_.profile.x_qm_scale);
     params.b_matrix_multiplier =
         QuantizationMatrixMultiplier(options_.profile.b_qm_scale);
-    params.adjust_ac_quant = 1;
+    params.adjust_ac_quant = coefficient_decision_mode_ ==
+        AcCoefficientDecisionMode::kAdjustedSharedQuant ? 1u : 0u;
     params.defer_dc = DeferredDc();
     params.defer_low_frequencies = DeferredDc();
     params.epf_quant_multiplier = options_.profile.epf_sigma.quant_multiplier;
@@ -2907,16 +3086,18 @@ class CudaPreparedResidentAqEvaluation final
       const CudaAqExactBatch& batch = self.batches_[batch_index];
       if (batch.anchor_count == 0) continue;
       const CudaAqResidentParams params = self.ResidentParams(batch_index);
-      status = LaunchCudaAqSelectAdjustedQuantization(
-          Pointer<CudaAqAnchor>(self.anchors_device_),
-          Pointer<const float>(self.quant_tables_device_),
-          Pointer<int>(self.raw_quant_device_),
-          Pointer<const float>(self.forward_device_),
-          Pointer<float>(self.thresholds_device_),
-          Pointer<const unsigned int>(self.quantizer_device_),
-          Pointer<unsigned int>(self.error_device_), batch, params,
-          backend.state_->stream);
-      if (status != cudaSuccess) return status;
+      if (params.adjust_ac_quant != 0) {
+        status = LaunchCudaAqSelectAdjustedQuantization(
+            Pointer<CudaAqAnchor>(self.anchors_device_),
+            Pointer<const float>(self.quant_tables_device_),
+            Pointer<int>(self.raw_quant_device_),
+            Pointer<const float>(self.forward_device_),
+            Pointer<float>(self.thresholds_device_),
+            Pointer<const unsigned int>(self.quantizer_device_),
+            Pointer<unsigned int>(self.error_device_), batch, params,
+            backend.state_->stream);
+        if (status != cudaSuccess) return status;
+      }
       status = LaunchCudaAqEncodeResidentCoefficients(
           Pointer<CudaAqAnchor>(self.anchors_device_),
           Pointer<const float>(self.quant_tables_device_),
@@ -3192,16 +3373,18 @@ class CudaPreparedResidentAqEvaluation final
         const CudaAqExactBatch& batch = self.batches_[batch_index];
         if (batch.anchor_count == 0) continue;
         const CudaAqResidentParams params = self.ResidentParams(batch_index);
-        status = LaunchCudaAqSelectAdjustedQuantization(
-            Pointer<CudaAqAnchor>(self.anchors_device_),
-            Pointer<const float>(self.quant_tables_device_),
-            Pointer<int>(self.raw_quant_device_),
-            Pointer<const float>(self.forward_device_),
-            Pointer<float>(self.thresholds_device_),
-            Pointer<const unsigned int>(self.quantizer_device_),
-            Pointer<unsigned int>(self.error_device_), batch, params,
-            backend.state_->stream);
-        if (status != cudaSuccess) return status;
+        if (params.adjust_ac_quant != 0) {
+          status = LaunchCudaAqSelectAdjustedQuantization(
+              Pointer<CudaAqAnchor>(self.anchors_device_),
+              Pointer<const float>(self.quant_tables_device_),
+              Pointer<int>(self.raw_quant_device_),
+              Pointer<const float>(self.forward_device_),
+              Pointer<float>(self.thresholds_device_),
+              Pointer<const unsigned int>(self.quantizer_device_),
+              Pointer<unsigned int>(self.error_device_), batch, params,
+              backend.state_->stream);
+          if (status != cudaSuccess) return status;
+        }
         // This branch rejects diagnostic reconstruction and only assembles
         // integer coefficients. A later evaluation rewrites the complete
         // reconstruction before running any inverse transform or filter.
@@ -3441,6 +3624,8 @@ class CudaPreparedResidentAqEvaluation final
   size_t anchor_count_ = 0;
   size_t filter_xyb_stage_count_ = 0;
   AqEvaluationOptions options_{};
+  AcCoefficientDecisionMode coefficient_decision_mode_ =
+      AcCoefficientDecisionMode::kAdjustedSharedQuant;
   AcStrategyGrid strategies_{};
   std::array<CudaAqExactBatch, 7> batches_{};
   ManagedVector<HostAnchor> row_major_anchors_;
@@ -3486,6 +3671,49 @@ class CudaPreparedResidentAqEvaluation final
   uint32_t nonlinear_cfl_iterations_ = 0;
   bool invalid_ = false;
 };
+
+Status CudaPreparedResidentAqEvaluation::CheckMetadataForTest(
+    const AcStrategyGrid& strategies, ConstPlaneU8View epf_sharpness) const {
+  Metadata actual, reference;
+  const Status fast = BuildMetadata(strategies, epf_sharpness, &actual);
+  const Status general = BuildMetadata(strategies, epf_sharpness, &reference, true);
+  if (fast.code() != general.code())
+    return Status::Internal("CUDA metadata builders disagree on validation");
+  if (!fast.ok()) return fast;
+  // Compare logical fields, never padding in host/device record structs.
+  const auto equal = [](const auto& a, const auto& b, auto fields) {
+    return std::ranges::equal(a, b, {}, fields, fields);
+  };
+  const auto batch = [](const CudaAqExactBatch& v) {
+    return std::tie(v.anchor_offset, v.anchor_count, v.coefficient_offset,
+                    v.coefficient_count, v.pixel_width, v.pixel_height,
+                    v.covered_width, v.covered_height);
+  };
+  const auto anchor = [](const CudaAqAnchor& v) { return std::tie(v.x, v.y); };
+  const auto host = [](const HostAnchor& v) {
+    return std::tie(v.block_x, v.block_y, v.strategy, v.batch_index, v.index_in_batch);
+  };
+  const auto color = [](const CudaAqColorTransformRecord& v) {
+    return std::tie(v.coefficient_offset, v.channel_stride, v.coefficient_count,
+                    v.strategy, v.raw_quant_index, v.tile_value_offset);
+  };
+  const auto layout = [](const vardct_frame_internal::QuantizedAcTransformLayout& v) {
+    return std::tie(v.block_x, v.block_y, v.strategy, v.coefficient_count,
+                    v.coefficient_offsets);
+  };
+  if (actual.population_mask != reference.population_mask ||
+      actual.epf_sharpness != reference.epf_sharpness ||
+      actual.sampled_dct8 != reference.sampled_dct8 ||
+      actual.packing_offsets != reference.packing_offsets ||
+      actual.color_tile_offsets != reference.color_tile_offsets ||
+      !equal(actual.batches, reference.batches, batch) ||
+      !equal(actual.device_anchors, reference.device_anchors, anchor) ||
+      !equal(actual.row_major_anchors, reference.row_major_anchors, host) ||
+      !equal(actual.color_transforms, reference.color_transforms, color) ||
+      !equal(actual.layouts, reference.layouts, layout))
+    return Status::Internal("CUDA DCT8 metadata differs from the general builder");
+  return Status::Ok();
+}
 
 Status CudaPreparedResidentAqEvaluation::ComputeStoragePlan(
     const CudaResidentStorageOptions& o, CudaResidentStoragePlan* out) {
@@ -3614,6 +3842,16 @@ Status GetCudaResidentMetadataPendingForTest(
   }
   *pending = resident->metadata_pending_for_test();
   return Status::Ok();
+}
+
+Status CheckCudaResidentMetadataForTest(
+    const PreparedAqEvaluation& prepared, const AcStrategyGrid& strategies,
+    ConstPlaneU8View epf_sharpness) {
+  const auto* resident =
+      dynamic_cast<const CudaPreparedResidentAqEvaluation*>(&prepared);
+  if (resident == nullptr)
+    return Status::InvalidArgument("CUDA resident metadata check target is invalid");
+  return resident->CheckMetadataForTest(strategies, epf_sharpness);
 }
 
 Status PoisonCudaResidentCoefficientReadbackForTest(

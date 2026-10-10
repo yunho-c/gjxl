@@ -137,12 +137,14 @@ bool CacheCompletedBuffer(CudaDeviceState& state, void* pointer,
 }
 
 Status TrimPool(CudaMemoryPoolState& pool,
-                const resource_budget_internal::ResourceBudget* budget = nullptr) {
+                const resource_budget_internal::ResourceBudget* budget = nullptr,
+                bool invalidate_leases = true) {
   ScopedCudaDevice device(pool.ordinal);
   if (device.status() != cudaSuccess)
     return CudaRuntimeStatus(device.status(), "Select CUDA pool trim device");
   std::lock_guard lock(pool.cache_mutex);
-  pool.cache_generation.fetch_add(1, std::memory_order_relaxed);
+  if (invalidate_leases)
+    pool.cache_generation.fetch_add(1, std::memory_order_relaxed);
   std::array<bool, 128> released{};
   cudaError_t error = cudaSuccess;
   for (size_t index = 0; index < pool.cached.size(); ++index) {
@@ -482,7 +484,18 @@ Status CudaBackend::Allocate(
       if (!status.ok()) return status;
       if (test_fail_next_allocation_.exchange(false, std::memory_order_relaxed))
         return Status::OutOfMemory("Injected CUDA backing allocation failure");
-      const cudaError_t error = AllocateDeviceMemory(*state_, size_bytes, &pointer);
+      cudaError_t error = AllocateDeviceMemory(*state_, size_bytes, &pointer);
+      if (error == cudaErrorMemoryAllocation && state_->memory_pool != nullptr) {
+        // Exact-size cache misses can exhaust a discrete GPU while completed
+        // buffers of other sizes remain idle. Reclaim only our pool's idle
+        // backing and retry once, keeping live owners and their cache leases.
+        // Preserve unrelated runtime errors and explicit failure injection.
+        if (cudaPeekAtLastError() == cudaErrorMemoryAllocation)
+          (void)cudaGetLastError();
+        status = TrimPool(*state_->memory_pool, nullptr, false);
+        if (!status.ok()) return status;
+        error = AllocateDeviceMemory(*state_, size_bytes, &pointer);
+      }
       if (error != cudaSuccess)
         return CudaRuntimeStatus(error, "Allocate CUDA device buffer");
       status = allocation.Commit();
@@ -797,7 +810,7 @@ Status CudaBackend::SubmitCompute(
     ? CudaProfileCapture::Current(*this) : nullptr;
   if (capture != nullptr) {
     mode = capture->mode();
-    stage_id = capture->operation();
+    if (stage_id.empty()) stage_id = capture->operation();
   }
   const bool profiling = mode == GpuProfilingMode::kStage || mode == GpuProfilingMode::kDispatch;
   if ((mode != GpuProfilingMode::kDisabled && !profiling) ||

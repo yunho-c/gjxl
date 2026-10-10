@@ -373,8 +373,17 @@ void Verify(gjxl::AcStrategyType strategy, uint32_t count, unsigned pattern,
     CheckGuards(cached.quantized_dc.Read(), c.quantized_dc, active_dc, "DC int");
     auto active_sigma = c.active_blocks;
     for (size_t i = 0; i < active_sigma.size(); ++i)
-      active_sigma[i] = active_sigma[i] && adjust && c.sharpness[i] < 8;
+      active_sigma[i] = active_sigma[i] && c.sharpness[i] < 8;
     CheckGuards(cached.sigma.Read(), c.sigma, active_sigma, "inverse sigma");
+    if (invalid == 0) {
+      const auto sigma = cached.sigma.Read();
+      for (size_t i = 0; i < active_sigma.size(); ++i) {
+        if (active_sigma[i] &&
+            (!std::isfinite(sigma[i]) || sigma[i] >= 0.0f ||
+             sigma[i] == kFloatGuard))
+          throw std::runtime_error("Resident EPF sigma was not initialized");
+      }
+    }
   }
   // A full evaluation after materialization must overwrite every active
   // reconstruction entry, without depending on the skipped float output.

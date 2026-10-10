@@ -119,6 +119,210 @@ AsMetalPrepared(PreparedAqEvaluation &prepared) noexcept {
 
 } // namespace
 
+Status MetalPreparedAqEvaluation::ConfigureEpfSharpnessSearch(float target) {
+  if (!std::isfinite(target) || target < 0.0f ||
+      (target != 0.0f && !options_.search_epf_sharpness)) {
+    return Status::InvalidArgument("EPF search was not prepared for this target");
+  }
+  epf_search_target_ = target >= 0.5f &&
+          options_.profile.loop_filter.epf_options.iterations != 0
+      ? target : 0.0f;
+  if (!options_.search_epf_sharpness) return Status::Ok();
+  EpfSharpnessSearchConfig config;
+  Status status = MakeEpfSharpnessSearchConfig(
+      epf_search_target_ == 0.0f ? 1.0f : epf_search_target_, &config);
+  if (!status.ok()) return status;
+  epf_search_params_ = {
+      static_cast<uint32_t>(source_extent_.width),
+      static_cast<uint32_t>(source_extent_.height),
+      static_cast<uint32_t>(epf_search_reference_[0].row_stride),
+      0u,
+      static_cast<uint32_t>(epf_search_mask_.row_stride),
+      static_cast<uint32_t>(block_extent_.width),
+      static_cast<uint32_t>(block_extent_.height),
+      static_cast<uint32_t>(epf_candidate_errors_[0].row_stride),
+      static_cast<uint32_t>(epf_sharpness_.row_stride),
+      config.no_smoothing_bias,
+      static_cast<uint32_t>(config.count),
+      {config.candidates[0], config.candidates[1], config.candidates[2]},
+  };
+  return Status::Ok();
+}
+
+void MetalPreparedAqEvaluation::EncodeEpfSearchSelection(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder, bool reset) const {
+  auto params = epf_search_params_;
+  if (reset) params.candidate_count = 0;
+  encoder->setComputePipelineState(backend.aq_pipelines_.epf_search_select.get());
+  for (size_t i = 0; i < 3; ++i) BindPlane(encoder, epf_candidate_errors_[i], i);
+  BindPlane(encoder, epf_sharpness_, 3);
+  BindPlane(encoder, reconstruction_error_, 4);
+  encoder->setBytes(&params, sizeof(params), 5);
+  MetalBackend::DispatchPlane(encoder, block_extent_);
+}
+
+void MetalPreparedAqEvaluation::EncodeEpfSearchReset(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
+  if (options_.search_epf_sharpness) EncodeEpfSearchSelection(backend, encoder, true);
+}
+
+void MetalPreparedAqEvaluation::EncodeEpfSearchSigma(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder, uint32_t value) const {
+  for (size_t i = 0; i < batches_.size(); ++i) {
+    if (!DeviceStrategyDispatch() && batches_[i].anchor_count == 0) continue;
+    encoder->setComputePipelineState(backend.aq_pipelines_.epf_search_sigma.get());
+    BindPlane(encoder, anchors_, 0);
+    BindPlane(encoder, raw_quant_, 1);
+    BindPlane(encoder, epf_sharpness_, 2);
+    BindPlane(encoder, resident_quantization_ ? resident_quantizer_params_ : raw_quant_, 3);
+    BindPlane(encoder, inverse_sigma_, 4);
+    BindPlane(encoder, reconstruction_error_, 5);
+    encoder->setBytes(&value, sizeof(value), 7);
+    if (DeviceStrategyDispatch()) {
+      BindStrategyParameters(encoder, i,
+          offsetof(gjxl_aq_dispatch::Record, reconstruction), 6);
+      DispatchStrategy(encoder, i, gjxl_aq_dispatch::kQuantField,
+                        MTL::Size(256, 1, 1));
+    } else {
+      encoder->setBytes(&reconstruction_params_[i], sizeof(AqReconstructionParams), 6);
+      DispatchMetalThreads(encoder, MTL::Size(batches_[i].anchor_count, 1, 1),
+                            MTL::Size(256, 1, 1));
+    }
+  }
+}
+
+void MetalPreparedAqEvaluation::EncodeEpfSharpnessSearch(
+    MetalBackend& backend, MTL::ComputeCommandEncoder* encoder) const {
+  if (epf_search_target_ == 0.0f) return;
+  // Linear RGB is dead during candidate evaluation. Reuse its storage for
+  // the immutable post-Gaborish XYB base; the two EPF scratch images remain
+  // available for each candidate's globally filtered intermediate results.
+  auto base = reconstructed_;
+  if (options_.profile.loop_filter.gaborish) {
+    base = reconstructed_linear_;
+    auto params = gaborish_params_;
+    params.output_stride = static_cast<uint32_t>(base[0].row_stride);
+    encoder->setComputePipelineState(backend.aq_pipelines_.gaborish.get());
+    BindImage(encoder, reconstructed_, 0);
+    BindImage(encoder, base, 3);
+    BindPlane(encoder, reconstruction_error_, 6);
+    encoder->setBytes(&params, sizeof(params), 7);
+    MetalBackend::DispatchPlane(encoder, source_extent_);
+  }
+  const uint32_t iterations = options_.profile.loop_filter.epf_options.iterations;
+  const uint32_t first_pass = iterations == 3 ? 0 : 1;
+  for (uint32_t candidate = 0; candidate < epf_search_params_.candidate_count; ++candidate) {
+    const uint32_t value = epf_search_params_.candidates[candidate];
+    auto image = base;
+    // Zero sigma is an exact copy in every EPF pass. Respect custom LUTs.
+    if (options_.profile.epf_sigma.sharpness_lut[value] != 0.0f) {
+      EncodeEpfSearchSigma(backend, encoder, value);
+      for (uint32_t stage = 0; stage < iterations; ++stage) {
+        const uint32_t pass = first_pass + stage;
+        const auto output = filter_scratch_[stage % 2];
+        auto params = epf_params_[pass];
+        params.input_stride = static_cast<uint32_t>(image[0].row_stride);
+        params.output_stride = static_cast<uint32_t>(output[0].row_stride);
+        const auto& dispatch = epf_dispatch_[pass];
+        encoder->setComputePipelineState(dispatch.pipeline);
+        BindImage(encoder, image, 0);
+        BindPlane(encoder, inverse_sigma_, 3);
+        BindImage(encoder, output, 4);
+        BindPlane(encoder, reconstruction_error_, 7);
+        encoder->setBytes(&params, sizeof(params), 8);
+        if (dispatch.tiled) {
+          DispatchMetalThreadgroups(encoder,
+              MTL::Size((source_extent_.width + 31) / 32,
+                         (source_extent_.height + 7) / 8, 1),
+              MTL::Size(32, 4, 1));
+        } else {
+          MetalBackend::DispatchPlane(encoder, source_extent_);
+        }
+        image = output;
+      }
+    }
+    auto params = epf_search_params_;
+    params.image_stride = static_cast<uint32_t>(image[0].row_stride);
+    encoder->setComputePipelineState(backend.aq_pipelines_.epf_search_error.get());
+    BindImage(encoder, epf_search_reference_, 0);
+    BindImage(encoder, image, 3);
+    BindPlane(encoder, epf_search_mask_, 6);
+    BindPlane(encoder, epf_candidate_errors_[candidate], 7);
+    BindPlane(encoder, reconstruction_error_, 8);
+    encoder->setBytes(&params, sizeof(params), 9);
+    DispatchMetalThreadgroups(encoder,
+        MTL::Size(block_extent_.width, block_extent_.height, 1), MTL::Size(32, 1, 1));
+  }
+  EncodeEpfSearchSelection(backend, encoder, false);
+  EncodeEpfSearchSigma(backend, encoder, 8u);
+}
+
+Status MetalPreparedAqEvaluation::ReadbackEpfSharpness() {
+  if (epf_search_target_ == 0.0f) return Status::Ok();
+  for (size_t y = 0; y < block_extent_.height; ++y) {
+    Status status = backend_->CopyDeviceToHost(*epf_sharpness_.buffer,
+        selected_epf_sharpness_host_.data() + y * block_extent_.width,
+        block_extent_.width, epf_sharpness_.offset_bytes + y * epf_sharpness_.row_stride);
+    if (!status.ok()) return status;
+  }
+  if (!std::ranges::all_of(selected_epf_sharpness_host_, [](uint8_t value) { return value < 8; }))
+    return Status::DeviceError("EPF search produced invalid sharpness");
+  return Status::Ok();
+}
+
+Status MetalPreparedAqEvaluation::GetEpfSearchSnapshot(
+    MetalEpfSearchSnapshotForTesting* output) const {
+  if (output == nullptr)
+    return Status::InvalidArgument("EPF search snapshot output is null");
+  std::unique_lock lock(mutex_, std::try_to_lock);
+  if (!lock.owns_lock() || state_ != State::kReady ||
+      epf_search_target_ == 0.0f) {
+    return Status::FailedPrecondition("EPF search snapshot is unavailable");
+  }
+  try {
+    MetalEpfSearchSnapshotForTesting candidate;
+    candidate.blocks = block_extent_;
+    candidate.candidate_count = epf_search_params_.candidate_count;
+    candidate.sharpness.resize(block_count_);
+    for (size_t y = 0; y < block_extent_.height; ++y) {
+      Status status = backend_->CopyDeviceToHost(*epf_sharpness_.buffer,
+          candidate.sharpness.data() + y * block_extent_.width,
+          block_extent_.width,
+          epf_sharpness_.offset_bytes + y * epf_sharpness_.row_stride);
+      if (!status.ok()) return status;
+    }
+    for (size_t i = 0; i < candidate.candidate_count; ++i) {
+      candidate.errors[i].resize(block_count_);
+      const auto plane = epf_candidate_errors_[i];
+      for (size_t y = 0; y < block_extent_.height; ++y) {
+        Status status = backend_->CopyDeviceToHost(*plane.buffer,
+            candidate.errors[i].data() + y * block_extent_.width,
+            block_extent_.width * sizeof(float),
+            plane.offset_bytes + y * plane.row_stride * sizeof(float));
+        if (!status.ok()) return status;
+      }
+    }
+    *output = std::move(candidate);
+    return Status::Ok();
+  } catch (const std::bad_alloc&) {
+    return Status::OutOfMemory("EPF search snapshot allocation failed");
+  }
+}
+
+Status GetMetalEpfSearchSnapshotForTesting(
+    PreparedAqEvaluation& prepared, MetalEpfSearchSnapshotForTesting* output) {
+  auto* metal = AsMetalPrepared(prepared);
+  if (metal == nullptr)
+    return Status::InvalidArgument("EPF search snapshot requires Metal AQ");
+  return metal->GetEpfSearchSnapshot(output);
+}
+
+ConstPlaneU8View MetalPreparedAqEvaluation::FinalEpfSharpness() const noexcept {
+  return {epf_search_target_ == 0.0f ? epf_sharpness_host_.data()
+                                    : selected_epf_sharpness_host_.data(),
+          block_extent_, block_extent_.width};
+}
+
 std::array<DevicePlaneView, 3>
 MetalPreparedAqEvaluation::FinalFilteredImage() const noexcept {
   return final_filter_scratch_index_ < 0 ? reconstructed_

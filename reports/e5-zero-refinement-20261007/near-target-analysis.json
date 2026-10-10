@@ -1,0 +1,86 @@
+[
+  {
+    "butteraugli_percent": 19.2944647418541,
+    "bytes_percent": 1.6769628808279258,
+    "image_id": "kodak/01",
+    "matching_kind": "secondary-saved-probe-match",
+    "score_difference": -0.00027135407822242996
+  },
+  {
+    "butteraugli_percent": 15.786003102135826,
+    "bytes_percent": 1.474505422149508,
+    "image_id": "kodak/08",
+    "matching_kind": "secondary-saved-probe-match",
+    "score_difference": 0.0038969924950009727
+  },
+  {
+    "butteraugli_percent": 3.675056884119865,
+    "bytes_percent": 1.1851489587153985,
+    "image_id": "kodak/13",
+    "matching_kind": "secondary-saved-probe-match",
+    "score_difference": 0.00017251862959710706
+  },
+  {
+    "butteraugli_percent": -4.01768591505075,
+    "bytes_percent": 0.46122603517708693,
+    "image_id": "kodak/23",
+    "matching_kind": "secondary-saved-probe-match",
+    "score_difference": 0.00026188639404267633
+  },
+  {
+    "butteraugli_percent": 2.041612501920742,
+    "bytes_percent": -4.19794188861985,
+    "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+    "matching_kind": "strict-target",
+    "score_difference": 0.02327424094471553
+  },
+  {
+    "butteraugli_percent": -18.052966420851526,
+    "bytes_percent": 0.8327110431898266,
+    "image_id": "clic2024_test/100a02c269c5948392f283b2aa3bb4da",
+    "matching_kind": "strict-target",
+    "score_difference": 0.003831237942847565
+  },
+  {
+    "butteraugli_percent": 0.8487513253586654,
+    "bytes_percent": 0.6628369421122438,
+    "image_id": "clic2024_test/28d24b9c83de066597ff96a68769884f",
+    "matching_kind": "strict-target",
+    "score_difference": 0.00550898005928957
+  },
+  {
+    "butteraugli_percent": -17.69752233812738,
+    "bytes_percent": 1.187372354756011,
+    "image_id": "clic2024_test/d1a9be98d1936065967adac50a6fb750",
+    "matching_kind": "strict-target",
+    "score_difference": -0.002735774757596232
+  },
+  {
+    "butteraugli_percent": 3.762815940284203,
+    "bytes_percent": -0.3973855315074215,
+    "image_id": "unsplash/alpine_lake/24mp",
+    "matching_kind": "strict-target",
+    "score_difference": -0.008354701892784533
+  },
+  {
+    "butteraugli_percent": 15.255834687340064,
+    "bytes_percent": 1.0110355070037214,
+    "image_id": "unsplash/campus_interior/12mp",
+    "matching_kind": "strict-target",
+    "score_difference": -0.014061343332528509
+  },
+  {
+    "butteraugli_percent": -5.72374626102633,
+    "bytes_percent": 1.0837757120185865,
+    "image_id": "unsplash/campus_interior/48mp",
+    "matching_kind": "strict-target",
+    "score_difference": 0.00810221652560017
+  },
+  {
+    "butteraugli_percent": 6.43533249842021,
+    "bytes_percent": 0.8183392677642898,
+    "image_id": "unsplash/forest_stream/48mp",
+    "matching_kind": "strict-target",
+    "score_difference": 0.010846195434410788
+  }
+]

@@ -1992,6 +1992,7 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
 
     std::optional<codestream_internal::EntropyReadinessAdmission> early_dc_admission;
     if (codestream_internal::EarlierDcEnabled() && overlap_dc &&
+        ac_provider->SupportsEarlyEntropy() &&
         !rate_optimized && profile == nullptr) {
       early_dc_admission.emplace(
           codestream_internal::DesiredDcTokenizationParticipants(frame),
@@ -2114,7 +2115,8 @@ Status EncodeVarDctCodestreamWithRepresentationPolicy(
           if (!status.ok()) return status;
           entropy_prepared_early = true;
         } else {
-        const unsigned eager_mode = codestream_internal::EntropyReadinessMode();
+        const unsigned eager_mode = ac_provider->SupportsEarlyEntropy()
+            ? codestream_internal::EntropyReadinessMode() : 0;
         const size_t requested = thread_budget_internal::CpuThreadCount();
         const size_t workers = std::min(kMaximumSectionWorkers, requested == 0
             ? std::max<size_t>(1, std::thread::hardware_concurrency()) : requested);

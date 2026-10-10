@@ -256,9 +256,11 @@ remain a decision-level acceptance oracle, not an additional public output.
 The fused resident-policy output makes those materializations independent.
 Public fully-resident and throughput Butteraugli encoding requests only
 the evaluated update-score history and final frame. It skips a terminal
-encoded-field evaluation by default, then transfers the device error word,
+perceptual score by default. When EPF sharpness search is enabled, the final
+field is still reconstructed to select its sharpness map. It then transfers the device error word,
 the contiguous score history, quantizer metadata, raw quant, and quantized
-DC/AC. An explicit final-score request adds that evaluation without changing
+DC/AC and, when searched, the selected block sharpness map. An explicit
+final-score request adds that evaluation without changing
 the field or frame. Serial exact-coefficient and maximum-error codestream calls
 still read the bounded block values and scalar metric results required by their
 CPU policy, but their final evaluation requests the frame without downloading
@@ -1224,8 +1226,10 @@ evaluations; the exact path retains evaluation-local quant-dependent maps.
 The separate throughput mode retains the resident coefficient path. Complete
 diagnostic calls retain the explicit one-update policy. Fully resident and
 throughput encoding-only calls apply the configured updates, then quantize the
-resulting final field into the frame without reconstructing and perceptually
-scoring it again by default. A final-score request performs that last
+resulting final field into the frame without perceptually scoring it again by
+default. EPF sharpness search, when enabled, reconstructs that field and selects
+the block sharpness map even when the final perceptual score is omitted; see
+[`epf-sharpness-search.md`](epf-sharpness-search.md). A final-score request performs that last
 evaluation but does not reduce the update count or alter the codestream.
 Direct fully resident AQ APIs still honor their requested iteration count.
 

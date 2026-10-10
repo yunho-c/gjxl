@@ -23,7 +23,7 @@ bool Check(bool ok, const char* message) {
 }
 
 bool CheckPolicy() {
-  constexpr std::array<size_t, 10> updates{0, 0, 0, 0, 1, 1, 2, 3, 4, 4};
+  constexpr std::array<size_t, 10> updates{0, 0, 0, 0, 0, 1, 2, 3, 4, 4};
   constexpr std::array<size_t, 10> error_updates{0, 0, 0, 1, 1, 1, 2, 3, 4, 4};
   for (int effort = 1; effort <= 10; ++effort) {
     for (auto density : {VarDctDensityMode::kDefault,
@@ -50,6 +50,51 @@ bool CheckPolicy() {
                        (high ? 4 : schedule[effort - 1]),
                      "Effort or override selected the wrong AQ update schedule"))
             return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
+bool CheckLowEffortQuantizationPolicy() {
+  for (int effort = 1; effort <= 10; ++effort) {
+    for (auto density : {VarDctDensityMode::kDefault,
+                         VarDctDensityMode::kHighDensity}) {
+      for (auto rate : {VarDctRateControlMode::kButteraugliTarget,
+                       VarDctRateControlMode::kTargetBytes,
+                       VarDctRateControlMode::kTargetBitsPerPixel,
+                       VarDctRateControlMode::kMaximumError}) {
+        for (auto mode : {GpuAdaptiveQuantizationMode::kExactCoefficients,
+                          GpuAdaptiveQuantizationMode::kFullyResident,
+                          GpuAdaptiveQuantizationMode::kThroughput,
+                          GpuAdaptiveQuantizationMode::kMaximumThroughput}) {
+          for (auto compression : {VarDctCompressionMode::kAutomatic,
+                                   VarDctCompressionMode::kMaximumCompression}) {
+            VarDctEncodingOptions o;
+            o.effort = effort;
+            o.density_mode = density;
+            o.rate_control_mode = rate;
+            o.gpu_aq_mode = mode;
+            o.compression_mode = compression;
+            const bool ordinary = density == VarDctDensityMode::kDefault &&
+              rate != VarDctRateControlMode::kMaximumError &&
+              mode != GpuAdaptiveQuantizationMode::kMaximumThroughput;
+            const auto expected = effort <= 4 && ordinary
+              ? AcCoefficientDecisionMode::kFixedRawQuant
+              : AcCoefficientDecisionMode::kAdjustedSharedQuant;
+            if (!Check(ResolveAcCoefficientDecision(o) == expected &&
+                         ResolveAdaptiveDcSmoothing(o) ==
+                           (effort >= 4 || (effort == 3 && ordinary)),
+                       "Low-effort quantization or smoothing scope changed"))
+              return false;
+            for (bool smoothing : {false, true}) {
+              o.adaptive_dc_smoothing = smoothing;
+              if (!Check(ResolveAdaptiveDcSmoothing(o) == smoothing &&
+                           ResolveAcCoefficientDecision(o) == expected,
+                         "Smoothing override changed AC decisions")) return false;
+            }
+          }
         }
       }
     }
@@ -157,9 +202,9 @@ bool CheckSearchStorage() {
   cpu.encoding.effort = 5;
   if (!Check(ComputeCpuWorkflowStoragePlan({257, 257}, cpu, &cpu_search).ok() &&
                cpu_fixed.frontend.peak_bytes < cpu_search.frontend.peak_bytes &&
-               cpu_fixed.score_count == 1 && cpu_search.score_count == 2 &&
+               cpu_fixed.score_count == 1 && cpu_search.score_count == 1 &&
                cpu_fixed.aq.policy.evaluations == 1 &&
-               cpu_search.aq.policy.evaluations == 2,
+               cpu_search.aq.policy.evaluations == 1,
              "CPU low-effort search storage or AQ evaluation count is wrong"))
     return false;
 #if GJXL_TEST_HAS_METAL
@@ -170,18 +215,31 @@ bool CheckSearchStorage() {
   if (!Check(ComputeResidentWorkflowStoragePlan({257, 257}, metal, &fixed).ok(),
              "Fixed resident plan failed")) return false;
   metal.encoding.effort = 5;
-  return Check(ComputeResidentWorkflowStoragePlan({257, 257}, metal, &search).ok() &&
+  if (!Check(ComputeResidentWorkflowStoragePlan({257, 257}, metal, &search).ok() &&
                  fixed.device_bytes < search.device_bytes &&
                  fixed.frontend.peak_bytes < search.frontend.peak_bytes &&
-                 fixed.score_count == 0 && search.score_count == 1,
-               "Resident low-effort search storage or AQ count is wrong");
-#else
-  return true;
+                 fixed.score_count == 0 && search.score_count == 0,
+               "Resident low-effort search storage or AQ count is wrong"))
+    return false;
+  metal.encoding.effort = 6;
+  ResidentWorkflowStoragePlan refined;
+  if (!Check(ComputeResidentWorkflowStoragePlan({257, 257}, metal, &refined).ok() &&
+                 refined.score_count == 1 &&
+                 search.device_bytes < refined.device_bytes,
+             "Resident e6 did not add perceptual evaluation storage"))
+    return false;
 #endif
+  cpu.encoding.effort = 6;
+  CpuWorkflowStoragePlan cpu_refined;
+  return Check(ComputeCpuWorkflowStoragePlan({257, 257}, cpu, &cpu_refined).ok() &&
+                 cpu_refined.score_count == 2 &&
+                 cpu_refined.aq.policy.evaluations == 2,
+               "CPU e6 did not add a refinement update");
 }
 }  // namespace
 
 int main() {
-  return CheckPolicy() && CheckProviderBypass() && CheckSearchStorage()
+  return CheckPolicy() && CheckLowEffortQuantizationPolicy() &&
+    CheckProviderBypass() && CheckSearchStorage()
     ? EXIT_SUCCESS : EXIT_FAILURE;
 }

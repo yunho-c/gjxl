@@ -76,13 +76,23 @@ struct VarDctEncodingOptions {
   /// block; efforts 5-9 use two-block spacing for these larger families.
   /// In the ordinary policy, efforts 1-4 use DCT8, disable Gaborish, and
   /// start with a uniform quantization field and run zero AQ updates.
-  /// Efforts 5-6 enable mixed-transform AC search and run one AQ update.
+  /// They retain the initial AC quantizer and fixed Y thresholds, independently
+  /// of DC quantization and smoothing. Maximum throughput keeps its own recipe.
+  /// Effort 5 enables mixed-transform AC search, spatial initialization, and
+  /// Gaborish with zero AQ updates. Effort 6 adds one AQ update.
   /// High-density and maximum-error overrides preserve their existing
   /// refinement and mixed-transform search behavior.
   /// Ordinary automatic effort 4 also searches DC integer mappings when DC
   /// quantization is prediction-aware. Native context-map compression is
   /// automatic at every effort.
   int32_t effort = 7;
+  /// Opts into final EPF sharpness search on CPU and Metal at efforts 6-10
+  /// and distance >= 0.5. CUDA retains its fixed-sharpness policy.
+  /// AQ iterations continue to use neutral sharpness 4. Maximum-error and
+  /// explicit maximum-throughput modes retain their separate filtering policy.
+  /// Off by default pending matched-quality qualification of the rate/runtime
+  /// tradeoff. Enabling search does not change intermediate AQ decisions.
+  bool adaptive_epf_sharpness = false;
   /// Maximum participating CPU threads per encode. Zero selects the existing
   /// automatic stage-specific desired parallelism. Both are additionally bounded
   /// by the shared execution domain. GPU execution is not constrained.
@@ -138,11 +148,22 @@ struct VarDctEncodingOptions {
   /// Automatic uses ordinary rounding at efforts 1-3 and prediction-aware
   /// quantization with one extra precision bit at efforts 4-10.
   DcQuantizationMode dc_quantization = DcQuantizationMode::kAutomatic;
-  /// Nullopt follows effort (off at 1-3, on at 4-10). Explicit false/true
-  /// overrides that policy independently of quantization. The resolved value
+  /// Nullopt enables smoothing at ordinary e3 and at efforts 4-10.
+  /// Specialized e3 density/error/maximum-throughput recipes retain it off.
+  /// Explicit false/true overrides the policy independently of quantization.
+  /// The resolved value
   /// is signaled to the decoder and used for reconstruction during AQ.
   std::optional<bool> adaptive_dc_smoothing;
 };
+
+/// Effort-three DC-smoothing scope, independent of the serializer intensity.
+[[nodiscard]] constexpr bool UsesOrdinaryEffort3Policy(
+    const VarDctEncodingOptions& options) {
+  return options.effort == 3 &&
+    options.density_mode == VarDctDensityMode::kDefault &&
+    options.rate_control_mode != VarDctRateControlMode::kMaximumError &&
+    options.gpu_aq_mode != GpuAdaptiveQuantizationMode::kMaximumThroughput;
+}
 
 /// Resolve public defaults before reconstruction and memory admission.
 [[nodiscard]] constexpr DcQuantizationMode ResolveDcQuantization(
@@ -155,7 +176,8 @@ struct VarDctEncodingOptions {
 
 [[nodiscard]] constexpr bool ResolveAdaptiveDcSmoothing(
     const VarDctEncodingOptions& options) {
-  return options.adaptive_dc_smoothing.value_or(options.effort >= 4);
+  return options.adaptive_dc_smoothing.value_or(
+    options.effort >= 4 || UsesOrdinaryEffort3Policy(options));
 }
 
 /// Encoder analysis reported without exposing temporary pipeline storage.

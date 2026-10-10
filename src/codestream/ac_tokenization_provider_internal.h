@@ -19,6 +19,9 @@ namespace gjxl::codestream_internal {
 class AcTokenizationProvider {
 public:
   virtual ~AcTokenizationProvider() = default;
+  // Preserve the existing Metal schedule. Other backends can retain the
+  // original Begin / CPU DC / Finish overlap while qualifying earlier entropy.
+  virtual bool SupportsEarlyEntropy() const noexcept { return true; }
   virtual Status Begin(const vardct_frame_internal::VarDctFrameView &frame,
                        const SimpleCoefficientOrders &orders,
                        const SimpleAcNaturalOrders &natural,

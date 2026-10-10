@@ -293,6 +293,10 @@ class CudaBackend final : public GpuBackend,
   friend class CudaPreparedAqEvaluation;
   friend class CudaPreparedExactAqEvaluation;
   friend class CudaPreparedResidentAqEvaluation;
+  friend class CudaAcTokenizer;
+#ifdef GJXL_CUDA_RESIDENT_TOKEN_EXPERIMENT
+  std::atomic<uint32_t> ac_token_capacity_hint_{0};
+#endif
   friend class CudaPreparedDeviceButteraugli;
   friend class CudaPreparedLinearRgbOpsin;
 
@@ -419,6 +423,12 @@ class CudaBackend final : public GpuBackend,
 // Internal lifecycle qualification hook. The caller must quiesce the object.
 [[nodiscard]] Status GetCudaResidentMetadataPendingForTest(
     const PreparedAqEvaluation& prepared, bool* pending);
+
+// Compare generated records and rejection status with the general builder.
+// Does not upload or mutate prepared state; the caller must quiesce the object.
+[[nodiscard]] Status CheckCudaResidentMetadataForTest(
+    const PreparedAqEvaluation& prepared, const AcStrategyGrid& strategies,
+    ConstPlaneU8View epf_sharpness);
 
 // Internal overwrite-coverage hook. The caller must quiesce the object.
 [[nodiscard]] Status PoisonCudaResidentCoefficientReadbackForTest(

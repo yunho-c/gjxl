@@ -45,6 +45,16 @@ jobs:
         run: ./build/cuda-ci/gjxl_cuda_backend_test.exe
       - name: Test native libraries
         run: ctest --test-dir build/cuda-ci --output-on-failure --parallel 1
+      - name: Check production short filters
+        run: |
+          foreach ($check in @('memcheck', 'racecheck', 'synccheck', 'initcheck')) {
+            $log = "$env:GITHUB_WORKSPACE/build/cuda-ci/short-filters-$check.log"
+            & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool $check --error-exitcode 86 "$env:GITHUB_WORKSPACE/build/cuda-ci/gjxl_cuda_direct_short_test.exe" --sanitizer 2>&1 | Tee-Object -FilePath $log
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $output = Get-Content -LiteralPath $log -Raw
+            $summary = if ($check -eq 'racecheck') { 'RACECHECK SUMMARY: 0 hazards' } else { 'ERROR SUMMARY: 0 errors' }
+            if ($output -notmatch 'Verified 45 direct short fixtures and 24 prepared legacy/fused pairs with guarded A/B/A reuse; rejected=29' -or $output -notmatch $summary) { throw "Instrumented short filters/$check did not complete" }
+          }
       - name: Check DC memory accesses
         run: |
           & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool memcheck --error-exitcode 86 "$env:GITHUB_WORKSPACE/build/cuda-ci/gjxl_cuda_dc_processing_test.exe" --report "$env:GITHUB_WORKSPACE/build/cuda-ci/dc-memcheck-complete.txt"
@@ -65,9 +75,33 @@ jobs:
           & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool memcheck --error-exitcode 86 "$env:GITHUB_WORKSPACE/build/cuda-ci/gjxl_cuda_exact_arithmetic_test.exe" --quick "$env:GITHUB_WORKSPACE/build/cuda-ci/exact-arithmetic-memcheck-complete.txt"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if ((Get-Content build/cuda-ci/exact-arithmetic-memcheck-complete.txt -Raw).Trim() -ne 'PASS CUDA exact arithmetic') { throw 'Instrumented exact arithmetic test did not complete' }
+      - name: Check CUDA idle-cache pressure recovery
+        run: |
+          foreach ($check in @('memcheck', 'initcheck')) {
+            $log = "$env:GITHUB_WORKSPACE/build/cuda-ci/pool-$check.log"
+            # The fixture intentionally requests an unsatisfiable allocation;
+            # its assertions check returned status, live ownership and recovery.
+            & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool $check --error-exitcode 86 --report-api-errors no "$env:GITHUB_WORKSPACE/build/cuda-ci/gjxl_cuda_memory_pool_test.exe" 2>&1 | Tee-Object -FilePath $log
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $output = Get-Content -LiteralPath $log -Raw
+            if ($output -notmatch 'CUDA memory pool ownership, reuse, concurrency, and trimming passed' -or $output -notmatch 'ERROR SUMMARY: 0 errors') { throw "Instrumented pool/$check did not complete" }
+          }
       - name: Test CUDA Rust bindings
         working-directory: rust
         run: cargo test --workspace --features cuda
+      # Tokenizer tests are included in the normal native build above.
+      - name: Check CUDA tokenization ownership and policy
+        run: |
+          foreach ($tool in @('memcheck', 'initcheck')) {
+            foreach ($fixture in @('gjxl_cuda_token_provider_test', 'gjxl_cuda_token_workflow_test', 'gjxl_cuda_token_batch_test', 'gjxl_cuda_entropy_readiness_test')) {
+              $log = "$env:GITHUB_WORKSPACE/build/cuda-ci/$fixture-$tool.log"
+              $stdout = "$env:GITHUB_WORKSPACE/build/cuda-ci/$fixture-$tool.stdout.log"
+              & "$env:CUDA_PATH/compute-sanitizer/compute-sanitizer.exe" --tool $tool --error-exitcode 86 --log-file $log "$env:GITHUB_WORKSPACE/build/cuda-ci/$fixture.exe" --smoke 2>&1 | Tee-Object -FilePath $stdout
+              if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+              $completion = if ($fixture -eq 'gjxl_cuda_entropy_readiness_test') { 'Verified transferred-provider lifetime and caller observations.' } else { 'Verified ' }
+              if ((Get-Content $log -Raw) -notmatch 'ERROR SUMMARY: 0 errors' -or (Get-Content $stdout -Raw) -notmatch [regex]::Escape($completion)) { throw "Instrumented $fixture/$tool did not complete" }
+            }
+          }
       - name: Check CUDA Rust incremental rebuilds
         working-directory: rust
         run: python check_native_rebuild.py --features cuda
@@ -82,3 +116,13 @@ jobs:
           path: |
             build/cuda-ci/Testing/Temporary/
             build/cuda-ci/*-complete.txt
+            build/cuda-ci/short-filters-*.log
+            build/cuda-ci/pool-*.log
+            build/cuda-ci/gjxl_cuda_token*-memcheck.log
+            build/cuda-ci/gjxl_cuda_token*-initcheck.log
+            build/cuda-ci/gjxl_cuda_entropy*-memcheck.log
+            build/cuda-ci/gjxl_cuda_entropy*-initcheck.log
+            build/cuda-ci/gjxl_cuda_token*-memcheck.stdout.log
+            build/cuda-ci/gjxl_cuda_token*-initcheck.stdout.log
+            build/cuda-ci/gjxl_cuda_entropy*-memcheck.stdout.log
+            build/cuda-ci/gjxl_cuda_entropy*-initcheck.stdout.log

@@ -1,0 +1,406 @@
+{
+  "aa_aggregate_ratio": 1.0147143375056926,
+  "aa_pairs": 24,
+  "aa_time_change_percent": 1.471433750569262,
+  "ab_pairs": 96,
+  "accepted_pairs": 120,
+  "accepted_processes": 240,
+  "accepted_swap_growth_mb": 0.0,
+  "aggregate_ratio": 0.575277570671126,
+  "block_ratios": [
+    0.5741241942861737,
+    0.5764953429651918
+  ],
+  "checks": {
+    "aa_aggregate": true,
+    "aa_images": true,
+    "aggregate_gain": true,
+    "conditional_interval": true,
+    "no_material_image_regression": true
+  },
+  "conditional_95_ratio": [
+    0.5719324953356867,
+    0.579553969726069
+  ],
+  "conditional_95_time_change_percent": [
+    -42.80675046643133,
+    -42.0446030273931
+  ],
+  "environment_snapshots": 2242,
+  "excluded_pairs": 10,
+  "images": [
+    {
+      "aa_median_ratio": 1.0210399361042581,
+      "aa_ratios": [
+        1.0017281745900204,
+        1.0403516976184957
+      ],
+      "baseline_ms": 12.5684375,
+      "blocks": [
+        0.7241323935879909,
+        0.7218470684831458
+      ],
+      "candidate_ms": 9.0196455,
+      "image_id": "kodak/01",
+      "matching_kind": "secondary-saved-probe-match",
+      "median_ratio": 0.7241323935879909,
+      "paired_ratios": [
+        0.816771925696172,
+        0.6609707827261897,
+        0.7246916434260474,
+        0.7235731437499344,
+        0.7109188025672546,
+        0.7327753343990371,
+        0.691264357035387,
+        0.7738245375740049
+      ]
+    },
+    {
+      "aa_median_ratio": 1.0516399061583892,
+      "aa_ratios": [
+        1.1309223725500284,
+        0.97235743976675
+      ],
+      "baseline_ms": 12.6008955,
+      "blocks": [
+        0.7284199644137404,
+        0.7375884994202451
+      ],
+      "candidate_ms": 9.12325,
+      "image_id": "kodak/08",
+      "matching_kind": "secondary-saved-probe-match",
+      "median_ratio": 0.7321327696533801,
+      "paired_ratios": [
+        0.8235660733598519,
+        0.7303238883334374,
+        0.7265160404940433,
+        0.7215282945962572,
+        0.7669438136365133,
+        0.7171911330451181,
+        0.733941650973323,
+        0.7412353478671673
+      ]
+    },
+    {
+      "aa_median_ratio": 1.0457563253186106,
+      "aa_ratios": [
+        1.0052974326072552,
+        1.086215218029966
+      ],
+      "baseline_ms": 11.9741875,
+      "blocks": [
+        0.7295460678282613,
+        0.7372946009916412
+      ],
+      "candidate_ms": 8.819104,
+      "image_id": "kodak/13",
+      "matching_kind": "secondary-saved-probe-match",
+      "median_ratio": 0.7372946009916412,
+      "paired_ratios": [
+        0.6811813902829187,
+        0.8382783814888224,
+        0.6986350054724386,
+        0.760457130184084,
+        0.7169145222094738,
+        0.7450337958075984,
+        0.7295554061756839,
+        0.7627639775387253
+      ]
+    },
+    {
+      "aa_median_ratio": 0.9979960413552905,
+      "aa_ratios": [
+        1.0055231770127406,
+        0.9904689056978404
+      ],
+      "baseline_ms": 11.3585625,
+      "blocks": [
+        0.6551731038502024,
+        0.6696813672087389
+      ],
+      "candidate_ms": 7.5545835,
+      "image_id": "kodak/23",
+      "matching_kind": "secondary-saved-probe-match",
+      "median_ratio": 0.6620990443677899,
+      "paired_ratios": [
+        0.654353155637727,
+        0.6705045433147859,
+        0.6559930520626778,
+        0.6533921050908853,
+        0.668205036672902,
+        0.6711576977445759,
+        0.6883173780069455,
+        0.6484763881794172
+      ]
+    },
+    {
+      "aa_median_ratio": 1.0051035394884087,
+      "aa_ratios": [
+        1.0026964256403588,
+        1.0075106533364584
+      ],
+      "baseline_ms": 41.208708,
+      "blocks": [
+        0.5759506901784717,
+        0.5801510492315546
+      ],
+      "candidate_ms": 23.867708,
+      "image_id": "clic2024_test/097cb426910ba8ce2525dd8bb7fb1777",
+      "matching_kind": "strict-target",
+      "median_ratio": 0.5791886108394373,
+      "paired_ratios": [
+        0.5814054089989796,
+        0.5735201746208793,
+        0.5698585317644719,
+        0.5783812057360639,
+        0.5737679037775407,
+        0.5803060825202984,
+        0.5814270569615502,
+        0.5799960159428108
+      ]
+    },
+    {
+      "aa_median_ratio": 1.021417977971244,
+      "aa_ratios": [
+        1.026908084614646,
+        1.0159278713278417
+      ],
+      "baseline_ms": 36.951875,
+      "blocks": [
+        0.5972304934841903,
+        0.6059421104983113
+      ],
+      "candidate_ms": 22.0715835,
+      "image_id": "clic2024_test/100a02c269c5948392f283b2aa3bb4da",
+      "matching_kind": "strict-target",
+      "median_ratio": 0.6004394830839808,
+      "paired_ratios": [
+        0.5954885843384146,
+        0.6019065635379954,
+        0.5942269641649763,
+        0.5989724026299661,
+        0.6098057942793154,
+        0.5935010999412639,
+        0.6117444809261077,
+        0.6020784267173072
+      ]
+    },
+    {
+      "aa_median_ratio": 1.0049643024876662,
+      "aa_ratios": [
+        0.9926261661874196,
+        1.017302438787913
+      ],
+      "baseline_ms": 35.3040835,
+      "blocks": [
+        0.5917389515968358,
+        0.5939431683304047
+      ],
+      "candidate_ms": 20.97475,
+      "image_id": "clic2024_test/28d24b9c83de066597ff96a68769884f",
+      "matching_kind": "strict-target",
+      "median_ratio": 0.5922871101055893,
+      "paired_ratios": [
+        0.5912900868649644,
+        0.5830606721494325,
+        0.5923864038824714,
+        0.5921878163287071,
+        0.59538122161122,
+        0.5921087963574624,
+        0.6072106261859582,
+        0.5925051150495895
+      ]
+    },
+    {
+      "aa_median_ratio": 1.0011070053718492,
+      "aa_ratios": [
+        0.9858692477354749,
+        1.0163447630082234
+      ],
+      "baseline_ms": 34.1283335,
+      "blocks": [
+        0.5990082458887067,
+        0.5888413221565971
+      ],
+      "candidate_ms": 20.2896045,
+      "image_id": "clic2024_test/d1a9be98d1936065967adac50a6fb750",
+      "matching_kind": "strict-target",
+      "median_ratio": 0.5948276360529564,
+      "paired_ratios": [
+        0.612400299894155,
+        0.5938476350212888,
+        0.6001204881877793,
+        0.5978960035896342,
+        0.5926193883425693,
+        0.5788358812191107,
+        0.595807637084624,
+        0.585063255970625
+      ]
+    },
+    {
+      "aa_median_ratio": 1.0012510917875348,
+      "aa_ratios": [
+        0.9977373908526204,
+        1.004764792722449
+      ],
+      "baseline_ms": 235.237,
+      "blocks": [
+        0.5479801164535338,
+        0.5460550107930874
+      ],
+      "candidate_ms": 128.1923125,
+      "image_id": "unsplash/alpine_lake/24mp",
+      "matching_kind": "strict-target",
+      "median_ratio": 0.5476779458490342,
+      "paired_ratios": [
+        0.5474937164134002,
+        0.5468199188897442,
+        0.5490141926561458,
+        0.5484665164936676,
+        0.5478621752846681,
+        0.5413492746116452,
+        0.5509842360329863,
+        0.5442478463015067
+      ]
+    },
+    {
+      "aa_median_ratio": 0.9997396957221738,
+      "aa_ratios": [
+        0.9938406948940894,
+        1.0056386965502582
+      ],
+      "baseline_ms": 136.4021455,
+      "blocks": [
+        0.5687709660232676,
+        0.5605305513885795
+      ],
+      "candidate_ms": 76.6014375,
+      "image_id": "unsplash/campus_interior/12mp",
+      "matching_kind": "strict-target",
+      "median_ratio": 0.5622967922052635,
+      "paired_ratios": [
+        0.571415347700609,
+        0.5661265843459262,
+        0.572108491993512,
+        0.5587575835519372,
+        0.5628704404352765,
+        0.5593379588019086,
+        0.5582738682634255,
+        0.5617231439752505
+      ]
+    },
+    {
+      "aa_median_ratio": 1.0191954805491725,
+      "aa_ratios": [
+        1.020938617664687,
+        1.017452343433658
+      ],
+      "baseline_ms": 640.1767085,
+      "blocks": [
+        0.3713576263201996,
+        0.3730629245744512
+      ],
+      "candidate_ms": 239.9155625,
+      "image_id": "unsplash/campus_interior/48mp",
+      "matching_kind": "strict-target",
+      "median_ratio": 0.37151167111131617,
+      "paired_ratios": [
+        0.3654610193635309,
+        0.37155388425142055,
+        0.3711613683889786,
+        0.3761654872471674,
+        0.3753866711962444,
+        0.3746563911776907,
+        0.37141360974362114,
+        0.3714694579712118
+      ]
+    },
+    {
+      "aa_median_ratio": 1.0090753382672237,
+      "aa_ratios": [
+        1.0220243590200155,
+        0.9961263175144318
+      ],
+      "baseline_ms": 633.976125,
+      "blocks": [
+        0.36047635882498386,
+        0.3651302997167477
+      ],
+      "candidate_ms": 230.538583,
+      "image_id": "unsplash/forest_stream/48mp",
+      "matching_kind": "strict-target",
+      "median_ratio": 0.3621441460517504,
+      "paired_ratios": [
+        0.36120106730068113,
+        0.3597516503492866,
+        0.3506713325737414,
+        0.3630872248028196,
+        0.35403321608112864,
+        0.3726078914327709,
+        0.3645493446229064,
+        0.36571125481058897
+      ]
+    }
+  ],
+  "protocol": {
+    "aa_rounds": [
+      1,
+      5
+    ],
+    "aggregation": "Median of five calls per process; median of eight paired ratios per image; equal-image geometric mean across the fixed cohort. Also report both blocks and strict/secondary strata separately. No pooling of absolute image times.",
+    "blocks": 2,
+    "boundary": "warm complete synchronous EncodeLinearRgbVarDctCodestream public call; excludes input loading, process/Metal initialization, output hashing, and file writing",
+    "effort": 5,
+    "exclusion": "Reject whole pair on competing codec/build processes, declared CPU pressure, non-AC power, thermal/performance warnings, swap growth from session start, or monitor error. Decisions never use measured latency.",
+    "maximum_aggregate_other_cpu_percent": 200,
+    "maximum_attempts_per_pair": 12,
+    "maximum_idle_wait_seconds": 600,
+    "maximum_other_process_cpu_percent": 80,
+    "minimum_free_bytes": 5368709120,
+    "monitor_interval_seconds": 1,
+    "order": "Rotate image order by round; alternate reference/test process order by round plus original image index. One same-baseline A/A pair per image before its A/B pair in rounds 1 and 5.",
+    "quality": "Eight original strict target pairs plus four secondary saved-probe matches. Each score in [79.9,80.1], pair difference <=0.05; the four secondary pair differences <=0.01. Distances independently measured per arm.",
+    "quiet_seconds": 20,
+    "rounds": 8,
+    "samples": 5,
+    "scope": "Single-image warm calls on this M4 Pro. No batch, cold-start, CUDA, or paper-row refresh.",
+    "threads": 8,
+    "timing_gates": {
+      "aa_aggregate_ratio_interval": [
+        0.97,
+        1.03
+      ],
+      "aa_image_ratio_interval": [
+        0.9,
+        1.1
+      ],
+      "maximum_aggregate_ratio": 0.85,
+      "maximum_image_ratio": 1.05,
+      "upper_conditional_95_ratio_below": 1.0
+    },
+    "uncertainty": "10000 stratified bootstrap draws resampling process pairs within each fixed image; conditional 95% interval, not a population confidence interval. Seed 20261007.",
+    "version": 1,
+    "warmups": 2
+  },
+  "provenance": {
+    "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-timing-confirmation-20261007/attempts.jsonl": "4690af039e6120bd4002bff78a9e15e397875ced79829b27c13b6697a2651e96",
+    "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-timing-confirmation-20261007/commands.jsonl": "6abbc77594659ebd3d43e5c3c8fcde99fdf6b949c99acfe02b0ee490fa532e3e",
+    "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-timing-confirmation-20261007/environment.jsonl": "1d34049d3087c9231d07d7f2e3731fc6c53bbde44b15c3a77e71475429091882",
+    "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-timing-confirmation-20261007/manifest.json": "f36aa98b8eb4e4bc35e99a4523ad58afbc151e5f8bc5616db168d312532cca97"
+  },
+  "status": "passed",
+  "strata": {
+    "secondary-saved-probe-match": {
+      "images": 4,
+      "ratio": 0.7132519359549461
+    },
+    "strict-target": {
+      "images": 8,
+      "ratio": 0.5166479174093344
+    }
+  },
+  "throughput_factor": 1.7382913066354866,
+  "time_change_percent": -42.472242932887404,
+  "timed_calls": 1200,
+  "total_accepted_encodes": 1920
+}

@@ -84,8 +84,35 @@ Status ComputeAqStoragePlan(const AqStoragePlanOptions &options,
        options.metric != AqEvaluationMetric::kButteraugli))
     return Status::InvalidArgument(
         "Resident strategy storage requires complete resident AQ");
+  if (options.search_epf_sharpness &&
+      (options.frame_only || options.evaluation_free ||
+       options.omit_initial_search_data ||
+       options.metric != AqEvaluationMetric::kButteraugli ||
+       (options.resident_epf_search_reference &&
+        !options.frame_only_resident_initial_quant)))
+    return Status::InvalidArgument("EPF search requires complete AQ storage");
   AqStoragePlan candidate;
   DeviceScratchLayoutPlan persistent, staging;
+  if (options.search_epf_sharpness) {
+    for (size_t i = 0; i < 3; ++i) {
+      status = staging.AddPlane(DeviceElementType::kF32, block_extent,
+                                 block_extent.width, kAqStorageAlignment,
+                                 &candidate.epf_candidate_errors[i]);
+      if (!status.ok()) return status;
+      if (!options.resident_epf_search_reference) {
+        status = persistent.AddPlane(DeviceElementType::kF32, options.coding_extent,
+                                      options.coding_extent.width, kAqStorageAlignment,
+                                      &candidate.epf_search_reference[i]);
+        if (!status.ok()) return status;
+      }
+    }
+    if (!options.resident_epf_search_reference) {
+      status = persistent.AddPlane(DeviceElementType::kF32, options.coding_extent,
+                                    options.coding_extent.width, kAqStorageAlignment,
+                                    &candidate.epf_search_mask);
+      if (!status.ok()) return status;
+    }
+  }
   if (!options.frame_only && !options.evaluation_free &&
       !options.borrowed_original_linear_rgb) {
     for (size_t channel = 0; channel < 3; ++channel) {

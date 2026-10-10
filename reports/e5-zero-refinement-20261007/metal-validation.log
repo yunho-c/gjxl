@@ -1,0 +1,28 @@
+Test project /Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-qualification/candidate-build
+    Start  39: codestream_workflow
+1/4 Test  #39: codestream_workflow ...................   Passed    2.45 sec
+    Start 109: low_effort_strategy_policy
+2/4 Test #109: low_effort_strategy_policy ............   Passed    0.03 sec
+    Start 158: resident_workflow_storage_plan
+3/4 Test #158: resident_workflow_storage_plan ........Subprocess aborted***Exception:   8.33 sec
+2026-10-07 11:54:35.128 gjxl_resident_workflow_storage_plan_test[2695:3221605] Metal API Validation Enabled
+2026-10-07 11:54:35.128 gjxl_resident_workflow_storage_plan_test[2695:3221605] Metal GPU Validation Enabled
+validateComputeFunctionArguments:1272: failed assertion `Functon(gjxl_aq_dc_quantize): total used threadgroupMemoryLength(49152) must be <= 32768.'
+Whole workflow plan shapes: 2240; search bounds: 64
+
+    Start 159: compatibility_workflow_storage_plan
+4/4 Test #159: compatibility_workflow_storage_plan ...Subprocess aborted***Exception:   3.81 sec
+2026-10-07 11:54:43.462 gjxl_compatibility_workflow_storage_plan_test[2808:3222602] Metal API Validation Enabled
+2026-10-07 11:54:43.463 gjxl_compatibility_workflow_storage_plan_test[2808:3222602] Metal GPU Validation Enabled
+validateComputeFunctionArguments:1272: failed assertion `Functon(gjxl_aq_dc_quantize): total used threadgroupMemoryLength(49152) must be <= 32768.'
+Compatibility planning checks: 2800; mixed limits: 64
+
+
+50% tests passed, 2 tests failed out of 4
+
+Total Test time (real) =  14.63 sec
+
+The following tests FAILED:
+	158 - resident_workflow_storage_plan (Subprocess aborted)
+	159 - compatibility_workflow_storage_plan (Subprocess aborted)
+Errors while running CTest

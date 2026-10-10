@@ -79,6 +79,7 @@ struct ResidentAqProfileInputOptions {
   bool resident_strategy_metadata = false;
   bool device_strategy_dispatch = false;
   bool adjust_initial_field = false;
+  bool search_epf_sharpness = false;
 };
 
 struct ResidentAqProfileInputStoragePlan {

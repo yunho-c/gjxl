@@ -10,6 +10,53 @@ admission and publication apply. The CUDA benchmark exports both modes through
 the same schema-4 JSON writer as the Metal benchmark. CUDA stages currently
 identify complete submissions; Metal has finer semantic stage boundaries.
 
+The CUDA benchmark also accepts `--raw-samples FILE.json` to retain the existing
+host workflow and CPU serializer breakdown for every measured encode. For a
+future host-profile run, for example:
+
+```sh
+gjxl_cuda_encoding_benchmark --workload padded_1080p --gpu-aq fully-resident \
+  --effort 1 --cpu-threads 2 --warmups 2 --samples 5 --gpu-only \
+  --raw-samples profiles/cuda-e1-host.json
+```
+
+This separate schema-1 export includes 45 integer `phase_nanoseconds` fields,
+with names shared with the Metal benchmark: workflow preparation/quantization,
+serializer validation, DC/AC tokenization, context and coefficient-order work,
+entropy optimization, section writing and final assembly. It also retains
+serializer counters and selected coding policies, encoded size, CPU participant
+count and AC storage sizes. Run metadata records the device, effort, distance,
+AQ/DC settings, CPU thread request, warmups and requested sample count.
+
+Warmups are excluded. Ordinary CPU/CUDA comparison mode exports two rows per
+sample index with `backend` and the alternating execution `order`; `--gpu-only`
+exports one CUDA row. Add `--raw-samples` to a `--gpu-profile stage|dispatch` run
+to retain host and GPU profiles from the same instrumented calls. Match workload
+name and `sample_index` across the separate files; the extra reference encode
+used for parity validation is excluded. Input and output paths must be distinct.
+Both writers publish after all workloads succeed, each via atomic replacement;
+the pair of files is not a single transaction. Existing console summaries and
+GPU schema-4 output are unchanged.
+
+Both host exporters retain the same complete profile snapshot and share phase
+and entropy-coding serialization helpers. Metal schema 17 and CUDA schema 1
+keep their existing metadata and counter layouts through separate adapters.
+Host and GPU exports share locale-independent JSON file writing and atomic
+replacement. The CPU-only `workflow_profile_json` test checks both host schemas
+against fixtures captured from the pre-refactor writers at `2491a36`; it also
+checks policy labels, escaping, numeric locale handling and failure cleanup.
+
+These are existing diagnostic counters, not new instrumentation. Nested phases
+must not be added to their parents; fields ending in `_work` sum worker time
+and can exceed elapsed wall time. `codestream_total_nanoseconds` is inside the
+workflow's `codestream_encoding` interval. Zero can mean an inactive stage.
+The detailed serializer profile uses its original readiness schedule, so
+optimized overlap available to unprofiled paths (including Metal) may differ.
+Use this export to attribute instrumented costs, keeping paper throughput
+measurements separate. It does not add finer timers inside metadata validation.
+Existing result files that did not retain these counters cannot recover them
+through postprocessing; a later diagnostic run is needed to collect them.
+
 For example, from a CUDA benchmark build:
 
 ```sh

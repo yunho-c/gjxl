@@ -1,0 +1,66 @@
+{
+  "environment": {
+    "MTL_DEBUG_LAYER": "1",
+    "MTL_SHADER_VALIDATION": "1"
+  },
+  "checks": [
+    {
+      "effort": 5,
+      "argv": [
+        "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-qualification/candidate-build/gjxl_metal_qualification",
+        "--effort",
+        "5",
+        "--synthetic",
+        "257x257",
+        "--synthetic",
+        "63x65",
+        "--batch",
+        "4",
+        "--in-flight",
+        "4",
+        "--callers",
+        "2",
+        "--cpu-limit",
+        "8",
+        "--threads",
+        "8",
+        "--limit",
+        "tight",
+        "--count",
+        "3"
+      ],
+      "exit_code": 0,
+      "log": "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-qualification/batch-e5.log",
+      "sha256": "dce3644f1594dc54b15f3223dbabb183c654b4f12165902a587cfaa0642cdcbd"
+    },
+    {
+      "effort": 6,
+      "argv": [
+        "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-qualification/candidate-build/gjxl_metal_qualification",
+        "--effort",
+        "6",
+        "--synthetic",
+        "257x257",
+        "--synthetic",
+        "63x65",
+        "--batch",
+        "4",
+        "--in-flight",
+        "4",
+        "--callers",
+        "2",
+        "--cpu-limit",
+        "8",
+        "--threads",
+        "8",
+        "--limit",
+        "tight",
+        "--count",
+        "3"
+      ],
+      "exit_code": 0,
+      "log": "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-qualification/batch-e6.log",
+      "sha256": "51756192647abfae7f053cb30bf55263d823e39ab362e94df4c12fc23f21ac48"
+    }
+  ]
+}

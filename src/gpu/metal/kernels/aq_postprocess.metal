@@ -520,3 +520,91 @@ GJXL_EPF_LINEAR_TILED(gjxl_aq_epf_pass2_linear_tile32x4_p2, 2)
 #undef GJXL_EPF_LINEAR_DIRECT
 #undef GJXL_EPF_LINEAR_TILED
 #undef GJXL_EPF_ARGUMENTS
+
+struct AqEpfSearchParams {
+  uint width;
+  uint height;
+  uint reference_stride;
+  uint image_stride;
+  uint mask_stride;
+  uint block_width;
+  uint block_height;
+  uint error_stride;
+  uint sharpness_stride;
+  float no_smoothing_bias;
+  uint candidate_count;
+  uint candidates[3];
+};
+
+// One SIMD group scores one clipped 8x8 block; each lane reads at most two
+// pixels. The three channel sums stay separate until the weighted reduction.
+kernel void gjxl_aq_epf_search_error(
+    device const float* reference_x [[buffer(0)]],
+    device const float* reference_y [[buffer(1)]],
+    device const float* reference_b [[buffer(2)]],
+    device const float* image_x [[buffer(3)]],
+    device const float* image_y [[buffer(4)]],
+    device const float* image_b [[buffer(5)]],
+    device const float* mask [[buffer(6)]],
+    device float* errors [[buffer(7)]],
+    device atomic_uint* error [[buffer(8)]],
+    constant AqEpfSearchParams& params [[buffer(9)]],
+    uint lane [[thread_index_in_simdgroup]],
+    uint2 block [[threadgroup_position_in_grid]]) {
+  float3 sum(0.0f);
+  for (uint pixel = lane; pixel < 64u; pixel += 32u) {
+    const uint2 p = block * 8u + uint2(pixel % 8u, pixel / 8u);
+    if (p.x >= params.width || p.y >= params.height) continue;
+    const uint r = p.y * params.reference_stride + p.x;
+    const uint i = p.y * params.image_stride + p.x;
+    const float m = mask[p.y * params.mask_stride + p.x];
+    const float3 delta(reference_x[r] - image_x[i], reference_y[r] - image_y[i],
+                       reference_b[r] - image_b[i]);
+    if (!isfinite(m) || m < 0.0f || !all(isfinite(delta)))
+      atomic_fetch_or_explicit(error, 1u << 29, memory_order_relaxed);
+    sum += (m * m) * delta * delta;
+  }
+  const float x = simd_sum(sum.x);
+  const float y = simd_sum(sum.y);
+  const float b = simd_sum(sum.z);
+  if (lane == 0u) {
+    const float value = 12.339445295782363f * x + y + 0.2f * b;
+    if (!isfinite(value) || value < 0.0f)
+      atomic_fetch_or_explicit(error, 1u << 29, memory_order_relaxed);
+    errors[block.y * params.error_stride + block.x] = value;
+  }
+}
+
+kernel void gjxl_aq_epf_search_select(
+    device const float* error0 [[buffer(0)]],
+    device const float* error1 [[buffer(1)]],
+    device const float* error2 [[buffer(2)]],
+    device uchar* sharpness [[buffer(3)]],
+    device atomic_uint* error [[buffer(4)]],
+    constant AqEpfSearchParams& params [[buffer(5)]],
+    uint2 block [[thread_position_in_grid]]) {
+  if (block.x >= params.block_width || block.y >= params.block_height) return;
+  const uint output = block.y * params.sharpness_stride + block.x;
+  if (params.candidate_count == 0u) {
+    sharpness[output] = 4u;
+    return;
+  }
+  const uint index = block.y * params.error_stride + block.x;
+  float best_error = error0[index] * params.no_smoothing_bias;
+  uchar best = uchar(params.candidates[0]);
+  const float second = error1[index];
+  if (!isfinite(best_error) || best_error < 0.0f ||
+      !isfinite(second) || second < 0.0f)
+    atomic_fetch_or_explicit(error, 1u << 29, memory_order_relaxed);
+  if (second < best_error) {
+    best_error = second;
+    best = uchar(params.candidates[1]);
+  }
+  if (params.candidate_count == 3u) {
+    const float third = error2[index];
+    if (!isfinite(third) || third < 0.0f)
+      atomic_fetch_or_explicit(error, 1u << 29, memory_order_relaxed);
+    if (third < best_error) best = uchar(params.candidates[2]);
+  }
+  sharpness[output] = best;
+}

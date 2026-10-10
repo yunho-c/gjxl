@@ -227,6 +227,9 @@ public:
           {
             .quant_field = quant_field,
             .quant_dc = quant_dc,
+            .epf_sharpness_search_target =
+                is_final_evaluation && options_.search_epf_sharpness
+                    ? options_.butteraugli_target : 0.0f,
           },
           prepared_output);
         if (!resident_status.ok()) return resident_status;
@@ -279,7 +282,7 @@ public:
                 .epf_sharpness = epf_sharpness_,
             },
             options_.profile, &exact_coefficients,
-            AcCoefficientDecisionMode::kAdjustedSharedQuant,
+            options_.coefficient_decision_mode,
             options_.dc_quantization, options_.dc_prediction);
         if (!status.ok()) {
           return status;
@@ -331,6 +334,9 @@ public:
           .y_to_b = y_to_b,
           .epf_inverse_sigma = {
             inverse_sigma.data(), block_extent, block_extent.width},
+          .epf_sharpness_search_target =
+              is_final_evaluation && options_.search_epf_sharpness
+                  ? options_.butteraugli_target : 0.0f,
       };
       if (mode_ == GpuAdaptiveQuantizationMode::kExactCoefficients) {
         prepared_input.exact_coefficients = &exact_coefficients;
@@ -487,9 +493,11 @@ Status RunGpuAdaptiveQuantizationImpl(
     .evaluation_free =
       mode != GpuAdaptiveQuantizationMode::kExactCoefficients &&
       options.iterations == 0 && !materialization.final_perceptual_evaluation &&
+      !options.search_epf_sharpness &&
       options.control_mode == AdaptiveQuantizationControlMode::kButteraugli,
     .dc_quantization = options.dc_quantization,
     .dc_prediction = options.dc_prediction,
+    .search_epf_sharpness = options.search_epf_sharpness,
   };
   const bool resident_quantization =
     mode != GpuAdaptiveQuantizationMode::kExactCoefficients;
@@ -511,7 +519,8 @@ Status RunGpuAdaptiveQuantizationImpl(
     .options = evaluation_options,
     .resident_quantization = resident_quantization,
     .coefficient_decision_mode =
-      AcCoefficientDecisionMode::kAdjustedSharedQuant,
+      options.coefficient_decision_mode,
+    .epf_search_reference = options.epf_search_reference,
   };
   const auto prepare_evaluation =
     [&](std::unique_ptr<PreparedAqEvaluation>* destination) {
@@ -556,8 +565,14 @@ Status RunGpuAdaptiveQuantizationImpl(
     };
     const bool same_preparation =
       reusable->evaluation != nullptr && reusable->backend == &gpu &&
+      reusable->coefficient_decision_mode == options.coefficient_decision_mode &&
       same_image(reusable->original_linear_rgb, original_linear_rgb) &&
       same_image(reusable->coding_opsin, opsin) &&
+      (!options.search_epf_sharpness || reusable->resident_epf_search_reference ||
+       (same_image(reusable->epf_search_reference.original_opsin,
+                   options.epf_search_reference.original_opsin) &&
+        same_plane(reusable->epf_search_reference.pixel_mask,
+                    options.epf_search_reference.pixel_mask))) &&
       SameDeviceImageIdentity(reusable->input_resident_original_linear_rgb,
         materialization.resident_original_linear_rgb) &&
       SameDeviceImageIdentity(reusable->input_resident_coding_opsin,
@@ -583,6 +598,7 @@ Status RunGpuAdaptiveQuantizationImpl(
           compatible = status.ok();
           if (compatible) {
             reusable->evaluation_options = evaluation_options;
+            reusable->coefficient_decision_mode = options.coefficient_decision_mode;
           }
         }
       }
@@ -619,6 +635,9 @@ Status RunGpuAdaptiveQuantizationImpl(
         reusable->input_resident_coding_opsin =
           materialization.resident_coding_opsin;
         reusable->evaluation_options = evaluation_options;
+        reusable->epf_search_reference = options.epf_search_reference;
+        reusable->resident_epf_search_reference = false;
+        reusable->coefficient_decision_mode = options.coefficient_decision_mode;
         reusable->resident_quantization = resident_quantization;
         reusable->omit_initial_search_data = false;
         reusable->frame_only_resident_frontend = false;
@@ -1061,7 +1080,7 @@ Status RunGpuFrameOnlyQuantizationImpl(
           options.profile.loop_filter.gaborish,
         .resident_initial_cfl = resident_initial_cfl,
         .coefficient_decision_mode =
-          AcCoefficientDecisionMode::kAdjustedSharedQuant,
+          options.coefficient_decision_mode,
       },
       &prepared);
     if (!status.ok()) return status;
@@ -1187,7 +1206,7 @@ static Status RunPreparedGpuFrameOnlyQuantizationResidentFrontendImpl(
       .frame_only_resident_initial_quant = true,
       .frame_only_resident_quantizer = true,
       .coefficient_decision_mode =
-        AcCoefficientDecisionMode::kAdjustedSharedQuant,
+        options.coefficient_decision_mode,
     };
     const auto same_plane = [](ConstPlaneF32View left,
                                ConstPlaneF32View right) {
@@ -1210,6 +1229,7 @@ static Status RunPreparedGpuFrameOnlyQuantizationResidentFrontendImpl(
     } else {
       const bool same_preparation =
         reusable->evaluation != nullptr && reusable->backend == &gpu &&
+        reusable->coefficient_decision_mode == options.coefficient_decision_mode &&
         same_image(reusable->original_linear_rgb, original_linear_rgb) &&
         same_image(reusable->coding_opsin, opsin) &&
         SameDeviceImageIdentity(reusable->input_resident_original_linear_rgb,
@@ -1247,6 +1267,7 @@ static Status RunPreparedGpuFrameOnlyQuantizationResidentFrontendImpl(
         }
         if (status.ok()) {
           reusable->evaluation_options = evaluation_options;
+          reusable->coefficient_decision_mode = options.coefficient_decision_mode;
         }
       } else {
         reusable->resident_coding_opsin = {};
@@ -1258,6 +1279,7 @@ static Status RunPreparedGpuFrameOnlyQuantizationResidentFrontendImpl(
           reusable->original_linear_rgb = original_linear_rgb;
           reusable->coding_opsin = opsin;
           reusable->evaluation_options = evaluation_options;
+          reusable->coefficient_decision_mode = options.coefficient_decision_mode;
           reusable->resident_quantization = false;
           reusable->frame_only_resident_frontend = true;
         }
@@ -1271,6 +1293,7 @@ static Status RunPreparedGpuFrameOnlyQuantizationResidentFrontendImpl(
           reusable->original_linear_rgb = original_linear_rgb;
           reusable->coding_opsin = opsin;
           reusable->evaluation_options = evaluation_options;
+          reusable->coefficient_decision_mode = options.coefficient_decision_mode;
           reusable->resident_quantization = false;
           reusable->frame_only_resident_frontend = true;
         }

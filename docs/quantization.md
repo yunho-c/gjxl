@@ -244,6 +244,14 @@ outputs expose the initial maps, a completed
 `VarDctEncoderFrame`, the final float quant field, score history, block distance
 map, and reconstructed linear RGB image.
 
+When enabled by the encoding policy, EPF sharpness search runs on the final
+quantized reconstruction. AQ updates retain sharpness 4; the final search
+compares globally filtered candidate reconstructions and selects one sharpness
+per 8-by-8 block. The selected map is stored in the frame and applied before
+any requested final perceptual score. See
+[`epf-sharpness-search.md`](epf-sharpness-search.md) for the effort and distance
+gates, libjxl reference semantics, and CPU/Metal implementation.
+
 The integration corpus covers odd dimensions and edge padding, gradients,
 texture, hard edges, saturated primaries, and a 64-pixel CfL tile boundary.
 Earlier pinned fixtures cover initial-AQ encoding-tile boundaries, individual

@@ -17,8 +17,9 @@ automatic/maximum entropy-search control. Execution policy belongs to a
 reusable context, and pixel memory belongs to a separate non-owning image view.
 
 DC quantization and adaptive DC smoothing default to effort-dependent automatic
-selection: ordinary rounding/no smoothing at efforts 1–3, prediction-aware
-quantization plus smoothing at 4–10. Explicit values override each independently;
+selection: ordinary rounding at efforts 1–3, prediction-aware quantization at
+4–10, and smoothing enabled from effort 3. Ordinary e1–4 retain the initial
+AC quantizer with fixed Y thresholds. Explicit DC values override each independently;
 the 28-byte layout and earlier field offsets are unchanged. See
 [DC controls and ABI values](dc-processing.md#controls-and-reconstruction-contract).
 
@@ -294,10 +295,15 @@ behavior:
 | Effort | AQ updates | Entropy behavior |
 | ---: | ---: | --- |
 | 1-4 | 0 | Balanced |
-| 5-6 | 1 | Balanced |
+| 5 | 0 | Balanced |
+| 6 | 1 | Balanced |
 | 7 | 2 | Balanced default |
 | 8 | 3 | Rate optimized, with balanced whole-file fallback |
 | 9-10 | 4 | Rate optimized, with balanced whole-file fallback |
+
+Effort 5 enables mixed-transform search, spatial initial quantization, and
+Gaborish without perceptual refinement. Effort 6 adds the first refinement
+update. High-density and maximum-error overrides retain their existing policy.
 
 Ordinary fully resident Metal efforts 8-10 also share eight-step nonlinear
 final chroma-from-luma. CPU and explicit exact/throughput frontend modes retain

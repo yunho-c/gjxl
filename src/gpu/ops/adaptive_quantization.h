@@ -191,6 +191,10 @@ struct PreparedAdaptiveQuantization {
   ConstImage3FView original_linear_rgb;
   ConstImage3FView coding_opsin;
   AqEvaluationOptions evaluation_options;
+  EpfSharpnessSearchReference epf_search_reference;
+  bool resident_epf_search_reference = false;
+  AcCoefficientDecisionMode coefficient_decision_mode =
+    AcCoefficientDecisionMode::kAdjustedSharedQuant;
   bool resident_quantization = false;
   bool omit_initial_search_data = false;
   bool frame_only_resident_frontend = false;

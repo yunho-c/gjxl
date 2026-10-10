@@ -44,6 +44,8 @@ struct AqStoragePlanOptions {
   uint8_t extra_dc_precision = 0;
   bool adaptive_dc_smoothing = false;
   bool resident_strategy_metadata = false;
+  bool search_epf_sharpness = false;
+  bool resident_epf_search_reference = false;
 };
 
 struct AqStoragePlan {
@@ -56,6 +58,9 @@ struct AqStoragePlan {
   DevicePlaneLayout strategies;
   DevicePlaneLayout anchors;
   DevicePlaneLayout epf_sharpness;
+  std::array<DevicePlaneLayout, 3> epf_candidate_errors;
+  std::array<DevicePlaneLayout, 3> epf_search_reference;
+  DevicePlaneLayout epf_search_mask;
   DevicePlaneLayout quant_tables;
   DevicePlaneLayout color_transform_records;
   DevicePlaneLayout color_tile_offsets;
