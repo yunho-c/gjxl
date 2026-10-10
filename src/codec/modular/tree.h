@@ -46,7 +46,8 @@ struct TreeLayout {
       result.context[id] = static_cast<uint8_t>(result.leaves++);
       result.weighted |= n.predictor == Predictor::kWeighted;
     } else {
-      if (n.property < 0 || n.property >= kPropertyCount || queued + 2 > tree.size)
+      if (n.property < 0 || static_cast<size_t>(n.property) >= kPropertyCount ||
+          queued + 2 > tree.size)
         return Status::InvalidArgument("Unsupported Modular tree property or shape");
       const auto [lower, upper] = ranges[id][n.property];
       if (n.split < lower || n.split >= upper)
