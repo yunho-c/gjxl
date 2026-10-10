@@ -1391,6 +1391,86 @@ bool CheckPreparedGpuAttemptReuse() {
   return true;
 }
 
+bool CheckFixedRawQuantizationReuse() {
+  using namespace gjxl;
+  using namespace gjxl::quantization_pipeline_internal;
+  ImageStorage original(kOriginalExtent), padded(kPaddedExtent), opsin(kPaddedExtent);
+  FillImages(&original, &padded);
+  if (!LinearRgbToOpsin(padded.ConstView(), 255.0f, opsin.View()).ok()) return false;
+  std::unique_ptr<GpuBackend> gpu;
+  if (!CreateMetalBackend(kMetalLibraryPath, &gpu).ok()) return false;
+  CpuQuantizationPipelineOptions options;
+  options.butteraugli_target = 1.9f;
+  options.fixed_dct8 = true;
+  options.uniform_initial_quantization = true;
+  options.adaptive_quantization.iterations = 0;
+  options.adaptive_quantization.profile.loop_filter.gaborish = false;
+  options.adaptive_quantization.profile.adaptive_dc_smoothing = true;
+  for (auto mode : {GpuAdaptiveQuantizationMode::kExactCoefficients,
+                    GpuAdaptiveQuantizationMode::kFullyResident,
+                    GpuAdaptiveQuantizationMode::kThroughput}) {
+    PreparedQuantizationPipeline host;
+    adaptive_quantization_gpu_internal::PreparedAdaptiveQuantization cached;
+    auto status = PrepareQuantizationPipeline(
+      original.ConstView(), opsin.ConstView(), options, &host, false);
+    if (!status.ok()) return false;
+    std::vector<uint8_t> adjusted_bytes;
+    for (auto decision : {AcCoefficientDecisionMode::kAdjustedSharedQuant,
+                          AcCoefficientDecisionMode::kFixedRawQuant,
+                          AcCoefficientDecisionMode::kFixedRawQuant,
+                          AcCoefficientDecisionMode::kAdjustedSharedQuant}) {
+      options.adaptive_quantization.coefficient_decision_mode = decision;
+      PipelineStorage fresh(kOriginalExtent, kPaddedExtent);
+      PipelineStorage reused(kOriginalExtent, kPaddedExtent);
+      status = RunGpuQuantizationPipeline(*gpu, original.ConstView(),
+        opsin.ConstView(), options, mode, fresh.Output());
+      if (status.ok()) status = RunPreparedGpuQuantizationPipeline(
+        *gpu, original.ConstView(), host, options, mode,
+        reused.Output(), nullptr, &cached);
+      std::vector<uint8_t> bytes;
+      if (status.ok()) status = EncodeVarDctCodestream(reused.frame, &bytes);
+      if (!status.ok() || !FramesEqual(fresh.frame, reused.frame) ||
+          fresh.scores != reused.scores ||
+          MaximumImageError(fresh.reconstructed, reused.reconstructed) != 0.0) {
+        std::cerr << "AC decision mode reused stale GPU state: "
+                  << status.message() << '\n';
+        return false;
+      }
+      if (decision == AcCoefficientDecisionMode::kFixedRawQuant) {
+        const auto raw = reused.frame.raw_quant_field();
+        for (size_t y = 0; y < raw.extent.height; ++y)
+          for (size_t x = 0; x < raw.extent.width; ++x)
+            // The low-level throughput API requests one AQ update; its input
+            // field is spatial even when initialization was uniform.
+            if (mode != GpuAdaptiveQuantizationMode::kThroughput &&
+                raw.Row(y)[x] != raw.Row(0)[0]) {
+              std::cerr << "Fixed raw coding changed the uniform quantizer\n";
+              return false;
+            }
+        if (bytes == adjusted_bytes) {
+          std::cerr << "AC bypass did not change the discriminating fixture\n";
+          return false;
+        }
+      } else if (adjusted_bytes.empty()) {
+        adjusted_bytes = bytes;
+      } else if (bytes != adjusted_bytes) {
+        std::cerr << "Restoring AC adjustment retained fixed-raw output\n";
+        return false;
+      }
+      if (mode == GpuAdaptiveQuantizationMode::kExactCoefficients) {
+        PipelineStorage cpu(kOriginalExtent, kPaddedExtent);
+        status = RunCpuQuantizationPipeline(original.ConstView(),
+          opsin.ConstView(), options, cpu.Output());
+        if (!status.ok() || !FramesEqual(cpu.frame, reused.frame)) {
+          std::cerr << "CPU/exact GPU AC policy mismatch\n";
+          return false;
+        }
+      }
+    }
+  }
+  return true;
+}
+
 bool CheckWorkflowBackendSelection() {
   constexpr gjxl::Extent2D kExtent{128, 96};
   ImageStorage original(kExtent);
@@ -1510,7 +1590,7 @@ bool CheckWorkflowBackendSelection() {
   // Low-frequency conversion is part of the CPU-authoritative exact prefix.
   // With both DC controls enabled, a redundant FP32 conversion used to change
   // later AQ decisions on this fixture (537 CPU bytes versus 778 Metal bytes).
-  for (int effort : {4, 7}) {
+  for (int effort : {1, 2, 3, 4, 7}) {
     for (auto prediction : {gjxl::VarDctDcPrediction::kGradient,
                             gjxl::VarDctDcPrediction::kWeighted}) {
       for (auto quantization : {gjxl::DcQuantizationMode::kRound,
@@ -2301,6 +2381,7 @@ int main(int argc, char **argv) {
       !CheckGpuGaborish() ||
       !CheckGpuPipelineParity() || !CheckMaximumThroughputFrontendParity() ||
       !CheckDefaultUpdatePipelineParity() || !CheckPreparedGpuAttemptReuse() ||
+      !CheckFixedRawQuantizationReuse() ||
       !CheckWorkflowBackendSelection()) {
     return EXIT_FAILURE;
   }

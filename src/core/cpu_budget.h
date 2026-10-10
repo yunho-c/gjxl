@@ -163,6 +163,14 @@ public:
     return *this;
   }
   [[nodiscard]] size_t count() const noexcept { return count_; }
+  /// Transfer pending slots without releasing their protected capacity.
+  /// Only the owner may split, before any worker can call Take().
+  [[nodiscard]] CpuWorkerReservation SplitOff(size_t count) noexcept {
+    assert(taken_.load(std::memory_order_relaxed) == 0 && count <= count_);
+    if (count == 0) return {};
+    count_ -= count;
+    return CpuWorkerReservation(state_, count);
+  }
   /// Return excess pending slots before any worker can call Take().
   void KeepAtMost(size_t maximum) noexcept {
     assert(taken_.load(std::memory_order_relaxed) == 0);

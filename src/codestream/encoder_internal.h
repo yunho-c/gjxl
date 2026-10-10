@@ -88,6 +88,9 @@ template <typename Allocator>
   });
 }
 
+/// Detailed phase profiling retains the original entropy-readiness schedule.
+/// Its additive phase durations do not measure the early-entropy default used
+/// by ordinary single-image calls and the public timing-only workflow API.
 struct VarDctCodestreamProfile {
   // Per-frame layout; workflow profiling retains the last attempt's counts.
   size_t dc_sample_count = 0;

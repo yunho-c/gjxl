@@ -1,0 +1,188 @@
+diff --git a/docs/c-api.md b/docs/c-api.md
+index d3d1317..72b72c1 100644
+--- a/docs/c-api.md
++++ b/docs/c-api.md
+@@ -294,11 +294,16 @@ behavior:
+ | Effort | AQ updates | Entropy behavior |
+ | ---: | ---: | --- |
+ | 1-4 | 0 | Balanced |
+-| 5-6 | 1 | Balanced |
++| 5 | 0 | Balanced |
++| 6 | 1 | Balanced |
+ | 7 | 2 | Balanced default |
+ | 8 | 3 | Rate optimized, with balanced whole-file fallback |
+ | 9-10 | 4 | Rate optimized, with balanced whole-file fallback |
+ 
++Effort 5 enables mixed-transform search, spatial initial quantization, and
++Gaborish without perceptual refinement. Effort 6 adds the first refinement
++update. High-density and maximum-error overrides retain their existing policy.
++
+ Ordinary fully resident Metal efforts 8-10 also share eight-step nonlinear
+ final chroma-from-luma. CPU and explicit exact/throughput frontend modes retain
+ their established final color-correlation policy. Effort 9 adds the fourth AQ
+diff --git a/docs/low-effort-dct8.md b/docs/low-effort-dct8.md
+index abb43b4..077bbb1 100644
+--- a/docs/low-effort-dct8.md
++++ b/docs/low-effort-dct8.md
+@@ -3,7 +3,8 @@
+ Ordinary efforts 1–4 select DCT8 for every 8×8 base block without invoking
+ AC-strategy search. They disable Gaborish and initialize every quantization
+ block to `0.79 / distance`, matching libjxl’s e1–4 initialization boundary.
+-Effort 5 enables mixed-transform search, spatial initialization, and Gaborish.
++Effort 5 enables mixed-transform search, spatial initialization, and Gaborish
++without perceptual refinement. Effort 6 adds the first refinement update.
+ Ordinary effort 4 now skips perceptual AQ refinement, like efforts 1–3.
+ It also enables the [default DC integer-mapping search](entropy-defaults.md)
+ under automatic compression; native context-map compression applies at every
+@@ -13,10 +14,11 @@ The adaptive-quantization update schedule is:
+ | Effort | Transform selection | AQ updates |
+ | --- | --- | --- |
+ | 1–4 | Fixed DCT8 | 0 |
+-| 5–6 | Mixed-transform search | 1 |
++| 5 | Mixed-transform search | 0 |
++| 6 | Mixed-transform search | 1 |
+ | 7 | Mixed-transform search | 2 |
+-| 8–9 | Mixed-transform search | 3 |
+-| 10 | Mixed-transform search | 4 |
++| 8 | Mixed-transform search | 3 |
++| 9–10 | Mixed-transform search | 4 |
+ 
+ The high-density and maximum-error overrides retain their existing search
+ and refinement behavior; high density still requests four AQ updates.
+diff --git a/include/gjxl/gjxl.h b/include/gjxl/gjxl.h
+index 2c21ee3..b22909a 100644
+--- a/include/gjxl/gjxl.h
++++ b/include/gjxl/gjxl.h
+@@ -132,6 +132,9 @@ typedef struct {
+   /// Speed/refinement intent in [1, 10]. Efforts 1-4 use DCT8, disable Gaborish, and start with a uniform
+   /// quantization field with zero AQ updates;
+   /// efforts 5-10 enable mixed-transform AC-strategy search.
++  /// Ordinary effort 5 retains spatial initialization and Gaborish with zero
++  /// AQ updates; effort 6 adds one update. High-density and maximum-error
++  /// overrides preserve their existing refinement policies.
+   /// Efforts 8-10 share the rate-optimized writer and, on ordinary fully
+   /// resident Metal, eight-step nonlinear final chroma-from-luma.
+   /// Effort 8 uses three AQ updates; efforts 9-10 use four. Ordinary effort 10
+diff --git a/src/codestream/workflow.h b/src/codestream/workflow.h
+index 1179c3f..2420622 100644
+--- a/src/codestream/workflow.h
++++ b/src/codestream/workflow.h
+@@ -76,7 +76,8 @@ struct VarDctEncodingOptions {
+   /// block; efforts 5-9 use two-block spacing for these larger families.
+   /// In the ordinary policy, efforts 1-4 use DCT8, disable Gaborish, and
+   /// start with a uniform quantization field and run zero AQ updates.
+-  /// Efforts 5-6 enable mixed-transform AC search and run one AQ update.
++  /// Effort 5 enables mixed-transform AC search, spatial initialization, and
++  /// Gaborish with zero AQ updates. Effort 6 adds one AQ update.
+   /// High-density and maximum-error overrides preserve their existing
+   /// refinement and mixed-transform search behavior.
+   /// Ordinary automatic effort 4 also searches DC integer mappings when DC
+diff --git a/src/codestream/workflow_internal.h b/src/codestream/workflow_internal.h
+index 6543626..f251493 100644
+--- a/src/codestream/workflow_internal.h
++++ b/src/codestream/workflow_internal.h
+@@ -46,9 +46,9 @@ namespace gjxl::codestream_internal {
+   const VarDctEncodingOptions& options) noexcept {
+   if (options.density_mode == VarDctDensityMode::kHighDensity) return 4;
+   if (options.effort <= 3) return 0;
+-  // Ordinary e4 skips perceptual refinement; explicit error/density recipes
++  // Ordinary e4-5 skip perceptual refinement; explicit error/density recipes
+   // retain their existing update policy.
+-  if (options.effort == 4 &&
++  if (options.effort <= 5 &&
+       options.density_mode == VarDctDensityMode::kDefault &&
+       options.rate_control_mode != VarDctRateControlMode::kMaximumError) return 0;
+   if (options.effort <= 6) return 1;
+diff --git a/tests/codestream_workflow_test.cpp b/tests/codestream_workflow_test.cpp
+index 4482638..98542c5 100644
+--- a/tests/codestream_workflow_test.cpp
++++ b/tests/codestream_workflow_test.cpp
+@@ -616,7 +616,7 @@ bool CheckEffortPolicy() {
+     {2, 1},
+     {3, 1},
+     {4, 1},
+-    {5, 2},
++    {5, 1},
+     {6, 2},
+     {7, 3},
+     {8, 4},
+@@ -670,11 +670,9 @@ bool CheckEffortPolicy() {
+   }
+ 
+ #if GJXL_TEST_HAS_METAL
+-  for (const int32_t effort : {1, 2, 3, 4, 5, 7, 8, 9, 10}) {
++  for (const int32_t effort : {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}) {
+     const size_t index = static_cast<size_t>(effort - 1);
+-    const size_t expected_score_count = effort <= 4
+-      ? 0
+-      : kCases[index].expected_score_count - 1;
++    const size_t expected_score_count = kCases[index].expected_score_count - 1;
+     std::vector<uint8_t> bytes;
+     gjxl::VarDctEncodingSummary summary;
+     status = gjxl::EncodeLinearRgbVarDctCodestream(
+@@ -705,7 +703,7 @@ bool CheckEffortPolicy() {
+       std::cerr << "Low Metal effort selected a non-DCT8 strategy\n";
+       return false;
+     }
+-    if (effort <= 4) {
++    if (effort <= 5) {
+       std::vector<uint8_t> scored_bytes;
+       gjxl::VarDctEncodingSummary scored_summary;
+       status = gjxl::EncodeLinearRgbVarDctCodestream(
+diff --git a/tests/low_effort_strategy_policy_test.cpp b/tests/low_effort_strategy_policy_test.cpp
+index 689b983..0867b2c 100644
+--- a/tests/low_effort_strategy_policy_test.cpp
++++ b/tests/low_effort_strategy_policy_test.cpp
+@@ -23,7 +23,7 @@ bool Check(bool ok, const char* message) {
+ }
+ 
+ bool CheckPolicy() {
+-  constexpr std::array<size_t, 10> updates{0, 0, 0, 0, 1, 1, 2, 3, 4, 4};
++  constexpr std::array<size_t, 10> updates{0, 0, 0, 0, 0, 1, 2, 3, 4, 4};
+   constexpr std::array<size_t, 10> error_updates{0, 0, 0, 1, 1, 1, 2, 3, 4, 4};
+   for (int effort = 1; effort <= 10; ++effort) {
+     for (auto density : {VarDctDensityMode::kDefault,
+@@ -157,9 +157,9 @@ bool CheckSearchStorage() {
+   cpu.encoding.effort = 5;
+   if (!Check(ComputeCpuWorkflowStoragePlan({257, 257}, cpu, &cpu_search).ok() &&
+                cpu_fixed.frontend.peak_bytes < cpu_search.frontend.peak_bytes &&
+-               cpu_fixed.score_count == 1 && cpu_search.score_count == 2 &&
++               cpu_fixed.score_count == 1 && cpu_search.score_count == 1 &&
+                cpu_fixed.aq.policy.evaluations == 1 &&
+-               cpu_search.aq.policy.evaluations == 2,
++               cpu_search.aq.policy.evaluations == 1,
+              "CPU low-effort search storage or AQ evaluation count is wrong"))
+     return false;
+ #if GJXL_TEST_HAS_METAL
+@@ -170,14 +170,26 @@ bool CheckSearchStorage() {
+   if (!Check(ComputeResidentWorkflowStoragePlan({257, 257}, metal, &fixed).ok(),
+              "Fixed resident plan failed")) return false;
+   metal.encoding.effort = 5;
+-  return Check(ComputeResidentWorkflowStoragePlan({257, 257}, metal, &search).ok() &&
++  if (!Check(ComputeResidentWorkflowStoragePlan({257, 257}, metal, &search).ok() &&
+                  fixed.device_bytes < search.device_bytes &&
+                  fixed.frontend.peak_bytes < search.frontend.peak_bytes &&
+-                 fixed.score_count == 0 && search.score_count == 1,
+-               "Resident low-effort search storage or AQ count is wrong");
+-#else
+-  return true;
++                 fixed.score_count == 0 && search.score_count == 0,
++               "Resident low-effort search storage or AQ count is wrong"))
++    return false;
++  metal.encoding.effort = 6;
++  ResidentWorkflowStoragePlan refined;
++  if (!Check(ComputeResidentWorkflowStoragePlan({257, 257}, metal, &refined).ok() &&
++                 refined.score_count == 1 &&
++                 search.device_bytes < refined.device_bytes,
++             "Resident e6 did not add perceptual evaluation storage"))
++    return false;
+ #endif
++  cpu.encoding.effort = 6;
++  CpuWorkflowStoragePlan cpu_refined;
++  return Check(ComputeCpuWorkflowStoragePlan({257, 257}, cpu, &cpu_refined).ok() &&
++                 cpu_refined.score_count == 2 &&
++                 cpu_refined.aq.policy.evaluations == 2,
++               "CPU e6 did not add a refinement update");
+ }
+ }  // namespace
+ 

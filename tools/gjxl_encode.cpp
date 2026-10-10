@@ -643,7 +643,7 @@ int main(int argc, char** argv) {
       linear_rgb.const_view(),
       {.butteraugli_target = options.butteraugli_target,
        .effort = options.effort,
-       .adaptive_epf_sharpness = options.adaptive_epf_sharpness.value_or(true),
+       .adaptive_epf_sharpness = options.adaptive_epf_sharpness.value_or(false),
        .density_mode = options.density_mode,
        .compression_mode = options.compression_mode,
        .rate_control_mode = options.rate_control_mode,

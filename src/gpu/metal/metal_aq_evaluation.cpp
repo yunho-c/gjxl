@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include "codec/host_metadata_internal.h"
 #include "gpu/metal/metal_aq_evaluation_internal.h"
 
 #include <algorithm>
@@ -59,6 +60,10 @@ class MetalCompletedVarDctFrame final
   }
 
   vardct_frame_internal::VarDctFrameView view() const noexcept override {
+    return published_view.has_validated_structure() ? published_view : RawView();
+  }
+
+  vardct_frame_internal::VarDctFrameView RawView() const noexcept {
     const Extent2D blocks = strategies.extent();
     const size_t count = raw_quant.size();
     ConstImage3I32View quantized_dc_view;
@@ -91,6 +96,9 @@ class MetalCompletedVarDctFrame final
   const DeviceBuffer* resident_ac_buffer(size_t* offset) const noexcept override {
     *offset = coefficient_offset_bytes; return allocation.get();
   }
+  // Published only after all writes finish. The pointee is stable through
+  // unique_ptr moves and owns every backing referenced by this descriptor.
+  vardct_frame_internal::VarDctFrameView published_view;
   size_t coefficient_offset_bytes = 0;
   std::unique_ptr<DeviceBuffer> allocation;
   // Populated only after successful completion/publication. Failed operations
@@ -1746,20 +1754,31 @@ MetalPreparedAqEvaluation::ReconfigureImpl(const AcStrategyGrid &strategies,
     return Status::InvalidArgument(
       "Prepared AQ reconfiguration geometry is invalid");
   }
-  for (size_t y = 0; y < block_extent_.height; ++y) {
-    for (size_t x = 0; x < block_extent_.width; ++x) {
-      AcStrategyCell cell;
-      const Status status = strategies.Get(x, y, &cell);
-      if (!status.ok() || !SupportedAqStrategy(cell.strategy) ||
-          epf_sharpness.Row(y)[x] >= 8 ||
-          (options_.search_epf_sharpness && epf_sharpness.Row(y)[x] != 4)) {
-        return Status::InvalidArgument(
-          "Prepared AQ reconfiguration metadata is invalid");
-      }
-      if (cell.is_anchor && !chroma_from_luma_internal::StrategyFitsColorTile(
-            x, y, cell.strategy)) {
-        return Status::InvalidArgument(
-          "Prepared AQ reconfiguration strategy crosses a color tile");
+  const bool reuse_metadata = metadata_on_device &&
+    vardct_frame_internal::HostMetadataReuseEnabled();
+  // Resident metadata storage already enforces this shader limit. Keep it
+  // explicit here: it bounds every omitted color-record field, including tile
+  // prefix counts, coefficient offsets/strides and raw-quant indices.
+  if (reuse_metadata && block_count_ >
+      size_t(std::numeric_limits<int32_t>::max()) / 192u) {
+    return Status::InvalidArgument("Resident AQ metadata exceeds Metal limits");
+  }
+  if (!reuse_metadata) {
+    for (size_t y = 0; y < block_extent_.height; ++y) {
+      for (size_t x = 0; x < block_extent_.width; ++x) {
+        AcStrategyCell cell;
+        const Status status = strategies.Get(x, y, &cell);
+        if (!status.ok() || !SupportedAqStrategy(cell.strategy) ||
+            epf_sharpness.Row(y)[x] >= 8 ||
+            (options_.search_epf_sharpness && epf_sharpness.Row(y)[x] != 4)) {
+          return Status::InvalidArgument(
+            "Prepared AQ reconfiguration metadata is invalid");
+        }
+        if (cell.is_anchor && !chroma_from_luma_internal::StrategyFitsColorTile(
+              x, y, cell.strategy)) {
+          return Status::InvalidArgument(
+            "Prepared AQ reconfiguration strategy crosses a color tile");
+        }
       }
     }
   }
@@ -1769,34 +1788,69 @@ MetalPreparedAqEvaluation::ReconfigureImpl(const AcStrategyGrid &strategies,
     return status;
   }
   try {
-    ManagedVector<int32_t> strategy_records(2 * block_count_);
+    ManagedVector<int32_t> strategy_records;
     ManagedVector<int32_t> anchor_records;
-    anchor_records.reserve(2 * block_count_);
     std::array<ManagedVector<std::array<int32_t, 2>>, 7> grouped_anchors;
+    std::array<size_t, 7> batch_counts{};
     ManagedVector<AqAnchor> row_major_anchors;
     row_major_anchors.reserve(block_count_);
-    ManagedVector<uint8_t> sharpness(block_count_);
-    for (size_t y = 0; y < block_extent_.height; ++y) {
-      std::copy_n(
-        epf_sharpness.Row(y), block_extent_.width,
-        sharpness.data() + y * block_extent_.width);
-      for (size_t x = 0; x < block_extent_.width; ++x) {
-        AcStrategyCell cell;
-        status = strategies.Get(x, y, &cell);
-        if (!status.ok()) {
-          Invalidate();
-          return status;
+    ManagedVector<uint8_t> sharpness;
+    const bool retain_sharpness = reuse_metadata &&
+      epf_sharpness.data == epf_sharpness_host_.data() &&
+      epf_sharpness.stride == block_extent_.width;
+    if (!retain_sharpness) sharpness.resize(block_count_);
+    if (reuse_metadata) {
+      for (size_t y = 0; y < block_extent_.height; ++y) {
+        const auto* row = epf_sharpness.Row(y);
+        if (std::any_of(row, row + block_extent_.width,
+                        [this](uint8_t value) {
+                          return value >= 8 ||
+                            (options_.search_epf_sharpness && value != 4);
+                        })) {
+          return Status::InvalidArgument(
+            "Prepared AQ reconfiguration sharpness is invalid");
         }
-        const size_t record = 2 * (y * block_extent_.width + x);
-        strategy_records[record] = static_cast<int32_t>(cell.strategy);
-        strategy_records[record + 1] = cell.is_anchor ? 1 : 0;
-        if (cell.is_anchor) {
-          const size_t batch_index = AqStrategyBatchIndex(cell.strategy);
-          const size_t index_in_batch = grouped_anchors[batch_index].size();
-          grouped_anchors[batch_index].push_back(
-            {static_cast<int32_t>(x), static_cast<int32_t>(y)});
-          row_major_anchors.push_back(
-            {x, y, cell.strategy, batch_index, index_in_batch});
+        if (!retain_sharpness)
+          std::copy_n(row, block_extent_.width,
+                      sharpness.data() + y * block_extent_.width);
+      }
+      status = strategies.ForEachAnchor(
+        [&](size_t x, size_t y, AcStrategyType strategy) {
+          if (!SupportedAqStrategy(strategy) ||
+              !chroma_from_luma_internal::StrategyFitsColorTile(x, y, strategy)) {
+            return Status::InvalidArgument(
+              "Prepared AQ reconfiguration strategy is invalid");
+          }
+          const size_t batch = AqStrategyBatchIndex(strategy);
+          row_major_anchors.push_back({x, y, strategy, batch, batch_counts[batch]++});
+          return Status::Ok();
+        });
+      if (!status.ok()) return status;
+    } else {
+      strategy_records.resize(2 * block_count_);
+      anchor_records.reserve(2 * block_count_);
+      for (size_t y = 0; y < block_extent_.height; ++y) {
+        std::copy_n(
+          epf_sharpness.Row(y), block_extent_.width,
+          sharpness.data() + y * block_extent_.width);
+        for (size_t x = 0; x < block_extent_.width; ++x) {
+          AcStrategyCell cell;
+          status = strategies.Get(x, y, &cell);
+          if (!status.ok()) {
+            Invalidate();
+            return status;
+          }
+          const size_t record = 2 * (y * block_extent_.width + x);
+          strategy_records[record] = static_cast<int32_t>(cell.strategy);
+          strategy_records[record + 1] = cell.is_anchor ? 1 : 0;
+          if (cell.is_anchor) {
+            const size_t batch_index = AqStrategyBatchIndex(cell.strategy);
+            const size_t index_in_batch = batch_counts[batch_index]++;
+            grouped_anchors[batch_index].push_back(
+              {static_cast<int32_t>(x), static_cast<int32_t>(y)});
+            row_major_anchors.push_back(
+              {x, y, cell.strategy, batch_index, index_in_batch});
+          }
         }
       }
     }
@@ -1817,7 +1871,7 @@ MetalPreparedAqEvaluation::ReconfigureImpl(const AcStrategyGrid &strategies,
           "AQ reconfiguration strategy disappeared");
       }
       const size_t coefficient_count = info->coefficient_count();
-      const size_t count = grouped_anchors[batch_index].size();
+      const size_t count = batch_counts[batch_index];
       batches[batch_index] = {
         strategy, anchor_offset, count, coefficient_offset,
         coefficient_count};
@@ -1899,7 +1953,7 @@ MetalPreparedAqEvaluation::ReconfigureImpl(const AcStrategyGrid &strategies,
 
     ManagedVector<int32_t> color_transform_records;
     ManagedVector<int32_t> color_tile_offsets;
-    if (resident_quantization_) {
+    if (resident_quantization_ && !reuse_metadata) {
       status = BuildColorTransformMetadata(
         row_major_anchors, batches, block_extent_, tile_extent_,
         &color_transform_records, &color_tile_offsets);
@@ -1970,7 +2024,7 @@ MetalPreparedAqEvaluation::ReconfigureImpl(const AcStrategyGrid &strategies,
     }
 
     strategies_host_ = strategies;
-    epf_sharpness_host_ = std::move(sharpness);
+    if (!retain_sharpness) epf_sharpness_host_ = std::move(sharpness);
     batches_ = batches;
     reconstruction_params_ = reconstruction_params;
     block_reduction_params_ = block_reduction_params;
@@ -3398,7 +3452,12 @@ Status MetalPreparedAqEvaluation::FinishCompletedFrame(
         ? std::fma(y, 1.0f, static_cast<float>(frame.quantized_dc[2 * block_count_ + i]) * steps[2])
         : static_cast<float>(frame.quantized_dc[2 * block_count_ + i]) * steps[2] + y;
   }
-  if (!frame.view().valid()) {
+  if (vardct_frame_internal::HostMetadataReuseEnabled()) {
+    status = vardct_frame_internal::ValidateFrameViewForPublication(
+      frame.RawView(), &frame.published_view);
+    if (!status.ok())
+      return Status::DeviceError("Completed Metal frame is invalid");
+  } else if (!frame.RawView().valid()) {
     return Status::DeviceError("Completed Metal frame is invalid");
   }
   return Status::Ok();
@@ -3757,7 +3816,7 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
   if (frame_requested && !exact_coefficients_) {
     candidate_readback_stats.mapped_frame_bytes =
       (coefficient_value_count_ + 3 * block_count_ +
-       (coefficient_decision_mode_ ==
+       (resident_quantization_ || coefficient_decision_mode_ ==
           AcCoefficientDecisionMode::kAdjustedSharedQuant
           ? block_count_ : 0)) * sizeof(int32_t);
   }
@@ -3804,7 +3863,7 @@ Status MetalPreparedAqEvaluation::FinishEvaluation(
       status = AssembleFrameFromReadback(&final_frame);
     } else {
       status = AssembleFrameFromCompletedDeviceBuffers(
-        coefficient_decision_mode_ ==
+        resident_quantization_ || coefficient_decision_mode_ ==
           AcCoefficientDecisionMode::kAdjustedSharedQuant,
         &final_frame);
     }
@@ -4263,12 +4322,6 @@ Status MetalPreparedAqEvaluation::ValidatePreparation(
   if (preparation.resident_quantization && preparation.frame_only) {
     return Status::InvalidArgument(
       "Resident AQ quantization requires complete evaluation preparation");
-  }
-  if (preparation.resident_quantization &&
-      preparation.coefficient_decision_mode !=
-        AcCoefficientDecisionMode::kAdjustedSharedQuant) {
-    return Status::InvalidArgument(
-      "Resident AQ quantization requires adjusted coefficient decisions");
   }
   switch (preparation.coefficient_decision_mode) {
     case AcCoefficientDecisionMode::kAdjustedSharedQuant:

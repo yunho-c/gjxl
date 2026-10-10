@@ -1,0 +1,33 @@
+{
+  "adoption": "see timing-confirmation/report.md",
+  "files": {
+    "analysis.json": "8c3e47e12d8ad7282555b4f3b3c5d7c8394d5fecf8ee6773dc3f67805f1e0ce6",
+    "baseline-validation.log": "979acfe99b12ef8385801cf827b00e8a7bd0d7bfa5f56dc7e95f389fe705b867",
+    "baseline-validation.xml": "5df1057f3339728e9b37efe75fb77fe088f6b4f4d0679567385bec08b29609d2",
+    "batch-checks.json": "55b1e0988b70b8cd37f81727cc07fce596b4d90bef5f42de650fcfca9d2ddec9",
+    "candidate-tests.xml": "af7a93be920d462dbdc90c935361f656979f00c7fe54d44f7783cbbc1f18107c",
+    "controls.json": "5ad212de2f41f1ee599cd92188ce351cb1220739e698bb395e300c7f90252b2f",
+    "manifest.json": "86816cbcebf0686e9e3dd9bea524ad5a2556012384a23d8ef020a9615aa41158",
+    "matches.jsonl": "6b2921320e7d3b19af0452cbc907435c301a577cabcb5e1a9250481f35d3d31f",
+    "metal-api-validation.log": "58489919abf55da5b758cfc61e756fa66f36b2cedf444f7ab030247359295566",
+    "metal-api-validation.xml": "d5c37abc9b046c2743071f684385adb5e19e44a2a09a53c170721a7b1b8656ad",
+    "metal-validation.log": "d981ada34e9a7689e16078c2b1ad31967eda590956330817e77af6efef59bad0",
+    "metal-validation.xml": "9521550efde6c5221bd092066e706b031730c1bdf6e829e3602eeabbac18fcc8",
+    "native-checks.json": "4b8b000e867268cb5d3cff1fb8ab1363bbcbf8c0e40c569acec4b0735e3ff340",
+    "near-target-analysis.json": "d3dd175b9470a4a5097c4705ef35eb17bfa1e3279550032ea9670be29f141d80",
+    "near-target-matches.jsonl": "470a2357d0b070d42fac20a8fd31856997f8684ee0cf6dcd49980af1213419e2",
+    "near-target-selection.json": "767014920a1267f65bb73632a6efb3b889268746b43d3a1125bcdd5a22566624",
+    "observations.jsonl": "7fe9d04c9b7910960a839601183bfe2e2979a46cbc4aee9516fd6cc358d7de08",
+    "outlier-matches.jsonl": "884f35208f3ba2483b661e3898fc114e6dd6a02e220f6790bb8260fd63ce6653",
+    "outlier-selection.json": "075ecced9eb2d29e28ff9628c06fe7dfef90dc4348aacef0f432f540b0ac4230",
+    "rate-quality.png": "131ba6809041a2e57ccd052df25f39398bf52ca51ace0ad5f69712fb7d4a6f08",
+    "report.md": "162a6358310d7c27c937a836640b2d7ebd17126a108d46819e4e772291513adc",
+    "source-identity.json": "b53a4beba5e0fa8d7cb70c08b0197cb25fcf76313840b4924f50a9f204499be8",
+    "source.patch": "32c243079aa159df2b22dc5ea81757495eea77b4a2fc644cb6364d1588fc7691",
+    "supplementary-analysis.json": "ee01be6618e095e412c8cf5fdb49b128bb79ba208cd6208966505e5ca3c5892a"
+  },
+  "generator_sha256": "2aa7d613c4db3e30ad99762633a550b639a55747d80b03abdf325eb8faff324b",
+  "raw_root": "/Users/yunhocho/GitHub/gjxl-e5-speed/build/e5-qualification",
+  "timing": "passed",
+  "timing_package_sha256": "d54ecd0361a35e91574f1b92082a9b15e9ad15ae340a1493e2b7f628c9fb324e"
+}

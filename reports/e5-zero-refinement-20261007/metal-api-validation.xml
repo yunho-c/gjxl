@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="(empty)"
+	tests="4"
+	failures="1"
+	disabled="0"
+	skipped="0"
+	hostname=""
+	time="613"
+	timestamp="2026-10-07T11:59:15"
+	>
+	<testcase name="codestream_workflow" classname="codestream_workflow" time="2.23996" status="run">
+		<properties/>
+		<system-out>2026-10-07 11:59:16.003 gjxl_codestream_workflow_test[8996:3242468] Metal API Validation Enabled
+Public workflow bytes=182 hash=17549798887378340505 strategies=5
+All public codestream workflow tests passed.
+</system-out>
+	</testcase>
+	<testcase name="low_effort_strategy_policy" classname="low_effort_strategy_policy" time="0.0252525" status="run">
+		<properties/>
+		<system-out></system-out>
+	</testcase>
+	<testcase name="resident_workflow_storage_plan" classname="resident_workflow_storage_plan" time="605.573" status="fail">
+		<failure message="Timeout"/>
+		<properties/>
+		<system-out>2026-10-07 11:59:18.285 gjxl_resident_workflow_storage_plan_test[9122:3242980] Metal API Validation Enabled
+Whole workflow plan shapes: 2240; search bounds: 64
+Bounded complete-workflow cases (cold/warm): 223
+</system-out>
+	</testcase>
+	<testcase name="compatibility_workflow_storage_plan" classname="compatibility_workflow_storage_plan" time="5.69965" status="run">
+		<properties/>
+		<system-out>2026-10-07 12:09:23.860 gjxl_compatibility_workflow_storage_plan_test[9447:3245472] Metal API Validation Enabled
+Compatibility planning checks: 2800; mixed limits: 64
+Mixed target routing: Metal=1 CPU=63
+Mixed target routing: Metal=1 CPU=63
+Bounded compatibility workflows: 118
+</system-out>
+	</testcase>
+</testsuite>

@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "codestream/batch_workflow_test.h"
+#include "codestream/entropy_readiness_internal.h"
 #include "codestream/rate_control_internal.h"
 #include "codestream/workflow_admission.h"
 #include "codestream/workflow_internal.h"
@@ -93,6 +94,11 @@ bool Plan(const Image3FBuffer &image, const VarDctEncodingOptions &o, WorkflowSt
       image.extent(),
       {o, WorkflowStorageRoute::kCpu, WorkflowStorageAdapter::kBorrowedLinearRgb, true}, nullptr,
       false, true, p));
+}
+bool BatchPlan(const Image3FBuffer &image, const VarDctEncodingOptions &o,
+               WorkflowStoragePlan *p) {
+  const EntropyReadinessBatchScope batch_scope;
+  return Plan(image, o, p);
 }
 bool CheckSearchReachability() {
   const auto predicate = +[](float target) { return IsAutomaticMetalTargetEligible(target); };
@@ -324,7 +330,7 @@ bool CheckBatch() {
     images[i] = Image({33 + 8 * i, 25 + 8 * i});
     requests[i] = {images[i].const_view(), Options(i)};
     WorkflowStoragePlan p;
-    if (!Plan(images[i], requests[i].options, &p) || !Ok(accumulator.AddRequest(&p)))
+    if (!BatchPlan(images[i], requests[i].options, &p) || !Ok(accumulator.AddRequest(&p)))
       return false;
   }
   requests.back().options = Options();
@@ -447,7 +453,7 @@ bool CheckBatchCompletedCache() {
       options.effort = 7;
       requests[i] = {images[image].const_view(), options};
       WorkflowStoragePlan plan;
-      if (!Plan(images[image], options, &plan) ||
+      if (!BatchPlan(images[image], options, &plan) ||
           !Ok(accumulator.AddRequest(&plan)) ||
           !Ok(EncodeLinearRgbVarDctCodestream(requests[i].linear_rgb, options,
                                              &expected[i], &summaries[i])))

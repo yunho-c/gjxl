@@ -1,9 +1,45 @@
 # EPF sharpness search
 
 The CPU reference, CPU/Metal AQ integration, device candidate search, and
-storage/profiling accounting are implemented. Validation on September 21, 2026
+storage/profiling accounting are implemented. Search is opt-in pending broader
+matched-quality qualification. Historical validation on September 21, 2026
 covered the Release build, CPU/Metal parity, decoder conformance, and a bounded
 same-distance comparison. Existing baseline test failures are recorded below.
+
+## Main integration (October 10, 2026)
+
+The implementation was integrated with main `38cac3e15f7ed287c2b0dd657f956b9cec138846`
+from feature tip `baa000d0332f7f9f291be32c61eb47db4d29b8b8`. It preserves main's
+effort-1--4 AC quantization, effort-3 DC smoothing, effort-5 zero-update policy,
+Metal host-metadata reuse, CUDA policies, and shared profile exporters.
+EPF settings are retained in both Metal workflow and GPU profile exports;
+explicit false remains distinguishable from an absent optional setting.
+
+Search is now opt-in in the public C++ options, CLI, and both benchmarks.
+Default CPU CLI goldens remain identical to main, and the explicitly enabled
+golden remains unchanged. The workflow fixture checks default versus explicit
+off and on on CPU, exact-coefficient Metal, and resident Metal at efforts
+3--6 and 8--10, including both sides of the distance-0.5 gate. Neutral-map
+validation is preserved in both Metal metadata-reuse and ordinary handoffs.
+
+Local Release C++20 validation used Apple Clang 21.0.0 with the audited Xcode
+27 SDK, Metal enabled, pinned libjxl reference tests enabled, and shader
+profiling disabled. The focused integration selection passed 10/10. The full
+180-test sweep passed 179 tests on its first run; `metal_butteraugli` reported
+a capacity-cache reuse assertion at iteration 9, then passed three successive
+follow-up runs. The cache test and implementation are unchanged from main;
+the transient failure's cause was not established. The three EPF/metadata/
+completed-frame tests also passed with `GJXL_HOST_METADATA=0`. Tiny-fixture CLI
+checks verified default/off/on profile metadata and rejection of explicit
+search controls outside public-workflow benchmark scopes.
+
+The suite includes C/C++ installed consumers, C++23 allocator checks, shader
+compilation, conformance smoke tests, workflow admission, and CLI checks.
+This local run is not Windows/Linux CI or CUDA hardware qualification, and
+does not update the historical speed/quality measurements below. Logs, JUnit
+results, the integrated source-tree identity, and source patches are retained
+under `build/modernize-main-20261010/` and its sibling `modernize-main-*.log`
+files. The main worktree's staged and unstaged changes were preserved.
 
 ## Reference behavior
 
@@ -12,16 +48,19 @@ The reference is `lib/jxl/enc_heuristics.cc` in local libjxl revision
 `ComputeARHeuristics` and `ComputeBlockL2Distance`. The implementation worktree
 starts from GJXL `b1a7373`.
 
-The CPU and Metal default policy enables search at effort 6 and above, distance at least
-0.5, and nonzero EPF iterations. Maximum-error control and explicit
+When explicitly enabled, CPU and Metal search at effort 6 and above, distance
+at least 0.5, and nonzero EPF iterations. Maximum-error control and explicit
 maximum-throughput mode retain their existing filtering policy. AQ uses the
 neutral sharpness field (4); search runs only after the final coefficient
 decisions. Within one distance attempt it changes the EPF control map, not
 coefficients, quantization, transforms, or the number of EPF passes. Changed
 codestream size can affect subsequent attempts in target-size control.
 
-`VarDctEncodingOptions::adaptive_epf_sharpness` defaults to true and can be
-disabled for ablation. CUDA retains fixed sharpness; its low-level AQ API
+`VarDctEncodingOptions::adaptive_epf_sharpness` defaults to false. The CLI and
+both benchmarks also default to off; pass `--epf-sharpness-search on` to opt in.
+The saved pilot showed higher same-distance quality with larger files and
+additional encoding cost. The sparse BD-rate analysis below does not support
+default promotion. CUDA retains fixed sharpness; its low-level AQ API
 rejects explicit search requests until a CUDA implementation is available. The CLI, public-workflow encoding benchmark, and quality
 benchmark expose `--epf-sharpness-search on|off`. Both benchmarks record the
 setting in their raw JSON. The quality benchmark also writes the codestream for
@@ -125,7 +164,7 @@ reproduce on an independent Release build of unchanged base revision `b1a7373`:
 
 Feature-specific regressions were corrected: disabled search contributes no
 CPU profiling stage time; legacy golden checks explicitly retain fixed
-sharpness; default CLI goldens reflect the new policy; installation includes
+sharpness; the then-default CLI goldens reflected the search policy; installation includes
 the new EPF header and the existing transitive AC-selection interface. The
 installed C++20 and C++23 consumers pass. No Python test files were changed.
 
@@ -179,6 +218,35 @@ not be treated as a search optimization benefit. The results demonstrate
 same-distance quality changes and bounded execution cost on this device; they
 do not establish matched-quality bitrate savings, BD-rate, or corpus-wide
 performance. Those remain separate experiments.
+
+### Exploratory BD-rate analysis (October 10, 2026)
+
+Reanalysis of the saved observations uses search-off as the anchor, measured
+SSIMULACRA2 as quality, and log(codestream bytes) as rate. The common interval
+across all four Kodak images, both efforts, and both settings is
+`[40.56243738, 73.28992429]`. Each image is integrated separately without
+extrapolation; the table averages the four per-image percentages equally.
+Positive values mean more bytes with search on at matched quality.
+
+| Effort | PCHIP | Akima | Piecewise log-linear |
+| --- | --- | --- | --- |
+| 6 | +1.429% | +1.418% | +1.038% |
+| 8 | +1.657% | +1.652% | +1.231% |
+
+This is an exploratory three-point estimate at distances 1, 4, and 8. It does
+not meet the standard four-point, SSIMULACRA2 75--85 qualification protocol:
+only Kodak 07 brackets that interval and no curve has four supports. The
+12 MP pair has only one point per setting and is excluded. Interpolator
+agreement is sensitivity evidence, not a confidence interval. Per-image full
+overlap intervals also give positive mean PCHIP deltas (+1.283% at effort 6,
++1.514% at effort 8). These historical results suggest a rate penalty, but
+neither qualify the modernized implementation nor measure efforts 9--10.
+
+The analysis verified 150 saved codestream, metric, and timing-file hashes and
+all 50 codestream byte counts. Reproduction code, input/helper snapshots,
+per-image results, exclusions, and numerical integration checks are retained
+in `build/epf-qualification/bd-rate-check-20261010/`. No new performance
+measurements were collected for this analysis.
 
 [`epf-sharpness-search-results.json`](epf-sharpness-search-results.json) retains
 the per-case raw timing samples, sizes, scores, input/artifact hashes, binary

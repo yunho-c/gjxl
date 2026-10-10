@@ -7,6 +7,8 @@
 #include <type_traits>
 
 #include "sparse_frame_fixture.h"
+#include "codec/vardct_frame_view_internal.h"
+#include "codestream/encoder_internal.h"
 
 namespace allocation_failure {
 thread_local bool enabled = false;
@@ -46,6 +48,15 @@ size_t cases = 0, injected = 0, queries = 0, tails = 0;
 
 void Require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
+}
+
+void CheckProof(const VarDctEncoderFrame& frame, bool expected = true) {
+  const auto view = internal::BorrowFrameWithAssemblyValidation(frame);
+  Require(view.has_validated_structure() == expected,
+          "Assembly validation provenance differs");
+  Require(view.valid() == frame.valid(), "Assembly proof differs from full validation");
+  Require(!internal::BorrowFrame(frame).has_validated_structure(),
+          "Ordinary borrow inherited assembly proof");
 }
 
 const void* FirstPointer(const VarDctEncoderFrame& frame) {
@@ -90,6 +101,7 @@ std::vector<VarDctEncoderFrame> Representations(size_t side, size_t pattern) {
 }
 
 void CopyCase(const VarDctEncoderFrame& source, const VarDctEncoderFrame& seed) {
+  CheckProof(source);
   const void* source_pointer = FirstPointer(source);
   auto destination = seed;
   size_t allocations;
@@ -100,11 +112,15 @@ void CopyCase(const VarDctEncoderFrame& source, const VarDctEncoderFrame& seed) 
   }
   Require(allocations > 0, "Copy assignment did not allocate");
   gjxl_test::EqualSparseCoefficients(source, destination);
+  CheckProof(destination);
   Require(FirstPointer(destination) != source_pointer, "Copy did not own AC storage");
   std::vector<uint8_t> expected, actual;
   Check(EncodeVarDctCodestream(source, {}, &expected));
   Check(EncodeVarDctCodestream(destination, {}, &actual));
   Require(actual == expected, "Copy changed codestream");
+  Check(codestream_internal::EncodeVarDctCodestreamFromView(
+    internal::BorrowFrameWithAssemblyValidation(destination), {}, &actual));
+  Require(actual == expected, "Assembly-validated serialization changed bytes");
   for (size_t index = 0; index < allocations; ++index) {
     destination = seed;
     const void* pointer = FirstPointer(destination);
@@ -119,6 +135,7 @@ void CopyCase(const VarDctEncoderFrame& source, const VarDctEncoderFrame& seed) 
       internal::GetCoefficientOrderPopulation(destination) == population,
       "Failed copy replaced destination ownership");
     gjxl_test::EqualSparseCoefficients(seed, destination);
+    CheckProof(destination);
     Require(FirstPointer(source) == source_pointer && source.valid(), "Copy changed source");
     ++injected;
   }
@@ -130,17 +147,75 @@ void CopyCase(const VarDctEncoderFrame& source, const VarDctEncoderFrame& seed) 
   }
   queries += 2;
   auto copied(source);
+  CheckProof(copied);
   auto moved(std::move(copied));
+  CheckProof(copied, false);
+  CheckProof(moved);
   Require(!copied.valid(), "Moved-from copy remains valid");
   destination = std::move(moved);
+  CheckProof(moved, false);
+  CheckProof(destination);
   Require(!moved.valid(), "Move-assigned source remains valid");
   gjxl_test::EqualSparseCoefficients(source, destination);
   VarDctEncoderFrame empty;
   destination = empty;
+  CheckProof(destination, false);
   Require(!destination.valid(), "Assignment of invalid frame retained validation");
   VarDctEncoderFrame empty_copy(empty);
+  CheckProof(empty_copy, false);
   Require(!empty_copy.valid(), "Copy of invalid frame became valid");
+  destination = source;
+  destination = std::move(destination);
+  CheckProof(destination, false);
   ++cases;
+}
+
+void MetadataCases() {
+  const auto seed = gjxl_test::MakeFrame(7, 2, 36);
+  gjxl_test::PopulationAssembly assembly(seed);
+  auto output = seed;
+  const auto* pointer = FirstPointer(output);
+  const auto reject = [&](auto input) {
+    Require(!internal::AssembleVarDctEncoderFrame(input, &output).ok(),
+            "Malformed metadata acquired assembly proof");
+    Require(FirstPointer(output) == pointer, "Rejected metadata changed output");
+    CheckProof(output);
+    gjxl_test::EqualSparseCoefficients(seed, output);
+  };
+  auto input = assembly.Input(nullptr);
+  const auto blocks = seed.geometry().block_grid().blocks;
+  std::vector<int32_t> raw(blocks.width * blocks.height, 1);
+  input.raw_quant_field = gjxl_test::View(raw, blocks);
+  for (int32_t invalid : {0, kMaxRawQuant + 1}) {
+    raw.back() = invalid;
+    reject(input);
+  }
+  input = assembly.Input(nullptr);
+  std::vector<uint8_t> sharpness(raw.size(), 0);
+  sharpness.back() = 8;
+  input.epf_sharpness = gjxl_test::View(sharpness, blocks);
+  reject(input);
+  input = assembly.Input(nullptr);
+  std::vector<int32_t> dc(raw.size(), 0);
+  dc.back() = internal::kUnwrittenQuantizedCoefficient;
+  input.quantized_dc.plane[2] = gjxl_test::View(dc, blocks);
+  input.reject_unwritten_coefficients = true;
+  reject(input);
+  input = assembly.Input(nullptr);
+  input.transforms = input.transforms.subspan(1);
+  reject(input);
+
+  // Structural proof must not bypass the serializer's separate support gates.
+  input = assembly.Input(nullptr);
+  input.profile.quantization_matrix_mode = QuantizationMatrixMode::kCustom;
+  Check(internal::AssembleVarDctEncoderFrame(input, &output));
+  CheckProof(output);
+  std::vector<uint8_t> bytes{1, 2, 3};
+  Require(!codestream_internal::EncodeVarDctCodestreamFromView(
+    internal::BorrowFrameWithAssemblyValidation(output), {}, &bytes).ok(),
+    "Assembly proof bypassed codec/profile support gate");
+  Require(bytes == std::vector<uint8_t>({1, 2, 3}),
+          "Unsupported profile changed serialized output");
 }
 
 template <typename T>
@@ -169,6 +244,7 @@ void TailCases() {
         Require(!status.ok() && owner.data() == input_pointer && FirstPointer(output) == output_pointer,
           "Malformed dense tail published or consumed ownership");
         gjxl_test::EqualSparseCoefficients(seed, output);
+        CheckProof(output);
         ++tails;
       }
     }
@@ -187,6 +263,7 @@ int main() {
       CopyCase(b, a);
     }
     TailCases<int8_t>(); TailCases<int16_t>(); TailCases<int32_t>();
+    MetadataCases();
     std::cout << "Frame validation PASS cases=" << cases << " injected_failures=" << injected
       << " allocation_free_validations=" << queries << " rejected_tails=" << tails << '\n';
   } catch (const std::exception& error) {

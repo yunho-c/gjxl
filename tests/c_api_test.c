@@ -379,7 +379,7 @@ static int CheckEncoding(GJXLContext* context) {
     gjxl_buffer_free(&old_dc_output);
   }
 
-  for (int effort = 3; effort <= 4; ++effort) {
+  for (int effort = 1; effort <= 4; ++effort) {
     for (int quantization = 0; quantization <= 2; ++quantization) {
       for (uint32_t smoothing = 0; smoothing <= 2; ++smoothing) {
         GJXLEncoderOptions automatic = options;
@@ -391,7 +391,7 @@ static int CheckEncoding(GJXLContext* context) {
           explicit_options.dc_quantization = effort >= 4
             ? GJXL_DC_QUANTIZATION_PREDICTION_AWARE : GJXL_DC_QUANTIZATION_ROUND;
         if (smoothing == GJXL_DC_SMOOTHING_AUTOMATIC)
-          explicit_options.adaptive_dc_smoothing = (uint32_t)(effort >= 4);
+          explicit_options.adaptive_dc_smoothing = (uint32_t)(effort >= 3);
         GJXLBuffer actual = {NULL, 0}, expected = {NULL, 0};
         CHECK(gjxl_encode(context, &rgb_view, &automatic, &actual) == GJXL_OK &&
               gjxl_encode(context, &rgb_view, &explicit_options, &expected) == GJXL_OK,

@@ -103,6 +103,9 @@ struct AdaptiveQuantizationOptions {
   /// may supply their already-resident original XYB and mask instead.
   bool search_epf_sharpness = false;
   EpfSharpnessSearchReference epf_search_reference;
+  /// Shared by CPU, exact-coefficient GPU, and resident GPU coding.
+  AcCoefficientDecisionMode coefficient_decision_mode =
+    AcCoefficientDecisionMode::kAdjustedSharedQuant;
 };
 
 struct AdaptiveQuantizationOutput {

@@ -28,6 +28,19 @@ namespace gjxl::codestream_internal {
          options.gpu_aq_mode != GpuAdaptiveQuantizationMode::kMaximumThroughput;
 }
 
+/// Ordinary efforts 1-4 retain the initial AC quantizer and fixed Y thresholds.
+/// DC quantization and smoothing follow their independent effort policies.
+[[nodiscard]] constexpr AcCoefficientDecisionMode ResolveAcCoefficientDecision(
+  const VarDctEncodingOptions& options) noexcept {
+  const bool fixed_raw = options.effort >= 1 && options.effort <= 4 &&
+    options.density_mode == VarDctDensityMode::kDefault &&
+    options.rate_control_mode != VarDctRateControlMode::kMaximumError &&
+    options.gpu_aq_mode != GpuAdaptiveQuantizationMode::kMaximumThroughput;
+  return fixed_raw
+    ? AcCoefficientDecisionMode::kFixedRawQuant
+    : AcCoefficientDecisionMode::kAdjustedSharedQuant;
+}
+
 /// Scope for modular DC mapping search. Keep explicit frontend and
 /// entropy modes, ordinary DC rounding, and other efforts on their own policy.
 [[nodiscard]] constexpr bool UseDcUintSearch(
@@ -57,9 +70,9 @@ namespace gjxl::codestream_internal {
   const VarDctEncodingOptions& options) noexcept {
   if (options.density_mode == VarDctDensityMode::kHighDensity) return 4;
   if (options.effort <= 3) return 0;
-  // Ordinary e4 skips perceptual refinement; explicit error/density recipes
+  // Ordinary e4-5 skip perceptual refinement; explicit error/density recipes
   // retain their existing update policy.
-  if (options.effort == 4 &&
+  if (options.effort <= 5 &&
       options.density_mode == VarDctDensityMode::kDefault &&
       options.rate_control_mode != VarDctRateControlMode::kMaximumError) return 0;
   if (options.effort <= 6) return 1;
@@ -202,6 +215,9 @@ struct VarDctEncodingProfile {
   uint64_t input_matrix_scale_stats_nanoseconds = 0;
   uint64_t input_resident_preparation_nanoseconds = 0;
   uint64_t input_quantization_preparation_nanoseconds = 0;
+  /// Backend selection during this encode's admission planning and attempts,
+  /// including production initialization when performed by those calls. Outer
+  /// batch/C adapter planning before this encode remains outside this profile.
   uint64_t backend_selection_nanoseconds = 0;
   uint64_t quantization_pipeline_nanoseconds = 0;
   uint64_t codestream_encoding_nanoseconds = 0;

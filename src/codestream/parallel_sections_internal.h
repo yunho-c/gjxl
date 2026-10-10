@@ -5,13 +5,22 @@
 #include "codestream/storage.h"
 #include "core/parallel_work_internal.h"
 #include <algorithm>
+#include <optional>
 #include <thread>
 #include <type_traits>
 namespace gjxl::codestream_internal {
+inline size_t DesiredSectionParticipants(
+    size_t count, size_t maximum_workers = kSerializerMaximumSectionWorkers) {
+  const size_t hardware = std::max<size_t>(std::thread::hardware_concurrency(), 1);
+  const size_t requested = thread_budget_internal::CpuThreadCount();
+  return std::min({count, maximum_workers, hardware,
+                   requested == 0 ? hardware : requested});
+}
 template <typename Function>
 Status
 RunParallelSections(size_t count, Function &&function,
-                    size_t maximum_workers = kSerializerMaximumSectionWorkers) {
+                    size_t maximum_workers = kSerializerMaximumSectionWorkers,
+                    const thread_budget_internal::CpuWorkerGroup* reserved = nullptr) {
   const auto invoke = [&](size_t index, size_t worker_index) -> Status {
     if constexpr (std::is_invocable_r_v<Status, Function &, size_t, size_t>) {
       return function(index, worker_index);
@@ -29,19 +38,20 @@ RunParallelSections(size_t count, Function &&function,
     }
     return Status::Ok();
   }
-  const size_t hardware_workers =
-      std::max<size_t>(std::thread::hardware_concurrency(), 1);
-  const size_t automatic_worker_count =
-      std::min(count, std::min(maximum_workers, hardware_workers));
   const size_t cpu_thread_count = thread_budget_internal::CpuThreadCount();
   auto *const participant_tracker =
       thread_budget_internal::ParticipantTracker();
   const auto resource_context =
       resource_budget_internal::CurrentResourceContext();
-  thread_budget_internal::CpuWorkerGroup cpu_workers(
-      cpu_thread_count == 0
-          ? automatic_worker_count
-          : std::min(automatic_worker_count, cpu_thread_count));
+  std::optional<thread_budget_internal::CpuWorkerGroup> local_workers;
+  if (reserved == nullptr) {
+    local_workers.emplace(DesiredSectionParticipants(count, maximum_workers));
+    reserved = &*local_workers;
+  } else {
+    assert(reserved->enabled() && reserved->participants() <= count &&
+           reserved->participants() <= DesiredSectionParticipants(count, maximum_workers));
+  }
+  const auto& cpu_workers = *reserved;
   const size_t participant_count = cpu_workers.participants();
   if (participant_count == 1) {
     thread_budget_internal::ParallelScope scope(

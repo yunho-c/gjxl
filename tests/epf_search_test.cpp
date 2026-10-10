@@ -352,6 +352,9 @@ bool CheckBackendPolicy() {
       VarDctEncodingOptions options;
       options.backend = backend;
       options.effort = effort;
+      if (options.adaptive_epf_sharpness ||
+          codestream_internal::UseEpfSharpnessSearch(options)) return false;
+      options.adaptive_epf_sharpness = true;
       const bool expected = backend != VarDctBackendPreference::kCuda && effort >= 6;
       if (codestream_internal::UseEpfSharpnessSearch(options) != expected) return false;
       options.adaptive_epf_sharpness = false;

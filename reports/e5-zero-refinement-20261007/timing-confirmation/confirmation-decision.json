@@ -1,0 +1,9 @@
+{
+  "aggregate_ratio_difference": 0.0001017332256573189,
+  "all_timing_gates_passed": true,
+  "original_analysis_sha256": "f56590a4f7b5748a21881a5714502579ee4c1876dd43954eb27f78842c5a4f46",
+  "original_status": "complete-with-failed-timing-gates",
+  "passed": true,
+  "protocol_limit": 0.05,
+  "replication_agrees": true
+}

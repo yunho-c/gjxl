@@ -28,11 +28,14 @@
 #error "GJXL storage contract requires C++20 or C++23; see docs/storage-toolchain.md"
 #endif
 #elif defined(_LIBCPP_VERSION)
-#if !defined(__APPLE__) || !defined(__apple_build_version__) || __apple_build_version__ != 17000604
-#error "GJXL storage contract requires audited Apple Clang build 17000604; see docs/storage-toolchain.md"
+#if !defined(__APPLE__) || !defined(__apple_build_version__) || (__apple_build_version__ != 17000604 && __apple_build_version__ != 21000334)
+#error "GJXL storage contract requires audited Apple Clang build 17000604 or 21000334; see docs/storage-toolchain.md"
 #endif
-#if !defined(_LIBCPP_VERSION) || _LIBCPP_VERSION != 200100
-#error "GJXL storage contract requires audited libc++ 200100; see docs/storage-toolchain.md"
+#if !defined(_LIBCPP_VERSION) || (_LIBCPP_VERSION != 200100 && _LIBCPP_VERSION != 220106)
+#error "GJXL storage contract requires audited libc++ 200100 or 220106; see docs/storage-toolchain.md"
+#endif
+#if (__apple_build_version__ == 17000604 && _LIBCPP_VERSION != 200100) || (__apple_build_version__ == 21000334 && _LIBCPP_VERSION != 220106)
+#error "GJXL storage contract requires an audited Apple Clang/libc++ pairing; see docs/storage-toolchain.md"
 #endif
 #if !defined(_LIBCPP_STD_VER) || (_LIBCPP_STD_VER != 20 && _LIBCPP_STD_VER != 23)
 #error "GJXL storage contract requires C++20 or C++23; see docs/storage-toolchain.md"
@@ -84,7 +87,8 @@ std::vector<T> MakeExactVector(std::span<const T> source) {
   return std::vector<T>(source.begin(), source.end());
 }
 
-// libc++ string: char-string __recommend rounds length+1 to an 8-byte boundary,
+// libc++ string: __recommend (200100) / __align_allocation_size (220106)
+// rounds char-string length+1 to an 8-byte boundary,
 // with an inline/long boundary adjustment. 32 bytes covers both. Growth doubles
 // the old capacity then rounds; max_size saturation also fits this envelope.
 // shrink_to_fit can retain the old doubled backing beside a fresh replacement.

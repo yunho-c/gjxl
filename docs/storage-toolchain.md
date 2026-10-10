@@ -7,6 +7,7 @@ contract:
 | Platform | Compiler / headers | ABI and modes |
 | --- | --- | --- |
 | macOS | Apple Clang 17.0.0, build `17000604`; SDK libc++ `200100` | Stable ABI 1; C++20/C++23, including Objective-C++ |
+| macOS | Apple Clang 21.0.0, build `21000334`; SDK libc++ `220106` (Xcode 27.0 build `27A266a`) | Stable ABI 1; C++20/C++23, including Objective-C++ |
 | Windows x64 | MSVC 19.37 / STL 143 update `202305` (VS 2022 toolset 14.37.32822) | Release iterator level 0; C++20 or MSVC's C++23/latest mode |
 | Linux x86-64 | Ubuntu 24.04 GCC `13.3.0-6ubuntu2~24.04.1`; libstdc++ 13 headers `20240904` | C++11 string ABI; release library; C++20/C++23 |
 
@@ -26,7 +27,11 @@ Microsoft `Microsoft.VisualStudio.Component.VC.14.37.17.7.x86.x64` component
 when that toolset is absent. A missing pinned package or toolchain is a CI
 failure; there is no fallback that disables storage validation.
 
-The qualified machine is Apple M4 Pro on macOS 15.6, as recorded in the
+Compiler/header pairs are checked together; mixing the two recognized Apple
+Clang and libc++ versions is rejected. Accepting Xcode 27 does not change the
+CI toolchain selection or admit arbitrary later SDKs.
+
+The original qualified machine is Apple M4 Pro on macOS 15.6, as recorded in the
 [final scheduling qualification](resident-scheduling-qualification.md). The
 version checks identify the reviewed implementation family, not the hash of
 every compiler or SDK file. Modified standard-library headers or custom ABI
@@ -41,6 +46,27 @@ path, but the allocator implementations preserve GJXL's backing counts:
   `__memory/allocator_traits.h` falls back to `{allocator.allocate(n), n}`.
 - Vector growth, string rounding/inline storage, and hash-node/bucket behavior
   for GJXL's existing operations follow the same bounds in both modes.
+
+The Xcode 27 audit uses the SDK shipped with build `27A266a`, on Apple M4 Pro
+and macOS 27.0 (`26A428`). Vector allocation, replacement, and 2x growth retain
+the bounds above. In libc++ `220106`, string rounding moved from `__recommend`
+to `__align_allocation_size` and growth uses
+`__get_amortized_growth_capacity`; the 8-byte character allocation rounding,
+2x growth, inline pointer classification, and existing 32-byte slack still
+apply. Hash nodes retain the concrete rebound type and unique-key insertion
+retains the existing bucket-growth bound. Both language modes preserve exact
+allocation counts for the standard allocator and the managed allocator's
+fallback. The accepted version pair remains implementation-specific.
+
+Validation on 2026-09-25 at source `d71eeb034f1f1d7d8b1aee2775ed9fe18bb24e98`
+plus this compatibility update passed all 159 Release C++20 tests, including
+the C++23 allocation target and installed C/C++ consumers in both modes.
+Separate C++20 and C++23 builds also passed the allocation and profile-storage
+tests. The header/toolchain test rejects mismatched recognized compiler/header
+pairs as well as unknown identities, unsupported language modes, and unstable
+ABI configurations. Metal compilation used toolchain `27A266a`
+(`metal-32023.921.6`). This qualification does not compare performance against
+the older compiler or extend support to C++26.
 
 This is an implementation-specific conclusion, not a general C++23 guarantee
 that `allocate_at_least` cannot return extra capacity. C++26 and later, other

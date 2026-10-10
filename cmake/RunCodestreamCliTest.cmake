@@ -231,7 +231,6 @@ endif()
 execute_process(
   COMMAND
     "${GJXL_ENCODER}" --distance 1.0 --backend cpu --effort 7
-    --epf-sharpness-search on
     "${GJXL_SAMPLE}" "${effort_7}"
   RESULT_VARIABLE effort_7_result
   OUTPUT_QUIET
@@ -471,20 +470,40 @@ endif()
 if(NOT maximum_compression_hash STREQUAL maximum_compression_repeat_hash)
   message(FATAL_ERROR "Maximum-compression CLI output is not deterministic")
 endif()
-# Effort 7 defaults to prediction-aware quantization, adaptive DC smoothing,
-# and adaptive EPF sharpness. The latter intentionally changes decoded pixels.
+# Effort 7 defaults to prediction-aware quantization and adaptive DC smoothing.
+# EPF search is opt-in; ordinary output retains main's fixed-sharpness golden.
 set(expected_hash
-  25e8394f453ae711e09a0ef3fcc48b54d6167928efd7b56451b343476ac5cabf)
+  c8a8c1215ac341df1a1a3337e428e9886bf8258fcde57aedd3958100d1cc3927)
 if(NOT first_hash STREQUAL expected_hash)
   message(FATAL_ERROR
     "checked sample codestream hash changed: ${first_hash}")
 endif()
 set(expected_maximum_compression_hash
-  4b90182c2eb7d73c846d108dd34e3cf6ad7f922c0920e81c1316a064540f727a)
+  38cf7b01a4c31c2e44a7ebd76ca9c92711606572e11107d95979054d0a14c49b)
 if(NOT maximum_compression_hash STREQUAL expected_maximum_compression_hash)
   message(FATAL_ERROR
     "Maximum-compression sample hash changed: ${maximum_compression_hash}")
 endif()
+foreach(search IN ITEMS off on)
+  set(epf_output "${GJXL_TEST_DIR}/epf-search-${search}.jxl")
+  execute_process(
+    COMMAND "${GJXL_ENCODER}" --distance 1.0 --backend cpu --effort 7
+      --epf-sharpness-search "${search}" "${GJXL_SAMPLE}" "${epf_output}"
+    RESULT_VARIABLE epf_result OUTPUT_QUIET ERROR_VARIABLE epf_error)
+  if(NOT epf_result EQUAL 0)
+    message(FATAL_ERROR "EPF search ${search} failed: ${epf_error}")
+  endif()
+  file(SHA256 "${epf_output}" epf_hash)
+  if(search STREQUAL "off")
+    if(NOT epf_hash STREQUAL first_hash)
+      message(FATAL_ERROR "Default CLI output differs from explicit EPF search off")
+    endif()
+  elseif(NOT epf_hash STREQUAL
+      "25e8394f453ae711e09a0ef3fcc48b54d6167928efd7b56451b343476ac5cabf")
+    message(FATAL_ERROR "Explicit EPF search golden changed: ${epf_hash}")
+  endif()
+endforeach()
+
 # Pin the former defaults, including fixed EPF sharpness, independently so
 # selecting the legacy behavior stays covered when the automatic policy changes.
 foreach(compression IN ITEMS ordinary maximum maximum-error)

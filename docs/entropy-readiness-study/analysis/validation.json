@@ -1,0 +1,203 @@
+{
+  "processes": 200,
+  "calls": 9098,
+  "encoded_images": 10106,
+  "warm_calls": 7098,
+  "distinct_references": 35,
+  "events": 203508,
+  "warm_traced_retries": 12,
+  "selected": [
+    {
+      "cohort": "ac_trace",
+      "variant": 2,
+      "selected": 2,
+      "jobs": 80
+    },
+    {
+      "cohort": "ac_trace",
+      "variant": 0,
+      "selected": 0,
+      "jobs": 80
+    },
+    {
+      "cohort": "ac_trace",
+      "variant": 1,
+      "selected": 1,
+      "jobs": 80
+    },
+    {
+      "cohort": "batch_trace",
+      "variant": 2,
+      "selected": 2,
+      "jobs": 43
+    },
+    {
+      "cohort": "batch_trace",
+      "variant": 0,
+      "selected": 0,
+      "jobs": 48
+    },
+    {
+      "cohort": "batch_trace",
+      "variant": 1,
+      "selected": 1,
+      "jobs": 48
+    },
+    {
+      "cohort": "batch_trace",
+      "variant": 2,
+      "selected": 0,
+      "jobs": 5
+    },
+    {
+      "cohort": "cpu_tokens",
+      "variant": 2,
+      "selected": 0,
+      "jobs": 24
+    },
+    {
+      "cohort": "cpu_tokens",
+      "variant": 0,
+      "selected": 0,
+      "jobs": 24
+    },
+    {
+      "cohort": "cpu_tokens",
+      "variant": 1,
+      "selected": 0,
+      "jobs": 24
+    },
+    {
+      "cohort": "cpu_trace",
+      "variant": 2,
+      "selected": 2,
+      "jobs": 48
+    },
+    {
+      "cohort": "cpu_trace",
+      "variant": 0,
+      "selected": 0,
+      "jobs": 48
+    },
+    {
+      "cohort": "cpu_trace",
+      "variant": 1,
+      "selected": 1,
+      "jobs": 48
+    },
+    {
+      "cohort": "forced_retry",
+      "variant": 2,
+      "selected": 2,
+      "jobs": 4
+    },
+    {
+      "cohort": "forced_retry",
+      "variant": 0,
+      "selected": 0,
+      "jobs": 4
+    },
+    {
+      "cohort": "forced_retry",
+      "variant": 1,
+      "selected": 1,
+      "jobs": 4
+    },
+    {
+      "cohort": "pilot",
+      "variant": 2,
+      "selected": 2,
+      "jobs": 24
+    },
+    {
+      "cohort": "pilot",
+      "variant": 0,
+      "selected": 0,
+      "jobs": 24
+    },
+    {
+      "cohort": "pilot",
+      "variant": 1,
+      "selected": 1,
+      "jobs": 24
+    },
+    {
+      "cohort": "rate_trace",
+      "variant": 2,
+      "selected": 0,
+      "jobs": 12
+    },
+    {
+      "cohort": "rate_trace",
+      "variant": 0,
+      "selected": 0,
+      "jobs": 12
+    },
+    {
+      "cohort": "rate_trace",
+      "variant": 1,
+      "selected": 1,
+      "jobs": 12
+    },
+    {
+      "cohort": "synthetic",
+      "variant": 2,
+      "selected": 2,
+      "jobs": 48
+    },
+    {
+      "cohort": "synthetic",
+      "variant": 0,
+      "selected": 0,
+      "jobs": 48
+    },
+    {
+      "cohort": "synthetic",
+      "variant": 1,
+      "selected": 1,
+      "jobs": 48
+    },
+    {
+      "cohort": "trace",
+      "variant": 2,
+      "selected": 2,
+      "jobs": 90
+    },
+    {
+      "cohort": "trace",
+      "variant": 0,
+      "selected": 0,
+      "jobs": 90
+    },
+    {
+      "cohort": "trace",
+      "variant": 1,
+      "selected": 1,
+      "jobs": 90
+    },
+    {
+      "cohort": "trace_followup",
+      "variant": 2,
+      "selected": 2,
+      "jobs": 72
+    },
+    {
+      "cohort": "trace_followup",
+      "variant": 0,
+      "selected": 0,
+      "jobs": 72
+    },
+    {
+      "cohort": "trace_followup",
+      "variant": 1,
+      "selected": 1,
+      "jobs": 72
+    }
+  ],
+  "artifacts_hashes_valid": true,
+  "outputs_equal": true,
+  "trace_bounds_valid": true,
+  "cpu_limits_valid": true,
+  "eager_readiness_jobs_validated": 409,
+  "warm_unforced_retries": 0
+}

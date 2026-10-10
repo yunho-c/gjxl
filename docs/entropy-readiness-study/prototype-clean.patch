@@ -1,0 +1,248 @@
+--- a/src/codestream/encoder.cpp
++++ b/src/codestream/encoder.cpp
+@@ -13,6 +13,7 @@
+ #include <cstddef>
+ #include <limits>
+ #include <new>
++#include <optional>
+ #include <span>
+ #include <stdexcept>
+ #include <thread>
+@@ -193,6 +194,11 @@
+ 
+ // Token backing and representation metadata are independent of entropy policy.
+ // Rate-optimized encoding shares them between its balanced and expanded search.
++struct InitialEntropyState {
++  EntropyCode dc_code, prefix_dc_code, order_code, prefix_order_code;
++  EntropyCodeCost dc_cost, prefix_dc_cost, order_cost, prefix_order_cost;
++};
++
+ struct PreparedVarDctRepresentation {
+   Storage<SimpleDcGroupTokenStreams> dc_groups;
+   Storage<Storage<EntropyToken>> dc_streams;
+@@ -1200,49 +1206,26 @@
+   return Status::Ok();
+ }
+ 
+-Status EncodePreparedVarDctRepresentation(
+-  const VarDctFrameView& frame,
+-  VarDctCodestreamOptions options,
+-  bool exhaustive_representation_search,
+-  const PreparedVarDctRepresentation& prepared,
+-  std::span<AcEncodingCandidate> candidates,
+-  const codestream_internal::DcContextTreeLayout& dc_layout,
+-  codestream_internal::CodestreamBuffer* output,
+-  codestream_internal::VarDctCodestreamProfile* profile,
+-  RepresentationPhaseTimes* phase_times = nullptr) {
+-
+-  const auto total_begin = ProfileBegin(profile);
+-  auto candidate_profile = profile == nullptr
+-    ? codestream_internal::VarDctCodestreamProfile{} : *profile;
+-  candidate_profile.entropy_behavior = options.entropy_behavior;
+-  candidate_profile.coefficient_order_behavior = options.coefficient_order_behavior;
+-  const auto& dc_groups = prepared.dc_groups;
++Status PrepareInitialEntropyTask(
++    size_t index, const VarDctFrameView& frame, VarDctCodestreamOptions options,
++    bool exhaustive_representation_search,
++    const PreparedVarDctRepresentation& prepared,
++    std::span<AcEncodingCandidate> candidates,
++    const codestream_internal::DcContextTreeLayout& dc_layout,
++    InitialEntropyState& initial,
++    codestream_internal::EntropyWorkProfile* entropy_profile) {
+   const auto& dc_streams = prepared.dc_streams;
+-  const auto& block_context_maps = prepared.block_context_maps;
+-  const auto& custom_orders = prepared.custom_orders;
+   const auto& order_tokens = prepared.order_tokens;
+-  const bool has_custom_orders = custom_orders.used_order_mask != 0;
+-  const size_t candidates_per_map =
+-    exhaustive_representation_search && has_custom_orders ? 2 : 1;
+-  Status status;
+-  const ProfileClock::time_point entropy_begin = ProfileBegin(profile);
+-  EntropyCode dc_code;
+-  EntropyCodeCost dc_cost;
+-  EntropyCode prefix_dc_code;
+-  EntropyCodeCost prefix_dc_cost;
+-  EntropyCode order_code;
+-  EntropyCodeCost order_cost;
+-  EntropyCode prefix_order_code;
+-  EntropyCodeCost prefix_order_cost;
++  const bool has_custom_orders = prepared.custom_orders.used_order_mask != 0;
+   const size_t order_task_count = has_custom_orders ? 1 : 0;
+-  const size_t entropy_task_count = 1 + order_task_count + candidates.size();
+-  Storage<codestream_internal::EntropyWorkProfile> entropy_profiles(
+-    profile == nullptr ? 0 : entropy_task_count);
+-  status = RunParallelSections(
+-    entropy_task_count,
+-    [&](size_t index) {
+-      auto* entropy_profile =
+-        profile == nullptr ? nullptr : &entropy_profiles[index];
++  auto& dc_code = initial.dc_code;
++  auto& dc_cost = initial.dc_cost;
++  auto& prefix_dc_code = initial.prefix_dc_code;
++  auto& prefix_dc_cost = initial.prefix_dc_cost;
++  auto& order_code = initial.order_code;
++  auto& order_cost = initial.order_cost;
++  auto& prefix_order_code = initial.prefix_order_code;
++  auto& prefix_order_cost = initial.prefix_order_cost;
+       if (index == 0) {
+         if (exhaustive_representation_search) {
+           return OptimizeBestEntropyCode(
+@@ -1315,6 +1298,55 @@
+         },
+         options.entropy_behavior, candidate.fixed_context_populations, true,
+         &candidate.ac_code, &candidate.ac_cost, entropy_profile);
++}
++
++Status EncodePreparedVarDctRepresentation(
++  const VarDctFrameView& frame,
++  VarDctCodestreamOptions options,
++  bool exhaustive_representation_search,
++  const PreparedVarDctRepresentation& prepared,
++  std::span<AcEncodingCandidate> candidates,
++  const codestream_internal::DcContextTreeLayout& dc_layout,
++  codestream_internal::CodestreamBuffer* output,
++  codestream_internal::VarDctCodestreamProfile* profile,
++  RepresentationPhaseTimes* phase_times = nullptr,
++  InitialEntropyState* early = nullptr) {
++
++  const auto total_begin = ProfileBegin(profile);
++  auto candidate_profile = profile == nullptr
++    ? codestream_internal::VarDctCodestreamProfile{} : *profile;
++  candidate_profile.entropy_behavior = options.entropy_behavior;
++  candidate_profile.coefficient_order_behavior = options.coefficient_order_behavior;
++  const auto& dc_groups = prepared.dc_groups;
++  const auto& dc_streams = prepared.dc_streams;
++  const auto& block_context_maps = prepared.block_context_maps;
++  const auto& custom_orders = prepared.custom_orders;
++  const auto& order_tokens = prepared.order_tokens;
++  const bool has_custom_orders = custom_orders.used_order_mask != 0;
++  const size_t candidates_per_map =
++    exhaustive_representation_search && has_custom_orders ? 2 : 1;
++  Status status;
++  const ProfileClock::time_point entropy_begin = ProfileBegin(profile);
++  InitialEntropyState local_initial;
++  auto& initial = early == nullptr ? local_initial : *early;
++  auto& dc_code = initial.dc_code;
++  auto& dc_cost = initial.dc_cost;
++  auto& prefix_dc_code = initial.prefix_dc_code;
++  auto& prefix_dc_cost = initial.prefix_dc_cost;
++  auto& order_code = initial.order_code;
++  auto& order_cost = initial.order_cost;
++  auto& prefix_order_code = initial.prefix_order_code;
++  auto& prefix_order_cost = initial.prefix_order_cost;
++  const size_t order_task_count = has_custom_orders ? 1 : 0;
++  const size_t entropy_task_count = 1 + order_task_count + candidates.size();
++  Storage<codestream_internal::EntropyWorkProfile> entropy_profiles(
++    profile == nullptr ? 0 : entropy_task_count);
++  if (early == nullptr) status = RunParallelSections(
++    entropy_task_count,
++    [&](size_t index) {
++      return PrepareInitialEntropyTask(index, frame, options,
++          exhaustive_representation_search, prepared, candidates, dc_layout,
++          initial, profile == nullptr ? nullptr : &entropy_profiles[index]);
+     });
+   if (!status.ok()) {
+     return status;
+@@ -1810,6 +1842,8 @@
+     options.entropy_behavior == VarDctEntropyBehavior::kRateOptimized;
+   try {
+     PreparedVarDctRepresentation prepared;
++    InitialEntropyState early_entropy;
++    bool entropy_prepared_early = false;
+     ParallelTokenCleanup token_cleanup{prepared};
+     if (rate_optimized) options.entropy_behavior = VarDctEntropyBehavior::kBalanced;
+     Status status;
+@@ -1958,12 +1992,78 @@
+         status = provider->Begin(frame, has_custom_orders ? custom_orders : natural_orders,
+             prepared_natural_orders, candidate.block_context_map, collect_fixed_populations);
+         if (!status.ok()) return status;
+-        if (overlap_dc) {
+-          status = prepare_dc();
++        unsigned eager_mode = 0;
++#ifdef GJXL_TOKENIZATION_EXPERIMENT
++        if (const char* mode = std::getenv("GJXL_EXPERIMENT_EAGER_ENTROPY")) {
++          if (mode[0] >= '1' && mode[0] <= '2' && mode[1] == '\0')
++            eager_mode = static_cast<unsigned>(mode[0] - '0');
++        }
++#endif
++        const size_t requested = thread_budget_internal::CpuThreadCount();
++        const size_t workers = std::min(kMaximumSectionWorkers, requested == 0
++            ? std::max<size_t>(1, std::thread::hardware_concurrency()) : requested);
++        // The experiment preserves DC's existing launch point. This is an
++        // earlier-completion/entropy test, not the separate earlier-DC idea.
++        // Native additive profiles retain the old schedule; independent trace
++        // spans and public wall time measure this overlapping prototype.
++        bool eager = eager_mode != 0 && overlap_dc && workers > 1 &&
++            profile == nullptr && thread_budget_internal::HasCpuParticipation() &&
++            !thread_budget_internal::InExplicitParallelScope() &&
++            (eager_mode == 1 || !rate_optimized);
++        std::optional<thread_budget_internal::CpuWorkerGroup> eager_workers;
++        if (eager) {
++          eager_workers.emplace(2);
++          eager = eager_workers->participants() == 2;
++        }
++        if (eager) {
++          auto* tracker = thread_budget_internal::ParticipantTracker();
++          constexpr thread_budget_internal::ParallelWorkErrors errors{
++            .allocation = "Eager entropy allocation failed",
++            .unexpected = "Eager entropy worker failed",
++            .length_code = StatusCode::kOutOfMemory,
++            .length = "Eager entropy storage overflow",
++            .launch_allocation = "Eager entropy worker allocation failed",
++            .launch_action = thread_budget_internal::LaunchFailureAction::kReturnError,
++            .launch = "Unable to start eager entropy worker",
++          };
++          status = thread_budget_internal::RunParallelWork<Storage>(2,
++              *eager_workers, 1,
++              thread_budget_internal::WorkerLaunchSite::kSerializerSections,
++              errors, [&](size_t branch, size_t) -> Status {
++            // Disjoint ceilings reset local nesting without exceeding the
++            // common per-image/domain reservations. DC can retain group workers.
++            thread_budget_internal::EncodeScope scope(
++                branch == 0 ? workers - 1 : 1, tracker);
++            if (branch == 0) {
++              Status result = prepare_dc();
++              if (result.ok() && eager_mode == 2)
++                result = PrepareInitialEntropyTask(0, frame, options, false,
++                    prepared, prepared.candidates, dc_layout, early_entropy, nullptr);
++              return result;
++            }
++            if (eager_mode == 2 && has_custom_orders) {
++              Status result = PrepareInitialEntropyTask(1, frame, options, false,
++                  prepared, prepared.candidates, dc_layout, early_entropy, nullptr);
++              if (!result.ok()) return result;
++            }
++            Status result = provider->Finish(&candidate.streams,
++                &candidate.fixed_context_populations);
++            if (result.ok() && eager_mode == 2)
++              result = PrepareInitialEntropyTask(1 + (has_custom_orders ? 1 : 0),
++                  frame, options, false, prepared, prepared.candidates, dc_layout,
++                  early_entropy, nullptr);
++            return result;
++          });
+           if (!status.ok()) return status;
+-        }
+-        status = provider->Finish(&candidate.streams, &candidate.fixed_context_populations);
+-        if (!status.ok()) return status;
++          entropy_prepared_early = eager_mode == 2;
++        } else {
++          if (overlap_dc) {
++            status = prepare_dc();
++            if (!status.ok()) return status;
++          }
++          status = provider->Finish(&candidate.streams, &candidate.fixed_context_populations);
++          if (!status.ok()) return status;
++        }
+         if (profile != nullptr) {
+           for (auto stream : candidate.streams) candidate_profile.coefficient_token_count += stream.size();
+           candidate_profile.coefficient_tokenization_pass_count = 1;
+@@ -2180,7 +2280,8 @@
+       status = EncodePreparedVarDctRepresentation(
+         frame, options, exhaustive_representation_search, prepared,
+         prepared.candidates, dc_layout,
+-        output, profile == nullptr ? nullptr : &candidate_profile);
++        output, profile == nullptr ? nullptr : &candidate_profile, nullptr,
++        entropy_prepared_early ? &early_entropy : nullptr);
+       if (status.ok() && profile != nullptr) {
+         candidate_profile.total_nanoseconds = ElapsedNanoseconds(total_begin);
+         *profile = candidate_profile;

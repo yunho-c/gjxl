@@ -15,6 +15,7 @@
 #include "codestream/workflow.h"
 #include "codestream/dc_context_tree_internal.h"
 #include "codestream/workflow_internal.h"
+#include "codestream/workflow_admission.h"
 #include "core/image.h"
 #include "gpu/metal/metal_butteraugli_test.h"
 
@@ -347,6 +348,68 @@ bool CheckQuantizationMatrixScaleStatsPolicy() {
   return true;
 }
 
+bool CheckAdmissionSelectionTiming() {
+  using namespace gjxl;
+  using namespace gjxl::codestream_internal;
+  WorkflowStorageOptions options{
+    .encoding = {.effort = 1, .backend = VarDctBackendPreference::kCpu},
+    .collect_profile = true,
+  };
+  WorkflowStoragePlan ordinary;
+  if (!PlanWorkflowAdmission(kExtent, options, nullptr, false, false, &ordinary).ok())
+    return false;
+  // The accumulator can contain earlier selection work. Profiling must append
+  // to it without changing the admitted storage recipe or discarding that work.
+  constexpr uint64_t kEarlierSelection = uint64_t{1} << 40;
+  uint64_t selection = kEarlierSelection;
+  for (size_t repeat = 0; repeat < 64; ++repeat) {
+    WorkflowStoragePlan measured;
+    if (!PlanWorkflowAdmission(kExtent, options, nullptr, false, false,
+                               &measured, &selection).ok() || measured != ordinary ||
+        selection < kEarlierSelection) {
+      std::cerr << "Admission profiling changed planning or reset its accumulator\n";
+      return false;
+    }
+  }
+  if (selection == kEarlierSelection) {
+    std::cerr << "Admission backend selection was never timed\n";
+    return false;
+  }
+  const uint64_t retained_selection = selection;
+  WorkflowStoragePlan retained = ordinary;
+  auto invalid = options;
+  invalid.encoding.effort = 0;
+  if (PlanWorkflowAdmission(kExtent, invalid, nullptr, false, false,
+                            &retained, &selection).ok() || retained != ordinary ||
+      selection != retained_selection ||
+      PlanWorkflowAdmission(kExtent, options, nullptr, false, false,
+                            nullptr, &selection).ok() || selection != retained_selection) {
+    std::cerr << "Failed admission published partial timing or storage\n";
+    return false;
+  }
+  auto unavailable = options;
+  unavailable.encoding.backend = VarDctBackendPreference::kCuda;
+  if (PlanWorkflowAdmission(kExtent, unavailable, nullptr, false, false,
+                            &retained, &selection).code() != StatusCode::kUnavailable ||
+      retained != ordinary || selection != retained_selection) {
+    std::cerr << "Failed backend selection published partial admission timing\n";
+    return false;
+  }
+  // This automatic target-search policy proves CPU-only admission without a
+  // backend-selection call. A non-null accumulator must not invent that stage.
+  options.encoding.backend = VarDctBackendPreference::kAutomatic;
+  options.encoding.rate_control_mode = VarDctRateControlMode::kTargetBytes;
+  options.encoding.target_bytes = 256;
+  options.encoding.target_size_maximum_attempts = 2;
+  options.encoding.gpu_aq_mode = GpuAdaptiveQuantizationMode::kFullyResident;
+  if (!PlanWorkflowAdmission(kExtent, options, nullptr, false, false,
+                             &retained, &selection).ok() || selection != retained_selection) {
+    std::cerr << "CPU-only admission invented a backend-selection span\n";
+    return false;
+  }
+  return true;
+}
+
 bool CheckDeterministicWorkflow() {
   ImageStorage image;
   FillImage(&image);
@@ -618,7 +681,7 @@ bool CheckEffortPolicy() {
     {2, 1},
     {3, 1},
     {4, 1},
-    {5, 2},
+    {5, 1},
     {6, 2},
     {7, 3},
     {8, 4},
@@ -672,11 +735,9 @@ bool CheckEffortPolicy() {
   }
 
 #if GJXL_TEST_HAS_METAL
-  for (const int32_t effort : {1, 2, 3, 4, 5, 7, 8, 9, 10}) {
+  for (const int32_t effort : {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}) {
     const size_t index = static_cast<size_t>(effort - 1);
-    const size_t expected_score_count = effort <= 4
-      ? 0
-      : kCases[index].expected_score_count - 1;
+    const size_t expected_score_count = kCases[index].expected_score_count - 1;
     std::vector<uint8_t> bytes;
     gjxl::VarDctEncodingSummary summary;
     status = gjxl::EncodeLinearRgbVarDctCodestream(
@@ -707,7 +768,7 @@ bool CheckEffortPolicy() {
       std::cerr << "Low Metal effort selected a non-DCT8 strategy\n";
       return false;
     }
-    if (effort <= 4) {
+    if (effort <= 5) {
       std::vector<uint8_t> scored_bytes;
       gjxl::VarDctEncodingSummary scored_summary;
       status = gjxl::EncodeLinearRgbVarDctCodestream(
@@ -1410,6 +1471,7 @@ int main() {
       !CheckQuantizationMatrixScaleStats() ||
       !CheckQuantizationMatrixScaleSelection() ||
       !CheckQuantizationMatrixScaleStatsPolicy() ||
+      !CheckAdmissionSelectionTiming() ||
       !CheckDeterministicWorkflow() ||
       !CheckCpuThreadBudget() ||
       !CheckEffortPolicy() ||

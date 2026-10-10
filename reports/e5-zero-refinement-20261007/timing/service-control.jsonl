@@ -1,0 +1,4 @@
+{"action": "paused", "time": 1791399023.434866, "media_pid": 94518, "collector_pid": 3368, "identity": "Tue Oct  6 21:52:45 2026     /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd", "authorization": "Explicit user approval in this conversation", "watchdog_seconds": 1800}
+{"action": "resumed", "time": 1791399400.0876951, "media_pid": 94518, "collector_pid": 3368, "reason": "collector exited", "state": "?E"}
+{"action": "paused", "time": 1791399590.9568279, "media_pid": 34086, "collector_pid": 37317, "identity": "Wed Oct  7 14:56:40 2026     /System/Library/PrivateFrameworks/MediaAnalysis.framework/Versions/A/mediaanalysisd", "authorization": "Explicit user approval in this conversation", "watchdog_seconds": 1800}
+{"action": "resumed", "time": 1791399904.138051, "media_pid": 34086, "collector_pid": 37317, "reason": "collector exited", "state": "?E"}

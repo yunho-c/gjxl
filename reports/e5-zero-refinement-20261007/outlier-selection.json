@@ -1,0 +1,28 @@
+{
+  "analysis_sha256": "fe701d49918fc8a3191aa7b7598facb14dd2aaf8893196224b4ce4d76ecbc8fd",
+  "images": [
+    {
+      "akima": 6.014281333008078,
+      "corpus": "clic2024_test",
+      "image_id": "clic2024_test/d79d465ac77c36518e0f0d626bf97ec4",
+      "pchip": 7.666540175382343,
+      "status": "ready"
+    },
+    {
+      "akima": 4.147239284695385,
+      "corpus": "clic2024_test",
+      "image_id": "clic2024_test/ef576c4ed599d75d72145a8f34b58ccb",
+      "pchip": 4.337822266977341,
+      "status": "ready"
+    },
+    {
+      "akima": 4.720967231850976,
+      "corpus": "clic2024_test",
+      "image_id": "clic2024_test/c80999cd5533e448167cd9b3ccfa2a37",
+      "pchip": 4.327746926806264,
+      "status": "ready"
+    }
+  ],
+  "runner_sha256": "8480740b5b41f996bd6bfc944f239731353f014c2e92bb1cefc2275a5fb5f519",
+  "selection": "Three largest observed PCHIP BD-rate increases"
+}

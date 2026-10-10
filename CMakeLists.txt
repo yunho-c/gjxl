@@ -10,6 +10,11 @@ project(
 )
 
 option(GJXL_BUILD_TOKENIZATION_EXPERIMENT "Enable diagnostic tokenization controls" OFF)
+option(GJXL_BUILD_CUDA_RESIDENT_TOKEN_EXPERIMENT
+  "Build CUDA GPU AC tokenization (legacy option name)" ON)
+if(GJXL_BUILD_CUDA_RESIDENT_TOKEN_EXPERIMENT)
+  add_compile_definitions(GJXL_CUDA_RESIDENT_TOKEN_EXPERIMENT=1)
+endif()
 if(GJXL_BUILD_TOKENIZATION_EXPERIMENT)
   add_compile_definitions(GJXL_TOKENIZATION_EXPERIMENT=1)
 endif()
@@ -57,6 +62,9 @@ option(
 
 option(GJXL_CUDA_COMPACT_AC
   "Experimental native narrow AC readback for the resident CUDA policy" OFF)
+
+option(GJXL_CUDA_SHORT_FILTER_TEST_SCHEDULES
+  "Build alternate CUDA short-filter schedules for differential tests" OFF)
 
 if(GJXL_ENABLE_METAL)
   if(NOT APPLE)
@@ -624,9 +632,18 @@ if(GJXL_ENABLE_CUDA)
   )
 
   add_library(gjxl::cuda ALIAS gjxl_cuda)
+  if(GJXL_BUILD_CUDA_RESIDENT_TOKEN_EXPERIMENT)
+    target_sources(gjxl_cuda PRIVATE
+      src/gpu/cuda/cuda_ac_tokenization.cpp
+      src/gpu/cuda/cuda_ac_tokenization_kernels.cu)
+  endif()
 
   if(GJXL_CUDA_COMPACT_AC)
     target_compile_definitions(gjxl_cuda PRIVATE GJXL_CUDA_COMPACT_AC=1)
+  endif()
+
+  if(GJXL_CUDA_SHORT_FILTER_TEST_SCHEDULES)
+    target_compile_definitions(gjxl_cuda PRIVATE GJXL_CUDA_SHORT_FILTER_TEST_SCHEDULES=1)
   endif()
 
   set_target_properties(
@@ -1588,6 +1605,10 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_ac_direct_tokenization_test PRIVATE gjxl_codestream)
   add_test(NAME ac_direct_tokenization COMMAND gjxl_ac_direct_tokenization_test)
 
+  add_executable(gjxl_ac_population_reduction_test tests/ac_population_reduction_test.cpp)
+  target_link_libraries(gjxl_ac_population_reduction_test PRIVATE gjxl_codestream)
+  add_test(NAME ac_population_reduction COMMAND gjxl_ac_population_reduction_test)
+
   add_executable(gjxl_token_storage_plan_test tests/token_storage_plan_test.cpp)
   target_link_libraries(gjxl_token_storage_plan_test PRIVATE gjxl_codestream)
   add_test(NAME token_storage_plan COMMAND gjxl_token_storage_plan_test)
@@ -2016,6 +2037,19 @@ if(GJXL_BUILD_TESTS)
   add_executable(gjxl_cpu_execution_test tests/cpu_execution_test.cpp)
   target_link_libraries(gjxl_cpu_execution_test PRIVATE gjxl_core)
   add_test(NAME cpu_execution COMMAND gjxl_cpu_execution_test)
+
+  add_executable(gjxl_entropy_readiness_test tests/entropy_readiness_test.cpp)
+  target_link_libraries(gjxl_entropy_readiness_test PRIVATE gjxl_codestream)
+  add_test(NAME entropy_readiness COMMAND gjxl_entropy_readiness_test)
+  set_tests_properties(entropy_readiness PROPERTIES TIMEOUT 30)
+  add_executable(gjxl_earlier_dc_contract_test tests/earlier_dc_contract_test.cpp)
+  target_link_libraries(gjxl_earlier_dc_contract_test PRIVATE gjxl_codestream)
+  add_test(NAME earlier_dc_contract COMMAND gjxl_earlier_dc_contract_test)
+  set_tests_properties(earlier_dc_contract PROPERTIES TIMEOUT 60)
+  add_executable(gjxl_entropy_readiness_contract_test tests/entropy_readiness_contract_test.cpp)
+  target_link_libraries(gjxl_entropy_readiness_contract_test PRIVATE gjxl_codestream)
+  add_test(NAME entropy_readiness_contract COMMAND gjxl_entropy_readiness_contract_test)
+  set_tests_properties(entropy_readiness_contract PROPERTIES TIMEOUT 60)
   set_tests_properties(cpu_execution PROPERTIES TIMEOUT 30)
 
   add_executable(gjxl_workflow_cpu_coordination_test tests/workflow_cpu_coordination_test.cpp)
@@ -2745,6 +2779,13 @@ if(GJXL_BUILD_TESTS)
       "$<TARGET_FILE:gjxl_gpu_profile_json_test>")
   set_tests_properties(gpu_profile_json PROPERTIES TIMEOUT 30)
 
+  add_executable(gjxl_workflow_profile_json_test tests/workflow_profile_json_test.cpp)
+  target_link_libraries(gjxl_workflow_profile_json_test PRIVATE gjxl_gpu_ops)
+  add_test(NAME workflow_profile_json
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/workflow_profile_json_test.py"
+      "$<TARGET_FILE:gjxl_workflow_profile_json_test>")
+  set_tests_properties(workflow_profile_json PROPERTIES TIMEOUT 30)
+
   if(GJXL_ENABLE_METAL)
   add_executable(gjxl_profile_storage_plan_metal_test tests/profile_storage_plan_test.cpp)
   target_link_libraries(gjxl_profile_storage_plan_metal_test PRIVATE gjxl_gpu_ops gjxl_metal)
@@ -2755,6 +2796,47 @@ if(GJXL_BUILD_TESTS)
   set_tests_properties(metal_profile_storage_plan PROPERTIES TIMEOUT 180)
   endif()
   if(GJXL_ENABLE_CUDA)
+    if(GJXL_BUILD_CUDA_RESIDENT_TOKEN_EXPERIMENT)
+      add_executable(gjxl_cuda_entropy_readiness_test tests/cuda_entropy_readiness_test.cpp)
+      target_link_libraries(gjxl_cuda_entropy_readiness_test PRIVATE gjxl_codestream gjxl_cuda CUDA::cudart)
+      target_include_directories(gjxl_cuda_entropy_readiness_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+      add_test(NAME cuda_entropy_readiness COMMAND gjxl_cuda_entropy_readiness_test)
+      set_tests_properties(cuda_entropy_readiness PROPERTIES TIMEOUT 300)
+      add_executable(gjxl_cuda_entropy_readiness_workflow_test tests/entropy_readiness_workflow_test.cpp)
+      target_compile_definitions(gjxl_cuda_entropy_readiness_workflow_test PRIVATE GJXL_TEST_CUDA_ENTROPY_READINESS=1)
+      target_link_libraries(gjxl_cuda_entropy_readiness_workflow_test PRIVATE gjxl_codestream gjxl_cuda)
+      add_test(NAME cuda_entropy_readiness_workflow COMMAND gjxl_cuda_entropy_readiness_workflow_test)
+      set_tests_properties(cuda_entropy_readiness_workflow PROPERTIES TIMEOUT 600)
+      add_executable(gjxl_cuda_token_provider_test tests/cuda_token_provider_test.cpp)
+      target_link_libraries(gjxl_cuda_token_provider_test PRIVATE gjxl_codestream gjxl_cuda CUDA::cudart)
+      target_include_directories(gjxl_cuda_token_provider_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+      add_test(NAME cuda_token_provider COMMAND gjxl_cuda_token_provider_test)
+      set_tests_properties(cuda_token_provider PROPERTIES TIMEOUT 600)
+      add_executable(gjxl_cuda_token_workflow_test tests/cuda_token_workflow_test.cpp)
+      target_link_libraries(gjxl_cuda_token_workflow_test PRIVATE gjxl_codestream gjxl_cuda)
+      # This fixture directly exercises the private CUDA policy helper.
+      target_compile_definitions(gjxl_cuda_token_workflow_test PRIVATE GJXL_ENABLE_CUDA=1)
+      add_test(NAME cuda_token_workflow COMMAND gjxl_cuda_token_workflow_test)
+      set_tests_properties(cuda_token_workflow PROPERTIES TIMEOUT 600)
+      add_executable(gjxl_cuda_token_profile_test tests/cuda_token_profile_test.cpp)
+      target_link_libraries(gjxl_cuda_token_profile_test PRIVATE gjxl_codestream gjxl_cuda)
+      add_test(NAME cuda_token_profile COMMAND gjxl_cuda_token_profile_test)
+      set_tests_properties(cuda_token_profile PROPERTIES TIMEOUT 600)
+      add_executable(gjxl_cuda_token_batch_test tests/cuda_token_batch_test.cpp)
+      target_link_libraries(gjxl_cuda_token_batch_test PRIVATE gjxl_codestream gjxl_cuda)
+      add_test(NAME cuda_token_batch COMMAND gjxl_cuda_token_batch_test)
+      set_tests_properties(cuda_token_batch PROPERTIES TIMEOUT 600)
+      add_executable(gjxl_cuda_ac_tokenization_test tests/cuda_ac_tokenization_test.cpp)
+      target_link_libraries(gjxl_cuda_ac_tokenization_test PRIVATE gjxl_codestream gjxl_cuda CUDA::cudart)
+      target_include_directories(gjxl_cuda_ac_tokenization_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+      add_test(NAME cuda_ac_tokenization COMMAND gjxl_cuda_ac_tokenization_test)
+      set_tests_properties(cuda_ac_tokenization PROPERTIES TIMEOUT 600)
+      add_executable(gjxl_cuda_token_coefficients_test tests/cuda_token_coefficients_test.cpp)
+      target_link_libraries(gjxl_cuda_token_coefficients_test PRIVATE gjxl_codestream gjxl_cuda CUDA::cudart)
+      target_include_directories(gjxl_cuda_token_coefficients_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+      add_test(NAME cuda_token_coefficients COMMAND gjxl_cuda_token_coefficients_test)
+      set_tests_properties(cuda_token_coefficients PROPERTIES TIMEOUT 600)
+    endif()
     add_executable(
       gjxl_cuda_backend_test
       tests/cuda_backend_test.cpp
@@ -2984,8 +3066,14 @@ if(GJXL_BUILD_TESTS)
     set_tests_properties(cuda_resource PROPERTIES SKIP_RETURN_CODE 77)
     add_executable(gjxl_cuda_low_effort_test tests/cuda_low_effort_test.cpp)
     target_link_libraries(gjxl_cuda_low_effort_test PRIVATE gjxl_codestream gjxl_cuda)
+    target_include_directories(gjxl_cuda_low_effort_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
     add_test(NAME cuda_low_effort COMMAND gjxl_cuda_low_effort_test)
     set_tests_properties(cuda_low_effort PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_quantization_policy_test tests/cuda_quantization_policy_test.cpp)
+    target_link_libraries(gjxl_cuda_quantization_policy_test PRIVATE gjxl_codestream gjxl_cuda)
+    add_test(NAME cuda_quantization_policy COMMAND gjxl_cuda_quantization_policy_test)
+    set_tests_properties(cuda_quantization_policy PROPERTIES SKIP_RETURN_CODE 77)
     target_link_libraries(gjxl_cuda_resident_input_test PRIVATE gjxl_cuda)
     add_test(NAME cuda_resident_input COMMAND gjxl_cuda_resident_input_test)
     set_tests_properties(cuda_resident_input PROPERTIES SKIP_RETURN_CODE 77)
@@ -2994,6 +3082,13 @@ if(GJXL_BUILD_TESTS)
     add_test(NAME cuda_opsin COMMAND gjxl_cuda_opsin_test)
     add_test(NAME cuda_opsin_tall COMMAND gjxl_cuda_opsin_test --tall-only)
     set_tests_properties(cuda_opsin cuda_opsin_tall PROPERTIES SKIP_RETURN_CODE 77)
+
+    add_executable(gjxl_cuda_direct_short_test tests/cuda_direct_short_test.cpp)
+    target_link_libraries(gjxl_cuda_direct_short_test PRIVATE gjxl_cuda)
+    target_include_directories(gjxl_cuda_direct_short_test PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
+    add_test(NAME cuda_direct_short COMMAND gjxl_cuda_direct_short_test)
+    add_test(NAME cuda_direct_short_tall COMMAND gjxl_cuda_direct_short_test --tall-only)
+    set_tests_properties(cuda_direct_short cuda_direct_short_tall PROPERTIES SKIP_RETURN_CODE 77)
 
     add_executable(gjxl_cuda_low_medium_test tests/cuda_low_medium_test.cpp)
     target_link_libraries(gjxl_cuda_low_medium_test PRIVATE gjxl_cuda)
@@ -3405,6 +3500,25 @@ if(GJXL_BUILD_TESTS)
   )
   add_dependencies(gjxl_metal_completed_frame_test gjxl_metal_shaders)
   add_test(NAME metal_completed_frame COMMAND gjxl_metal_completed_frame_test)
+  add_test(NAME metal_completed_frame_host_metadata
+    COMMAND gjxl_metal_completed_frame_test --expect-host-metadata 1)
+  add_test(NAME metal_aq_strategy_host_metadata COMMAND gjxl_metal_aq_strategy_metadata_test)
+  set_tests_properties(metal_completed_frame_host_metadata metal_aq_strategy_host_metadata
+    PROPERTIES ENVIRONMENT "GJXL_HOST_METADATA=1")
+  add_test(NAME metal_completed_frame_host_metadata_default
+    COMMAND gjxl_metal_completed_frame_test --expect-host-metadata 1)
+  set_tests_properties(metal_completed_frame_host_metadata_default
+    PROPERTIES ENVIRONMENT_MODIFICATION "GJXL_HOST_METADATA=unset:")
+  add_test(NAME metal_completed_frame_host_metadata_optout
+    COMMAND gjxl_metal_completed_frame_test --expect-host-metadata 0)
+  add_test(NAME metal_aq_strategy_host_metadata_optout
+    COMMAND gjxl_metal_aq_strategy_metadata_test)
+  set_tests_properties(metal_completed_frame_host_metadata_optout metal_aq_strategy_host_metadata_optout
+    PROPERTIES ENVIRONMENT "GJXL_HOST_METADATA=0")
+  add_test(NAME metal_completed_frame_host_metadata_invalid
+    COMMAND gjxl_metal_completed_frame_test --expect-host-metadata 1)
+  set_tests_properties(metal_completed_frame_host_metadata_invalid
+    PROPERTIES ENVIRONMENT "GJXL_HOST_METADATA=invalid")
 
   add_executable(gjxl_metal_resource_budget_test tests/metal_resource_budget_test.cpp)
   target_link_libraries(gjxl_metal_resource_budget_test PRIVATE gjxl_codestream gjxl_metal)
@@ -3455,6 +3569,10 @@ if(GJXL_BUILD_TESTS)
   add_executable(gjxl_gpu_tokenization_default_test tests/gpu_tokenization_default_test.cpp)
   target_link_libraries(gjxl_gpu_tokenization_default_test PRIVATE gjxl_codestream gjxl_metal)
   add_test(NAME gpu_tokenization_default COMMAND gjxl_gpu_tokenization_default_test)
+  add_executable(gjxl_entropy_readiness_workflow_test tests/entropy_readiness_workflow_test.cpp)
+  target_link_libraries(gjxl_entropy_readiness_workflow_test PRIVATE gjxl_codestream gjxl_metal)
+  add_test(NAME entropy_readiness_workflow COMMAND gjxl_entropy_readiness_workflow_test)
+  set_tests_properties(entropy_readiness_workflow PROPERTIES TIMEOUT 120)
   if(GJXL_BUILD_TOKENIZATION_EXPERIMENT)
     add_executable(gjxl_metal_ac_tokenization_failure_test tests/metal_ac_tokenization_failure_test.cpp)
     target_link_libraries(gjxl_metal_ac_tokenization_failure_test PRIVATE gjxl_codestream gjxl_metal)
@@ -3625,6 +3743,10 @@ if(GJXL_BUILD_BENCHMARKS)
           "$<TARGET_FILE:gjxl_cuda_encoding_benchmark>")
       set_tests_properties(cuda_profile_benchmark_cli PROPERTIES
         LABELS "benchmark;cli;cuda" SKIP_RETURN_CODE 77 TIMEOUT 240)
+      add_test(NAME cuda_profile_export_cli
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/cuda_profile_export_cli_test.py"
+          "$<TARGET_FILE:gjxl_cuda_encoding_benchmark>")
+      set_tests_properties(cuda_profile_export_cli PROPERTIES LABELS "benchmark;cli" TIMEOUT 30)
     endif()
   endif()
 

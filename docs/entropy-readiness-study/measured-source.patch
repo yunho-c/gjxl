@@ -1,0 +1,1007 @@
+--- a/docs/storage-toolchain.md
++++ b/docs/storage-toolchain.md
+@@ -7,6 +7,7 @@
+ | Platform | Compiler / headers | ABI and modes |
+ | --- | --- | --- |
+ | macOS | Apple Clang 17.0.0, build `17000604`; SDK libc++ `200100` | Stable ABI 1; C++20/C++23, including Objective-C++ |
++| macOS | Apple Clang 21.0.0, build `21000334`; SDK libc++ `220106` (Xcode 27.0 build `27A266a`) | Stable ABI 1; C++20/C++23, including Objective-C++ |
+ | Windows x64 | MSVC 19.37 / STL 143 update `202305` (VS 2022 toolset 14.37.32822) | Release iterator level 0; C++20 or MSVC's C++23/latest mode |
+ | Linux x86-64 | Ubuntu 24.04 GCC `13.3.0-6ubuntu2~24.04.1`; libstdc++ 13 headers `20240904` | C++11 string ABI; release library; C++20/C++23 |
+ 
+@@ -26,7 +27,11 @@
+ when that toolset is absent. A missing pinned package or toolchain is a CI
+ failure; there is no fallback that disables storage validation.
+ 
+-The qualified machine is Apple M4 Pro on macOS 15.6, as recorded in the
++Compiler/header pairs are checked together; mixing the two recognized Apple
++Clang and libc++ versions is rejected. Accepting Xcode 27 does not change the
++CI toolchain selection or admit arbitrary later SDKs.
++
++The original qualified machine is Apple M4 Pro on macOS 15.6, as recorded in the
+ [final scheduling qualification](resident-scheduling-qualification.md). The
+ version checks identify the reviewed implementation family, not the hash of
+ every compiler or SDK file. Modified standard-library headers or custom ABI
+@@ -41,6 +46,27 @@
+   `__memory/allocator_traits.h` falls back to `{allocator.allocate(n), n}`.
+ - Vector growth, string rounding/inline storage, and hash-node/bucket behavior
+   for GJXL's existing operations follow the same bounds in both modes.
++
++The Xcode 27 audit uses the SDK shipped with build `27A266a`, on Apple M4 Pro
++and macOS 27.0 (`26A428`). Vector allocation, replacement, and 2x growth retain
++the bounds above. In libc++ `220106`, string rounding moved from `__recommend`
++to `__align_allocation_size` and growth uses
++`__get_amortized_growth_capacity`; the 8-byte character allocation rounding,
++2x growth, inline pointer classification, and existing 32-byte slack still
++apply. Hash nodes retain the concrete rebound type and unique-key insertion
++retains the existing bucket-growth bound. Both language modes preserve exact
++allocation counts for the standard allocator and the managed allocator's
++fallback. The accepted version pair remains implementation-specific.
++
++Validation on 2026-09-25 at source `d71eeb034f1f1d7d8b1aee2775ed9fe18bb24e98`
++plus this compatibility update passed all 159 Release C++20 tests, including
++the C++23 allocation target and installed C/C++ consumers in both modes.
++Separate C++20 and C++23 builds also passed the allocation and profile-storage
++tests. The header/toolchain test rejects mismatched recognized compiler/header
++pairs as well as unknown identities, unsupported language modes, and unstable
++ABI configurations. Metal compilation used toolchain `27A266a`
++(`metal-32023.921.6`). This qualification does not compare performance against
++the older compiler or extend support to C++26.
+ 
+ This is an implementation-specific conclusion, not a general C++23 guarantee
+ that `allocate_at_least` cannot return extra capacity. C++26 and later, other
+--- a/src/codestream/block_context_map.cpp
++++ b/src/codestream/block_context_map.cpp
+@@ -1,3 +1,4 @@
++#include "core/boundary_trace_internal.h"
+ // Copyright (c) the JPEG XL Project Authors.
+ // SPDX-License-Identifier: BSD-3-Clause
+ //
+@@ -71,6 +72,7 @@
+              codestream_internal::kSimpleCoefficientOrderCount>* counts,
+   std::array<size_t, 256>* qf_counts,
+   size_t* block_count) {
++  boundary_trace_internal::Span boundary_histogram("context.histogram_cpu");
+ 
+   if (counts == nullptr || qf_counts == nullptr || block_count == nullptr) {
+     return Status::InvalidArgument(
+@@ -106,6 +108,7 @@
+ Storage<uint32_t> MedianQuantThreshold(
+   const std::array<size_t, 256>& qf_counts,
+   size_t block_count) {
++  boundary_trace_internal::Span boundary_policy("context.policy_cpu");
+ 
+   if (block_count < kMinimumQuantSplitBlockCount) {
+     return {};
+@@ -128,6 +131,7 @@
+                    codestream_internal::kSimpleCoefficientOrderCount>& counts,
+   std::span<const uint32_t> qf_thresholds,
+   size_t block_count) {
++  boundary_trace_internal::Span boundary_policy("context.policy_cpu");
+ 
+   const size_t segment_count = qf_thresholds.size() + 1;
+   const size_t cell_count =
+--- a/src/codestream/coefficient_order.cpp
++++ b/src/codestream/coefficient_order.cpp
+@@ -1,3 +1,4 @@
++#include "core/boundary_trace_internal.h"
+ // Copyright (c) the JPEG XL Project Authors.
+ // SPDX-License-Identifier: BSD-3-Clause
+ //
+@@ -595,6 +596,7 @@
+     Status status;
+     const auto population = frame.coefficient_order_population();
+     if (!population.counts.empty()) {
++      boundary_trace_internal::Span boundary_population("order.population_read");
+       using namespace vardct_frame_internal;
+       if (population.counts.size() != kOrderPopulationCount ||
+           population.present_mask == 0 ||
+@@ -755,6 +757,7 @@
+       if ((present_mask & family_bit) == 0) {
+         continue;
+       }
++      boundary_trace_internal::Span boundary_sort("order.sort_family", family);
+       const AcStrategyInfo* info = RepresentativeInfo(family);
+       if (info == nullptr) {
+         return Status::Internal(
+--- a/src/codestream/dc_group.cpp
++++ b/src/codestream/dc_group.cpp
+@@ -1,3 +1,4 @@
++#include "core/boundary_trace_internal.h"
+ // Copyright (c) the JPEG XL Project Authors.
+ // SPDX-License-Identifier: BSD-3-Clause
+ //
+@@ -466,6 +467,7 @@
+     const ConstPlaneI8View y_to_b = frame.color_correlation().y_to_b_map();
+ 
+     const auto tokenize_group = [&](size_t group_index) -> Status {
++        boundary_trace_internal::Span boundary_group("dc.group", group_index);
+         const size_t group_y = group_index / group_extent.width;
+         const size_t group_x = group_index % group_extent.width;
+         SimpleDcGroupTokenStreams stream;
+@@ -483,6 +485,7 @@
+             SlicePlane(dc.plane[channel], stream.block_x, stream.block_y,
+                        stream.block_extent);
+         }
++        boundary_trace_internal::Span boundary_predict("dc.prediction_tokens", group_index);
+         Status status =
+             prediction == VarDctDcPrediction::kWeighted
+                 ? TokenizeWeightedDcGroup(group_dc, &stream.dc_tokens)
+@@ -491,6 +494,7 @@
+           return status;
+         }
+ 
++        boundary_predict.End();
+         const size_t tile_x =
+           stream.block_x / (kColorTileDimension / kJxlBlockDimension);
+         const size_t tile_y =
+@@ -508,6 +512,7 @@
+           .epf_sharpness = SlicePlane(sharpness, stream.block_x, stream.block_y,
+                                       stream.block_extent),
+         };
++        boundary_trace_internal::Span boundary_metadata("dc.metadata_tokens", group_index);
+         status = TokenizeSimpleAcMetadata(metadata, &stream.ac_metadata_tokens,
+                                           &stream.transform_anchor_count);
+         if (!status.ok()) {
+--- a/src/codestream/encoder.cpp
++++ b/src/codestream/encoder.cpp
+@@ -1,3 +1,4 @@
++#include "core/boundary_trace_internal.h"
+ // Copyright (c) the JPEG XL Project Authors.
+ // SPDX-License-Identifier: BSD-3-Clause
+ //
+@@ -193,6 +194,11 @@
+ 
+ // Token backing and representation metadata are independent of entropy policy.
+ // Rate-optimized encoding shares them between its balanced and expanded search.
++struct InitialEntropyState {
++  EntropyCode dc_code, prefix_dc_code, order_code, prefix_order_code;
++  EntropyCodeCost dc_cost, prefix_dc_cost, order_cost, prefix_order_cost;
++};
++
+ struct PreparedVarDctRepresentation {
+   Storage<SimpleDcGroupTokenStreams> dc_groups;
+   Storage<Storage<EntropyToken>> dc_streams;
+@@ -1200,49 +1206,29 @@
+   return Status::Ok();
+ }
+ 
+-Status EncodePreparedVarDctRepresentation(
+-  const VarDctFrameView& frame,
+-  VarDctCodestreamOptions options,
+-  bool exhaustive_representation_search,
+-  const PreparedVarDctRepresentation& prepared,
+-  std::span<AcEncodingCandidate> candidates,
+-  const codestream_internal::DcContextTreeLayout& dc_layout,
+-  codestream_internal::CodestreamBuffer* output,
+-  codestream_internal::VarDctCodestreamProfile* profile,
+-  RepresentationPhaseTimes* phase_times = nullptr) {
+-
+-  const auto total_begin = ProfileBegin(profile);
+-  auto candidate_profile = profile == nullptr
+-    ? codestream_internal::VarDctCodestreamProfile{} : *profile;
+-  candidate_profile.entropy_behavior = options.entropy_behavior;
+-  candidate_profile.coefficient_order_behavior = options.coefficient_order_behavior;
+-  const auto& dc_groups = prepared.dc_groups;
++Status PrepareInitialEntropyTask(
++    size_t index, const VarDctFrameView& frame, VarDctCodestreamOptions options,
++    bool exhaustive_representation_search,
++    const PreparedVarDctRepresentation& prepared,
++    std::span<AcEncodingCandidate> candidates,
++    const codestream_internal::DcContextTreeLayout& dc_layout,
++    InitialEntropyState& initial,
++    codestream_internal::EntropyWorkProfile* entropy_profile) {
+   const auto& dc_streams = prepared.dc_streams;
+-  const auto& block_context_maps = prepared.block_context_maps;
+-  const auto& custom_orders = prepared.custom_orders;
+   const auto& order_tokens = prepared.order_tokens;
+-  const bool has_custom_orders = custom_orders.used_order_mask != 0;
+-  const size_t candidates_per_map =
+-    exhaustive_representation_search && has_custom_orders ? 2 : 1;
+-  Status status;
+-  const ProfileClock::time_point entropy_begin = ProfileBegin(profile);
+-  EntropyCode dc_code;
+-  EntropyCodeCost dc_cost;
+-  EntropyCode prefix_dc_code;
+-  EntropyCodeCost prefix_dc_cost;
+-  EntropyCode order_code;
+-  EntropyCodeCost order_cost;
+-  EntropyCode prefix_order_code;
+-  EntropyCodeCost prefix_order_cost;
++  const bool has_custom_orders = prepared.custom_orders.used_order_mask != 0;
+   const size_t order_task_count = has_custom_orders ? 1 : 0;
+-  const size_t entropy_task_count = 1 + order_task_count + candidates.size();
+-  Storage<codestream_internal::EntropyWorkProfile> entropy_profiles(
+-    profile == nullptr ? 0 : entropy_task_count);
+-  status = RunParallelSections(
+-    entropy_task_count,
+-    [&](size_t index) {
+-      auto* entropy_profile =
+-        profile == nullptr ? nullptr : &entropy_profiles[index];
++  boundary_trace_internal::Span task(index == 0 ? "entropy.dc" :
++      (has_custom_orders && index == 1 ? "entropy.order" : "entropy.ac"),
++      static_cast<uint64_t>(options.entropy_behavior));
++  auto& dc_code = initial.dc_code;
++  auto& dc_cost = initial.dc_cost;
++  auto& prefix_dc_code = initial.prefix_dc_code;
++  auto& prefix_dc_cost = initial.prefix_dc_cost;
++  auto& order_code = initial.order_code;
++  auto& order_cost = initial.order_cost;
++  auto& prefix_order_code = initial.prefix_order_code;
++  auto& prefix_order_cost = initial.prefix_order_cost;
+       if (index == 0) {
+         if (exhaustive_representation_search) {
+           return OptimizeBestEntropyCode(
+@@ -1315,11 +1301,63 @@
+         },
+         options.entropy_behavior, candidate.fixed_context_populations, true,
+         &candidate.ac_code, &candidate.ac_cost, entropy_profile);
++}
++
++Status EncodePreparedVarDctRepresentation(
++  const VarDctFrameView& frame,
++  VarDctCodestreamOptions options,
++  bool exhaustive_representation_search,
++  const PreparedVarDctRepresentation& prepared,
++  std::span<AcEncodingCandidate> candidates,
++  const codestream_internal::DcContextTreeLayout& dc_layout,
++  codestream_internal::CodestreamBuffer* output,
++  codestream_internal::VarDctCodestreamProfile* profile,
++  RepresentationPhaseTimes* phase_times = nullptr,
++  InitialEntropyState* early = nullptr) {
++  boundary_trace_internal::Span boundary_representation("representation.total", static_cast<uint64_t>(options.entropy_behavior));
++
++  const auto total_begin = ProfileBegin(profile);
++  auto candidate_profile = profile == nullptr
++    ? codestream_internal::VarDctCodestreamProfile{} : *profile;
++  candidate_profile.entropy_behavior = options.entropy_behavior;
++  candidate_profile.coefficient_order_behavior = options.coefficient_order_behavior;
++  const auto& dc_groups = prepared.dc_groups;
++  const auto& dc_streams = prepared.dc_streams;
++  const auto& block_context_maps = prepared.block_context_maps;
++  const auto& custom_orders = prepared.custom_orders;
++  const auto& order_tokens = prepared.order_tokens;
++  const bool has_custom_orders = custom_orders.used_order_mask != 0;
++  const size_t candidates_per_map =
++    exhaustive_representation_search && has_custom_orders ? 2 : 1;
++  Status status;
++  boundary_trace_internal::Span boundary_entropy("entropy.phase", static_cast<uint64_t>(options.entropy_behavior));
++  const ProfileClock::time_point entropy_begin = ProfileBegin(profile);
++  InitialEntropyState local_initial;
++  auto& initial = early == nullptr ? local_initial : *early;
++  auto& dc_code = initial.dc_code;
++  auto& dc_cost = initial.dc_cost;
++  auto& prefix_dc_code = initial.prefix_dc_code;
++  auto& prefix_dc_cost = initial.prefix_dc_cost;
++  auto& order_code = initial.order_code;
++  auto& order_cost = initial.order_cost;
++  auto& prefix_order_code = initial.prefix_order_code;
++  auto& prefix_order_cost = initial.prefix_order_cost;
++  const size_t order_task_count = has_custom_orders ? 1 : 0;
++  const size_t entropy_task_count = 1 + order_task_count + candidates.size();
++  Storage<codestream_internal::EntropyWorkProfile> entropy_profiles(
++    profile == nullptr ? 0 : entropy_task_count);
++  if (early == nullptr) status = RunParallelSections(
++    entropy_task_count,
++    [&](size_t index) {
++      return PrepareInitialEntropyTask(index, frame, options,
++          exhaustive_representation_search, prepared, candidates, dc_layout,
++          initial, profile == nullptr ? nullptr : &entropy_profiles[index]);
+     });
+   if (!status.ok()) {
+     return status;
+   }
+ 
++  boundary_trace_internal::Point("entropy.initial_tasks_done");
+   const bool deferred_rate_ac =
+     options.entropy_behavior == VarDctEntropyBehavior::kRateOptimized &&
+     !candidates.front().prepared_ans.candidates.empty();
+@@ -1358,6 +1396,7 @@
+       [&](size_t task_index) {
+         const ProfileClock::time_point task_begin =
+           WorkBegin(profile != nullptr);
++        boundary_trace_internal::Span boundary_measure("entropy.ac_candidate_cost", task_index);
+         const AnsSectionTask task = ans_tasks[task_index];
+         AcEncodingCandidate& candidate = candidates[task.candidate_index];
+         const size_t candidate_count =
+@@ -1387,6 +1426,7 @@
+           ? nullptr
+           : &entropy_profiles[1 + order_task_count + candidate_index];
+         if (deferred_rate_ac) {
++          boundary_trace_internal::Span boundary_finalize("entropy.ac_finalize", candidate_index);
+           auto& candidate = candidates[candidate_index];
+           const auto selection_begin = WorkBegin(entropy_profile != nullptr);
+           Status finalize_status = codestream_internal::FinalizePreparedAnsEntropyCode(
+@@ -1413,6 +1453,7 @@
+   if (phase_times != nullptr)
+     phase_times->phases[0] = {entropy_begin, ProfileClock::now()};
+ 
++  boundary_entropy.End();
+   uint64_t section_measurement_nanoseconds = 0;
+   size_t selected_index = 0;
+   if (exhaustive_representation_search) {
+@@ -1599,6 +1640,7 @@
+   Storage<BitWriter> common_sections;
+   uint64_t written_dc_token_bits = 0;
+   codestream_internal::SectionWritingWorkProfile selected_write_profile;
++  boundary_trace_internal::Span boundary_common("write.common", static_cast<uint64_t>(options.entropy_behavior));
+   status = WriteCommonSections(
+       frame, dc_groups, dc_streams, selected.block_context_map,
+       selected_dc_code, &common_sections,
+@@ -1608,8 +1650,10 @@
+   if (!status.ok()) {
+     return status;
+   }
++  boundary_common.End();
+   Storage<BitWriter> ac_sections;
+   uint64_t written_ac_token_bits = 0;
++  boundary_trace_internal::Span boundary_ac_write("write.ac", static_cast<uint64_t>(options.entropy_behavior));
+   status = WriteAcSections(
+     selected, selected_ac_code, custom_orders, order_tokens,
+     selected_order_code, &ac_sections,
+@@ -1618,6 +1662,7 @@
+   if (!status.ok()) {
+     return status;
+   }
++  boundary_ac_write.End();
+   uint64_t selected_write_nanoseconds = 0;
+   ProfileEnd(profile, selected_write_begin, &selected_write_nanoseconds);
+   if (phase_times != nullptr)
+@@ -1637,10 +1682,12 @@
+ 
+   const ProfileClock::time_point assembly_begin = ProfileBegin(profile);
+   codestream_internal::CodestreamBuffer candidate_output;
++  boundary_trace_internal::Span boundary_assembly("write.assembly", static_cast<uint64_t>(options.entropy_behavior));
+   status = AssembleCandidate(
+     frame, common_sections, ac_sections,
+     selected.streams.size(), &candidate_output,
+     profile == nullptr ? nullptr : &candidate_profile.assembly);
++  boundary_assembly.End();
+   if (!status.ok()) {
+     return status;
+   }
+@@ -1785,7 +1832,9 @@
+     options.coefficient_order_behavior;
+   const ProfileClock::time_point total_begin = ProfileBegin(profile);
+   const ProfileClock::time_point validation_begin = ProfileBegin(profile);
++  boundary_trace_internal::Span boundary_validation("serializer.validation");
+   const Status validation = ValidateSimpleCodestreamFrame(frame);
++  boundary_validation.End();
+   ProfileEnd(
+     profile, validation_begin, &candidate_profile.validation_nanoseconds);
+   if (!validation.ok()) {
+@@ -1810,6 +1859,8 @@
+     options.entropy_behavior == VarDctEntropyBehavior::kRateOptimized;
+   try {
+     PreparedVarDctRepresentation prepared;
++    InitialEntropyState early_entropy;
++    bool entropy_prepared_early = false;
+     ParallelTokenCleanup token_cleanup{prepared};
+     if (rate_optimized) options.entropy_behavior = VarDctEntropyBehavior::kBalanced;
+     Status status;
+@@ -1817,6 +1868,7 @@
+         codestream_internal::active_ac_tokenization_provider != nullptr &&
+         codestream_internal::GpuTokenizationOverlapEnabled();
+     const auto prepare_dc = [&]() -> Status {
++    boundary_trace_internal::Span boundary_dc("dc.prepare");
+     const ProfileClock::time_point dc_tokenization_begin = ProfileBegin(profile);
+     auto& dc_groups = prepared.dc_groups;
+     Status status = codestream_internal::TokenizeSimpleDcGroupsForEncoder(
+@@ -1864,6 +1916,7 @@
+     const ProfileClock::time_point ac_tokenization_begin = ProfileBegin(profile);
+     auto& block_context_maps = prepared.block_context_maps;
+     auto& custom_orders = prepared.custom_orders;
++    boundary_trace_internal::Span boundary_context("ac.context_select");
+     const ProfileClock::time_point block_context_begin =
+       WorkBegin(profile != nullptr);
+     if (exhaustive_representation_search) {
+@@ -1885,6 +1938,8 @@
+       return status;
+     }
+ 
++    boundary_context.End();
++    boundary_trace_internal::Span boundary_order("ac.order_select");
+     const ProfileClock::time_point coefficient_order_begin =
+       WorkBegin(profile != nullptr);
+     status = codestream_internal::ComputeSimpleCoefficientOrdersForEncoder(
+@@ -1895,6 +1950,7 @@
+     if (!status.ok()) {
+       return status;
+     }
++    boundary_order.End();
+     if (block_context_maps.empty()) {
+       return Status::Internal(
+         "Validated frame produced no block-context candidates");
+@@ -1904,7 +1960,9 @@
+     if (custom_orders.used_order_mask != 0) {
+       const ProfileClock::time_point order_tokenization_begin =
+         WorkBegin(profile != nullptr);
++      boundary_trace_internal::Span boundary_order_tokens("ac.order_tokens");
+       status = TokenizeSimpleCoefficientOrders(custom_orders, &order_tokens);
++      boundary_order_tokens.End();
+       WorkEnd(
+         profile != nullptr, order_tokenization_begin,
+         &candidate_profile.coefficient_order_work_nanoseconds);
+@@ -1948,9 +2006,11 @@
+         return Status::Internal("Ordinary AC candidate count differs");
+       }
+       codestream_internal::SimpleAcNaturalOrders prepared_natural_orders;
++      boundary_trace_internal::Span boundary_natural("ac.natural_orders");
+       status = codestream_internal::PrepareSimpleAcNaturalOrders(
+         &prepared_natural_orders);
+       if (!status.ok()) return status;
++      boundary_natural.End();
+       AcEncodingCandidate& candidate = candidates.front();
+       const bool collect_fixed_populations =
+         options.entropy_behavior == VarDctEntropyBehavior::kBalanced;
+@@ -1958,17 +2018,85 @@
+         status = provider->Begin(frame, has_custom_orders ? custom_orders : natural_orders,
+             prepared_natural_orders, candidate.block_context_map, collect_fixed_populations);
+         if (!status.ok()) return status;
+-        if (overlap_dc) {
+-          status = prepare_dc();
++        unsigned eager_mode = 0;
++#ifdef GJXL_TOKENIZATION_EXPERIMENT
++        if (const char* mode = std::getenv("GJXL_EXPERIMENT_EAGER_ENTROPY")) {
++          if (mode[0] >= '1' && mode[0] <= '2' && mode[1] == '\0')
++            eager_mode = static_cast<unsigned>(mode[0] - '0');
++        }
++#endif
++        const size_t requested = thread_budget_internal::CpuThreadCount();
++        const size_t workers = std::min(kMaximumSectionWorkers, requested == 0
++            ? std::max<size_t>(1, std::thread::hardware_concurrency()) : requested);
++        // The experiment preserves DC's existing launch point. This is an
++        // earlier-completion/entropy test, not the separate earlier-DC idea.
++        // Native additive profiles retain the old schedule; independent trace
++        // spans and public wall time measure this overlapping prototype.
++        bool eager = eager_mode != 0 && overlap_dc && workers > 1 &&
++            profile == nullptr && thread_budget_internal::HasCpuParticipation() &&
++            !thread_budget_internal::InExplicitParallelScope() &&
++            (eager_mode == 1 || !rate_optimized);
++        std::optional<thread_budget_internal::CpuWorkerGroup> eager_workers;
++        if (eager) {
++          eager_workers.emplace(2);
++          eager = eager_workers->participants() == 2;
++        }
++        boundary_trace_internal::Point("eager.selected", eager ? eager_mode : 0);
++        if (eager) {
++          auto* tracker = thread_budget_internal::ParticipantTracker();
++          constexpr thread_budget_internal::ParallelWorkErrors errors{
++            .allocation = "Eager entropy allocation failed",
++            .unexpected = "Eager entropy worker failed",
++            .length_code = StatusCode::kOutOfMemory,
++            .length = "Eager entropy storage overflow",
++            .launch_allocation = "Eager entropy worker allocation failed",
++            .launch_action = thread_budget_internal::LaunchFailureAction::kReturnError,
++            .launch = "Unable to start eager entropy worker",
++          };
++          status = thread_budget_internal::RunParallelWork<Storage>(2,
++              *eager_workers, 1,
++              thread_budget_internal::WorkerLaunchSite::kSerializerSections,
++              errors, [&](size_t branch, size_t) -> Status {
++            // Disjoint ceilings reset local nesting without exceeding the
++            // common per-image/domain reservations. DC can retain group workers.
++            thread_budget_internal::EncodeScope scope(
++                branch == 0 ? workers - 1 : 1, tracker);
++            if (branch == 0) {
++              Status result = prepare_dc();
++              if (result.ok() && eager_mode == 2)
++                result = PrepareInitialEntropyTask(0, frame, options, false,
++                    prepared, prepared.candidates, dc_layout, early_entropy, nullptr);
++              return result;
++            }
++            if (eager_mode == 2 && has_custom_orders) {
++              Status result = PrepareInitialEntropyTask(1, frame, options, false,
++                  prepared, prepared.candidates, dc_layout, early_entropy, nullptr);
++              if (!result.ok()) return result;
++            }
++            Status result = provider->Finish(&candidate.streams,
++                &candidate.fixed_context_populations);
++            if (result.ok() && eager_mode == 2)
++              result = PrepareInitialEntropyTask(1 + (has_custom_orders ? 1 : 0),
++                  frame, options, false, prepared, prepared.candidates, dc_layout,
++                  early_entropy, nullptr);
++            return result;
++          });
+           if (!status.ok()) return status;
+-        }
+-        status = provider->Finish(&candidate.streams, &candidate.fixed_context_populations);
+-        if (!status.ok()) return status;
++          entropy_prepared_early = eager_mode == 2;
++        } else {
++          if (overlap_dc) {
++            status = prepare_dc();
++            if (!status.ok()) return status;
++          }
++          status = provider->Finish(&candidate.streams, &candidate.fixed_context_populations);
++          if (!status.ok()) return status;
++        }
+         if (profile != nullptr) {
+           for (auto stream : candidate.streams) candidate_profile.coefficient_token_count += stream.size();
+           candidate_profile.coefficient_tokenization_pass_count = 1;
+         }
+       } else {
++      boundary_trace_internal::Span boundary_cpu_ac("ac.cpu_tokenization");
+       candidate.direct_groups.resize(ac_group_count);
+       std::array<codestream_internal::SimpleAcTokenizationScratch,
+                  kMaximumSectionWorkers> tokenization_scratch;
+@@ -1982,6 +2110,7 @@
+           }
+           const ProfileClock::time_point work_begin =
+             WorkBegin(profile != nullptr);
++          boundary_trace_internal::Span boundary_cpu_group("ac.cpu_group", group_index);
+           Status token_status =
+             codestream_internal::TokenizeSimpleAcGroupForEncoder(
+               frame, has_custom_orders ? custom_orders : natural_orders,
+@@ -2180,7 +2309,8 @@
+       status = EncodePreparedVarDctRepresentation(
+         frame, options, exhaustive_representation_search, prepared,
+         prepared.candidates, dc_layout,
+-        output, profile == nullptr ? nullptr : &candidate_profile);
++        output, profile == nullptr ? nullptr : &candidate_profile, nullptr,
++        entropy_prepared_early ? &early_entropy : nullptr);
+       if (status.ok() && profile != nullptr) {
+         candidate_profile.total_nanoseconds = ElapsedNanoseconds(total_begin);
+         *profile = candidate_profile;
+--- a/src/codestream/workflow.cpp
++++ b/src/codestream/workflow.cpp
+@@ -1,3 +1,4 @@
++#include "core/boundary_trace_internal.h"
+ // SPDX-License-Identifier: Apache-2.0
+ // Copyright (c) 2026 Yunho Cho
+ 
+@@ -869,6 +870,7 @@
+   gpu_profile_internal::GpuProfilingMode gpu_profiling_mode,
+   gpu_profile_internal::GpuExecutionProfile* gpu_profile,
+   bool retain_preparation_for_retry) {
++  boundary_trace_internal::Span boundary_attempt("workflow.attempt");
+ 
+   if (!prepared.gpu_adaptive_quantization.has_value()) {
+     return Status::FailedPrecondition("Encoding attempt uses released preparation");
+@@ -938,6 +940,7 @@
+     pipeline_options.adaptive_quantization.color_correlation_iterations =
+       final_cfl_iterations;
+   }
++  boundary_trace_internal::Span boundary_pipeline("workflow.quantization");
+   const WorkflowClock::time_point pipeline_begin = ProfileBegin(profile);
+   EncodingArtifacts encoding;
+   if (!prepared.backend_preselected && selected_accelerator &&
+@@ -1048,12 +1051,14 @@
+     return status;
+   }
+   if (!retain_preparation_for_retry && encoding.completed_frame != nullptr) {
++    boundary_trace_internal::Span boundary_release("workflow.release_preparation");
+     prepared.ReleaseBeforeSerialization();
+   }
+   ProfileEnd(
+     profile, pipeline_begin,
+     &candidate_profile.quantization_pipeline_nanoseconds);
+ 
++  boundary_pipeline.End();
+   if (workflow_lifetime_observer.before_serialization != nullptr) {
+     workflow_lifetime_observer.before_serialization(
+       encoding.completed_frame != nullptr, retain_preparation_for_retry,
+@@ -1061,6 +1066,7 @@
+   }
+ 
+   codestream_internal::CodestreamBuffer candidate;
++  boundary_trace_internal::Span boundary_serializer("workflow.serializer");
+   const WorkflowClock::time_point codestream_begin = ProfileBegin(profile);
+   const VarDctCodestreamOptions codestream_options{
+       .entropy_behavior = codestream_internal::ResolveEntropyBehavior(options),
+@@ -1083,6 +1089,7 @@
+       encoding.completed_frame != nullptr) {
+     size_t coefficient_offset = 0;
+     if (const auto* buffer = encoding.completed_frame->resident_ac_buffer(&coefficient_offset)) {
++      boundary_trace_internal::Span boundary_provider("token.provider_create");
+       status = codestream_internal::CreateMetalAcTokenizationProvider(
+           *selected_gpu, *buffer, coefficient_offset, &ac_tokenizer);
+       if (!status.ok()) return status;
+@@ -1100,6 +1107,8 @@
+     return status;
+   }
+ 
++  boundary_serializer.End();
++  boundary_trace_internal::Span boundary_summary("workflow.summary");
+   const WorkflowClock::time_point summary_begin = ProfileBegin(profile);
+   codestream_internal::OwnedEncodingSummary candidate_summary_owner;
+   auto& candidate_summary = candidate_summary_owner.value();
+@@ -1554,6 +1563,8 @@
+   gpu_profile_internal::GpuExecutionProfile* gpu_profile,
+   thread_budget_internal::CpuExecutionScope* outer_cpu_execution = nullptr,
+   std::unique_ptr<PreparedResidentInput> resident_input = nullptr) {
++  boundary_trace_internal::RootScope boundary_root;
++  boundary_trace_internal::Span boundary_workflow("workflow.internal");
+ 
+   const bool gpu_profiling =
+     gpu_profiling_mode != gpu_profile_internal::GpuProfilingMode::kDisabled;
+--- /dev/null
++++ b/src/core/boundary_trace_internal.h
+@@ -0,0 +1,87 @@
++// Local measurement instrumentation. Not a production API.
++#pragma once
++#include <algorithm>
++#include <atomic>
++#include <cstdint>
++#include <cstring>
++#include <memory>
++#include <ostream>
++#include <mach/mach_time.h>
++#include <pthread.h>
++
++namespace gjxl::boundary_trace_internal {
++inline uint64_t Now() noexcept {
++  static const auto timebase = [] { mach_timebase_info_data_t t; mach_timebase_info(&t); return t; }();
++  const uint64_t ticks = mach_absolute_time();
++  return static_cast<uint64_t>((static_cast<__uint128_t>(ticks) * timebase.numer) / timebase.denom);
++}
++inline uint64_t Thread() noexcept {
++  thread_local const uint64_t id = [] { uint64_t n = 0; pthread_threadid_np(nullptr, &n); return n; }();
++  return id;
++}
++struct Event {
++  char name[96]{};
++  const char* kind = "cpu";
++  uint64_t begin = 0, end = 0, tid = 0, value = 0;
++  uint32_t job = 0;
++};
++struct Sink {
++  static constexpr size_t capacity = 65536;
++  std::unique_ptr<Event[]> events = std::make_unique<Event[]>(capacity);
++  std::atomic<size_t> count{0};
++  std::atomic<uint32_t> jobs{0};
++  void Reset() { count.store(0); jobs.store(0); }
++  void Add(const char* name, const char* kind, uint64_t begin, uint64_t end,
++           uint32_t job, uint64_t value = 0) noexcept {
++    const auto i = count.fetch_add(1, std::memory_order_relaxed);
++    if (i >= capacity) return;
++    auto& e = events[i];
++    const auto n = std::min(std::strlen(name), sizeof(e.name) - 1);
++    std::memcpy(e.name, name, n); e.name[n] = 0;
++    e.kind = kind; e.begin = begin; e.end = end; e.job = job; e.tid = Thread(); e.value = value;
++  }
++  void Write(std::ostream& out) const {
++    out << '[';
++    for (size_t i = 0; i < std::min(count.load(), capacity); ++i) {
++      const auto& e = events[i];
++      if (i) out << ',';
++      out << "{\"name\":\"" << e.name << "\",\"kind\":\"" << e.kind
++          << "\",\"begin_ns\":" << e.begin << ",\"end_ns\":" << e.end
++          << ",\"job\":" << e.job << ",\"tid\":" << e.tid << ",\"value\":" << e.value << '}';
++    }
++    out << ']';
++  }
++};
++struct Context { Sink* sink = nullptr; uint32_t job = 0; };
++inline std::atomic<Sink*> active_sink{nullptr};
++inline thread_local Context current;
++struct ContextScope {
++  Context previous;
++  explicit ContextScope(Context value) : previous(current) { current = value; }
++  ~ContextScope() { current = previous; }
++};
++struct RootScope {
++  Context previous;
++  RootScope() : previous(current) {
++    if (auto* sink = active_sink.load(std::memory_order_relaxed))
++      current = {sink, sink->jobs.fetch_add(1, std::memory_order_relaxed) + 1};
++  }
++  ~RootScope() { current = previous; }
++};
++struct Span {
++  Context context;
++  const char* name;
++  const char* kind;
++  uint64_t begin = 0, value;
++  Span(const char* name, uint64_t value = 0) : Span(current, name, "cpu", value) {}
++  Span(Context context, const char* name, const char* kind = "cpu", uint64_t value = 0)
++      : context(context), name(name), kind(kind), value(value) { if (context.sink) begin = Now(); }
++  void End() noexcept {
++    if (context.sink) { context.sink->Add(name, kind, begin, Now(), context.job, value); context.sink = nullptr; }
++  }
++  ~Span() { End(); }
++};
++inline void Point(const char* name, uint64_t value = 0) {
++  if (current.sink) { const auto now = Now(); current.sink->Add(name, "point", now, now, current.job, value); }
++}
++}  // namespace gjxl::boundary_trace_internal
+--- a/src/core/parallel_work_internal.h
++++ b/src/core/parallel_work_internal.h
+@@ -1,3 +1,4 @@
++#include "core/boundary_trace_internal.h"
+ // SPDX-License-Identifier: Apache-2.0
+ // Copyright (c) 2026 Yunho Cho
+ 
+@@ -54,7 +55,9 @@
+   std::atomic<size_t> next_index{0};
+   Storage<std::thread> workers;
+   workers.reserve(spawned_workers);
++  const auto boundary_context = boundary_trace_internal::current;
+   const auto run_worker = [&](size_t worker_index) {
++    boundary_trace_internal::ContextScope boundary_scope(boundary_context);
+     ParallelScope scope(cpu_thread_count, tracker, resources, &group);
+     while (true) {
+       const size_t index = next_index.fetch_add(1, std::memory_order_relaxed);
+--- a/src/core/stdlib_storage_compat.h
++++ b/src/core/stdlib_storage_compat.h
+@@ -28,11 +28,14 @@
+ #error "GJXL storage contract requires C++20 or C++23; see docs/storage-toolchain.md"
+ #endif
+ #elif defined(_LIBCPP_VERSION)
+-#if !defined(__APPLE__) || !defined(__apple_build_version__) || __apple_build_version__ != 17000604
+-#error "GJXL storage contract requires audited Apple Clang build 17000604; see docs/storage-toolchain.md"
++#if !defined(__APPLE__) || !defined(__apple_build_version__) || (__apple_build_version__ != 17000604 && __apple_build_version__ != 21000334)
++#error "GJXL storage contract requires audited Apple Clang build 17000604 or 21000334; see docs/storage-toolchain.md"
+ #endif
+-#if !defined(_LIBCPP_VERSION) || _LIBCPP_VERSION != 200100
+-#error "GJXL storage contract requires audited libc++ 200100; see docs/storage-toolchain.md"
++#if !defined(_LIBCPP_VERSION) || (_LIBCPP_VERSION != 200100 && _LIBCPP_VERSION != 220106)
++#error "GJXL storage contract requires audited libc++ 200100 or 220106; see docs/storage-toolchain.md"
++#endif
++#if (__apple_build_version__ == 17000604 && _LIBCPP_VERSION != 200100) || (__apple_build_version__ == 21000334 && _LIBCPP_VERSION != 220106)
++#error "GJXL storage contract requires an audited Apple Clang/libc++ pairing; see docs/storage-toolchain.md"
+ #endif
+ #if !defined(_LIBCPP_STD_VER) || (_LIBCPP_STD_VER != 20 && _LIBCPP_STD_VER != 23)
+ #error "GJXL storage contract requires C++20 or C++23; see docs/storage-toolchain.md"
+@@ -84,7 +87,8 @@
+   return std::vector<T>(source.begin(), source.end());
+ }
+ 
+-// libc++ string: char-string __recommend rounds length+1 to an 8-byte boundary,
++// libc++ string: __recommend (200100) / __align_allocation_size (220106)
++// rounds char-string length+1 to an 8-byte boundary,
+ // with an inline/long boundary adjustment. 32 bytes covers both. Growth doubles
+ // the old capacity then rounds; max_size saturation also fits this envelope.
+ // shrink_to_fit can retain the old doubled backing beside a fresh replacement.
+--- a/src/gpu/metal/metal_ac_tokenization.cpp
++++ b/src/gpu/metal/metal_ac_tokenization.cpp
+@@ -1,3 +1,4 @@
++#include "core/boundary_trace_internal.h"
+ // SPDX-License-Identifier: Apache-2.0
+ #include "codestream/ac_tokenization_provider_internal.h"
+ #include "codestream/simple_ac_context.h"
+@@ -38,6 +39,7 @@
+   }
+ 
+   Status Initialize() {
++    boundary_trace_internal::Span trace_initialize("token.initialize");
+     std::lock_guard lock(backend_.ac_tokenization_mutex_);
+     constexpr const char *names[] = {
+         "gjxl_ac_token_metadata", "gjxl_ac_token_offsets", "gjxl_ac_token_emit",
+@@ -68,6 +70,8 @@
+                const SimpleAcNaturalOrders &natural,
+                const SimpleBlockContextMap &contexts,
+                bool populations) override {
++    boundary_trace_internal::Span trace_begin("token.begin");
++    boundary_trace_internal::Span trace_arena("token.begin_arena");
+     diagnostic_ = TokenizationExperimentSetting(
+                       "GJXL_EXPERIMENT_TOKEN_DIAGNOSTIC") != nullptr;
+     Stamp(0);
+@@ -162,6 +166,8 @@
+       return status;
+     arena_buffer_ = MetalBackend::AsMetalBuffer(*arena_.backing_buffer());
+     Stamp(1);
++    trace_arena.End();
++    boundary_trace_internal::Span trace_orders("token.pack_orders");
+     auto *strategy_data = Data<TokenStrategy>(2);
+     std::memset(strategy_data, 0, kAcStrategyCount * sizeof(TokenStrategy));
+     auto *order_data = Data<uint32_t>(3);
+@@ -188,6 +194,8 @@
+         order_used += static_cast<uint32_t>(scan.size());
+       }
+     }
++    trace_orders.End();
++    boundary_trace_internal::Span trace_contexts("token.pack_contexts");
+     auto *control = Data<uint32_t>(9);
+     control[0] = contexts.num_contexts;
+     control[1] = static_cast<uint32_t>(segments);
+@@ -202,6 +210,7 @@
+     control[control_end_ + 2] = 0;
+     control[control_end_ + 3] = smart_;
+     control[control_end_ + 4] = scalar_dct8_;
++    trace_contexts.End();
+     if (smart_) {
+       uint32_t hint = backend_.ac_tokenization_capacity_hint_.load(
+           std::memory_order_relaxed);
+@@ -215,6 +224,7 @@
+       if (!status.ok())
+         return status;
+     }
++    boundary_trace_internal::Span trace_anchors("token.clear_and_pack_anchors");
+     if (populations)
+       std::memset(Data<uint32_t>(8), 0, sizes_[8]);
+     auto *anchors = Data<TokenAnchor>(0);
+@@ -302,6 +312,8 @@
+         return Status::Unavailable("Grouped DCT8 threadgroup is unsupported");
+       pipelines_[5] = pipeline;
+     }
++    trace_anchors.End();
++    boundary_trace_internal::Point("token.anchor_count", anchor_count);
+     tasks_ = 3 * anchor_count;
+     if (diagnostic_)
+       std::fprintf(stderr,
+@@ -362,6 +374,7 @@
+ 
+   Status Finish(Storage<EntropyTokenStreamView> *streams,
+                 Storage<PreparedFixedAnsCluster> *populations) override {
++    boundary_trace_internal::Span trace_finish("token.finish");
+     if (!submission_ || !streams || !populations)
+       return Status::InvalidArgument("Missing AC token submission/output");
+     if (finished_)
+@@ -374,6 +387,7 @@
+     status = LogSubmission();
+     if (!status.ok())
+       return status;
++    boundary_trace_internal::Span trace_capacity("token.capacity_check_retry");
+     if (compact_) {
+       auto *groups = Data<TokenGroup>(1);
+       uint32_t total = 0;
+@@ -391,7 +405,10 @@
+         backend_.ac_tokenization_capacity_hint_.store(
+             std::max(total, output_capacity_tokens_),
+             std::memory_order_relaxed);
++      boundary_trace_internal::Point("token.total_tokens", total);
++      boundary_trace_internal::Point("token.capacity", output_capacity_tokens_);
+       if (!smart_ || total > output_capacity_tokens_) {
++        boundary_trace_internal::Point("token.capacity_retry", total);
+         submission_.reset(); // The first command has completed; release its
+                              // references.
+         status = PrepareOutput(total);
+@@ -430,6 +447,8 @@
+         Stamp(5); // Compact wait includes sizing and its second GPU submission.
+       }
+     }
++    trace_capacity.End();
++    boundary_trace_internal::Span trace_views("token.stream_views");
+     Storage<EntropyTokenStreamView> result;
+     result.reserve(group_count_);
+     const auto *groups = Data<TokenGroup>(1);
+@@ -447,6 +466,8 @@
+           {values + g.output, g.tokens}, {contexts + g.output, g.tokens}));
+       total_tokens += g.tokens;
+     }
++    trace_views.End();
++    boundary_trace_internal::Span trace_reduce("token.population_reduce");
+     Storage<PreparedFixedAnsCluster> reduced;
+     if (populations_) {
+       reduced.resize(context_count_);
+@@ -526,6 +547,7 @@
+     return total;
+   }
+   Status PrepareOutput(uint32_t tokens) {
++    boundary_trace_internal::Span trace_output("token.allocate_output", tokens);
+     // Previous speculative output is no longer in use: Finish waited first.
+     output_arena_ = DeviceScratchArena{};
+     output_capacity_tokens_ = tokens;
+--- a/src/gpu/metal/metal_aq_evaluation.cpp
++++ b/src/gpu/metal/metal_aq_evaluation.cpp
+@@ -1,3 +1,4 @@
++#include "core/boundary_trace_internal.h"
+ // SPDX-License-Identifier: Apache-2.0
+ // Copyright (c) 2026 Yunho Cho
+ 
+@@ -2616,7 +2617,10 @@
+   }
+ 
+   gpu_profile_internal::GpuSubmissionProfile submission_profile;
++  boundary_trace_internal::Span boundary_wait("aq.final_wait");
+   status = WaitForOperation(profiling ? &submission_profile : nullptr);
++  boundary_wait.End();
++  boundary_trace_internal::Span boundary_post_wait("aq.post_wait");
+   if (!status.ok()) return status;
+   if (profiling) {
+     try {
+@@ -3280,6 +3284,7 @@
+ 
+ Status MetalPreparedAqEvaluation::FinishCompletedFrame(
+     MetalCompletedVarDctFrame& frame) const {
++  boundary_trace_internal::Span boundary_frame("frame.complete");
+   const resource_budget_internal::ResourceClassScope resource_class(
+     resource_budget_internal::ResourceClass::kCompletedFrame);
+   std::span<const int32_t> raw_quant;
+@@ -3318,6 +3323,7 @@
+   }
+   // These block-resolution fields are snapshotted so temporary AQ storage can
+   // be reused/destroyed immediately. The full-resolution AC plane is borrowed.
++  boundary_trace_internal::Span boundary_metadata("frame.snapshot_metadata");
+   std::copy(raw_quant.begin(), raw_quant.end(), frame.raw_quant.begin());
+   std::copy(quantized_dc.begin(), quantized_dc.end(), frame.quantized_dc.begin());
+   frame.quantizer = last_quantizer_;
+@@ -3337,6 +3343,8 @@
+         ? std::fma(y, 1.0f, static_cast<float>(frame.quantized_dc[2 * block_count_ + i]) * steps[2])
+         : static_cast<float>(frame.quantized_dc[2 * block_count_ + i]) * steps[2] + y;
+   }
++  boundary_metadata.End();
++  boundary_trace_internal::Span boundary_validate("frame.validation");
+   if (!frame.view().valid()) {
+     return Status::DeviceError("Completed Metal frame is invalid");
+   }
+--- a/src/gpu/metal/metal_submission.cpp
++++ b/src/gpu/metal/metal_submission.cpp
+@@ -1,3 +1,4 @@
++#include "core/boundary_trace_internal.h"
+ // SPDX-License-Identifier: Apache-2.0
+ // Copyright (c) 2026 Yunho Cho
+ 
+@@ -175,7 +176,14 @@
+       counter_sample_buffer_(std::move(counter_sample_buffer)),
+       profile_(std::move(profile)), profiling_mode_(profiling_mode),
+       resolved_sample_count_(resolved_sample_count),
+-      indirect_(std::move(indirect)) {}
++      indirect_(std::move(indirect)) {
++        trace_context_ = boundary_trace_internal::current;
++        if (trace_context_.sink) {
++          const auto* label = command_buffer_->label();
++          const char* name = label ? label->utf8String() : "unlabeled";
++          std::strncpy(trace_label_, name, sizeof(trace_label_) - 1);
++        }
++      }
+ 
+   ~MetalSubmission() override = default;
+ 
+@@ -184,7 +192,14 @@
+     std::call_once(wait_once_, [this] {
+       auto pool = NS::TransferPtr(
+         NS::AutoreleasePool::alloc()->init());
++      boundary_trace_internal::Span trace_wait(trace_context_, trace_label_, "wait");
+       command_buffer_->waitUntilCompleted();
++      trace_wait.End();
++      if (trace_context_.sink && command_buffer_->status() == MTL::CommandBufferStatusCompleted) {
++        trace_context_.sink->Add(trace_label_, "gpu",
++          static_cast<uint64_t>(command_buffer_->GPUStartTime() * 1.0e9),
++          static_cast<uint64_t>(command_buffer_->GPUEndTime() * 1.0e9), trace_context_.job);
++      }
+       if (test_fail_completion_) {
+         completion_status_ = Status::DeviceError(
+           "Injected Metal command-buffer completion failure");
+@@ -339,6 +354,8 @@
+   }
+ 
+ private:
++  boundary_trace_internal::Context trace_context_;
++  char trace_label_[96]{};
+   NS::SharedPtr<MTL::CommandBuffer> command_buffer_;
+   NS::SharedPtr<MTL::CommandQueue> command_queue_;
+   NS::SharedPtr<MTL::Device> device_;
+@@ -543,7 +560,8 @@
+       "Failed to create Metal compute encoder");
+   }
+ 
+-  encode(*this, encoder, context);
++  { boundary_trace_internal::Span trace_encode(boundary_trace_internal::current, label, "encode");
++    encode(*this, encoder, context); }
+   encoder->endEncoding();
+   std::unique_ptr<GpuSubmission> pending(
+     new MetalSubmission(
+@@ -551,7 +569,8 @@
+       command_queue_,
+       device_,
+       fail_completion));
+-  raw_command_buffer->commit();
++  { boundary_trace_internal::Span trace_commit(boundary_trace_internal::current, label, "commit");
++    raw_command_buffer->commit(); }
+   RecordCommittedSubmission();
+   *submission = std::move(pending);
+   return Status::Ok();
+@@ -744,7 +763,8 @@
+     command_buffer, command_queue_, device_, fail_completion,
+     sample_buffer, std::move(profile), mode, resolved_sample_count,
+     std::move(indirect)));
+-  raw_command_buffer->commit();
++  { boundary_trace_internal::Span trace_commit(boundary_trace_internal::current, label, "commit");
++    raw_command_buffer->commit(); }
+   RecordCommittedSubmission();
+   *submission = std::move(pending);
+   return Status::Ok();
+--- a/tests/storage_toolchain_test.py
++++ b/tests/storage_toolchain_test.py
+@@ -57,6 +57,10 @@
+         ("_LIBCPP_ABI_VERSION", "2", "stable libc++ ABI version 1"),
+         ("_LIBCPP_ABI_UNSTABLE", "1", "stable libc++ ABI version 1"),
+     ])
++    if not msvc and not gnu:
++        # Reject mixing the two individually recognized compiler/header versions.
++        other_compiler = "17000604" if "#define __apple_build_version__ 21000334" in macros else "21000334"
++        cases.append(("__apple_build_version__", other_compiler, "audited Apple Clang/libc++ pairing"))
+     with tempfile.TemporaryDirectory(prefix="gjxl-storage-header-") as directory:
+         source_path = Path(directory) / "probe.cpp"
+ 

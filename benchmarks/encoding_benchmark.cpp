@@ -47,6 +47,7 @@
 #include "io/pfm.h"
 #include "synthetic_images.h"
 #include "gpu_profile_json.h"
+#include "workflow_profile_json.h"
 
 #ifndef GJXL_FLOWER_PPM_PATH
 #error "GJXL_FLOWER_PPM_PATH must identify the pinned Flower PPM"
@@ -141,7 +142,8 @@ struct CommandLineOptions {
   gjxl::VarDctCompressionMode compression_mode =
       gjxl::VarDctCompressionMode::kAutomatic;
   bool collect_final_butteraugli_score = false;
-  bool adaptive_epf_sharpness = true;
+  bool adaptive_epf_sharpness = false;
+  bool epf_sharpness_search_specified = false;
   float butteraugli_target = kDefaultButteraugliTarget;
   int32_t effort = 7;
   size_t cpu_thread_count = 0;
@@ -641,6 +643,7 @@ ParseGpuProfilingMode(std::string_view text) {
         throw std::runtime_error("EPF sharpness search must be on or off");
       }
       options.adaptive_epf_sharpness = value == "on";
+      options.epf_sharpness_search_specified = true;
     } else if (argument == "--distance") {
       options.butteraugli_target = ParsePositiveFloat(value);
     } else if (argument == "--effort") {
@@ -671,11 +674,11 @@ ParseGpuProfilingMode(std::string_view text) {
     throw std::runtime_error(
       "Maximum-throughput mode requires a public-workflow scope");
   }
-  if (!options.adaptive_epf_sharpness &&
+  if (options.epf_sharpness_search_specified &&
       options.scope != BenchmarkScope::kPublicWorkflow &&
       options.scope != BenchmarkScope::kMetalPublicWorkflow) {
     throw std::runtime_error(
-        "EPF sharpness ablation requires a public-workflow scope");
+        "EPF sharpness search controls require a public-workflow scope");
   }
   if (options.density_mode == gjxl::VarDctDensityMode::kHighDensity &&
       (options.scope != BenchmarkScope::kPublicWorkflow &&
@@ -936,156 +939,19 @@ void PrintRatioStats(std::string_view label,
   return static_cast<double>(nanoseconds) / 1.0e6;
 }
 
-constexpr std::array<std::string_view, 45> kWorkflowProfileNames = {
-    "total",
-    "input_preparation",
-    "input_geometry_and_storage",
-    "input_color_transform",
-    "input_matrix_scale_stats",
-    "input_resident_preparation",
-    "input_quantization_preparation",
-    "backend_selection",
-    "quantization_pipeline",
-    "codestream_encoding",
-    "summary_assembly",
-    "codestream_validation",
-    "codestream_dc_tokenization",
-    "codestream_ac_tokenization",
-    "codestream_block_context_map_work",
-    "codestream_coefficient_order_work",
-    "codestream_coefficient_tokenization_work",
-    "codestream_coefficient_context_materialization_work",
-    "codestream_entropy_optimization",
-    "codestream_entropy_prefix_histogram_build_work",
-    "codestream_entropy_prefix_histogram_cost_work",
-    "codestream_entropy_prefix_clustering_work",
-    "codestream_entropy_prefix_code_build_work",
-    "codestream_entropy_prefix_value_collection_work",
-    "codestream_entropy_prefix_config_search_work",
-    "codestream_entropy_prefix_exact_measurement_work",
-    "codestream_entropy_ans_prefix_validation_work",
-    "codestream_entropy_ans_value_collection_work",
-    "codestream_entropy_ans_value_aggregation_work",
-    "codestream_entropy_ans_prepared_value_validation_work",
-    "codestream_entropy_ans_uint_config_work",
-    "codestream_entropy_ans_histogram_build_work",
-    "codestream_entropy_ans_model_build_work",
-    "codestream_entropy_ans_token_cost_work",
-    "codestream_entropy_selection_work",
-    "codestream_section_writing",
-    "codestream_section_model_and_header_work",
-    "codestream_section_token_write_work",
-    "codestream_section_candidate_measure_work",
-    "codestream_assembly",
-    "codestream_assembly_candidate_selection",
-    "codestream_assembly_section_size",
-    "codestream_assembly_frame_header",
-    "codestream_assembly_toc_and_sections",
-    "codestream_assembly_output_copy",
-};
+using gjxl::benchmark::kWorkflowProfileNames;
 
-struct RawWorkflowSample {
-  size_t sample_index = 0;
-  std::string_view backend;
-  size_t peak_cpu_participants = 0;
-  gjxl::VarDctEntropyBehavior entropy_behavior =
-    gjxl::VarDctEntropyBehavior::kBalanced;
-  size_t ans_uint_config_candidate_count = 0;
-  size_t ans_histogram_candidate_count = 0;
-  size_t ans_alphabet_width_candidate_count = 0;
-  std::array<uint64_t, kWorkflowProfileNames.size()> phase_nanoseconds{};
-  size_t encoded_bytes = 0;
-  uint64_t entropy_model_bits = 0;
-  uint64_t entropy_token_bits = 0;
-  size_t dc_entropy_clusters = 0;
-  size_t ac_entropy_clusters = 0;
-  bool dc_entropy_is_ans = false;
-  bool ac_entropy_is_ans = false;
-  bool coefficient_order_entropy_is_ans = false;
-  size_t natural_candidate_bytes = 0;
-  size_t custom_order_candidate_bytes = 0;
-  uint16_t selected_coefficient_order_mask = 0;
-  size_t block_context_candidate_count = 0;
-  size_t compact_block_context_candidate_bytes = 0;
-  size_t selected_block_context_candidate_index = 0;
-  size_t selected_block_context_count = 0;
-  size_t selected_block_context_qf_threshold_count = 0;
-  size_t coefficient_tokenization_pass_count = 0;
-  size_t coefficient_token_count = 0;
-  size_t coefficient_context_materialization_count = 0;
-  size_t coefficient_materialized_token_count = 0;
-  bool has_final_score = false;
-  double final_score = 0.0;
-};
-
-struct RawWorkflowWorkload {
-  std::string workload;
-  gjxl::Extent2D source_extent;
-  std::string codestream_comparison;
-  std::vector<RawWorkflowSample> samples;
-};
+using gjxl::benchmark::RawWorkflowSample;
+using gjxl::benchmark::RawWorkflowWorkload;
 
 using gjxl::benchmark::RawGpuProfileSample;
 using gjxl::benchmark::RawGpuProfileWorkload;
-using gjxl::benchmark::JsonEscape;
 
 using WorkflowProfileSamples =
     std::array<std::vector<double>, kWorkflowProfileNames.size()>;
 
-using WorkflowProfileNanoseconds =
-    std::array<uint64_t, kWorkflowProfileNames.size()>;
-
-[[nodiscard]] WorkflowProfileNanoseconds WorkflowProfileValues(
-    const gjxl::codestream_internal::VarDctEncodingProfile& profile) {
-  return {
-      profile.total_nanoseconds,
-      profile.input_preparation_nanoseconds,
-      profile.input_geometry_and_storage_nanoseconds,
-      profile.input_color_transform_nanoseconds,
-      profile.input_matrix_scale_stats_nanoseconds,
-      profile.input_resident_preparation_nanoseconds,
-      profile.input_quantization_preparation_nanoseconds,
-      profile.backend_selection_nanoseconds,
-      profile.quantization_pipeline_nanoseconds,
-      profile.codestream_encoding_nanoseconds,
-      profile.summary_assembly_nanoseconds,
-      profile.codestream.validation_nanoseconds,
-      profile.codestream.dc_tokenization_nanoseconds,
-      profile.codestream.ac_tokenization_nanoseconds,
-      profile.codestream.block_context_map_work_nanoseconds,
-      profile.codestream.coefficient_order_work_nanoseconds,
-      profile.codestream.coefficient_tokenization_work_nanoseconds,
-      profile.codestream.coefficient_context_materialization_work_nanoseconds,
-      profile.codestream.entropy_optimization_nanoseconds,
-      profile.codestream.entropy_work.prefix_histogram_build_nanoseconds,
-      profile.codestream.entropy_work.prefix_histogram_cost_nanoseconds,
-      profile.codestream.entropy_work.prefix_clustering_nanoseconds,
-      profile.codestream.entropy_work.prefix_code_build_nanoseconds,
-      profile.codestream.entropy_work.prefix_value_collection_nanoseconds,
-      profile.codestream.entropy_work.prefix_config_search_nanoseconds,
-      profile.codestream.entropy_work.prefix_exact_measurement_nanoseconds,
-      profile.codestream.entropy_work.ans_prefix_validation_nanoseconds,
-      profile.codestream.entropy_work.ans_value_collection_nanoseconds,
-      profile.codestream.entropy_work.ans_value_aggregation_nanoseconds,
-      profile.codestream.entropy_work
-        .ans_prepared_value_validation_nanoseconds,
-      profile.codestream.entropy_work.ans_uint_config_nanoseconds,
-      profile.codestream.entropy_work.ans_histogram_build_nanoseconds,
-      profile.codestream.entropy_work.ans_model_build_nanoseconds,
-      profile.codestream.entropy_work.ans_token_cost_nanoseconds,
-      profile.codestream.entropy_work.selection_nanoseconds,
-      profile.codestream.section_writing_nanoseconds,
-      profile.codestream.section_writing_work.model_and_header_nanoseconds,
-      profile.codestream.section_writing_work.token_write_nanoseconds,
-      profile.codestream.section_writing_work.candidate_measure_nanoseconds,
-      profile.codestream.assembly_nanoseconds,
-      profile.codestream.assembly.candidate_selection_nanoseconds,
-      profile.codestream.assembly.section_size_nanoseconds,
-      profile.codestream.assembly.frame_header_nanoseconds,
-      profile.codestream.assembly.toc_and_sections_nanoseconds,
-      profile.codestream.assembly.output_copy_nanoseconds,
-  };
-}
+using gjxl::benchmark::WorkflowProfileNanoseconds;
+using gjxl::benchmark::WorkflowProfileValues;
 
 void AppendWorkflowProfile(
     const gjxl::codestream_internal::VarDctEncodingProfile& profile,
@@ -1100,175 +966,25 @@ void WriteRawWorkflowSamples(
     const std::filesystem::path& destination,
     const CommandLineOptions& options,
     const std::vector<RawWorkflowWorkload>& workloads) {
-  std::filesystem::path temporary = destination;
-  const uint64_t suffix = static_cast<uint64_t>(
-      Clock::now().time_since_epoch().count());
-  temporary += ".tmp-" + std::to_string(suffix);
-
-  try {
-    std::ofstream output;
-    output.exceptions(std::ios::badbit | std::ios::failbit);
-    output.open(temporary, std::ios::out | std::ios::trunc);
-    output << "{\n"
-           << "  \"schema_version\": 17,\n"
-           << "  \"substage_work_timing\": \"aggregate-worker-time\",\n"
-           << "  \"scope\": \"" << BenchmarkScopeName(options.scope)
-           << "\",\n"
-           << "  \"validation\": \""
-           << ValidationModeName(options.validation) << "\",\n"
-           << "  \"implementation\": \""
-           << JsonEscape(options.implementation) << "\",\n"
-           << "  \"ac_residual_inverse\": \""
-           << JsonEscape(options.ac_residual_inverse) << "\",\n"
-           << "  \"gpu_aq\": \"" << GpuAqModeName(options.gpu_aq_mode)
-           << "\",\n"
-           << "  \"collect_final_score\": "
-           << (options.collect_final_butteraugli_score ? "true" : "false")
-           << ",\n"
-           << "  \"density\": \""
-           << (options.density_mode == gjxl::VarDctDensityMode::kHighDensity
-                 ? "high"
-                 : "default")
-           << "\",\n"
-           << "  \"compression\": \""
-           << (options.compression_mode ==
-                     gjxl::VarDctCompressionMode::kMaximumCompression
-                 ? "maximum"
-                 : "automatic")
-           << "\",\n"
-           << "  \"distance\": " << std::setprecision(9)
-           << options.butteraugli_target << ",\n"
-           << "  \"effort\": " << options.effort << ",\n"
-           << "  \"adaptive_epf_sharpness\": "
-           << (options.adaptive_epf_sharpness ? "true" : "false") << ",\n"
-           << "  \"cpu_threads\": " << options.cpu_thread_count << ",\n"
-           << "  \"warmups\": " << options.warmups << ",\n"
-           << "  \"sample_count\": " << options.samples << ",\n"
-           << "  \"workloads\": [\n";
-    for (size_t workload_index = 0; workload_index < workloads.size();
-         ++workload_index) {
-      const RawWorkflowWorkload& workload = workloads[workload_index];
-      output << "    {\n"
-             << "      \"name\": \"" << JsonEscape(workload.workload)
-             << "\",\n"
-             << "      \"source_width\": " << workload.source_extent.width
-             << ",\n"
-             << "      \"source_height\": " << workload.source_extent.height
-             << ",\n"
-             << "      \"codestream_comparison\": \""
-             << workload.codestream_comparison << "\",\n"
-             << "      \"samples\": [\n";
-      for (size_t sample_index = 0; sample_index < workload.samples.size();
-           ++sample_index) {
-        const RawWorkflowSample& sample = workload.samples[sample_index];
-        output << "        {\"sample_index\": " << sample.sample_index
-               << ", \"backend\": \"" << sample.backend
-               << "\", \"peak_cpu_participants\": "
-               << sample.peak_cpu_participants
-               << ", \"entropy_behavior\": \""
-               << (sample.entropy_behavior ==
-                         gjxl::VarDctEntropyBehavior::kMaximumCompression
-                     ? "maximum"
-                     : sample.entropy_behavior ==
-                           gjxl::VarDctEntropyBehavior::kHighDensity
-                         ? "high-density"
-                         : sample.entropy_behavior ==
-                               gjxl::VarDctEntropyBehavior::kRateOptimized
-                             ? "rate-optimized"
-                             : "balanced")
-               << "\", \"entropy_search\": {\"uint_configs\": "
-               << sample.ans_uint_config_candidate_count
-               << ", \"histograms\": "
-               << sample.ans_histogram_candidate_count
-               << ", \"alphabet_widths\": "
-               << sample.ans_alphabet_width_candidate_count << "}"
-               << ", \"encoded_bytes\": " << sample.encoded_bytes
-               << ", \"entropy_bits\": {\"model\": "
-               << sample.entropy_model_bits << ", \"tokens\": "
-               << sample.entropy_token_bits << "}"
-               << ", \"entropy_clusters\": {\"dc\": "
-               << sample.dc_entropy_clusters << ", \"ac\": "
-               << sample.ac_entropy_clusters << "}"
-               << ", \"entropy_coding\": {\"dc\": \""
-               << (sample.dc_entropy_is_ans ? "ans" : "prefix")
-               << "\", \"ac\": \""
-               << (sample.ac_entropy_is_ans ? "ans" : "prefix")
-               << "\", \"coefficient_order\": \""
-               << (sample.selected_coefficient_order_mask == 0
-                     ? "none"
-                     : sample.coefficient_order_entropy_is_ans
-                         ? "ans"
-                         : "prefix")
-               << "\"}"
-               << ", \"coefficient_order\": {\"natural_bytes\": "
-               << sample.natural_candidate_bytes << ", \"custom_bytes\": "
-               << sample.custom_order_candidate_bytes
-               << ", \"selected_mask\": "
-               << sample.selected_coefficient_order_mask << "}"
-               << ", \"block_context\": {\"candidate_count\": "
-               << sample.block_context_candidate_count
-               << ", \"compact_bytes\": "
-               << sample.compact_block_context_candidate_bytes
-               << ", \"selected_index\": "
-               << sample.selected_block_context_candidate_index
-               << ", \"selected_contexts\": "
-               << sample.selected_block_context_count
-               << ", \"qf_thresholds\": "
-               << sample.selected_block_context_qf_threshold_count << "}"
-               << ", \"ac_tokenization\": {\"path\": \""
-               << (sample.entropy_behavior ==
-                     gjxl::VarDctEntropyBehavior::kMaximumCompression
-                     ? "template" : "direct")
-               << "\", \"pass_count\": "
-               << sample.coefficient_tokenization_pass_count
-               << ", \"tokens\": "
-               << sample.coefficient_token_count
-               << ", \"context_materialization_count\": "
-               << sample.coefficient_context_materialization_count
-               << ", \"materialized_tokens\": "
-               << sample.coefficient_materialized_token_count << "}"
-               << ", \"final_score\": ";
-        if (sample.has_final_score) {
-          output << std::setprecision(17) << sample.final_score;
-        } else {
-          output << "null";
-        }
-        output << ", \"phase_nanoseconds\": {";
-        for (size_t phase = 0; phase < kWorkflowProfileNames.size(); ++phase) {
-          if (phase != 0) {
-            output << ", ";
-          }
-          output << '\"' << kWorkflowProfileNames[phase] << "\": "
-                 << sample.phase_nanoseconds[phase];
-        }
-        output << "}}";
-        if (sample_index + 1 != workload.samples.size()) {
-          output << ',';
-        }
-        output << '\n';
-      }
-      output << "      ]\n"
-             << "    }";
-      if (workload_index + 1 != workloads.size()) {
-        output << ',';
-      }
-      output << '\n';
-    }
-    output << "  ]\n}\n";
-    output.close();
-
-    std::error_code rename_error;
-    std::filesystem::rename(temporary, destination, rename_error);
-    if (rename_error) {
-      throw std::runtime_error(
-          "Could not atomically replace raw-samples output: " +
-          rename_error.message());
-    }
-  } catch (...) {
-    std::error_code ignored;
-    std::filesystem::remove(temporary, ignored);
-    throw;
-  }
+  gjxl::benchmark::MetalWorkflowProfileJsonOptions metadata;
+  metadata.scope = BenchmarkScopeName(options.scope);
+  metadata.validation = ValidationModeName(options.validation);
+  metadata.implementation = options.implementation;
+  metadata.ac_residual_inverse = options.ac_residual_inverse;
+  metadata.gpu_aq = GpuAqModeName(options.gpu_aq_mode);
+  metadata.collect_final_butteraugli_score = options.collect_final_butteraugli_score;
+  metadata.density = options.density_mode == gjxl::VarDctDensityMode::kHighDensity
+      ? "high" : "default";
+  metadata.compression =
+      options.compression_mode == gjxl::VarDctCompressionMode::kMaximumCompression
+          ? "maximum" : "automatic";
+  metadata.butteraugli_target = options.butteraugli_target;
+  metadata.effort = options.effort;
+  metadata.adaptive_epf_sharpness = options.adaptive_epf_sharpness;
+  metadata.cpu_thread_count = options.cpu_thread_count;
+  metadata.warmups = options.warmups;
+  metadata.samples = options.samples;
+  gjxl::benchmark::WriteMetalWorkflowSamples(destination, metadata, workloads);
 }
 
 void WriteGpuProfileSamples(
@@ -1556,57 +1272,10 @@ void RunPublicWorkflowOnlyWorkload(
     if (raw_results == nullptr) {
       return;
     }
-    RawWorkflowSample raw_sample;
-    raw_sample.sample_index = sample_index;
-    raw_sample.backend = backend;
-    raw_sample.peak_cpu_participants = profile.peak_cpu_participants;
-    raw_sample.entropy_behavior = profile.codestream.entropy_behavior;
-    raw_sample.ans_uint_config_candidate_count =
-      profile.codestream.entropy_work.ans_uint_config_candidate_count;
-    raw_sample.ans_histogram_candidate_count =
-      profile.codestream.entropy_work.ans_histogram_candidate_count;
-    raw_sample.ans_alphabet_width_candidate_count =
-      profile.codestream.entropy_work.ans_alphabet_width_candidate_count;
-    raw_sample.phase_nanoseconds = WorkflowProfileValues(profile);
-    raw_sample.encoded_bytes = bytes.size();
-    raw_sample.entropy_model_bits = profile.codestream.entropy_model_bits;
-    raw_sample.entropy_token_bits = profile.codestream.entropy_token_bits;
-    raw_sample.dc_entropy_clusters =
-      profile.codestream.dc_entropy_clusters;
-    raw_sample.ac_entropy_clusters =
-      profile.codestream.ac_entropy_clusters;
-    raw_sample.dc_entropy_is_ans = profile.codestream.dc_entropy_is_ans;
-    raw_sample.ac_entropy_is_ans = profile.codestream.ac_entropy_is_ans;
-    raw_sample.coefficient_order_entropy_is_ans =
-      profile.codestream.coefficient_order_entropy_is_ans;
-    raw_sample.natural_candidate_bytes =
-      profile.codestream.natural_candidate_bytes;
-    raw_sample.custom_order_candidate_bytes =
-      profile.codestream.custom_order_candidate_bytes;
-    raw_sample.selected_coefficient_order_mask =
-      profile.codestream.selected_coefficient_order_mask;
-    raw_sample.block_context_candidate_count =
-      profile.codestream.block_context_candidate_count;
-    raw_sample.compact_block_context_candidate_bytes =
-      profile.codestream.compact_block_context_candidate_bytes;
-    raw_sample.selected_block_context_candidate_index =
-      profile.codestream.selected_block_context_candidate_index;
-    raw_sample.selected_block_context_count =
-      profile.codestream.selected_block_context_count;
-    raw_sample.selected_block_context_qf_threshold_count =
-      profile.codestream.selected_block_context_qf_threshold_count;
-    raw_sample.coefficient_tokenization_pass_count =
-      profile.codestream.coefficient_tokenization_pass_count;
-    raw_sample.coefficient_token_count =
-      profile.codestream.coefficient_token_count;
-    raw_sample.coefficient_context_materialization_count =
-      profile.codestream.coefficient_context_materialization_count;
-    raw_sample.coefficient_materialized_token_count =
-      profile.codestream.coefficient_materialized_token_count;
-    raw_sample.has_final_score =
-      summary.final_butteraugli_score_evaluated &&
-      !summary.score_history.empty();
-    if (raw_sample.has_final_score) {
+    RawWorkflowSample raw_sample{
+        .sample_index = sample_index, .backend = backend,
+        .encoded_bytes = bytes.size(), .profile = profile};
+    if (summary.final_butteraugli_score_evaluated && !summary.score_history.empty()) {
       raw_sample.final_score = summary.score_history.back();
     }
     raw_workload.samples.push_back(raw_sample);

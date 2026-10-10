@@ -416,7 +416,9 @@ bool CheckWorkflow(GpuBackend& backend) {
   if (!f.Initialize(true, 2)) return false;
   struct Setting { int effort; float target; };
   for (int path = 0; path < 3; ++path) {
-    for (const Setting setting : {Setting{5, 1.0f}, {6, 0.49f}, {6, 1.0f}, {8, 8.0f}}) {
+    for (const Setting setting : {Setting{3, 1.0f}, {4, 1.0f}, {5, 1.0f},
+                                 {6, 0.49f}, {6, 0.5f}, {6, 1.0f},
+                                 {8, 8.0f}, {9, 1.0f}, {10, 1.0f}}) {
       VarDctEncodingOptions options;
       options.effort = setting.effort;
       options.butteraugli_target = setting.target;
@@ -426,6 +428,10 @@ bool CheckWorkflow(GpuBackend& backend) {
       options.gpu_aq_mode = path == 1 ? GpuAdaptiveQuantizationMode::kExactCoefficients
                                        : GpuAdaptiveQuantizationMode::kFullyResident;
       options.collect_final_butteraugli_score = true;
+      std::vector<uint8_t> default_bytes;
+      if (!Ok(codestream_internal::EncodeLinearRgbVarDctCodestreamWithBackendForTesting(
+                f.linear.const_view(), options, path == 0 ? nullptr : &backend,
+                true, &default_bytes))) return false;
       std::array<std::vector<uint8_t>, 2> bytes;
       std::array<VarDctEncodingSummary, 2> summaries;
       for (size_t search = 0; search < 2; ++search) {
@@ -434,6 +440,8 @@ bool CheckWorkflow(GpuBackend& backend) {
                   f.linear.const_view(), options, path == 0 ? nullptr : &backend,
                   true, &bytes[search], &summaries[search]))) return false;
       }
+      if (!Check(default_bytes == bytes[0],
+                 "Default workflow did not retain fixed EPF sharpness")) return false;
       const bool active = setting.effort >= 6 && setting.target >= 0.5f;
       if (!active && !Check(bytes[0] == bytes[1], "Disabled workflow gate changed bytes"))
         return false;

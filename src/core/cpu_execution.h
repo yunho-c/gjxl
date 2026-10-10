@@ -162,9 +162,23 @@ public:
   }
   [[nodiscard]] size_t participants() const noexcept { return participants_; }
   [[nodiscard]] bool enabled() const noexcept { return enabled_; }
+  /// Partition a grant before launching either group. Both groups borrow an
+  /// already participating caller; this does not grant another caller ticket.
+  [[nodiscard]] CpuWorkerGroup SplitWorkers(size_t workers) noexcept {
+    assert(enabled_ && workers < participants_);
+    participants_ -= workers;
+    return CpuWorkerGroup(context_, domain_slots_.SplitOff(workers),
+                          job_slots_.SplitOff(workers));
+  }
 
 private:
   friend class CpuWorkerScope;
+  CpuWorkerGroup(CpuExecutionContext context,
+                 cpu_budget_internal::CpuWorkerReservation domain,
+                 cpu_budget_internal::CpuWorkerReservation job) noexcept
+      : context_(std::move(context)), domain_slots_(std::move(domain)),
+        job_slots_(std::move(job)), participants_(1 + domain_slots_.count()),
+        enabled_(true) {}
   CpuExecutionContext context_;
   cpu_budget_internal::CpuWorkerReservation domain_slots_;
   cpu_budget_internal::CpuWorkerReservation job_slots_;

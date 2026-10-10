@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -30,14 +31,16 @@ class VarDctEncoderFrame;
 enum class AcCoefficientDecisionMode {
   /// Applies the pinned cross-channel AdjustQuantBlockAC policy.
   kAdjustedSharedQuant,
-  /// Retains the supplied raw quant as an independently testable diagnostic
-  /// coefficient-coding mode.
+  /// Retains the supplied raw quant and fixed Y thresholds. Used by ordinary
+  /// efforts 1-4 and independently selectable by low-level coefficient callers.
   kFixedRawQuant,
 };
 
 namespace vardct_frame_internal {
 class VarDctFrameView;
 [[nodiscard]] VarDctFrameView BorrowFrame(const VarDctEncoderFrame&) noexcept;
+[[nodiscard]] VarDctFrameView BorrowFrameWithAssemblyValidation(
+  const VarDctEncoderFrame&) noexcept;
 struct CoefficientOrderPopulation;
 [[nodiscard]] const CoefficientOrderPopulation* GetCoefficientOrderPopulation(
   const VarDctEncoderFrame&) noexcept;
@@ -183,6 +186,9 @@ private:
       VarDctEncoderFrame&, ConstPlaneU8View);
   friend vardct_frame_internal::VarDctFrameView
     vardct_frame_internal::BorrowFrame(const VarDctEncoderFrame&) noexcept;
+  friend vardct_frame_internal::VarDctFrameView
+    vardct_frame_internal::BorrowFrameWithAssemblyValidation(
+      const VarDctEncoderFrame&) noexcept;
 
   friend vardct_frame_internal::AcStorageInfo
   vardct_frame_internal::GetAcStorageInfo(const VarDctEncoderFrame &) noexcept;
@@ -247,6 +253,24 @@ private:
   // Producers establish dense zero tails or exhaustively validate sparse
   // payloads before publication. Const queries never rescan immutable AC data.
   bool ac_validated_ = false;
+  // Assembly establishes every invariant in valid() while constructing the
+  // immutable owner. Only the completed-frame handoff opts into reusing this
+  // proof; ordinary borrowed views and valid() retain their full checks.
+  // Defaulted frame moves must invalidate the emptied source, including a
+  // self-move. Copies retain proof with their independently copied storage.
+  struct AssemblyValidation {
+    bool established = false;
+    AssemblyValidation() = default;
+    AssemblyValidation(const AssemblyValidation&) = default;
+    AssemblyValidation& operator=(const AssemblyValidation&) = default;
+    AssemblyValidation(AssemblyValidation&& other) noexcept
+      : established(std::exchange(other.established, false)) {}
+    AssemblyValidation& operator=(AssemblyValidation&& other) noexcept {
+      established = this != &other
+        ? std::exchange(other.established, false) : false;
+      return *this;
+    }
+  } assembly_validation_;
   // Immutable and frame-owned: copies may share counts, never mutable input.
   std::shared_ptr<const vardct_frame_internal::CoefficientOrderPopulation>
     coefficient_order_population_;

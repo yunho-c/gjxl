@@ -4,6 +4,7 @@
 #include "codestream/batch_workflow.h"
 
 #include "codestream/batch_workflow_test.h"
+#include "codestream/entropy_readiness_internal.h"
 #include "codestream/workflow_admission.h"
 #include "codestream/workflow_internal.h"
 #include "core/cpu_execution.h"
@@ -49,6 +50,8 @@ void ObserveLifecycle(codestream_internal::BatchLifecycleEventForTesting event) 
 
 Status PlanRequest(const VarDctBatchEncodingRequest &request,
                    codestream_internal::WorkflowStoragePlan *plan) {
+  // Admission and worker execution must resolve the same tokenization policy.
+  const codestream_internal::EntropyReadinessBatchScope batch_scope;
   if (!request.linear_rgb.valid())
     return Status::InvalidArgument("VarDCT encoding input or output is invalid");
   return codestream_internal::PlanWorkflowAdmission(
@@ -101,6 +104,7 @@ void EncodeOne(
   VarDctBatchEncodingResult candidate;
   OwnedEncodingResult candidate_owned;
   try {
+    const codestream_internal::EntropyReadinessBatchScope batch_scope;
     candidate.status = codestream_internal::EncodeLinearRgbVarDctCodestreamOwned(
       request.linear_rgb,
       request.options,

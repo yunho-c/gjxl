@@ -31,7 +31,7 @@ struct Options {
   gjxl::VarDctDcPrediction dc_prediction = gjxl::kDefaultDcPrediction;
   gjxl::DcQuantizationMode dc_quantization = gjxl::DcQuantizationMode::kAutomatic;
   std::optional<bool> adaptive_dc_smoothing;
-  bool adaptive_epf_sharpness = true;
+  bool adaptive_epf_sharpness = false;
   size_t effort = 7, threads = 8, warmups = 1, samples = 1;
 };
 
