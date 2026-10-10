@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <locale>
 
 #include "../benchmarks/workflow_profile_json.h"
@@ -119,6 +121,24 @@ int main(int argc, char** argv) try {
         .density = "default", .compression = "automatic",
         .butteraugli_target = 1.25f, .effort = 4, .cpu_thread_count = 8,
         .warmups = 2, .samples = 1};
+    // The shared writers must preserve an explicit false as well as true;
+    // absent settings keep the pre-EPF schemas used by the fixture comparison.
+    for (const bool search : {false, true}) {
+      const std::string expected = std::string("\"adaptive_epf_sharpness\": ") +
+          (search ? "true" : "false");
+      const auto has_setting = [&] {
+        std::ifstream input(argv[1]);
+        const std::string json((std::istreambuf_iterator<char>(input)), {});
+        return json.find(expected) != std::string::npos;
+      };
+      metal_options.adaptive_epf_sharpness = search;
+      WriteMetalWorkflowSamples(argv[1], metal_options, workloads);
+      if (!has_setting()) return 8;
+      options.adaptive_epf_sharpness = search;
+      WriteGpuProfileSamples(argv[1], options, {});
+      if (!has_setting()) return 9;
+    }
+    metal_options.adaptive_epf_sharpness.reset();
     WriteMetalWorkflowSamples(argv[1], metal_options, workloads);
   } else {
     return 7;

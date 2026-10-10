@@ -292,9 +292,10 @@ Status PrepareResidentFrontend(
       ? AqEvaluationMetric::kMaximumError
       : AqEvaluationMetric::kButteraugli,
     .maximum_error = options.adaptive_quantization.maximum_error,
-    .evaluation_free = evaluation_free,
+    .evaluation_free = evaluation_free && !options.adaptive_quantization.search_epf_sharpness,
     .dc_quantization = options.adaptive_quantization.dc_quantization,
     .dc_prediction = options.adaptive_quantization.dc_prediction,
+    .search_epf_sharpness = options.adaptive_quantization.search_epf_sharpness,
   };
   const bool resident_strategy_metadata =
       !options.fixed_dct8 &&
@@ -375,6 +376,7 @@ Status PrepareResidentFrontend(
             options.adaptive_quantization.coefficient_decision_mode,
         .defer_final_transform_metadata = true,
         .resident_strategy_metadata = resident_strategy_metadata,
+        .epf_search_reference = options.adaptive_quantization.epf_search_reference,
     };
     auto* const validated_preparation = HasValidatedHostImages(
         prepared, original_linear_rgb)
@@ -427,6 +429,8 @@ Status PrepareResidentFrontend(
       prepared.resident_original_linear_rgb;
     state.input_resident_coding_opsin = prepared.resident_coding_opsin;
     state.evaluation_options = evaluation_options;
+    state.epf_search_reference = options.adaptive_quantization.epf_search_reference;
+    state.resident_epf_search_reference = true;
     state.coefficient_decision_mode =
       options.adaptive_quantization.coefficient_decision_mode;
     state.resident_quantization = true;
@@ -841,6 +845,8 @@ Status RunPreparedGpuQuantizationPipelineImpl(
     prepared_aq->original_linear_rgb = {};
     prepared_aq->coding_opsin = {};
     prepared_aq->evaluation_options = {};
+    prepared_aq->epf_search_reference = {};
+    prepared_aq->resident_epf_search_reference = false;
     prepared_aq->resident_quantization = false;
     prepared_aq->frame_only_resident_frontend = false;
     prepared_aq->evaluation.reset();

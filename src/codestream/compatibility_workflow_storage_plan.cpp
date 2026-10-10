@@ -80,7 +80,8 @@ Status ComputeMetalCompatibilityWorkflowStoragePlan(
        .exact_coefficients = exact,
        .reconstruct_exact_coefficients = exact,
        .initial_pixel_mask_readback = frame_only,
-       .adaptive_dc_smoothing = ResolveAdaptiveDcSmoothing(e)},
+       .adaptive_dc_smoothing = ResolveAdaptiveDcSmoothing(e),
+       .search_epf_sharpness = UseEpfSharpnessSearch(e)},
       &host);
   if (!status.ok())
     return status;
@@ -126,7 +127,9 @@ Status ComputeMetalCompatibilityWorkflowStoragePlan(
        .dc_quantization = ResolveDcQuantization(e),
        .dc_prediction = e.dc_prediction,
        .extra_dc_precision = uint8_t(ResolveDcQuantization(e) == DcQuantizationMode::kPredictionAware),
-       .adaptive_dc_smoothing = ResolveAdaptiveDcSmoothing(e)},
+       .adaptive_dc_smoothing = ResolveAdaptiveDcSmoothing(e),
+       .search_epf_sharpness = UseEpfSharpnessSearch(e),
+       .resident_epf_search_reference = resident},
       &device);
   if (!status.ok())
     return status;

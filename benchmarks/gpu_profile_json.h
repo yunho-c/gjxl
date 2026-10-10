@@ -35,6 +35,7 @@ struct GpuProfileJsonOptions {
   std::string_view dc_quantization;
   std::string_view dc_prediction;
   std::optional<bool> adaptive_dc_smoothing;
+  std::optional<bool> adaptive_epf_sharpness;
 };
 
 struct RawGpuProfileSample {
@@ -103,6 +104,10 @@ inline void WriteGpuProfileSamples(
            << "  \"sample_count\": " << options.samples << ",\n"
            << "  \"effort\": " << options.effort << ",\n"
            << "  \"cpu_threads\": " << options.cpu_thread_count << ",\n";
+    if (options.adaptive_epf_sharpness.has_value()) {
+      output << "  \"adaptive_epf_sharpness\": "
+             << (*options.adaptive_epf_sharpness ? "true" : "false") << ",\n";
+    }
     if (!options.execution_path.empty()) {
       output << "  \"execution_path\": \""
              << JsonEscape(options.execution_path) << "\",\n";

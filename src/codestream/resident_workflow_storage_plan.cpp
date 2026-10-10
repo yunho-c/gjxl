@@ -173,7 +173,8 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
        .resident_quantization = true,
        .defer_final_transform_metadata = true,
        .reconfigure = true,
-       .resident_strategy_metadata = resident_strategy_metadata},
+       .resident_strategy_metadata = resident_strategy_metadata,
+       .search_epf_sharpness = UseEpfSharpnessSearch(e)},
       &host);
   if (!status.ok())
     return status;
@@ -215,7 +216,9 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
                  uint8_t(ResolveDcQuantization(e) ==
                          DcQuantizationMode::kPredictionAware),
              .adaptive_dc_smoothing = ResolveAdaptiveDcSmoothing(e),
-             .resident_strategy_metadata = resident_strategy_metadata},
+             .resident_strategy_metadata = resident_strategy_metadata,
+             .search_epf_sharpness = UseEpfSharpnessSearch(e),
+             .resident_epf_search_reference = true},
             &aq))
            .ok() ||
       (!evaluation_free && !(status = ComputeButteraugliStoragePlan(
@@ -305,7 +308,7 @@ ComputeResidentWorkflowStoragePlan(Extent2D source,
                           ResolveDcQuantization(e) == DcQuantizationMode::kPredictionAware,
                           ResolveAdaptiveDcSmoothing(e),
                           resident_strategy_metadata,
-                          resident_strategy_metadata, true},
+                          resident_strategy_metadata, true, UseEpfSharpnessSearch(e)},
                          fixed_dct8, submission, &p, &profile_output);
     if (!status.ok())
       return status;

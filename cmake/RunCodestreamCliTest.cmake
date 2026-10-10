@@ -471,7 +471,7 @@ if(NOT maximum_compression_hash STREQUAL maximum_compression_repeat_hash)
   message(FATAL_ERROR "Maximum-compression CLI output is not deterministic")
 endif()
 # Effort 7 defaults to prediction-aware quantization and adaptive DC smoothing.
-# Context-map search changes these codestreams without changing decoded pixels.
+# EPF search is opt-in; ordinary output retains main's fixed-sharpness golden.
 set(expected_hash
   c8a8c1215ac341df1a1a3337e428e9886bf8258fcde57aedd3958100d1cc3927)
 if(NOT first_hash STREQUAL expected_hash)
@@ -484,8 +484,28 @@ if(NOT maximum_compression_hash STREQUAL expected_maximum_compression_hash)
   message(FATAL_ERROR
     "Maximum-compression sample hash changed: ${maximum_compression_hash}")
 endif()
-# Pin the former defaults independently, so selecting the legacy behavior stays
-# covered when the automatic policy changes.
+foreach(search IN ITEMS off on)
+  set(epf_output "${GJXL_TEST_DIR}/epf-search-${search}.jxl")
+  execute_process(
+    COMMAND "${GJXL_ENCODER}" --distance 1.0 --backend cpu --effort 7
+      --epf-sharpness-search "${search}" "${GJXL_SAMPLE}" "${epf_output}"
+    RESULT_VARIABLE epf_result OUTPUT_QUIET ERROR_VARIABLE epf_error)
+  if(NOT epf_result EQUAL 0)
+    message(FATAL_ERROR "EPF search ${search} failed: ${epf_error}")
+  endif()
+  file(SHA256 "${epf_output}" epf_hash)
+  if(search STREQUAL "off")
+    if(NOT epf_hash STREQUAL first_hash)
+      message(FATAL_ERROR "Default CLI output differs from explicit EPF search off")
+    endif()
+  elseif(NOT epf_hash STREQUAL
+      "25e8394f453ae711e09a0ef3fcc48b54d6167928efd7b56451b343476ac5cabf")
+    message(FATAL_ERROR "Explicit EPF search golden changed: ${epf_hash}")
+  endif()
+endforeach()
+
+# Pin the former defaults, including fixed EPF sharpness, independently so
+# selecting the legacy behavior stays covered when the automatic policy changes.
 foreach(compression IN ITEMS ordinary maximum maximum-error)
   set(legacy "${GJXL_TEST_DIR}/legacy-${compression}.jxl")
   set(compression_flags)
@@ -504,6 +524,7 @@ foreach(compression IN ITEMS ordinary maximum maximum-error)
   execute_process(
     COMMAND "${GJXL_ENCODER}" ${rate_control_flags} --backend cpu
       --dc-quantization round --no-adaptive-dc-smoothing
+      --epf-sharpness-search off
       ${compression_flags} "${GJXL_SAMPLE}" "${legacy}"
     RESULT_VARIABLE legacy_result
     OUTPUT_QUIET

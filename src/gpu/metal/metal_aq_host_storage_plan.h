@@ -27,6 +27,7 @@ struct AqHostStorageOptions {
   bool initial_pixel_mask_readback = false;
   bool adaptive_dc_smoothing = false;
   bool resident_strategy_metadata = false;
+  bool search_epf_sharpness = false;
 };
 
 struct AqHostStoragePlan {

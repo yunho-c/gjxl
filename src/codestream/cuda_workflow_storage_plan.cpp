@@ -31,6 +31,7 @@ Status ComputeCompatibility(Extent2D source, const CudaWorkflowStorageOptions &o
   // with the concrete CUDA owners. No memory guard is relaxed for these modes.
   CpuWorkflowStorageOptions cpu_options{o.encoding, o.collect_timing, o.collect_profile};
   cpu_options.encoding.backend = VarDctBackendPreference::kCpu;
+  cpu_options.encoding.adaptive_epf_sharpness = false;
   CpuWorkflowStoragePlan cpu;
   Status status = ComputeCpuWorkflowStoragePlan(source, cpu_options, &cpu);
   if (!status.ok())

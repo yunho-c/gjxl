@@ -159,6 +159,7 @@ struct MetalWorkflowProfileJsonOptions {
   size_t cpu_thread_count = 0;
   size_t warmups = 0;
   size_t samples = 0;
+  std::optional<bool> adaptive_epf_sharpness;
 };
 
 inline void WriteMetalWorkflowSamples(
@@ -193,8 +194,12 @@ inline void WriteMetalWorkflowSamples(
            << "  \"effort\": " << options.effort << ",\n"
            << "  \"cpu_threads\": " << options.cpu_thread_count << ",\n"
            << "  \"warmups\": " << options.warmups << ",\n"
-           << "  \"sample_count\": " << options.samples << ",\n"
-           << "  \"workloads\": [\n";
+           << "  \"sample_count\": " << options.samples << ",\n";
+    if (options.adaptive_epf_sharpness.has_value()) {
+      output << "  \"adaptive_epf_sharpness\": "
+             << (*options.adaptive_epf_sharpness ? "true" : "false") << ",\n";
+    }
+    output << "  \"workloads\": [\n";
     for (size_t workload_index = 0; workload_index < workloads.size();
          ++workload_index) {
       const RawWorkflowWorkload& workload = workloads[workload_index];

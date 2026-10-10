@@ -44,6 +44,8 @@ Status ComputeAqHostStoragePlan(const AqHostStorageOptions &o,
         "Metal AQ host coefficient count is too large");
   if ((o.metric != AqEvaluationMetric::kButteraugli &&
        o.metric != AqEvaluationMetric::kMaximumError) ||
+      (o.search_epf_sharpness &&
+       (o.frame_only || o.metric != AqEvaluationMetric::kButteraugli)) ||
       (o.resident_ac_strategy_inputs && !o.resident_initial_quant) ||
       (o.defer_final_transform_metadata &&
        (!o.resident_ac_strategy_inputs || !o.resident_quantization ||
@@ -68,6 +70,8 @@ Status ComputeAqHostStoragePlan(const AqHostStorageOptions &o,
   const size_t source_pixels = o.source_extent.width * o.source_extent.height;
   AqHostStoragePlan p;
   auto &prepared = p.prepared;
+  if (o.search_epf_sharpness && !prepared.AddVector<uint8_t>(blocks, kFreshExact))
+    return Overflow();
   if (!prepared.AddVector<uint8_t>(blocks, kFreshExact, 2) || // grid, sharpness
       !prepared.AddVector<int8_t>(tiles, kFreshExact, 2) ||
       !prepared.AddVector<AqAnchor>(blocks, kGrowing) ||

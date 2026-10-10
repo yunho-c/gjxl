@@ -57,6 +57,7 @@ template <typename T>
 [[nodiscard]] Status
 AssembleVarDctEncoderFrameImpl(QuantizedFrameAssemblyInputT<T>,
                                VarDctEncoderFrame *);
+[[nodiscard]] Status ReplaceEpfSharpness(VarDctEncoderFrame&, ConstPlaneU8View);
 [[nodiscard]] Status AssembleVarDctEncoderFrame(
   QuantizedFrameAssemblyInput,
   VarDctEncoderFrame*);
@@ -181,6 +182,8 @@ public:
                                         VarDctNativeAcGroupView *out) const;
 
 private:
+  friend Status vardct_frame_internal::ReplaceEpfSharpness(
+      VarDctEncoderFrame&, ConstPlaneU8View);
   friend vardct_frame_internal::VarDctFrameView
     vardct_frame_internal::BorrowFrame(const VarDctEncoderFrame&) noexcept;
   friend vardct_frame_internal::VarDctFrameView

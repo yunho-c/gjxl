@@ -86,6 +86,13 @@ struct VarDctEncodingOptions {
   /// quantization is prediction-aware. Native context-map compression is
   /// automatic at every effort.
   int32_t effort = 7;
+  /// Opts into final EPF sharpness search on CPU and Metal at efforts 6-10
+  /// and distance >= 0.5. CUDA retains its fixed-sharpness policy.
+  /// AQ iterations continue to use neutral sharpness 4. Maximum-error and
+  /// explicit maximum-throughput modes retain their separate filtering policy.
+  /// Off by default pending matched-quality qualification of the rate/runtime
+  /// tradeoff. Enabling search does not change intermediate AQ decisions.
+  bool adaptive_epf_sharpness = false;
   /// Maximum participating CPU threads per encode. Zero selects the existing
   /// automatic stage-specific desired parallelism. Both are additionally bounded
   /// by the shared execution domain. GPU execution is not constrained.

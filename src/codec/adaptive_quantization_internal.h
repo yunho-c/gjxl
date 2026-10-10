@@ -23,6 +23,7 @@ enum class EvaluationStage : size_t {
   kFieldConstruction,
   kCoefficientCoding,
   kReconstruction,
+  kEpfSharpnessSearch,
   kLoopFilters,
   kColorConversion,
   kButteraugli,

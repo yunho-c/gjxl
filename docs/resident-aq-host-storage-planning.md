@@ -50,7 +50,7 @@ validated against the existing AQ geometry and shader limits.
 
 | Owner | Capacity recipe |
 | --- | --- |
-| Strategy grid and sharpness | Two fresh `B`-byte arrays. |
+| Strategy grid and sharpness | Two fresh `B`-byte arrays; search preparation adds a separate `B`-byte selected-sharpness array while retaining the neutral map for subsequent calls. |
 | CfL readback/state | Two fresh `T`-byte arrays; invariant replacement temporarily overlaps two new arrays with the old pair. |
 | Row-major anchors | Initially push-grown, at most `B` records: retained at most `2B`, replacement peak at most `3B` records. Reconfiguration moves in a separately reserved `B`-record array. |
 | Final transform layouts | Fresh reserve of `B` records unless deferred; subsequent reconfiguration moves in a fresh array of at most `B` records. |

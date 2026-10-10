@@ -129,6 +129,9 @@ Status ValidateFiniteImage(ConstImage3FView image, std::string_view name) {
 }
 
 Status ValidateOptions(const AqEvaluationOptions& options) {
+  if (options.search_epf_sharpness) {
+    return Status::Unavailable("CUDA EPF sharpness search is not implemented");
+  }
   if (!options.profile.valid()) {
     return Status::InvalidArgument("CUDA exact AQ profile is invalid");
   }
@@ -811,6 +814,9 @@ class CudaPreparedExactAqEvaluation final : public PreparedAqEvaluation {
   }
 
   Status ValidateInput(AqEvaluationInput input) const {
+    if (input.epf_sharpness_search_target != 0.0f) {
+      return Status::Unavailable("CUDA EPF sharpness search is not implemented");
+    }
     if (input.exact_coefficients == nullptr ||
         !ValidHostPlaneLayout(input.raw_quant_field) ||
         input.raw_quant_field.extent != block_extent_ ||

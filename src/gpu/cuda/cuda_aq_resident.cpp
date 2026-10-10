@@ -150,6 +150,9 @@ Status ValidateFiniteImage(ConstImage3FView image, const char* name) {
 }
 
 Status ValidateOptions(const AqEvaluationOptions& options) {
+  if (options.search_epf_sharpness) {
+    return Status::Unavailable("CUDA EPF sharpness search is not implemented");
+  }
   if (!IsValidDcQuantization({options.dc_quantization, options.dc_prediction,
                               options.profile.extra_dc_precision}) ||
       (options.dc_quantization == DcQuantizationMode::kPredictionAware &&
@@ -2461,6 +2464,9 @@ class CudaPreparedResidentAqEvaluation final
   }
 
   Status ValidateInput(AqEvaluationInput input) const {
+    if (input.epf_sharpness_search_target != 0.0f) {
+      return Status::Unavailable("CUDA EPF sharpness search is not implemented");
+    }
     const auto plane_i32_specified = [](ConstPlaneI32View plane) {
       return plane.data != nullptr || !plane.extent.empty() ||
              plane.stride != 0;

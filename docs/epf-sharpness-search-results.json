@@ -1,0 +1,1814 @@
+{
+  "schema_version": 1,
+  "scope": "Bounded same-distance EPF sharpness-search comparison, not matched-quality or BD-rate evidence.",
+  "base_revision": "b1a7373beff4c0370494c2f9584bcb1510491357",
+  "feature_source_status": "Uncommitted feature sources at measurement time; exact source hashes retained in local provenance.json.",
+  "source_manifest_sha256": "20618b8b394c2febc4208cb10668dbf4cc130c5b1568a2492fbc2bf62dcffece",
+  "source_patch_sha256": "70c03a397fe5a3edb5c5d1d5d802d0711b84d9bc36f29e2b1a87df864b73ee85",
+  "provenance_sha256": "e0857936a6fbaf84ada4dbb9f0cb985e95b453fe7582fb05edb48df1cc7815c9",
+  "binaries": {
+    "gjxl_quality_benchmark-frozen": "2944d37914b32a779759cceab7390a753974dafa6e7f623b6f73245d685cb031",
+    "djxl": "9782c3474e41e5e5415da5fc68e7103d27047661385dc5b863dcad50ec4474ac",
+    "ssimulacra2": "8dadf1683e2be1874ec55c4e32919654aa8aa89ec42fcf59e23903e9955b3c28"
+  },
+  "hardware": "hw.model: Mac16,7\nhw.memsize: 51539607552\nmachdep.cpu.brand_string: Apple M4 Pro\n",
+  "os": "ProductName:\t\tmacOS\nProductVersion:\t\t15.6\nBuildVersion:\t\t24G84\n",
+  "protocol": {
+    "requested_distances": [
+      1,
+      4,
+      8
+    ],
+    "efforts": [
+      6,
+      8
+    ],
+    "kodak_images": [
+      1,
+      7,
+      13,
+      19
+    ],
+    "additional_case": "forest_stream/12mp, effort 8, distance 1",
+    "warmups": 2,
+    "samples": 7,
+    "validation_encodes": 1,
+    "cpu_threads": 8,
+    "backend": "Metal fully-resident",
+    "final_perceptual_score": false,
+    "stage_profiling": false,
+    "timing": "Complete public call; per-case median.",
+    "pair_order_seed": 20260921,
+    "encode_order": [
+      "forest-12mp-e8-d1-off",
+      "forest-12mp-e8-d1-on",
+      "kodak-07-e6-d8-off",
+      "kodak-07-e6-d8-on",
+      "kodak-19-e8-d1-on",
+      "kodak-19-e8-d1-off",
+      "kodak-13-e8-d1-on",
+      "kodak-13-e8-d1-off",
+      "kodak-07-e8-d1-off",
+      "kodak-07-e8-d1-on",
+      "kodak-19-e6-d1-on",
+      "kodak-19-e6-d1-off",
+      "kodak-13-e8-d8-off",
+      "kodak-13-e8-d8-on",
+      "kodak-01-e6-d1-on",
+      "kodak-01-e6-d1-off",
+      "kodak-01-e8-d1-off",
+      "kodak-01-e8-d1-on",
+      "kodak-13-e8-d4-off",
+      "kodak-13-e8-d4-on",
+      "kodak-13-e6-d4-on",
+      "kodak-13-e6-d4-off",
+      "kodak-01-e8-d4-on",
+      "kodak-01-e8-d4-off",
+      "kodak-13-e6-d8-on",
+      "kodak-13-e6-d8-off",
+      "kodak-19-e6-d8-on",
+      "kodak-19-e6-d8-off",
+      "kodak-19-e6-d4-on",
+      "kodak-19-e6-d4-off",
+      "kodak-07-e8-d4-off",
+      "kodak-07-e8-d4-on",
+      "kodak-19-e8-d4-off",
+      "kodak-19-e8-d4-on",
+      "kodak-07-e8-d8-off",
+      "kodak-07-e8-d8-on",
+      "kodak-13-e6-d1-on",
+      "kodak-13-e6-d1-off",
+      "kodak-01-e8-d8-on",
+      "kodak-01-e8-d8-off",
+      "kodak-19-e8-d8-on",
+      "kodak-19-e8-d8-off",
+      "kodak-01-e6-d8-on",
+      "kodak-01-e6-d8-off",
+      "kodak-07-e6-d1-off",
+      "kodak-07-e6-d1-on",
+      "kodak-01-e6-d4-on",
+      "kodak-01-e6-d4-off",
+      "kodak-07-e6-d4-off",
+      "kodak-07-e6-d4-on"
+    ],
+    "decoder_revision": "e8ff09762481785938d8e4e01333ed3917571161",
+    "decoder_color_space": "RGB_D65_SRG_Rel_Lin",
+    "decoder_threads": 2,
+    "metric": "SSIMULACRA2",
+    "metric_collection": "After all timing collection."
+  },
+  "inputs": {
+    "unsplash/forest_stream/12mp.pfm": "008c3e28641d8da8830ad9abdaf95f4d3f136d2d96d3c7c76af5fea00906f454",
+    "kodak/07.pfm": "1c93ea5f46ba77733dac06173c566023b2a4dc72e2739d858dd0184a47f97f43",
+    "kodak/19.pfm": "c1023621155cbf85b8d425a1d18b7790b6abd0ea6973d5f20625742ddd8b063b",
+    "kodak/13.pfm": "90034e4a5ada79fc75f1eebd6d0caee467e8f8014d2861d7d7564098a8c03ec9",
+    "kodak/01.pfm": "85de56c3dbb999e135db21f4944a7d1e9ba0307d0499946721aa021fc0bfeb96"
+  },
+  "started": 1789986387.336786,
+  "completed": 1789986415.821662,
+  "pairs": [
+    {
+      "image": "forest-12mp",
+      "effort": 8,
+      "distance": 1,
+      "bytes_off": 3870491,
+      "bytes_on": 3891807,
+      "size_percent": 0.5507311604651788,
+      "ssimulacra2_off": 82.12259779,
+      "ssimulacra2_on": 82.2280115,
+      "ssimulacra2_delta": 0.10541370999999344,
+      "median_ms_off": 475.263959,
+      "median_ms_on": 493.91625,
+      "time_percent": 3.9246171831009757
+    },
+    {
+      "image": "kodak-07",
+      "effort": 6,
+      "distance": 8,
+      "bytes_off": 13956,
+      "bytes_on": 14723,
+      "size_percent": 5.495844081398671,
+      "ssimulacra2_off": 38.95073283,
+      "ssimulacra2_on": 40.56243738,
+      "ssimulacra2_delta": 1.611704549999999,
+      "median_ms_off": 12.463958,
+      "median_ms_on": 13.69425,
+      "time_percent": 9.870797061415004
+    },
+    {
+      "image": "kodak-19",
+      "effort": 8,
+      "distance": 1,
+      "bytes_off": 85200,
+      "bytes_on": 85899,
+      "size_percent": 0.8204225352112626,
+      "ssimulacra2_off": 81.01780435,
+      "ssimulacra2_on": 81.16855184,
+      "ssimulacra2_delta": 0.15074749000000054,
+      "median_ms_off": 29.64975,
+      "median_ms_on": 30.744042,
+      "time_percent": 3.690729264159054
+    },
+    {
+      "image": "kodak-13",
+      "effort": 8,
+      "distance": 1,
+      "bytes_off": 140932,
+      "bytes_on": 141579,
+      "size_percent": 0.45908665171856544,
+      "ssimulacra2_off": 73.73385081,
+      "ssimulacra2_on": 73.86001862,
+      "ssimulacra2_delta": 0.12616780999999833,
+      "median_ms_off": 28.264042,
+      "median_ms_on": 28.855417,
+      "time_percent": 2.092322817805048
+    },
+    {
+      "image": "kodak-07",
+      "effort": 8,
+      "distance": 1,
+      "bytes_off": 69786,
+      "bytes_on": 70556,
+      "size_percent": 1.1033731694036097,
+      "ssimulacra2_off": 87.45661364,
+      "ssimulacra2_on": 87.5950553,
+      "ssimulacra2_delta": 0.13844165999999802,
+      "median_ms_off": 27.565458,
+      "median_ms_on": 28.545583,
+      "time_percent": 3.555627481321011
+    },
+    {
+      "image": "kodak-19",
+      "effort": 6,
+      "distance": 1,
+      "bytes_off": 85551,
+      "bytes_on": 86246,
+      "size_percent": 0.8123809189839903,
+      "ssimulacra2_off": 80.85075273,
+      "ssimulacra2_on": 80.95075752,
+      "ssimulacra2_delta": 0.10000478999999984,
+      "median_ms_off": 14.3295,
+      "median_ms_on": 14.924708,
+      "time_percent": 4.153724833385675
+    },
+    {
+      "image": "kodak-13",
+      "effort": 8,
+      "distance": 8,
+      "bytes_off": 21497,
+      "bytes_on": 22247,
+      "size_percent": 3.488858910545667,
+      "ssimulacra2_off": -4.96594434,
+      "ssimulacra2_on": -0.19270173,
+      "ssimulacra2_delta": 4.7732426100000005,
+      "median_ms_off": 23.055292,
+      "median_ms_on": 23.761833,
+      "time_percent": 3.0645502125932644
+    },
+    {
+      "image": "kodak-01",
+      "effort": 6,
+      "distance": 1,
+      "bytes_off": 120531,
+      "bytes_on": 121274,
+      "size_percent": 0.6164389244260882,
+      "ssimulacra2_off": 81.01226518,
+      "ssimulacra2_on": 81.09573429,
+      "ssimulacra2_delta": 0.0834691099999958,
+      "median_ms_off": 16.480792,
+      "median_ms_on": 14.7495,
+      "time_percent": -10.504907773849704
+    },
+    {
+      "image": "kodak-01",
+      "effort": 8,
+      "distance": 1,
+      "bytes_off": 120119,
+      "bytes_on": 120868,
+      "size_percent": 0.6235483145880405,
+      "ssimulacra2_off": 81.18483729,
+      "ssimulacra2_on": 81.2577908,
+      "ssimulacra2_delta": 0.07295350999999073,
+      "median_ms_off": 29.490584,
+      "median_ms_on": 29.881042,
+      "time_percent": 1.3240090464129217
+    },
+    {
+      "image": "kodak-13",
+      "effort": 8,
+      "distance": 4,
+      "bytes_off": 43942,
+      "bytes_on": 44771,
+      "size_percent": 1.886577761594821,
+      "ssimulacra2_off": 34.14657762,
+      "ssimulacra2_on": 34.62495767,
+      "ssimulacra2_delta": 0.4783800499999984,
+      "median_ms_off": 25.001417,
+      "median_ms_on": 25.634292,
+      "time_percent": 2.5313565227123025
+    },
+    {
+      "image": "kodak-13",
+      "effort": 6,
+      "distance": 4,
+      "bytes_off": 45166,
+      "bytes_on": 45990,
+      "size_percent": 1.8243811716778024,
+      "ssimulacra2_off": 35.18018463,
+      "ssimulacra2_on": 35.81170655,
+      "ssimulacra2_delta": 0.6315219199999973,
+      "median_ms_off": 12.648041,
+      "median_ms_on": 13.571417,
+      "time_percent": 7.300545594373076
+    },
+    {
+      "image": "kodak-01",
+      "effort": 8,
+      "distance": 4,
+      "bytes_off": 35575,
+      "bytes_on": 36460,
+      "size_percent": 2.487702037947992,
+      "ssimulacra2_off": 40.05002205,
+      "ssimulacra2_on": 40.61311409,
+      "ssimulacra2_delta": 0.5630920400000008,
+      "median_ms_off": 23.250958,
+      "median_ms_on": 24.126791,
+      "time_percent": 3.766868444732463
+    },
+    {
+      "image": "kodak-13",
+      "effort": 6,
+      "distance": 8,
+      "bytes_off": 22432,
+      "bytes_on": 23186,
+      "size_percent": 3.361269614835938,
+      "ssimulacra2_off": -3.69146974,
+      "ssimulacra2_on": 1.0171833,
+      "ssimulacra2_delta": 4.70865304,
+      "median_ms_off": 11.803083,
+      "median_ms_on": 12.356209,
+      "time_percent": 4.686284083573766
+    },
+    {
+      "image": "kodak-19",
+      "effort": 6,
+      "distance": 8,
+      "bytes_off": 12494,
+      "bytes_on": 13190,
+      "size_percent": 5.570673923483271,
+      "ssimulacra2_off": 16.06596027,
+      "ssimulacra2_on": 17.47959824,
+      "ssimulacra2_delta": 1.41363797,
+      "median_ms_off": 12.880375,
+      "median_ms_on": 12.1675,
+      "time_percent": -5.534582649961662
+    },
+    {
+      "image": "kodak-19",
+      "effort": 6,
+      "distance": 4,
+      "bytes_off": 23651,
+      "bytes_on": 24504,
+      "size_percent": 3.6066128282102206,
+      "ssimulacra2_off": 47.9605208,
+      "ssimulacra2_on": 48.69393991,
+      "ssimulacra2_delta": 0.7334191099999998,
+      "median_ms_off": 12.554417,
+      "median_ms_on": 13.112083,
+      "time_percent": 4.4419904165999835
+    },
+    {
+      "image": "kodak-07",
+      "effort": 8,
+      "distance": 4,
+      "bytes_off": 23906,
+      "bytes_on": 24909,
+      "size_percent": 4.195599431105168,
+      "ssimulacra2_off": 63.45170989,
+      "ssimulacra2_on": 63.58976073,
+      "ssimulacra2_delta": 0.13805084000000534,
+      "median_ms_off": 22.822084,
+      "median_ms_on": 23.447959,
+      "time_percent": 2.7424095012532623
+    },
+    {
+      "image": "kodak-19",
+      "effort": 8,
+      "distance": 4,
+      "bytes_off": 22591,
+      "bytes_on": 23453,
+      "size_percent": 3.8156788101456396,
+      "ssimulacra2_off": 46.22195144,
+      "ssimulacra2_on": 46.84389101,
+      "ssimulacra2_delta": 0.6219395700000021,
+      "median_ms_off": 24.379625,
+      "median_ms_on": 24.994208,
+      "time_percent": 2.5208878315396532
+    },
+    {
+      "image": "kodak-07",
+      "effort": 8,
+      "distance": 8,
+      "bytes_off": 13457,
+      "bytes_on": 14216,
+      "size_percent": 5.640187263134422,
+      "ssimulacra2_off": 38.84136332,
+      "ssimulacra2_on": 40.50330016,
+      "ssimulacra2_delta": 1.6619368400000027,
+      "median_ms_off": 21.931334,
+      "median_ms_on": 22.305917,
+      "time_percent": 1.7079809189901596
+    },
+    {
+      "image": "kodak-13",
+      "effort": 6,
+      "distance": 1,
+      "bytes_off": 141218,
+      "bytes_on": 141857,
+      "size_percent": 0.45249189196845396,
+      "ssimulacra2_off": 73.28992429,
+      "ssimulacra2_on": 73.4287355,
+      "ssimulacra2_delta": 0.13881121000000007,
+      "median_ms_off": 13.72775,
+      "median_ms_on": 14.0715,
+      "time_percent": 2.504052011436686
+    },
+    {
+      "image": "kodak-01",
+      "effort": 8,
+      "distance": 8,
+      "bytes_off": 17575,
+      "bytes_on": 18335,
+      "size_percent": 4.324324324324325,
+      "ssimulacra2_off": 6.33646288,
+      "ssimulacra2_on": 7.58760865,
+      "ssimulacra2_delta": 1.25114577,
+      "median_ms_off": 22.61525,
+      "median_ms_on": 23.596417,
+      "time_percent": 4.338519361934967
+    },
+    {
+      "image": "kodak-19",
+      "effort": 8,
+      "distance": 8,
+      "bytes_off": 11971,
+      "bytes_on": 12662,
+      "size_percent": 5.772283017291779,
+      "ssimulacra2_off": 16.95950128,
+      "ssimulacra2_on": 17.78453673,
+      "ssimulacra2_delta": 0.8250354499999979,
+      "median_ms_off": 22.870375,
+      "median_ms_on": 23.362834,
+      "time_percent": 2.1532615884085837
+    },
+    {
+      "image": "kodak-01",
+      "effort": 6,
+      "distance": 8,
+      "bytes_off": 18329,
+      "bytes_on": 19088,
+      "size_percent": 4.140978776801796,
+      "ssimulacra2_off": 8.00012565,
+      "ssimulacra2_on": 9.17296023,
+      "ssimulacra2_delta": 1.17283458,
+      "median_ms_off": 11.9415,
+      "median_ms_on": 12.672083,
+      "time_percent": 6.118016999539422
+    },
+    {
+      "image": "kodak-07",
+      "effort": 6,
+      "distance": 1,
+      "bytes_off": 70973,
+      "bytes_on": 71741,
+      "size_percent": 1.0821016442872589,
+      "ssimulacra2_off": 87.36697202,
+      "ssimulacra2_on": 87.48445397,
+      "ssimulacra2_delta": 0.11748194999999839,
+      "median_ms_off": 13.789,
+      "median_ms_on": 14.411333,
+      "time_percent": 4.513256943940824
+    },
+    {
+      "image": "kodak-01",
+      "effort": 6,
+      "distance": 4,
+      "bytes_off": 36542,
+      "bytes_on": 37428,
+      "size_percent": 2.4246073011876756,
+      "ssimulacra2_off": 40.62854777,
+      "ssimulacra2_on": 41.11634168,
+      "ssimulacra2_delta": 0.4877939100000006,
+      "median_ms_off": 12.520792,
+      "median_ms_on": 14.020959,
+      "time_percent": 11.98140660750533
+    },
+    {
+      "image": "kodak-07",
+      "effort": 6,
+      "distance": 4,
+      "bytes_off": 24752,
+      "bytes_on": 25759,
+      "size_percent": 4.068358112475767,
+      "ssimulacra2_off": 63.98444,
+      "ssimulacra2_on": 64.26065772,
+      "ssimulacra2_delta": 0.2762177199999982,
+      "median_ms_off": 12.344458,
+      "median_ms_on": 13.06325,
+      "time_percent": 5.822791085683954
+    }
+  ],
+  "records": [
+    {
+      "id": "forest-12mp-e8-d1-off",
+      "image": "forest-12mp",
+      "effort": 8,
+      "distance": 1,
+      "search": "off",
+      "quality": 82.12259779,
+      "median_ns": 475263959,
+      "times_ns": [
+        471570625,
+        485649916,
+        471032667,
+        478053417,
+        480840000,
+        470894750,
+        475263959
+      ],
+      "bytes": 3870491,
+      "artifacts": {
+        "metric.txt": "24b92ab99d99fd14201998b35aa7d3c0262b25d8cafcbca663739df49476a77b",
+        "decoded.pfm": "b7b0f85723ed9c409e4abd31cf31ca5e1d757412d88dcf00834f05fc69e3b9e1",
+        "timing.json": "7f4d4e43d6c652722e3bf8eb4b5efc198848ec9e5ff1fd24f52745b7a1c1a13e",
+        "decode.log": "8dc549085b77f5a00df9c10e9e7b5a91b395edeeb645a8db9f87bd7684dea5d5",
+        "output.jxl": "5a6ec406edce280d69c4ef76aaa4c8acf4342dff1be49521eb94764b5a02b1fa",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "forest-12mp-e8-d1-on",
+      "image": "forest-12mp",
+      "effort": 8,
+      "distance": 1,
+      "search": "on",
+      "quality": 82.2280115,
+      "median_ns": 493916250,
+      "times_ns": [
+        484775750,
+        507281125,
+        484682542,
+        507100042,
+        493308042,
+        506991917,
+        493916250
+      ],
+      "bytes": 3891807,
+      "artifacts": {
+        "metric.txt": "ff56ed4d7161bb59d16d19ddc5671c49bcb2d773342a265a48a770dd7c64b16d",
+        "decoded.pfm": "89c944863f70f360f7c389e6acabf472590bf5ee3dacc1220550d38766fa165d",
+        "timing.json": "96a2bf0334f6611d0fe06fdccb1a9b7dd49701edda2d973dd3866b0cfbfbc3ee",
+        "decode.log": "af409743e6faf4d2e03bc107dae7c472802943333572660e35588063ff73bcd6",
+        "output.jxl": "5db094e487cf709917c8e099e8947cd3f22e4292e45872976449bd3a6c9ca0d7",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-07-e6-d8-off",
+      "image": "kodak-07",
+      "effort": 6,
+      "distance": 8,
+      "search": "off",
+      "quality": 38.95073283,
+      "median_ns": 12463958,
+      "times_ns": [
+        13649459,
+        13083125,
+        13073125,
+        12321500,
+        12440375,
+        12463958,
+        11645542
+      ],
+      "bytes": 13956,
+      "artifacts": {
+        "metric.txt": "27cb05333c6e30bf7e032bd8bd7aa42526472a0e643995838a587b71d08f7eef",
+        "decoded.pfm": "f784b4de1cdb26771594520a21eac1372a490d566b0762c23e872d548f341160",
+        "timing.json": "767e0ff1b3d87343423cc7774c1d861d6b4e20a803206d61efb71b62b82ac383",
+        "decode.log": "2382f0c3e4fc37bc0a61ec8aed7c00fc36925a247dc2ea7ae8a96e9e509b0600",
+        "output.jxl": "23222b69d7a6b36bd6a084e9180a576e117642ee346abb0df14549758f66500a",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-07-e6-d8-on",
+      "image": "kodak-07",
+      "effort": 6,
+      "distance": 8,
+      "search": "on",
+      "quality": 40.56243738,
+      "median_ns": 13694250,
+      "times_ns": [
+        17046084,
+        16724833,
+        15832459,
+        13694250,
+        12628541,
+        12084250,
+        12319417
+      ],
+      "bytes": 14723,
+      "artifacts": {
+        "metric.txt": "4b5d430578acbc877509dda1ac463ced3fb7b683e767740963cc40a231348d04",
+        "decoded.pfm": "cb69eb25f7b232ab441215af9e5fde21188f26adb0a4d1b375ce60c17f0d9c14",
+        "timing.json": "c419ef985460e7a90523e84374af68b743668480f17e4bbc63c06064928106ff",
+        "decode.log": "b499c0525025effcf768c7e44a4c2afd52253abdcd7a3769351e4a6b781f728c",
+        "output.jxl": "f8f3f1ba56ac5d919bac4db16265cbbd0aadadda13bcd54b910e77d15777998c",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-19-e8-d1-on",
+      "image": "kodak-19",
+      "effort": 8,
+      "distance": 1,
+      "search": "on",
+      "quality": 81.16855184,
+      "median_ns": 30744042,
+      "times_ns": [
+        30931209,
+        30161041,
+        31302917,
+        29902750,
+        30744042,
+        29952042,
+        31441791
+      ],
+      "bytes": 85899,
+      "artifacts": {
+        "metric.txt": "eaa174fd1aa328f590096e738ee67671f143c625adb75802d276977c6b977553",
+        "decoded.pfm": "93ab99a909991575ea7fdad5f9de7ee50bb7db48992d52b75b8b19da0a950c02",
+        "timing.json": "3b30cca108cf1b9e2b7f58ef8eb1986561087716644f55127291f103988339a8",
+        "decode.log": "de06d48194fcf96a4dcf99768b00a283d84afc2f33c800911c5a479a861c7b26",
+        "output.jxl": "700223893d6bac6179c3462c5104a5af361f3b4073c2ebe33a3264b70e1363e8",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-19-e8-d1-off",
+      "image": "kodak-19",
+      "effort": 8,
+      "distance": 1,
+      "search": "off",
+      "quality": 81.01780435,
+      "median_ns": 29649750,
+      "times_ns": [
+        30483541,
+        29564917,
+        29566959,
+        29682958,
+        29925542,
+        29649750,
+        29126375
+      ],
+      "bytes": 85200,
+      "artifacts": {
+        "metric.txt": "f4bdf239b816d32a71c11e5c426bdc498342643ee172b4fac7885ca194a85c06",
+        "decoded.pfm": "42f849ce989d065eaecdfd697df62b1732203508fc8083cfeec647770c3a49e6",
+        "timing.json": "60639e3e77ea4a1647e4a691d0efbd86196e98d3e442339d1c47f434b5e05133",
+        "decode.log": "da1db09fbfaeeb2f98371019f4c8a32401ffad00da09f33fdcbff925258d55c0",
+        "output.jxl": "df99f48820f6a20094e55c6dd4c1ff52404a8c0150d294c5265ef20e828ee667",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-13-e8-d1-on",
+      "image": "kodak-13",
+      "effort": 8,
+      "distance": 1,
+      "search": "on",
+      "quality": 73.86001862,
+      "median_ns": 28855417,
+      "times_ns": [
+        28855417,
+        30166250,
+        28717250,
+        30014625,
+        28577875,
+        29108875,
+        28281834
+      ],
+      "bytes": 141579,
+      "artifacts": {
+        "metric.txt": "958c1387a8aa2ef834529253f7b25101bc6011504d830cb742ce2d4a52e70882",
+        "decoded.pfm": "3eb5aac7ee9d1b2a2ac2db98b067a0c2b9ed9fff259e04b92c8beb1faa651f01",
+        "timing.json": "893d19d679c5a2380daa4db19e714a1198aa2db1fb90d086a9f4221d9fb9d1c8",
+        "decode.log": "d39579cf4ac4822c48c99ad35aaa112dc6476ba3bd2811ab61288c4142db2a82",
+        "output.jxl": "ba2f7d9a5ab6b2fa0f13929111e41578739506b8e792cb961af12ecbd16bf492",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-13-e8-d1-off",
+      "image": "kodak-13",
+      "effort": 8,
+      "distance": 1,
+      "search": "off",
+      "quality": 73.73385081,
+      "median_ns": 28264042,
+      "times_ns": [
+        29480167,
+        29023167,
+        28892958,
+        28264042,
+        27957083,
+        27883333,
+        28130083
+      ],
+      "bytes": 140932,
+      "artifacts": {
+        "metric.txt": "09ba0d4795c8673bf497b7e417cbe00263e2baef51993874bc657a992255d93c",
+        "decoded.pfm": "94d78105e9142814fa1069bf25b64a2a862f71dc2c2402d78e6bfa02bc693e24",
+        "timing.json": "4bf3cd0d6ac97b5e2c33bb5aad89a83a73ab8987ef5dbac3667f9977aea4d301",
+        "decode.log": "69a69825550bfee3f7eec623ffff82142ff82c143a7247647a5e561ee29519db",
+        "output.jxl": "b7e945107257205883054d6e87a483e0933b5b607dbb7b6e67e0ffc27c91a275",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-07-e8-d1-off",
+      "image": "kodak-07",
+      "effort": 8,
+      "distance": 1,
+      "search": "off",
+      "quality": 87.45661364,
+      "median_ns": 27565458,
+      "times_ns": [
+        27504584,
+        27315167,
+        27297916,
+        27708625,
+        27565458,
+        27589167,
+        27813000
+      ],
+      "bytes": 69786,
+      "artifacts": {
+        "metric.txt": "92ef5fffbbd29405e86a50aee70c63f2f3cd7a653ac5f921afc78c2fae1635da",
+        "decoded.pfm": "0acceb5680b4779f56ffe4ad3423fe83b871dda69800356fbfa742d633362554",
+        "timing.json": "bee236ec201fe266943177ebf2f7d8178fa58d6d16628c56d36cc27bd0459074",
+        "decode.log": "d9a2fb1ff1129aea648b99ca2628f699084b7bb3b8f4120d550f020c94dc2664",
+        "output.jxl": "e6d315043c19cd2d0ea27f55914f765538f59c124414fd2eaa51ea1720c3c84a",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-07-e8-d1-on",
+      "image": "kodak-07",
+      "effort": 8,
+      "distance": 1,
+      "search": "on",
+      "quality": 87.5950553,
+      "median_ns": 28545583,
+      "times_ns": [
+        28401833,
+        28357375,
+        28043333,
+        28694458,
+        28813792,
+        28545583,
+        28613083
+      ],
+      "bytes": 70556,
+      "artifacts": {
+        "metric.txt": "379d2d87eb9ff796b858415e652d426344897980defcabf91da8999dbb3aedb6",
+        "decoded.pfm": "85f047908038500fe0b69a3602c82131f853070da2c8ad7a01505e1b8d83d5b6",
+        "timing.json": "ca54aa1d264775aad8a412cdc38fd3ae037809536f5ebe05a652bcc4b11fbc55",
+        "decode.log": "d38970dd965b25876628ab1edaa45db5f3eb5a78fea00b816e1be8714684a949",
+        "output.jxl": "786f87b47aeef27c6146d7c8d6cb0b4bbd52c2564b32574efb9eb5fc2b832da2",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-19-e6-d1-on",
+      "image": "kodak-19",
+      "effort": 6,
+      "distance": 1,
+      "search": "on",
+      "quality": 80.95075752,
+      "median_ns": 14924708,
+      "times_ns": [
+        15441166,
+        15227625,
+        14924708,
+        14654500,
+        14624416,
+        14812250,
+        15127083
+      ],
+      "bytes": 86246,
+      "artifacts": {
+        "metric.txt": "6a64d5af48d618ab6e7312a33887341d93f8443b4a854bf024ba0c5b23b3f069",
+        "decoded.pfm": "8b87e6f42bad8ae9e0c6664c04c31e9a06985d3700f2fc57456da2122272f655",
+        "timing.json": "ad9ca67daa230a8dcc632816929d19b86d761e8ce2ca0e34bb53a3de115af8eb",
+        "decode.log": "8cefcd3b39fc419e4191148c0d464116abf426dcd70cf4c2ba95f0aae4bb347b",
+        "output.jxl": "e6b22427407b319ea9c47f2fac862b4e9f9b487b9b77756d6ce0233fd62a68e5",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-19-e6-d1-off",
+      "image": "kodak-19",
+      "effort": 6,
+      "distance": 1,
+      "search": "off",
+      "quality": 80.85075273,
+      "median_ns": 14329500,
+      "times_ns": [
+        14417417,
+        14477209,
+        14329500,
+        14483500,
+        14257791,
+        14083375,
+        14040625
+      ],
+      "bytes": 85551,
+      "artifacts": {
+        "metric.txt": "a75c1e879477ae3fdf50dda6a6bee4551ecb92709c4ef19e465169c7952ec96e",
+        "decoded.pfm": "931fe1b873b43b825e81bf3d9427708e903bade78239bbb0bc769c0c7bec2b2d",
+        "timing.json": "22d634636ab8f6333156e26c669be991aa0b7e7a49982f569b90a2083799ab05",
+        "decode.log": "b9fa3114a92be2c5e62ad8c50fa61c8cb8079705b22af4ff48ab373a9fd65676",
+        "output.jxl": "653695af05e8600e00092baefd00af8a4a418be5fb649f05587816ff0a4ede45",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-13-e8-d8-off",
+      "image": "kodak-13",
+      "effort": 8,
+      "distance": 8,
+      "search": "off",
+      "quality": -4.96594434,
+      "median_ns": 23055292,
+      "times_ns": [
+        23163708,
+        23406250,
+        23053542,
+        23055292,
+        22925666,
+        23026750,
+        23161958
+      ],
+      "bytes": 21497,
+      "artifacts": {
+        "metric.txt": "f57b5761e9d14ec1ea14a9d628cee79a079ea2504a8a33e00d23df013a902d1d",
+        "decoded.pfm": "fab1a830202803088a126fadc851eb2ad6d439dff677daf9b8d3976f01f1fb12",
+        "timing.json": "86c29e6c5ba651bc9049f3a202ac56d9c05ed9e0cca607c23626ecff50a1ebfc",
+        "decode.log": "29f085da798b3d4ab03bf9fddaf8acdb8a3dd1fed532dc5cdf4265a464096abb",
+        "output.jxl": "cf8ea7171a22dd50d3cf119907de01b2a51d6685c60bfbeb2b9a511cd1f9bda8",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-13-e8-d8-on",
+      "image": "kodak-13",
+      "effort": 8,
+      "distance": 8,
+      "search": "on",
+      "quality": -0.19270173,
+      "median_ns": 23761833,
+      "times_ns": [
+        23824792,
+        23761833,
+        24118667,
+        23682750,
+        24088666,
+        23681416,
+        23191834
+      ],
+      "bytes": 22247,
+      "artifacts": {
+        "metric.txt": "2a9fa1c0d50d6d3db331d0783bd8fe7b0f7489a75c922f3784715412b6fbd5aa",
+        "decoded.pfm": "3e69469d45c54b416127bd2bd3bbff6ed1a903a596ff6e68d85c0f6f183cafb0",
+        "timing.json": "5674957b549263c6de651a4045eba02e81edfde23b5c36921c26f27f2d4f6e34",
+        "decode.log": "e1ba7c0f6bd794ea4f1638d5acc3879c4d8e1b012dba987b15f930e91d044361",
+        "output.jxl": "4e2ea06975e0656978be9d898b2bfd01baf46dc78435d02eed1cf5e824e77942",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-01-e6-d1-on",
+      "image": "kodak-01",
+      "effort": 6,
+      "distance": 1,
+      "search": "on",
+      "quality": 81.09573429,
+      "median_ns": 14749500,
+      "times_ns": [
+        14932791,
+        14523458,
+        14568000,
+        14749500,
+        14568709,
+        14812125,
+        15005625
+      ],
+      "bytes": 121274,
+      "artifacts": {
+        "metric.txt": "52101a2d34a6a7df27a10c50c1096afce9aabaaee901a21e563f0407da92510a",
+        "decoded.pfm": "573c6f2554507bfc159aee928aa727591c9b4726b2b169a5f498230e2c41c559",
+        "timing.json": "7e24c9480f457a41291d4fb7e58534107675d5b615ff99f4d125ff168cea127b",
+        "decode.log": "d50b50429f23e2696e0bc5747da56aea09ddf88a57d079ad7b6a2c3c30e66064",
+        "output.jxl": "92f408b7ba3c12f0f2f1850c2d829e9e3b269d4895fec6862a9082c4056ee3db",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-01-e6-d1-off",
+      "image": "kodak-01",
+      "effort": 6,
+      "distance": 1,
+      "search": "off",
+      "quality": 81.01226518,
+      "median_ns": 16480792,
+      "times_ns": [
+        16730041,
+        16480792,
+        16558791,
+        16684291,
+        16368417,
+        16349000,
+        16004958
+      ],
+      "bytes": 120531,
+      "artifacts": {
+        "metric.txt": "678a45f93cba0fcc60e0963eab7a1ee919ff0c6ba30d2b4c911671e18f54f283",
+        "decoded.pfm": "b2d79a5fe45541b490cefc283157cd49658edbb7b938ee51cb8c3400d2dcd255",
+        "timing.json": "9f35345aa2e33d42c60314c19e92d10f006858a642f4c58976a861f6a3fecc80",
+        "decode.log": "738e0c60ec0c27c8fc989c957bec1a4fd67429b80b3e20703502ac1c7badb8d2",
+        "output.jxl": "f12aaefda07788c6c103207b7b07604d3eaf555663d48a23af3f0314c29be201",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-01-e8-d1-off",
+      "image": "kodak-01",
+      "effort": 8,
+      "distance": 1,
+      "search": "off",
+      "quality": 81.18483729,
+      "median_ns": 29490584,
+      "times_ns": [
+        29393250,
+        29429125,
+        29462083,
+        29594000,
+        29558125,
+        29847875,
+        29490584
+      ],
+      "bytes": 120119,
+      "artifacts": {
+        "metric.txt": "4927747a49264120df222f633f9bc7b8030fc6c6eb55cb4e57589b26c4030e9b",
+        "decoded.pfm": "8bb8b70906edfa4535ca6149f373dc96e854794964cb80abd1fb7897386cb0d4",
+        "timing.json": "358494987b7d046eb6244ca789d88a212e2f0acae5be2e3076d305e5a9828f7c",
+        "decode.log": "f6b793142342c7f0277e334385a5455bb6ef36c2898f3280433a16ae0763436a",
+        "output.jxl": "08ab93898c9d116856be567dbb903071ee73c51616c428adf8ae6e37500fe9bb",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-01-e8-d1-on",
+      "image": "kodak-01",
+      "effort": 8,
+      "distance": 1,
+      "search": "on",
+      "quality": 81.2577908,
+      "median_ns": 29881042,
+      "times_ns": [
+        29655042,
+        29881042,
+        29439042,
+        29867042,
+        29926625,
+        29980500,
+        30074375
+      ],
+      "bytes": 120868,
+      "artifacts": {
+        "metric.txt": "4db16952342fadd0cd9e199d7204fe2c4b3632df1ec35ad86b8a82557b58d2c0",
+        "decoded.pfm": "9a4557ccc5c70aeaa7bb1007fbe82622fcd7de99388e3b08d5062d04bf83f327",
+        "timing.json": "1e80b709a1f0b84425d1ffd57177ef515557a62e4ca5ae8a34e3a7b82e8e9273",
+        "decode.log": "617eece6238b33040f5371be81286c6e2a68b3032def31357bd8cfea9149dd63",
+        "output.jxl": "3f4001dd09ed3bcf24e5adae8f06fad88c2bc59bacc147025c11311b6c1e1f19",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-13-e8-d4-off",
+      "image": "kodak-13",
+      "effort": 8,
+      "distance": 4,
+      "search": "off",
+      "quality": 34.14657762,
+      "median_ns": 25001417,
+      "times_ns": [
+        25016583,
+        24500125,
+        24167667,
+        25001417,
+        26359292,
+        25145875,
+        24963209
+      ],
+      "bytes": 43942,
+      "artifacts": {
+        "metric.txt": "ca68100bb1904600f5d570d03b220b4ae880d09d7db6db0e501f5b9fae738889",
+        "decoded.pfm": "d4ad81ee0bd10667b59cc15cc7aab967503b850910afe217aef5a59518c5a2f3",
+        "timing.json": "83cee66182612709fe37e2375717a92b8369b0b87e87a370e0607253ff9fdcc2",
+        "decode.log": "7b5868e040af4a5cd8eec38fb0b8f2a4f4be9c3ab93f0c0dbc97e8671c86e796",
+        "output.jxl": "0efa306a762339cfd0f161471ee6c5369fc895ecf28bd42859f235074a79ce1d",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-13-e8-d4-on",
+      "image": "kodak-13",
+      "effort": 8,
+      "distance": 4,
+      "search": "on",
+      "quality": 34.62495767,
+      "median_ns": 25634292,
+      "times_ns": [
+        26139625,
+        25634292,
+        26097667,
+        25244166,
+        25253333,
+        25607667,
+        25801542
+      ],
+      "bytes": 44771,
+      "artifacts": {
+        "metric.txt": "5e8c674f34706e0134e52939592f79ba6ad280241548d73d83fe21f9b00a2ae2",
+        "decoded.pfm": "be715806c8fb79ebabc037922d4373878089ca81f14ed20bd50ce010aa87f4d0",
+        "timing.json": "54eda39dcd5cb7e241a1cb89155738c336f096c37c291070a1945c9b9656cd3e",
+        "decode.log": "041552f7bb9270894b10eb8a7dc9951c29ae35eeec1e270a046c378fdab105ce",
+        "output.jxl": "6ba91b1f6db407f3fd31d6017c3084c7824b60665007a5194e92b198fb3178d5",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-13-e6-d4-on",
+      "image": "kodak-13",
+      "effort": 6,
+      "distance": 4,
+      "search": "on",
+      "quality": 35.81170655,
+      "median_ns": 13571417,
+      "times_ns": [
+        13375292,
+        13571417,
+        13846458,
+        13612042,
+        13493667,
+        13610208,
+        13386000
+      ],
+      "bytes": 45990,
+      "artifacts": {
+        "metric.txt": "6c8a3b85760c663e0c302f163e094509178a977699d23ae47baa2e1d6e52fa6c",
+        "decoded.pfm": "4b8553d8aed4c060f71080477d59f4b78f53807966432c03a23acc277c685f22",
+        "timing.json": "b137d66e45ce6504f3dce7ff15f1bfc46851fadc09d186be69b1d45a9c2ca076",
+        "decode.log": "9bafa63ec10a6e251900e118f49afbafd37d9931fa2f6a73245dcae89d9f0561",
+        "output.jxl": "c1127441cf643c6117f0c2c42d69bf7df1c0dc2f5876fd0ab992488f5b32de31",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-13-e6-d4-off",
+      "image": "kodak-13",
+      "effort": 6,
+      "distance": 4,
+      "search": "off",
+      "quality": 35.18018463,
+      "median_ns": 12648041,
+      "times_ns": [
+        12819417,
+        12053042,
+        12648041,
+        12623959,
+        12705458,
+        12349708,
+        12689458
+      ],
+      "bytes": 45166,
+      "artifacts": {
+        "metric.txt": "9c415b254e6c2e4e96b90ecafdeff3a4e3bca5f066874ff9ac265d6a57d93a47",
+        "decoded.pfm": "21d2756f2287d798f6fda46a66435ffeba224ef19bdbee1c87ea10fff0ab94a6",
+        "timing.json": "f182a69eae439b7163b6d98ea25c2a4f6cb92278229b31cbd597984b75f9a399",
+        "decode.log": "4a7c1a78b947480b89bdb93523a0749c8706d78eb2da5499f14fa0da4316f518",
+        "output.jxl": "bf215b14fae42d57c17dd8d8cf25af979d4b53ebf95c526f8b131b086d48abed",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-01-e8-d4-on",
+      "image": "kodak-01",
+      "effort": 8,
+      "distance": 4,
+      "search": "on",
+      "quality": 40.61311409,
+      "median_ns": 24126791,
+      "times_ns": [
+        23730750,
+        23860375,
+        23953708,
+        24134542,
+        24126791,
+        27597083,
+        24536833
+      ],
+      "bytes": 36460,
+      "artifacts": {
+        "metric.txt": "e86a918b6c7738cb91ea783eabed4dae25027dfaa9e54f1828554ee8c68d5b6c",
+        "decoded.pfm": "4bf17ddf2b51ca59b5f3ce545dbf25345f1d93574dbd4a983a620fc94487d7cd",
+        "timing.json": "7a8a013aecdb9b7bd370cfaa806fdc7ea6054130caa067e6d402bcf3ca8f4f88",
+        "decode.log": "e52f78e60781d855e885c8b2eeb621aec232b051b497b8005f29f50509c765a7",
+        "output.jxl": "087b69a84cf6c47afd869726086337b77742ad8e145a0d236bafc1407ee9c688",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-01-e8-d4-off",
+      "image": "kodak-01",
+      "effort": 8,
+      "distance": 4,
+      "search": "off",
+      "quality": 40.05002205,
+      "median_ns": 23250958,
+      "times_ns": [
+        22937709,
+        23250417,
+        22640875,
+        23999834,
+        23250958,
+        23399750,
+        24108750
+      ],
+      "bytes": 35575,
+      "artifacts": {
+        "metric.txt": "a5e3f0c015a299a01782372b56239a92d5711839f075a9f3d627a992989e24a0",
+        "decoded.pfm": "c0062a6c8103d21fb20bb37a80310d704c1008d6c574e31bea4ae8198421b2c1",
+        "timing.json": "3c06df0596af214e389c86342df506f1fba4c608c8d08e80e3e797740e801dce",
+        "decode.log": "beebdbc77b4bb184d083491349ce93f3937d5e979ab0f7b79b4303b77fee7a95",
+        "output.jxl": "0ef240c42ecdff937de64bd2bb33a661a26841f32f52b780490cddb0557fb7c1",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-13-e6-d8-on",
+      "image": "kodak-13",
+      "effort": 6,
+      "distance": 8,
+      "search": "on",
+      "quality": 1.0171833,
+      "median_ns": 12356209,
+      "times_ns": [
+        12159791,
+        12401208,
+        12191666,
+        12100583,
+        12356209,
+        12672375,
+        12379084
+      ],
+      "bytes": 23186,
+      "artifacts": {
+        "metric.txt": "0f2821f8f932f93713022329e4c9592b39774475c25654edb3b0a05528a8e908",
+        "decoded.pfm": "7cc0593382f34e2ca955cc92146a514c5674a87f8e2dbbacce95dae116c1fbe5",
+        "timing.json": "ccfd5fc25afeac74724b9d054efa19007a85c96029d088ac3c2afe9d8f80c913",
+        "decode.log": "15f7b88993ef107478ccac74ea7db7f199cb9abb6af8c3058dd07d3891a6581e",
+        "output.jxl": "2a5ef35666e4a939797467c1eabf300560e70da2611d4047a06bde39a4ccc068",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-13-e6-d8-off",
+      "image": "kodak-13",
+      "effort": 6,
+      "distance": 8,
+      "search": "off",
+      "quality": -3.69146974,
+      "median_ns": 11803083,
+      "times_ns": [
+        11869042,
+        11796000,
+        11803083,
+        11940042,
+        11688959,
+        11818541,
+        11520250
+      ],
+      "bytes": 22432,
+      "artifacts": {
+        "metric.txt": "181e6eda9ac9c1d9f89e081de9f1cfcac7a51a4a42a505f1ddbb8d27d9d55fca",
+        "decoded.pfm": "b150f1952695ccdda1c1b38737c04298aa006084714b011048af9caee4ca7e07",
+        "timing.json": "302e29480e1dad4728ad261ce36113a8ca9fa7cd05024879e119bdb4c6db2b42",
+        "decode.log": "901796dc8a3393d5cc169ba7b663be88ddf529bb0ac4cdd637ac3884eb76de9a",
+        "output.jxl": "934f61fc6b937b543c8e2f406548e81dfb06b32aace388923d62c9ad2276ba74",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-19-e6-d8-on",
+      "image": "kodak-19",
+      "effort": 6,
+      "distance": 8,
+      "search": "on",
+      "quality": 17.47959824,
+      "median_ns": 12167500,
+      "times_ns": [
+        12312500,
+        12287875,
+        12290042,
+        11984500,
+        12167500,
+        12005250,
+        11970250
+      ],
+      "bytes": 13190,
+      "artifacts": {
+        "metric.txt": "dda3c57a9ef1d5bec7330c556cfaf50923e4accca07584a2eb193ad29397b655",
+        "decoded.pfm": "2fc8a544955b3645a1cf014bcccb13bd8438f6bff63560ece28cd63a3d6116b6",
+        "timing.json": "78e9dc4123d268e524a4c16ff36455a5ace3b0ec700ea42b31b865871e3fff17",
+        "decode.log": "98620a70b4d70089dc5dc159dec5bdab36bb3e817a38f5cac422bf4d8c8fb38e",
+        "output.jxl": "eca6aa0e6683c4d8b9c6fb414ea9d18829aeaa94a22958790dd317f5466b340a",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-19-e6-d8-off",
+      "image": "kodak-19",
+      "effort": 6,
+      "distance": 8,
+      "search": "off",
+      "quality": 16.06596027,
+      "median_ns": 12880375,
+      "times_ns": [
+        15454416,
+        14158333,
+        12880375,
+        13346083,
+        12805250,
+        12520708,
+        12177000
+      ],
+      "bytes": 12494,
+      "artifacts": {
+        "metric.txt": "af6f4918e0164cb996875e19b4f159d88612e22d663ccb38dbc658892c6ea23c",
+        "decoded.pfm": "f24a561e0c93b10071e0f38e219fd06242e083cbb9b517755c22925a7389b843",
+        "timing.json": "311103f9e098d8258879db9bce3564af8394b3f50d9fb54221ca72d569ff8078",
+        "decode.log": "ad09a399f8bfdea5f94577c76d11df62fdc198d3b2c0983d95c7c9a16d941b60",
+        "output.jxl": "d5b752b3fd71974283ff126134116e23b20fb0a731bd9295b3ace31edbec70ac",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-19-e6-d4-on",
+      "image": "kodak-19",
+      "effort": 6,
+      "distance": 4,
+      "search": "on",
+      "quality": 48.69393991,
+      "median_ns": 13112083,
+      "times_ns": [
+        13066416,
+        13151916,
+        12780250,
+        13123083,
+        12965667,
+        13112083,
+        13215958
+      ],
+      "bytes": 24504,
+      "artifacts": {
+        "metric.txt": "75dea11ceca6c25eb260c089a3f258dd35589d6a913b55034fe47f61d5695744",
+        "decoded.pfm": "ee31504e098cb843c69e05b668074fa553b4baa176a1a9a68a1049b7ae40f31b",
+        "timing.json": "bedeaae279a0e89b83212b6087a786c983d701be0c11c6400546136e31d562d4",
+        "decode.log": "3366b4b921d73dbf397942ab24468c8fc7c5f7f62b3c752475b84c46c08c9ea1",
+        "output.jxl": "ba768fdb6d240e8f5bfb9adaeb3c321e599521483fd817b3370cc0d71b320703",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-19-e6-d4-off",
+      "image": "kodak-19",
+      "effort": 6,
+      "distance": 4,
+      "search": "off",
+      "quality": 47.9605208,
+      "median_ns": 12554417,
+      "times_ns": [
+        12625209,
+        12137958,
+        12591958,
+        12554417,
+        12458041,
+        12617000,
+        12531667
+      ],
+      "bytes": 23651,
+      "artifacts": {
+        "metric.txt": "6195a985e02d147015a2ed7528c4249b7998e7fe252f7275892e72d45a15ee2e",
+        "decoded.pfm": "f6ec03052ecd45f5ff8c23fe2eb8b838a63ddd6791141fabfa0ee64feb819b27",
+        "timing.json": "9b8215e83042f3dddbfb0b846b0d7f4afa7995dab847d56b71fedfb0aa179960",
+        "decode.log": "7bb76540d42ba7feb76d6e2089a8afcc4b3e37dbcb89c5d9f2acb45e5037595a",
+        "output.jxl": "b06caa4f7300d73944b18ded7bb339b0e427149f390b4ad040ef05dc063effc7",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-07-e8-d4-off",
+      "image": "kodak-07",
+      "effort": 8,
+      "distance": 4,
+      "search": "off",
+      "quality": 63.45170989,
+      "median_ns": 22822084,
+      "times_ns": [
+        22619041,
+        22842125,
+        23411708,
+        23133625,
+        22822084,
+        22797041,
+        22698833
+      ],
+      "bytes": 23906,
+      "artifacts": {
+        "metric.txt": "5febcff659dd0bcfbad662833503797fb075d880742d3f19592f9dec0c2aa64f",
+        "decoded.pfm": "6f59452ed318f2e3b0d9451cc1da57b0c0fef0e5775b6d208ca7027ebe66679e",
+        "timing.json": "45fef6e0d8771f2139a98af362301a09b6f308a4d99309582345e10f41d00678",
+        "decode.log": "b1462ac74002ce3209ba41095c31487b6d58a8090e7c2a0601ce6137e1398750",
+        "output.jxl": "a972b59a282407aba9275ba1804084a3b18377148119da21e38b67a83b9c9149",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-07-e8-d4-on",
+      "image": "kodak-07",
+      "effort": 8,
+      "distance": 4,
+      "search": "on",
+      "quality": 63.58976073,
+      "median_ns": 23447959,
+      "times_ns": [
+        23896667,
+        23881958,
+        23392000,
+        23229875,
+        23372666,
+        23447959,
+        23691750
+      ],
+      "bytes": 24909,
+      "artifacts": {
+        "metric.txt": "95c8ef2b91962f1788020a4a38447998d2c1931d046dc4a6239c77a3fdaa9eb4",
+        "decoded.pfm": "ece336f0c8721d039af794a54ffb06f7199184bc768521202dbea22ae0635209",
+        "timing.json": "f893099ce8e53c3dc24c12fc9606cf32678b9c6810f2c9a4b8c7888e743212b6",
+        "decode.log": "e0bdb2037c118f7d5d9c498ccaefaf9aeae3a275a04fc35376925e09a3683a1a",
+        "output.jxl": "d43f51c0cd6648e4365d0350cabb03774c7e45da028b53c90a7c98e1c69bf99a",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-19-e8-d4-off",
+      "image": "kodak-19",
+      "effort": 8,
+      "distance": 4,
+      "search": "off",
+      "quality": 46.22195144,
+      "median_ns": 24379625,
+      "times_ns": [
+        24308000,
+        24466917,
+        24491292,
+        24376208,
+        24636875,
+        24379625,
+        24151334
+      ],
+      "bytes": 22591,
+      "artifacts": {
+        "metric.txt": "54d6cc89c5ae38531e23ccb887def09588de4bb4436dd274542f7edc96f9f4a2",
+        "decoded.pfm": "16eb5eba3a9f5352824ed99b603d75e8b16be9b50ce91c165ad0c11c5193d5bf",
+        "timing.json": "dc2a6690d047e5c7503eb65d91c88cd4bb6e953506711836ea2f18ab41ac023a",
+        "decode.log": "0cd91588720407b7593ca867d0826bd27e8e217d32dec1cde241371cfb662151",
+        "output.jxl": "fcd6826ea6683ca7e6848233ed1315bf80ca2856f5db0240b593c689f23b9c45",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-19-e8-d4-on",
+      "image": "kodak-19",
+      "effort": 8,
+      "distance": 4,
+      "search": "on",
+      "quality": 46.84389101,
+      "median_ns": 24994208,
+      "times_ns": [
+        24898084,
+        24586375,
+        25165250,
+        25146000,
+        24650166,
+        24994208,
+        25491375
+      ],
+      "bytes": 23453,
+      "artifacts": {
+        "metric.txt": "62ff0fd88d6aaf0a5066e69070d5ac04540b23af9e485fb3693966715ff0044c",
+        "decoded.pfm": "827f37aefabf101025513a2a18603cbe9778aa1134527e1fb54d05abd220322d",
+        "timing.json": "27c7d5a4f5bc7ad17c5fb226c089f9d715459df8abd5f898b87a3def3ecc3fd9",
+        "decode.log": "537b3f9ce4feaf5573df2cee9a0388146da15027c749a84c417bb2ed4d2b8c85",
+        "output.jxl": "e7b8443118b135f62148808c7e986bc1cdff019773e20375ae75479df7077614",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-07-e8-d8-off",
+      "image": "kodak-07",
+      "effort": 8,
+      "distance": 8,
+      "search": "off",
+      "quality": 38.84136332,
+      "median_ns": 21931334,
+      "times_ns": [
+        21596250,
+        21250500,
+        21931334,
+        21756708,
+        22199416,
+        22537292,
+        23279209
+      ],
+      "bytes": 13457,
+      "artifacts": {
+        "metric.txt": "fae30d22a420e7565676529b5de8085065a87b159ec63b41e75feea139a93581",
+        "decoded.pfm": "adf616b2e093735542c0336fbfd38135c6f1b246b5c49ce0840e90c8bcc38a28",
+        "timing.json": "99e606e4059c4a5e66598aa388fe436d3577da19f1d2c38c7d3b956d2675b756",
+        "decode.log": "678ce6002d22c7ce6bc2852e90e60388ab97c7091b984e16a80b690515153764",
+        "output.jxl": "51f803c946c0c9b57852d925ad8eb7497c71554b20810e823f941534f0af154f",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-07-e8-d8-on",
+      "image": "kodak-07",
+      "effort": 8,
+      "distance": 8,
+      "search": "on",
+      "quality": 40.50330016,
+      "median_ns": 22305917,
+      "times_ns": [
+        22305917,
+        22723458,
+        22550708,
+        22904750,
+        22087541,
+        22071541,
+        22265958
+      ],
+      "bytes": 14216,
+      "artifacts": {
+        "metric.txt": "ca244956c57c66133c25d9b23c06a2fdf4f229d162775713ba841a98e772f0ae",
+        "decoded.pfm": "ea633c3b46eb8ef1b3d9671e2800bc6d1661178b35576a97146f65826ad76f95",
+        "timing.json": "ac51f973f8c5e0360b5ad2d91e2cdb4fe86a5e79d9624c3f1f19add3fac58165",
+        "decode.log": "f0484d6cff2f71857cc9d5060244a94e13e570da66019646e3fdfd527ac0b88d",
+        "output.jxl": "9df46a9cb0508dbf8f01146d58b4be6ac3b67dd1e105336711fbe93dd53ace0b",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-13-e6-d1-on",
+      "image": "kodak-13",
+      "effort": 6,
+      "distance": 1,
+      "search": "on",
+      "quality": 73.4287355,
+      "median_ns": 14071500,
+      "times_ns": [
+        14071500,
+        13815917,
+        13974500,
+        14268583,
+        14406334,
+        14187125,
+        13944000
+      ],
+      "bytes": 141857,
+      "artifacts": {
+        "metric.txt": "fd9b6eb4a64a2a8383b896c71080d6e16f4a52e9619cfb70111dc6eadf3f2239",
+        "decoded.pfm": "4a34c195e385e13a833861368ea5c1abf2de46b580512ea6c6705aac409cd8ea",
+        "timing.json": "2338efdfa9a9e099ca1f8a3b5c91d4b2d09c2326c68fe8ebf9c7ca1caac8af63",
+        "decode.log": "68b19aa24dd4ddc1c11dc7a2e2fbffbb094a5c130d4c51d1fae24f6997911442",
+        "output.jxl": "950d14035be2c20ad7f4947e19e2ff4dcc89ff2e8c726c49439b6b09ea78b719",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-13-e6-d1-off",
+      "image": "kodak-13",
+      "effort": 6,
+      "distance": 1,
+      "search": "off",
+      "quality": 73.28992429,
+      "median_ns": 13727750,
+      "times_ns": [
+        13577500,
+        13378167,
+        13687000,
+        13798875,
+        14016083,
+        14340667,
+        13727750
+      ],
+      "bytes": 141218,
+      "artifacts": {
+        "metric.txt": "25c3e3b860c0a70aaf5308c9d72da6d9fb3dcd3a05a5498b12d6bdd4da46e9be",
+        "decoded.pfm": "21ae08bbb882e8ecd4e5139fe8cb2054a5c53579c39bd54cef65cb2b35cbb1a1",
+        "timing.json": "2e815253b7c866dbad267d944e81e6d6892f17b98c857bb95f4943c1375116be",
+        "decode.log": "565ae289013a4a3024cb563161104e646b9e1e8686bf087c2263dbedb4c7b01e",
+        "output.jxl": "5be16b0a2fc1b179eeb8fbcb61a6f083b4b2b8c84db9519c88c86e9f0331d61a",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-01-e8-d8-on",
+      "image": "kodak-01",
+      "effort": 8,
+      "distance": 8,
+      "search": "on",
+      "quality": 7.58760865,
+      "median_ns": 23596417,
+      "times_ns": [
+        23639750,
+        23775750,
+        23196959,
+        23618250,
+        23451000,
+        23162250,
+        23596417
+      ],
+      "bytes": 18335,
+      "artifacts": {
+        "metric.txt": "551d3607624929d5777e1b74258054ccebd4d2acd9d9c4cf253602f798ae196d",
+        "decoded.pfm": "a303f96e200d6b1d0f805ba966d45c448ff981c5e8e3edf0850202a5e798b521",
+        "timing.json": "6cd991e2b2001dccc7caf72ae7b7e0045e70d1bb7a266820b22860c2dc28c279",
+        "decode.log": "1010632563edadcb9906c57ebb0be04291c14c1d766a4ce8201b2145636856f8",
+        "output.jxl": "5d78c16cca5510f655c9e2f8a7462870046005f42640d7999fb551523990bb29",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-01-e8-d8-off",
+      "image": "kodak-01",
+      "effort": 8,
+      "distance": 8,
+      "search": "off",
+      "quality": 6.33646288,
+      "median_ns": 22615250,
+      "times_ns": [
+        22851833,
+        22622125,
+        22266625,
+        22189208,
+        22626625,
+        22615250,
+        22044667
+      ],
+      "bytes": 17575,
+      "artifacts": {
+        "metric.txt": "b3cea1481714571d9b92fe59902847296b6aea60e6de73729131c409b7b9d8b5",
+        "decoded.pfm": "869acd07137dcb96ecadb00fd701ba5c9c1a628ae57e9ba9e7f118a0532418ee",
+        "timing.json": "a21aeaa1c5482eba0a75c605f18d5e95de7fb6bc374a68aa6e1154c2ed181243",
+        "decode.log": "660d58b632e3bb7a81d2575489153ac72a753bccc715ec2074426a64ed6ac44f",
+        "output.jxl": "344fc9439fc76e9c130a0419702be2e635936677395891f1839815b4f6993532",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-19-e8-d8-on",
+      "image": "kodak-19",
+      "effort": 8,
+      "distance": 8,
+      "search": "on",
+      "quality": 17.78453673,
+      "median_ns": 23362834,
+      "times_ns": [
+        23579083,
+        23295541,
+        22969500,
+        23779042,
+        23723667,
+        23271917,
+        23362834
+      ],
+      "bytes": 12662,
+      "artifacts": {
+        "metric.txt": "1cbeb289924d0cc38f8b286d43d2c6b171b81e6652f67386eadc402bf6cee3f6",
+        "decoded.pfm": "b1591f17d18517087d2ee1f03a36df25f9e09ef68455063563e2fb8c7bb2c667",
+        "timing.json": "5358c6d9a9a4233fb36d114208b937a4dd10e96fd938a3f95740d50e4b30ee47",
+        "decode.log": "50a289020dc4edbab6e56aa9a6e0d2e5d8edf59c727c499fe41da22c7f1a80f3",
+        "output.jxl": "d8b2fbb2fedcc5d5a11ee4f7348c71fda2a65fa647b613c5f5e4e2119c9137ae",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-19-e8-d8-off",
+      "image": "kodak-19",
+      "effort": 8,
+      "distance": 8,
+      "search": "off",
+      "quality": 16.95950128,
+      "median_ns": 22870375,
+      "times_ns": [
+        22539208,
+        22526541,
+        22793833,
+        22870375,
+        22976750,
+        23069125,
+        23324167
+      ],
+      "bytes": 11971,
+      "artifacts": {
+        "metric.txt": "fbd9e1c97dfb6b69fd4d1a10e63e042d11ca263124c63021735902ffe1460251",
+        "decoded.pfm": "eccf2f4fdfcecb4c82b3a89fe18e1e2271149d4e17c68b902ca25f8219018595",
+        "timing.json": "679b32008ce58cc3dd25236caae1873ec58b40630fd3fa6ff4cbecfe794bdb4d",
+        "decode.log": "45e27408644f91d568d731a54c83026ae42d3d0d4c907b1b791e0a74c9a7c5d2",
+        "output.jxl": "824577034656c15bd58dd8ffff175250143b600b4aa2e866145d9b6eec432937",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-01-e6-d8-on",
+      "image": "kodak-01",
+      "effort": 6,
+      "distance": 8,
+      "search": "on",
+      "quality": 9.17296023,
+      "median_ns": 12672083,
+      "times_ns": [
+        15773250,
+        14479542,
+        12830041,
+        12672083,
+        12532708,
+        12229667,
+        12399625
+      ],
+      "bytes": 19088,
+      "artifacts": {
+        "metric.txt": "744a0776dd27489c75c9eea5de1442e26bf037f990ff58ce58187ac8cec9ba7c",
+        "decoded.pfm": "81be1dcff9a51c7c62cd00ef736450f469ba587e4d6a2dc04ff8cf1059b35508",
+        "timing.json": "e65179fe06f09ed45b28d623d5696f7497f9329768568f4cf1dbbdd767bded31",
+        "decode.log": "13a0a2a1e2b0fa4c80da9fcd2e6db4d8f4eb82acde272b7057cf8ba02fb77737",
+        "output.jxl": "260cb5a6ad867878dd28d353d57f5e66177b8e02da8608bcfe1c0a27e48247c5",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-01-e6-d8-off",
+      "image": "kodak-01",
+      "effort": 6,
+      "distance": 8,
+      "search": "off",
+      "quality": 8.00012565,
+      "median_ns": 11941500,
+      "times_ns": [
+        11913000,
+        12151500,
+        11865875,
+        11904500,
+        11962083,
+        11941500,
+        12286875
+      ],
+      "bytes": 18329,
+      "artifacts": {
+        "metric.txt": "7457f32d315d3e8390733b60403dbb62aa1dfe36700940022f0131383656d58a",
+        "decoded.pfm": "46109f6a44259b9a44076be3ae7f932874a42a42244277b74ad099e18e811e9f",
+        "timing.json": "5ab3e7dcbd5b0bd2402b89ab2f3dd4815e364f28198cdd964567d0991a0422ce",
+        "decode.log": "1652f9adc950dfd066354cacac3fda201cb909ef2db5db0f6c1101694aeb3e25",
+        "output.jxl": "ac984e7ee7e3815bdb6177550f9ceeb2035b36cb694751fabb41ab20ec6c865c",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-07-e6-d1-off",
+      "image": "kodak-07",
+      "effort": 6,
+      "distance": 1,
+      "search": "off",
+      "quality": 87.36697202,
+      "median_ns": 13789000,
+      "times_ns": [
+        13848833,
+        14213833,
+        13572792,
+        13789000,
+        13547792,
+        14330625,
+        13653666
+      ],
+      "bytes": 70973,
+      "artifacts": {
+        "metric.txt": "7aa393883cda5238dd9c03f44b38432b3a0463e0f9b63d9b3a10e93a624195f3",
+        "decoded.pfm": "25deded36b27592f6df0fd39642c7cb2514dd552e7f3ea06cd25b1b3557e1273",
+        "timing.json": "c7a4e1029b7a4ad46bc921f8a27ae276e22a20ccb7a4acb25da0432c52d5e7f3",
+        "decode.log": "0e9b35d009f93f55f63e64d49cc71c31622ce305d702e3be0503eba49b40008c",
+        "output.jxl": "d89c9194170db1be397ba47b0b8dddc019ddf300a91c1e82f78baa708637949c",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-07-e6-d1-on",
+      "image": "kodak-07",
+      "effort": 6,
+      "distance": 1,
+      "search": "on",
+      "quality": 87.48445397,
+      "median_ns": 14411333,
+      "times_ns": [
+        14411333,
+        14440916,
+        14433792,
+        14437042,
+        14193125,
+        14307166,
+        14370792
+      ],
+      "bytes": 71741,
+      "artifacts": {
+        "metric.txt": "993a197a6268f97c5eed0bf69ae2223979635abf90361e37e4c244a290dffd3e",
+        "decoded.pfm": "d6bbd1dd85f4ad94717e520ca8802b0575ff0d1f80760f0363aea55a4bddc805",
+        "timing.json": "c225b5af0512095ce4de095c01dada9a025169e3be38e1f5f390a73d2ad81c59",
+        "decode.log": "744dd1d3abfc92f55818b4ca1e7a0419e41860ab47743b4fb25dcbf6397ad79c",
+        "output.jxl": "12024e668f0c6a5240c215d7ae2ccf2828dd2a9aa25268a012705104ea0bf4ad",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-01-e6-d4-on",
+      "image": "kodak-01",
+      "effort": 6,
+      "distance": 4,
+      "search": "on",
+      "quality": 41.11634168,
+      "median_ns": 14020959,
+      "times_ns": [
+        14698875,
+        14002500,
+        14519875,
+        14421250,
+        14020959,
+        13970125,
+        13799750
+      ],
+      "bytes": 37428,
+      "artifacts": {
+        "metric.txt": "a03aec4d158eca5f36342c99d165f2a0357ec86887251d38e30c8600f18dc1a0",
+        "decoded.pfm": "9297c2c160d8c3e4411e62e1e15c8c4e85a202f46636c5f593600cf2c2d3dc8f",
+        "timing.json": "5667ae280486af78ad22f958095375ccd35d11d95d0ca9b2d14488ad219a8d61",
+        "decode.log": "3a1d5db0cef9207c677d207803732b0b13d8d185f29ce5a44be3bd572a6fb75b",
+        "output.jxl": "629ff318c4782b73d006dfe3914443b83083e610888925d59631d0821460755b",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-01-e6-d4-off",
+      "image": "kodak-01",
+      "effort": 6,
+      "distance": 4,
+      "search": "off",
+      "quality": 40.62854777,
+      "median_ns": 12520792,
+      "times_ns": [
+        12509292,
+        12368708,
+        12586625,
+        12686125,
+        12650834,
+        12520792,
+        12503792
+      ],
+      "bytes": 36542,
+      "artifacts": {
+        "metric.txt": "aabc59bdd9950a4f31dcf76f881ed67f97aa001a555e9f0ae5a3df985e390014",
+        "decoded.pfm": "3feb2828b3948bdd0243f1afd1f25a1a51393958b1969c0da0e27c7e8210f46b",
+        "timing.json": "625dee9533da63b02c75838c259c28e9e361baa096ec68e53557d8aa6f2020c0",
+        "decode.log": "4250a57bb735e58fc6a5026ee8bfef67c841c99742193ab7bd6f920ee402316d",
+        "output.jxl": "219c8e254ecafd425773946e93c90e5d344135096a98356ca5f6d6116778a246",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-07-e6-d4-off",
+      "image": "kodak-07",
+      "effort": 6,
+      "distance": 4,
+      "search": "off",
+      "quality": 63.98444,
+      "median_ns": 12344458,
+      "times_ns": [
+        12344458,
+        12075250,
+        11907084,
+        11994209,
+        12418750,
+        12443042,
+        12476166
+      ],
+      "bytes": 24752,
+      "artifacts": {
+        "metric.txt": "8f3a0528a17f5f5a2fe334d157542b22a29c3eee2d5e1a934778055f141a921c",
+        "decoded.pfm": "9e5539d8a22ed2e3ccb8b8312ec9c9f2205e8f9dd0dcf2d94f805997c6cdb4e9",
+        "timing.json": "084bf7ff07ea3a17e84e3572f94a59a79e09f40791b6c5ba14635541da3a6bbe",
+        "decode.log": "5fa1da34f2eeb6d1187ca406bfb09a06c8242bb26bf89ecc05f398d679eeb121",
+        "output.jxl": "9764d0a1fe418af5301d30d26c3f56fa89a6106e94a66130d8dd88c4ad50dea1",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "id": "kodak-07-e6-d4-on",
+      "image": "kodak-07",
+      "effort": 6,
+      "distance": 4,
+      "search": "on",
+      "quality": 64.26065772,
+      "median_ns": 13063250,
+      "times_ns": [
+        13112958,
+        13063250,
+        13231750,
+        12551583,
+        12818167,
+        12982167,
+        13227041
+      ],
+      "bytes": 25759,
+      "artifacts": {
+        "metric.txt": "81c0865f8654949a5738304539caf913cc8f51922fa1c1ca03faaf7c79a340a5",
+        "decoded.pfm": "2328f511a7326d95a0ac9a8e63f774639949e5a7f6b2a568c92c6dd798cbf626",
+        "timing.json": "067ad3c02135a2996b20a98199dd887c87c9552447257864da000f1753f93e33",
+        "decode.log": "3e65e64960b9323cc87b1baeae3c523cf182d316f38feef57d23d60b47548459",
+        "output.jxl": "a804db87f2bb4017ac579543c97e9ca8b2a096982b49e42fe91f89d9fe2bc723",
+        "encode.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  ],
+  "local_artifacts": "build/epf-qualification (includes frozen encoder, source patch, full source manifest, logs, codestreams and decoded images)"
+}

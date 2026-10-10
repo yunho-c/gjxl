@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Optional EPF sharpness search
+
+- CPU and Metal encoding can search the final per-block EPF sharpness map at
+  efforts 6--10 and distances at least 0.5 when EPF is enabled. Intermediate
+  AQ decisions retain neutral sharpness. CUDA keeps its fixed-sharpness policy.
+- Search is off by default. Enable it with
+  `VarDctEncodingOptions::adaptive_epf_sharpness` or CLI/benchmark
+  `--epf-sharpness-search on`. Maximum-error and maximum-throughput modes
+  retain their existing policies.
+- The saved pilot improves same-distance quality at additional size and time
+  cost; its sparse BD-rate estimate suggests a penalty. See the
+  [implementation and qualification report](epf-sharpness-search.md) for the
+  evidence and its limits.
+
 ### Fully resident Metal encoding default
 
 - Fully resident AQ is now the default Metal computation path for codestream
