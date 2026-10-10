@@ -80,6 +80,60 @@ bool CheckMutableValueAggregation() {
   return true;
 }
 
+bool CheckClusteredValueAggregation() {
+  using namespace gjxl;
+  using namespace gjxl::codestream_internal;
+  uint32_t random = 0x183476ab;
+  for (size_t clusters : {1ul, 7ul, 64ul}) {
+    Storage<uint8_t> map(127);
+    for (size_t i = 0; i < map.size(); ++i) map[i] = (i * 17) % clusters;
+    for (size_t count : {0ul, 1ul, 4095ul, 4096ul, 65537ul}) {
+      for (unsigned distribution = 0; distribution < 4; ++distribution) {
+        std::vector<EntropyToken> tokens(count);
+        std::vector<uint32_t> split_values(count);
+        std::vector<uint16_t> split_contexts(count);
+        for (size_t i = 0; i < count; ++i) {
+          random ^= random << 13; random ^= random >> 17; random ^= random << 5;
+          uint32_t value = random;
+          if (distribution == 0) value %= 1024;
+          if (distribution == 1) value = i % 2 == 0 ? value % 1024 : value;
+          if (distribution == 2) {
+            constexpr std::array<uint32_t, 6> edges{0, 1023, 1024, 65535, 65536, UINT32_MAX};
+            value = edges[i % edges.size()];
+          }
+          const uint32_t context = (random >> 16) % map.size();
+          tokens[i] = {.context = context, .value = value};
+          split_values[i] = value;
+          split_contexts[i] = static_cast<uint16_t>(context);
+        }
+        const size_t cut = count / 3;
+        const std::array sections{
+          EntropyTokenStreamView::Interleaved(std::span(tokens).first(cut)),
+          EntropyTokenStreamView::Split({}, {}),
+          EntropyTokenStreamView::Split(std::span(split_values).subspan(cut),
+                                       std::span(split_contexts).subspan(cut))};
+        Storage<Storage<WeightedValue>> reference, fused;
+        if (!CollectClusteredEntropyValues(sections, map, clusters, &reference, nullptr, false).ok() ||
+            !CollectClusteredEntropyValues(sections, map, clusters, &fused).ok() || fused != reference) {
+          std::cerr << "Fused clustered populations differ\n";
+          return false;
+        }
+        // Fail after a valid first section, preserving the previous owner.
+        const std::array invalid_token{EntropyToken{.context = static_cast<uint32_t>(map.size()), .value = 42}};
+        const std::array invalid_sections{sections[0], EntropyTokenStreamView::Interleaved(invalid_token)};
+        if (CollectClusteredEntropyValues(invalid_sections, map, clusters, &fused).ok() || fused != reference)
+          return false;
+        const uint8_t saved = map.back();
+        map.back() = static_cast<uint8_t>(clusters);
+        if (CollectClusteredEntropyValues(sections, map, clusters, &fused).ok() || fused != reference)
+          return false;
+        map.back() = saved;
+      }
+    }
+  }
+  return true;
+}
+
 bool CheckDeterministicHuffmanScratch() {
   constexpr std::array<uint64_t, 5> equal_counts = {1, 1, 1, 1, 1};
   constexpr std::array<uint8_t, 5> expected_depths = {2, 2, 2, 3, 3};
@@ -2474,7 +2528,7 @@ int main() {
     std::cerr << "Signed packing is incorrect\n";
     return EXIT_FAILURE;
   }
-  if (!CheckMutableValueAggregation() ||
+  if (!CheckMutableValueAggregation() || !CheckClusteredValueAggregation() ||
       !CheckHybridUintBoundaries() || !CheckDcUintSearch() ||
       !CheckValidatedHybridUintEncoding() ||
       !CheckDeterministicHuffmanScratch() ||

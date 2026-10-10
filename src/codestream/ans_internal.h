@@ -93,6 +93,14 @@ inline constexpr size_t kMaximumAnsConfigWorkers = 8;
 
 [[nodiscard]] Status ValidateAnsEntropyCode(const EntropyCode& code);
 
+/// Collect exact sorted raw-value populations for a validated partition.
+/// Output is replaced only on success; split/interleaved sections are borrowed.
+[[nodiscard]] Status CollectClusteredEntropyValues(
+  std::span<const EntropyTokenStreamView> sections,
+  std::span<const uint8_t> context_map, size_t cluster_count,
+  Storage<Storage<WeightedValue>>* values,
+  EntropyWorkProfile* profile = nullptr, bool fuse_common_values = true);
+
 /// One pre-encoded context-map alphabet, optionally followed by an implicit
 /// singleton distance-zero histogram. RLE distance reads consume no bits and
 /// leave the ANS state unchanged, so tokens contains only literals and lengths.
