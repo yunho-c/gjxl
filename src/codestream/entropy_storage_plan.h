@@ -13,6 +13,9 @@ using resource_budget_internal::HostStorageBound;
 // Shared with aggregation, rather than duplicated policy thresholds.
 inline constexpr size_t kEntropyDenseValueCount = size_t{1} << 16;
 inline constexpr size_t kEntropyMinimumCountingInput = size_t{1} << 12;
+// Cluster-major common-value counts fuse collection and aggregation. Values
+// outside this bounded table retain the general aggregation path.
+inline constexpr size_t kEntropyClusterDenseValueCount = size_t{1} << 10;
 inline constexpr size_t kPrefixMaximumTokenBits = 31 + 15;
 inline constexpr size_t kAnsMaximumTokenBits = 31 + 16;
 inline constexpr size_t kAnsStreamStateBits = 32;

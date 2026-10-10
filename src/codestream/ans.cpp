@@ -13,6 +13,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <limits>
 #include <new>
@@ -1672,36 +1674,15 @@ Status PrepareDirectAnsPartition(
         };
       }
     } else {
-      const ProfileClock::time_point value_begin = ProfileBegin(profile);
-      Storage<Storage<uint32_t>> cluster_values(clustered.size());
-      for (const EntropyTokenStreamView section : section_tokens) {
-        if (!section.valid())
-          return Status::InvalidArgument("ANS token-stream view is invalid");
-        for (size_t index = 0; index < section.size(); ++index) {
-          const EntropyToken token = section[index];
-          if (token.context >= candidate_partition.context_count)
-            return Status::InvalidArgument("ANS token context is out of range");
-          const size_t cluster =
-            candidate_partition.context_map[token.context];
-          cluster_values[cluster].push_back(token.value);
-        }
-      }
-      ProfileEnd(
-        profile, value_begin,
-        &EntropyWorkProfile::ans_value_collection_nanoseconds);
-      const ProfileClock::time_point aggregation_begin = ProfileBegin(profile);
-      candidate_prepared.values.resize(clustered.size());
-      for (size_t cluster = 0; cluster < clustered.size(); ++cluster) {
-        if (Status aggregate = codestream_internal::AggregateEntropyValues(
-              std::move(cluster_values[cluster]),
-              &candidate_prepared.values[cluster]);
-            !aggregate.ok()) {
-          return aggregate;
-        }
-      }
-      ProfileEnd(
-        profile, aggregation_begin,
-        &EntropyWorkProfile::ans_value_aggregation_nanoseconds);
+      bool fused = true;
+#ifdef GJXL_TOKENIZATION_EXPERIMENT
+      if (const char* value = std::getenv("GJXL_EXPERIMENT_FUSED_ENTROPY_VALUES"))
+        fused = std::strcmp(value, "0") != 0;
+#endif
+      if (Status aggregate = codestream_internal::CollectClusteredEntropyValues(
+            section_tokens, candidate_partition.context_map, clustered.size(),
+            &candidate_prepared.values, profile, fused);
+          !aggregate.ok()) return aggregate;
     }
     *prepared = std::move(candidate_prepared);
     *partition = std::move(candidate_partition);
@@ -2104,6 +2085,83 @@ Status codestream_internal::AggregateEntropyValues(
   Storage<WeightedValue>* aggregated) {
 
   return AggregateEntropyValues(std::span<uint32_t>(values), aggregated);
+}
+
+Status codestream_internal::CollectClusteredEntropyValues(
+  std::span<const EntropyTokenStreamView> sections,
+  std::span<const uint8_t> context_map, size_t cluster_count,
+  Storage<Storage<WeightedValue>>* values, EntropyWorkProfile* profile,
+  bool fuse_common_values) {
+  if (values == nullptr || context_map.empty() || cluster_count == 0 ||
+      cluster_count > kMaximumAnsClusters)
+    return Status::InvalidArgument("ANS value partition is invalid");
+  for (uint8_t cluster : context_map)
+    if (cluster >= cluster_count)
+      return Status::InvalidArgument("ANS value cluster is out of range");
+  size_t total = 0;
+  for (const auto section : sections) {
+    if (!section.valid())
+      return Status::InvalidArgument("ANS token-stream view is invalid");
+    if (section.size() > std::numeric_limits<size_t>::max() - total)
+      return Status::InvalidArgument("ANS value count overflows");
+    total += section.size();
+  }
+  try {
+    const auto collection_begin = ProfileBegin(profile);
+    // Small streams retain the cheaper sort path. The dense table is bounded
+    // by 64 * 1024 counts regardless of the token count or raw value range.
+    const size_t dense_size = fuse_common_values &&
+      total >= kEntropyMinimumCountingInput ? kEntropyClusterDenseValueCount : 0;
+    Storage<uint64_t> dense(cluster_count * dense_size);
+    Storage<Storage<uint32_t>> tails(cluster_count);
+    for (const auto section : sections) {
+      for (size_t index = 0; index < section.size(); ++index) {
+        const auto token = section[index];
+        if (token.context >= context_map.size())
+          return Status::InvalidArgument("ANS token context is out of range");
+        const size_t cluster = context_map[token.context];
+        if (token.value < dense_size) {
+          // Total validated stream lengths fit size_t (and uint64_t), so no
+          // individual count can overflow. No atomics or worker replicas.
+          ++dense[cluster * dense_size + token.value];
+        } else {
+          tails[cluster].push_back(token.value);
+        }
+      }
+    }
+    ProfileEnd(profile, collection_begin,
+      &EntropyWorkProfile::ans_value_collection_nanoseconds);
+    const auto aggregation_begin = ProfileBegin(profile);
+    Storage<Storage<WeightedValue>> candidate(cluster_count);
+    for (size_t cluster = 0; cluster < cluster_count; ++cluster) {
+      auto& output = candidate[cluster];
+      if (Status status = AggregateEntropyValues(std::move(tails[cluster]), &output);
+          !status.ok()) return status;
+      size_t common_count = 0;
+      for (size_t value = 0; value < dense_size; ++value)
+        common_count += dense[cluster * dense_size + value] != 0;
+      const size_t sparse_count = output.size();
+      output.resize(sparse_count + common_count);
+      // All sparse values are greater than every dense value. Shift once in
+      // place, retaining the same growing-vector bound as general aggregation.
+      std::move_backward(output.begin(), output.begin() + sparse_count, output.end());
+      size_t next = 0;
+      for (size_t value = 0; value < dense_size; ++value) {
+        const uint64_t count = dense[cluster * dense_size + value];
+        if (count != 0) output[next++] = {static_cast<uint32_t>(value), count};
+      }
+    }
+    ProfileEnd(profile, aggregation_begin,
+      &EntropyWorkProfile::ans_value_aggregation_nanoseconds);
+    *values = std::move(candidate);
+    return Status::Ok();
+  } catch (const resource_budget_internal::ManagedAllocationFailure& error) {
+    return error.status();
+  } catch (const std::bad_alloc&) {
+    return AllocationFailure();
+  } catch (const std::length_error&) {
+    return AllocationFailure();
+  }
 }
 
 Status codestream_internal::ValidateAnsEntropyCode(const EntropyCode& code) {
@@ -3488,11 +3546,15 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
     // Across all clusters, raw logical lengths sum to N; their vector capacity
     // bounds add to 2N/3N. Weighted destinations also sum to <=2N/3N, even
     // when some clusters take the small-sort and others the counting path.
-    // Hash/dense scratch exists for ONE cluster at a time, not K copies.
+    // Hash/dense tail scratch exists for ONE cluster at a time. Direct
+    // partitions additionally retain a bounded common-value table for K
+    // clusters while collecting only uncommon raw values.
     if (!work.AddVector<Storage<uint32_t>>(k, kFreshExact) ||
         !work.AddVector<uint32_t>(o.tokens, kGrowing) ||
         !work.AddVector<WeightedValue>(o.tokens, kGrowing) ||
-        !work.Add(aggregate.scratch))
+        !work.Add(aggregate.scratch) ||
+        (direct && o.tokens >= kEntropyMinimumCountingInput &&
+         !work.AddVector<uint64_t>(kEntropyClusterDenseValueCount, kFreshExact, k)))
       return overflow();
   }
   *out = plan;
