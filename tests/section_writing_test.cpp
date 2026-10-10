@@ -5,6 +5,7 @@
 #include "codestream/serializer_storage_plan.h"
 #include "codestream_frame_fixture.h"
 #include "core/worker_launch_internal.h"
+#include "environment_test_utils.h"
 #include <array>
 #include <atomic>
 #include <iostream>
@@ -16,6 +17,7 @@ using namespace gjxl::codestream_internal;
 using namespace gjxl::thread_budget_internal;
 using namespace gjxl::resource_budget_internal;
 using codestream_test_internal::FrameFixture;
+using gjxl_test::SetEnvironment;
 
 void Require(bool value, const char* message) {
   if (!value) throw std::runtime_error(message);
@@ -31,21 +33,21 @@ void Empty(const ExecutionDomain& domain, size_t limit) {
 }
 
 void PolicyContracts() {
-  unsetenv("GJXL_SECTION_WRITE_OVERLAP");
-  unsetenv("GJXL_EXPERIMENT_SECTION_WRITE");
+  SetEnvironment("GJXL_SECTION_WRITE_OVERLAP", nullptr);
+  SetEnvironment("GJXL_EXPERIMENT_SECTION_WRITE", nullptr);
   Require(SectionWritingOverlapRequested(), "Production default is disabled");
   Require(!CanOverlapSectionWriting(4), "Unadmitted call enabled overlap");
-  setenv("GJXL_EXPERIMENT_SECTION_WRITE", "0", 1);
+  SetEnvironment("GJXL_EXPERIMENT_SECTION_WRITE", "0");
 #ifdef GJXL_TOKENIZATION_EXPERIMENT
   Require(!SectionWritingOverlapRequested(), "Diagnostic opt-out ignored");
 #else
   Require(SectionWritingOverlapRequested(), "Production read diagnostic control");
 #endif
-  setenv("GJXL_EXPERIMENT_SECTION_WRITE", "1", 1);
-  setenv("GJXL_SECTION_WRITE_OVERLAP", "0", 1);
+  SetEnvironment("GJXL_EXPERIMENT_SECTION_WRITE", "1");
+  SetEnvironment("GJXL_SECTION_WRITE_OVERLAP", "0");
   Require(!SectionWritingOverlapRequested(), "Stable opt-out lost precedence");
-  unsetenv("GJXL_SECTION_WRITE_OVERLAP");
-  unsetenv("GJXL_EXPERIMENT_SECTION_WRITE");
+  SetEnvironment("GJXL_SECTION_WRITE_OVERLAP", nullptr);
+  SetEnvironment("GJXL_EXPERIMENT_SECTION_WRITE", nullptr);
 
   std::shared_ptr<const ExecutionDomain> domain;
   Ok(ExecutionDomain::Create({0, 4}, &domain));
@@ -162,13 +164,13 @@ int main() try {
         SerializerStoragePlan enabled, disabled;
         Ok(ComputeSerializerStoragePlan(frame.view().geometry().frame(),
             {coding, 4, false, false}, &enabled));
-        setenv("GJXL_SECTION_WRITE_OVERLAP", "0", 1);
+        SetEnvironment("GJXL_SECTION_WRITE_OVERLAP", "0");
         Ok(ComputeSerializerStoragePlan(frame.view().geometry().frame(),
             {coding, 4, false, false}, &disabled));
         Require(enabled.working.peak_bytes == disabled.working.peak_bytes,
                 "Opt-out changed admitted storage plan");
         EncodeBounded(frame, coding, 4, domain, expected);
-        unsetenv("GJXL_SECTION_WRITE_OVERLAP");
+        SetEnvironment("GJXL_SECTION_WRITE_OVERLAP", nullptr);
         Empty(*domain, 4);
         ++cases;
       }

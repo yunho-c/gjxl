@@ -73,6 +73,37 @@ stage spans are kept separate from ordinary public-call latency.
 The production-default integration checks, including stable opt-out and batch
 fallback, are recorded at
 `/Users/yunhocho/GitHub/gjxl/reports/section-writing-default-20260927/REPORT.md`.
-Earlier frozen source, binaries, and measurements remain intact in the separate
-prototype worktree. High-effort entropy preparation and ANS cost evaluation
-remain separate optimization targets.
+The original reports and their frozen artifacts are retained at those paths.
+High-effort entropy preparation and ANS cost evaluation remain separate
+optimization targets.
+
+## Current-main integration (2026-10-10)
+
+Merge `911015c9c0e7aaa9ecd31e0b207aaa36ec7f5d98` brings upstream main
+`86301a11098b6b1808504ae44f975de81f6935b4` into the feature branch without
+conflicts. The original overlap implementation remains in place alongside
+current low-effort policies, CUDA tokenization/early-entropy scheduling, and
+the opt-in EPF sharpness search. The section-writing contract test now uses
+the shared cross-platform environment helper instead of POSIX-only calls.
+
+The early-DC dispatcher joins its workers and releases protected CPU capacity
+before selected section writing. CUDA admission composes the shared serializer
+storage plan, including its mixed DC/AC scratch bound. These are source-level
+integration checks; they do not establish CUDA hardware execution or timing.
+
+This update retains the September performance qualification at the user's
+request. It does not repeat performance captures or establish a current-main
+speedup. In particular, the earlier batch-of-four timing caveat remains open.
+Fresh validation is limited to build and correctness tests. Local commands,
+logs, JUnit results, source hashes, and primary-checkout preservation checks are
+retained under `build/section-writing-modernization-20261010/`.
+
+The fresh ordinary Release build passed all **174/174 CPU/Metal tests**, with
+no skips. This includes 222 earlier-DC contract cases, 288 entropy-readiness
+contract cases, the opt-in Metal EPF search tests, and the installed consumer.
+The diagnostic CPU build also passed its section-writing test. Both ordinary
+and diagnostic section-writing runs verified **88 exact-byte encodes each**,
+including planned memory, CPU limits, profile/batch fallbacks, shared callers,
+and worker-launch failure cleanup. Both builds used C++20, with pinned libjxl
+reference tests disabled. CUDA compilation/execution and Windows execution
+were not performed on this Mac.
