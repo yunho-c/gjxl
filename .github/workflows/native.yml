@@ -48,10 +48,34 @@ jobs:
       - uses: ./.github/actions/setup-native-toolchain
       - name: Configure
         run: cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=${{ matrix.standard }} -DGJXL_ENABLE_CUDA=OFF -DGJXL_BUILD_TESTS=ON -DGJXL_BUILD_BENCHMARKS=ON -DGJXL_ENABLE_LIBJXL_REFERENCE=OFF
+      - name: Build pinned libjxl for Modular qualification
+        env:
+          CMAKE_BUILD_PARALLEL_LEVEL: 4
+        run: cmake --build build/ci --target gjxl_pinned_decoder --parallel 4
+      - name: Enable independent Modular tests
+        shell: bash
+        run: |
+          # The existing pinned-decoder target selects clang-cl on Windows.
+          reference_build=build/ci/pinned-libjxl
+          if [[ -f build/ci/pinned-libjxl-clang/CMakeCache.txt ]]; then
+            reference_build=build/ci/pinned-libjxl-clang
+          fi
+          cmake -S . -B build/ci "-DGJXL_MODULAR_ORACLE_BUILD:PATH=$PWD/$reference_build"
+      - name: Build Modular qualification targets
+        run: >-
+          cmake --build build/ci --parallel 4 --target
+          gjxl_modular_stream_test gjxl_modular_foundation_test
+          gjxl_modular_workflow_test gjxl_modular_capture
+          gjxl_modular_oracle_test gjxl_modular_conformance_test
+          gjxl_modular_policy_test gjxl_modular_transform_test
+          gjxl_modular_api_test gjxl_modular_reference_capture gjxl_encode
+      - name: Qualify Modular encoding
+        working-directory: build/ci
+        run: ctest --output-on-failure --parallel 2 --timeout 600 --no-tests=error -R "^modular_" --output-junit modular-tests.xml
       - name: Build
         run: cmake --build build/ci --parallel 4
       - name: Test
-        run: ctest --test-dir build/ci --output-on-failure --parallel 2
+        run: ctest --test-dir build/ci --output-on-failure --parallel 2 -E "^modular_"
       - name: Diagnose Metal baseline on failure
         if: failure() && runner.os == 'macOS' && matrix.standard == 20 && github.event_name == 'pull_request'
         continue-on-error: true
@@ -82,5 +106,10 @@ jobs:
         with:
           name: native-${{ matrix.os }}-cxx${{ matrix.standard }}
           path: |
+            build/ci/CMakeCache.txt
+            build/ci/pinned-libjxl*/CMakeCache.txt
+            build/ci/modular-tests.xml
+            build/ci/modular-frozen-native/
+            build/ci/modular-frozen-reference/
             build/ci/Testing/Temporary/
             build/main-reference-build/Testing/Temporary/

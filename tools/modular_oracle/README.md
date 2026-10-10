@@ -21,6 +21,15 @@ independent ordered dictionary and pinned shape application. Broader geometry,
 transform-prefix and arithmetic-extrema checks remain in `modular_policy` and
 `modular_transform`; this compact corpus complements them.
 
+The normal Native Libraries CI matrix builds the pinned reference with
+`gjxl_pinned_decoder`, then reconfigures with `GJXL_MODULAR_ORACLE_BUILD` set to
+that build. All 11 `modular_*` tests run on macOS, Linux and Windows under both
+C++20 and C++23, before the broad build/test steps. Explicit qualification targets
+make missing reference configuration a build failure; Python is required when
+the oracle is enabled so CLI and frozen-reference checks cannot be omitted.
+CI retains the CMake caches, Modular JUnit report, frozen artifacts and test logs.
+The remaining suite excludes `modular_*` to avoid running the qualification twice.
+
 An installed native package can run the same gate using the matching private
 source headers, without exporting those headers or linking libjxl:
 

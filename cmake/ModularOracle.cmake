@@ -88,7 +88,7 @@ if(WIN32)
   set_tests_properties(modular_api PROPERTIES ENVIRONMENT_MODIFICATION "PATH=path_list_prepend:${GJXL_MODULAR_ORACLE_BUILD}/tools")
 endif()
 
-find_package(Python3 COMPONENTS Interpreter QUIET)
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
 if(Python3_Interpreter_FOUND)
   add_test(NAME modular_cli COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/modular_cli_test.py"
     "$<TARGET_FILE:gjxl_encode>" "$<TARGET_FILE:gjxl_modular_api_test>" "${CMAKE_CURRENT_BINARY_DIR}/modular-cli")
