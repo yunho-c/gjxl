@@ -284,6 +284,17 @@ Status ComputeSerializerStoragePlan(Extent2D frame_extent,
       !dc_writers.Add(dc_emission.scratch, std::min(workers, d)))
     return Overflow();
   HostStorageBound write_scratch = Either(ac_writers, dc_writers);
+  if (workers > 1) {
+    // Enumerate every DC/AC mix within the SAME participant ceiling. Summing
+    // full independent pools would overstate this flattened dispatcher.
+    for (size_t active_dc = 0; active_dc <= std::min(workers, d); ++active_dc) {
+      HostStorageBound mixed;
+      if (!mixed.Add(dc_emission.scratch, active_dc) ||
+          !mixed.Add(ac_emission.scratch, std::min(g, workers - active_dc)))
+        return Overflow();
+      write_scratch = Either(write_scratch, mixed);
+    }
+  }
   HostStorageBound dc_header = headers.dc_global_scratch;
   // Measurement owns a destination global writer besides the header's own
   // temporary. Selected section destinations are also bounded below.
