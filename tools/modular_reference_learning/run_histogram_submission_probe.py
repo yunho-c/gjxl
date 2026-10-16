@@ -18,6 +18,7 @@ def main():
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--repeats", type=int, default=20)
     parser.add_argument("--power", choices=("ac", "battery"), default="ac")
+    parser.add_argument("--mode", choices=("fixed", "capacity"), default="fixed")
     args = parser.parse_args()
     require(0 < args.repeats <= 1000, "Invalid repetitions")
     repo = Path(__file__).resolve().parents[2]
@@ -27,7 +28,7 @@ def main():
     _, dependencies = mac_dependencies(binary)
     report = dict(status="running", binary=str(binary), binary_sha256=sha(binary),
                   sources=source_files(repo), dependencies=dependencies,
-                  power=args.power, attempts=[])
+                  power=args.power, mode=args.mode, attempts=[])
     expected_power = "'AC Power'" if args.power == "ac" else "'Battery Power'"
     def save():
         (out / "manifest.json").write_text(json.dumps(report, indent=2) + "\n")
@@ -39,7 +40,7 @@ def main():
             before = snapshot()
             require(expected_power in before["power"], "Wrong power condition")
             result_path = out / f"attempt-{attempt}.json"
-            command = [str(binary), str(result_path), str(args.repeats)]
+            command = [str(binary), str(result_path), str(args.repeats), args.mode]
             activity = []
             with (out / f"attempt-{attempt}.log").open("x") as log:
                 process = sp.Popen(command, stdout=log, stderr=sp.STDOUT)
@@ -56,7 +57,8 @@ def main():
             require(process.returncode == 0, "Probe failed")
             require(expected_power in after["power"], "Power changed during probe")
             result = json.loads(result_path.read_text())
-            require(result["passed"] and len(result["records"]) == 12 * (args.repeats + 3),
+            per_round = 15 if args.mode == "capacity" else 12
+            require(result["passed"] and len(result["records"]) == per_round * (args.repeats + 3),
                     "Probe coverage differs")
             for r in result["records"]:
                 t = r["wait_trace"]
@@ -64,9 +66,20 @@ def main():
                         t["kernel_end"] <= t["blocking_end"], "Invalid driver timing")
                 require(t["commit_begin"] <= t["gpu_begin"] <= t["gpu_end"] <=
                         t["blocking_end"], "Invalid GPU timing")
-                require(r["compute_encoders"] == (1 + 4*r["waves"] if r["variant"] & 2 else 1),
+                multiple = args.mode == "fixed" and r["variant"] & 2
+                require(r["compute_encoders"] == (1 + 4*r["waves"] if multiple else 1),
                         "Wrong encoder count")
-                if not r["variant"] & 1:
+                if args.mode == "capacity":
+                    required, capacity = r["buffer_requested_bytes"], r["buffer_capacity_bytes"]
+                    require(all(c >= n for c, n in zip(capacity, required)), "Undersized backing")
+                    if r["variant"] != 2:
+                        require(capacity == required, "Exact/fresh retained oversized backing")
+                    if r["variant"] == 2:
+                        require(r["reused_buffers"] == (0 if r["step"] == 0 else 7),
+                                "Variable capacity reuse missed backing")
+                    if r["variant"] == 0:
+                        require(r["reused_buffers"] == 0, "Fresh variant reused backing")
+                elif not r["variant"] & 1:
                     require(r["reused_buffers"] == 0, "Fresh variant reused backing")
                 elif not r["warmup"]:
                     require(r["reused_buffers"] == 7, "Fixed reuse variant lost backing")

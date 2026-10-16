@@ -407,12 +407,29 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
                                                              &profile_bound);
             !s.ok())
           return s;
-        auto evaluation_bound = plan.evaluation;
+        auto capacities = op->HistogramFittingBufferCapacities(
+            plan, options.fitting_execution);
+        HostStorageBound evaluation_bound;
+        if (auto s = ComputeHistogramFittingCapacityBound(plan, capacities,
+                                                          &evaluation_bound); !s.ok())
+          return s;
         if (!evaluation_bound.Add(profile_bound))
           return Status::OutOfMemory("Histogram diagnostic admission overflow");
         ResourceReservation evaluation_reservation;
-        const auto admitted = budget.TryReserve(evaluation_bound.peak_bytes,
-                                                &evaluation_reservation);
+        auto admitted = budget.TryReserve(evaluation_bound.peak_bytes,
+                                          &evaluation_reservation);
+        // A larger cache entry is optional. If its full capacity cannot be
+        // admitted, retry the original logical envelope before CPU fallback.
+        if (!admitted.ok() && AdmissionFailure(admitted) &&
+            options.fitting_execution.reuse_larger_buffers) {
+          ++stats->histogram_capacity_retries;
+          capacities = {};
+          evaluation_bound = plan.evaluation;
+          if (!evaluation_bound.Add(profile_bound))
+            return Status::OutOfMemory("Histogram diagnostic admission overflow");
+          admitted = budget.TryReserve(evaluation_bound.peak_bytes,
+                                        &evaluation_reservation);
+        }
         if (!admitted.ok() && !AdmissionFailure(admitted))
           return admitted;
         std::unique_ptr<PreparedGpuHistogramEvaluation> output;
@@ -433,7 +450,8 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
           Seconds timer(stats->histogram_evaluation_seconds);
           if (auto status = op->EvaluateHistogramNodes(
                   {prepared.get(), std::span(nodes).subspan(first, length),
-                   options.fitting_execution, profile_mode, &batch_profile, trace_wait},
+                   options.fitting_execution, profile_mode, &batch_profile, trace_wait,
+                   capacities},
                   &output);
               !status.ok())
             return status;

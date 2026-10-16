@@ -1088,13 +1088,16 @@ Status MetalBackend::AcquireAqScratchArena(
   MetalAqScratchArena kind,
   size_t required_capacity_bytes,
   DeviceScratchArena* arena,
-  bool* reused) {
+  bool* reused,
+  size_t maximum_capacity_bytes) {
 
   if (reused) *reused = false;
+  if (!maximum_capacity_bytes) maximum_capacity_bytes = required_capacity_bytes;
 
   const size_t index = static_cast<size_t>(kind);
   if (arena == nullptr || required_capacity_bytes == 0 ||
-      index >= idle_aq_scratch_.size() || arena->capacity_bytes() != 0) {
+      index >= idle_aq_scratch_.size() || arena->capacity_bytes() != 0 ||
+      maximum_capacity_bytes < required_capacity_bytes) {
     return Status::InvalidArgument(
       "Metal AQ scratch lease request is invalid");
   }
@@ -1122,7 +1125,8 @@ Status MetalBackend::AcquireAqScratchArena(
     }
   }
   if (candidate.capacity_bytes() != 0 &&
-      candidate.capacity_bytes() != required_capacity_bytes) {
+      (candidate.capacity_bytes() < required_capacity_bytes ||
+       candidate.capacity_bytes() > maximum_capacity_bytes)) {
     candidate = DeviceScratchArena{};
   }
   if (candidate.capacity_bytes() != 0) {
@@ -1151,7 +1155,7 @@ Status MetalBackend::AcquireAqScratchArena(
 void MetalBackend::ReleaseAqScratchArena(
   MetalAqScratchArena kind,
   DeviceScratchArena arena,
-  bool reusable) noexcept {
+  bool reusable, bool prefer_larger) noexcept {
 
   const size_t index = static_cast<size_t>(kind);
   if (!reusable || index >= idle_aq_scratch_.size() ||
@@ -1172,7 +1176,8 @@ void MetalBackend::ReleaseAqScratchArena(
     if (buffer->cache_generation != preparation_cache_generation_) return;
     std::optional<DeviceScratchArena>& idle = idle_aq_scratch_[index];
     if (!idle.has_value() ||
-        arena.capacity_bytes() < idle->capacity_bytes()) {
+        (prefer_larger ? arena.capacity_bytes() > idle->capacity_bytes()
+                       : arena.capacity_bytes() < idle->capacity_bytes())) {
       if (!buffer->allocation().MakeIdle().ok()) return;
       DropAqScratchArenaLocked(index);
       if (!ReservePreparationCacheBytesLocked(arena.capacity_bytes())) return;

@@ -369,6 +369,23 @@ Status ComputeHistogramFittingEvaluationPlan(
   return Status::Ok();
 }
 
+Status ComputeHistogramFittingCapacityBound(
+    const HistogramFittingEvaluationPlan &plan,
+    const std::array<size_t, 3> &capacities, HostStorageBound *out) {
+  if (!out) return Status::InvalidArgument("Null histogram capacity bound");
+  const std::array required{plan.output_bytes, plan.dispatch_bytes, plan.scratch_bytes};
+  auto bound = plan.evaluation;
+  for (size_t i = 0; i < required.size(); ++i) {
+    if (!capacities[i]) continue;
+    if (capacities[i] < required[i] || !required[i])
+      return Status::InvalidArgument("Invalid histogram buffer capacity");
+    const size_t extra = capacities[i] - required[i];
+    if (!bound.Add({extra, extra})) return Overflow();
+  }
+  *out = bound;
+  return Status::Ok();
+}
+
 Status
 ComputeHistogramFittingWorkingSetBound(const HistogramFittingPreparationPlan &p,
                                        const HistogramFittingEvaluationPlan &e,

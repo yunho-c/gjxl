@@ -17,7 +17,7 @@ public:
   explicit MetalHistogramEvaluation(MetalBackend &b) : owner(b) {}
   ~MetalHistogramEvaluation() override {
     owner.ReleaseAqScratchArena(MetalAqScratchArena::kHistogramOutput,
-                                std::move(buffer), reusable);
+                                std::move(buffer), reusable, prefer_larger);
   }
   BackendId backend_id() const noexcept override { return backend; }
   std::span<const HistogramPropertyResult> results() const noexcept override {
@@ -28,17 +28,19 @@ public:
   DeviceScratchArena buffer;
   std::span<const HistogramPropertyResult> host;
   bool reusable = false;
+  bool prefer_larger = false;
 };
 struct MetalHistogramScratchLease {
   MetalBackend &owner;
   DeviceScratchArena dispatch, scratch;
   bool reusable = false;
+  bool prefer_larger = false;
   ~MetalHistogramScratchLease() { Release(); }
   void Release() noexcept {
     owner.ReleaseAqScratchArena(MetalAqScratchArena::kHistogramDispatch,
-                                std::move(dispatch), reusable);
+                                std::move(dispatch), reusable, prefer_larger);
     owner.ReleaseAqScratchArena(MetalAqScratchArena::kHistogramScratch,
-                                std::move(scratch), reusable);
+                                std::move(scratch), reusable, prefer_larger);
     dispatch = DeviceScratchArena{};
     scratch = DeviceScratchArena{};
   }
@@ -217,6 +219,24 @@ MetalBackend::histogram_fitting_limits() const noexcept {
           std::min(buffer, size_t{256 * 1024 * 1024})};
 }
 
+std::array<size_t, 3> MetalBackend::HistogramFittingBufferCapacities(
+    const HistogramFittingEvaluationPlan &plan,
+    HistogramFittingExecutionOptions options) {
+  std::array capacities{plan.output_bytes, plan.dispatch_bytes, plan.scratch_bytes};
+  if (!options.reuse_buffers || !options.reuse_larger_buffers) return capacities;
+  const std::array kinds{MetalAqScratchArena::kHistogramOutput,
+                         MetalAqScratchArena::kHistogramDispatch,
+                         MetalAqScratchArena::kHistogramScratch};
+  std::lock_guard lock(preparation_cache_mutex_);
+  for (size_t i = 0; i < kinds.size(); ++i) {
+    const auto &idle = idle_aq_scratch_[static_cast<size_t>(kinds[i])];
+    if (capacities[i] && idle &&
+        (i != 2 || idle->capacity_bytes() <= options.maximum_scratch_bytes))
+      capacities[i] = std::max(capacities[i], idle->capacity_bytes());
+  }
+  return capacities;
+}
+
 Status MetalBackend::HistogramFittingProfileStorageBound(
     const HistogramFittingEvaluationPlan &plan,
     HistogramFittingProfileMode mode, HostStorageBound *out) const {
@@ -356,6 +376,14 @@ Status MetalBackend::EvaluateHistogramNodes(
   if (auto s = ValidateHistogramFittingInput(input, id(), &plan, &limits);
       !s.ok())
     return s;
+  HostStorageBound capacity_bound;
+  if (auto s = ComputeHistogramFittingCapacityBound(
+          plan, input.buffer_capacity_limits, &capacity_bound); !s.ok())
+    return s;
+  if (input.options.reuse_larger_buffers && !input.options.reuse_buffers)
+    return Status::InvalidArgument("Larger histogram buffers require reuse");
+  if (input.buffer_capacity_limits[2] > input.options.maximum_scratch_bytes)
+    return Status::InvalidArgument("Histogram scratch capacity exceeds limit");
   const auto *prepared = dynamic_cast<const Prepared *>(input.prepared);
   if (!prepared ||
       plan.prepared_bytes != prepared->plan.retained.retained_bytes)
@@ -371,16 +399,23 @@ Status MetalBackend::EvaluateHistogramNodes(
   const ManagedHostScope resources(ResourceClass::kPreparation);
   auto candidate = std::make_unique<MetalHistogramEvaluation>(*this);
   candidate->backend = id();
+  candidate->prefer_larger = input.options.reuse_larger_buffers;
   MetalHistogramScratchLease backing{*this};
+  backing.prefer_larger = input.options.reuse_larger_buffers;
   Pending pending;
   const auto allocate = [&](MetalAqScratchArena kind, size_t bytes,
-                            DeviceScratchArena *arena, uint32_t bit) {
+                            DeviceScratchArena *arena, size_t index) {
     bool reused = false;
+    const size_t maximum = input.options.reuse_larger_buffers
+        ? input.buffer_capacity_limits[index] : bytes;
     const auto status = input.options.reuse_buffers
-        ? AcquireAqScratchArena(kind, bytes, arena, &reused)
+        ? AcquireAqScratchArena(kind, bytes, arena, &reused, maximum)
         : arena->Prepare(*this, bytes);
+    if (!status.ok()) return status;
+    profile.value.buffer_requested_bytes[index] = bytes;
+    profile.value.buffer_capacity_bytes[index] = arena->capacity_bytes();
     if (reused) {
-      profile.value.reused_buffers |= bit;
+      profile.value.reused_buffers |= uint32_t{1} << index;
       profile.value.reused_buffer_bytes += bytes;
     }
     return status;
@@ -388,15 +423,15 @@ Status MetalBackend::EvaluateHistogramNodes(
   {
     const ResourceClassScope retained(ResourceClass::kCompletedFrame);
     if (auto s = allocate(MetalAqScratchArena::kHistogramOutput,
-                          plan.output_bytes, &candidate->buffer, 1); !s.ok())
+                          plan.output_bytes, &candidate->buffer, 0); !s.ok())
       return s;
   }
   if (auto s = allocate(MetalAqScratchArena::kHistogramDispatch,
-                        plan.dispatch_bytes, &backing.dispatch, 2); !s.ok())
+                        plan.dispatch_bytes, &backing.dispatch, 1); !s.ok())
     return s;
   if (plan.scratch_bytes)
     if (auto s = allocate(MetalAqScratchArena::kHistogramScratch,
-                          plan.scratch_bytes, &backing.scratch, 4); !s.ok())
+                          plan.scratch_bytes, &backing.scratch, 2); !s.ok())
       return s;
   auto *dispatch = backing.dispatch.backing_buffer();
   auto *scratch = backing.scratch.backing_buffer();

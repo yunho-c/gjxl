@@ -79,7 +79,13 @@ void Trees(GpuBackend &gpu, std::vector<HistogramTrainingSamples> originals,
       break;
     std::unique_ptr<PreparedGpuHistogramEvaluation> output;
     const auto submissions = gpu.stats().committed_submissions;
-    Ok(Operation(gpu).EvaluateHistogramNodes({prepared.get(), nodes, execution},
+    std::vector<HistogramFittingNodeShape> shapes;
+    for (const auto &node : nodes) shapes.push_back(node.shape);
+    HistogramFittingEvaluationPlan plan;
+    Ok(ComputeHistogramFittingEvaluationPlan(prepared->shapes(), shapes, execution, &plan));
+    const auto capacities = Operation(gpu).HistogramFittingBufferCapacities(plan, execution);
+    Ok(Operation(gpu).EvaluateHistogramNodes({prepared.get(), nodes, execution,
+        HistogramFittingProfileMode::kDisabled, nullptr, false, capacities},
                                              &output));
     Check(gpu.stats().committed_submissions == submissions + 1,
           "A node batch did not use exactly one submission");
@@ -499,15 +505,20 @@ void SubmissionVariants(GpuBackend &gpu) {
   Ok(op.PrepareHistogramRows({&source, 1}, &prepared));
   std::vector<HistogramPropertyResult> expected(samples.property_count);
   Ok(EvaluateHistogramNodeOnCpu(fitter, source.source_id, expected));
-  for (bool reuse : {false, true}) for (bool multiple : {false, true}) {
+  for (int mode : {0, 1, 2}) for (bool multiple : {false, true}) {
+    const bool reuse = mode != 0;
     Ok(gpu.TrimPreparationCache());
     HistogramFittingExecutionOptions options{4, 3, 64 * 1024 * 1024, reuse, multiple};
+    options.reuse_larger_buffers = mode == 2;
     HistogramFittingBatchProfile profile;
     std::unique_ptr<PreparedGpuHistogramEvaluation> first, second;
     const auto evaluate = [&](auto *out) {
       const auto submissions = gpu.stats().committed_submissions;
+      HistogramFittingEvaluationPlan plan;
+      Ok(ComputeHistogramFittingEvaluationPlan(prepared->shapes(), {&node.shape, 1}, options, &plan));
+      const auto capacities = op.HistogramFittingBufferCapacities(plan, options);
       Ok(op.EvaluateHistogramNodes({prepared.get(), {&node, 1}, options,
-          HistogramFittingProfileMode::kWall, &profile, true}, out));
+          HistogramFittingProfileMode::kWall, &profile, true, capacities}, out));
       Check(gpu.stats().committed_submissions == submissions + 1,
             "Encoder boundaries changed submission count");
       Compare((*out)->results(), expected);
@@ -569,6 +580,116 @@ void SubmissionVariants(GpuBackend &gpu) {
     Ok(gpu.TrimPreparationCache());
   }
 }
+void CapacityReuse(GpuBackend &gpu) {
+  Ok(gpu.TrimPreparationCache());
+  auto &op = Operation(gpu);
+  std::vector<HistogramTrainingSamples> samples{
+      Fixture(6, 1025, 2), Fixture(9, 1033, 2), Fixture(6, 257, 2)};
+  std::vector<HistogramTreeFitter> fitters(3);
+  std::vector<HistogramFittingSource> sources;
+  std::vector<HistogramFittingNodeInput> nodes;
+  std::vector<HistogramPropertyResult> expected(48);
+  for (size_t i = 0; i < 3; ++i) {
+    sources.push_back({uint32_t(i + 1), &samples[i]});
+    Ok(fitters[i].Initialize(samples[i])); Ok(fitters[i].Advance());
+    nodes.push_back(HistogramFittingNodeView(i, fitters[i].node()));
+    Ok(EvaluateHistogramNodeOnCpu(fitters[i], sources[i].source_id,
+                                  std::span(expected).subspan(16 * i, 16)));
+  }
+  constexpr size_t limit = 256 * 1024 * 1024;
+  ResourceBudget budget(limit);
+  ResourceReservation preparation;
+  Ok(budget.TryReserve(4 * 1024 * 1024, &preparation));
+  std::unique_ptr<PreparedGpuHistogramRows> prepared;
+  {
+    ResourceContextScope scope({&preparation, ResourceClass::kPreparation});
+    Ok(op.PrepareHistogramRows(sources, &prepared));
+  }
+  preparation.Reset();
+  HistogramFittingExecutionOptions options;
+  const auto large = std::span(nodes).first(2), small = std::span(nodes).subspan(2);
+  const auto plan_for = [&](auto view) {
+    std::vector<HistogramFittingNodeShape> shapes;
+    for (const auto &node : view) shapes.push_back(node.shape);
+    HistogramFittingEvaluationPlan plan;
+    Ok(ComputeHistogramFittingEvaluationPlan(prepared->shapes(), shapes, options, &plan));
+    return plan;
+  };
+  const auto lp = plan_for(large), sp = plan_for(small);
+  const std::array large_bytes{lp.output_bytes, lp.dispatch_bytes, lp.scratch_bytes};
+  const std::array small_bytes{sp.output_bytes, sp.dispatch_bytes, sp.scratch_bytes};
+  for (size_t i = 0; i < 3; ++i) Check(large_bytes[i] > small_bytes[i], "Fixture must vary every capacity");
+  HistogramFittingBatchProfile profile;
+  const auto evaluate = [&](auto view, const auto &plan, auto caps, auto *out) {
+    HostStorageBound bound;
+    Ok(ComputeHistogramFittingCapacityBound(plan, caps, &bound));
+    ResourceReservation reservation;
+    Ok(budget.TryReserve(bound.peak_bytes, &reservation));
+    ResourceContextScope scope({&reservation, ResourceClass::kPreparation});
+    Ok(op.EvaluateHistogramNodes({prepared.get(), view, options,
+        HistogramFittingProfileMode::kWall, &profile, false, caps}, out));
+    Compare((*out)->results(), std::span(expected).subspan(view.front().shape.fit * 16, view.size() * 16));
+    Check(budget.snapshot().committed_bytes() <= limit, "Reuse exceeded domain budget");
+  };
+  std::unique_ptr<PreparedGpuHistogramEvaluation> result, held;
+  evaluate(large, lp, large_bytes, &result);
+  Check(profile.reused_buffers == 0, "Cold capacity call reused backing");
+  result.reset();
+  evaluate(small, sp, op.HistogramFittingBufferCapacities(sp, options), &result);
+  Check(profile.reused_buffers == 7 && profile.buffer_requested_bytes == small_bytes &&
+        profile.buffer_capacity_bytes == large_bytes, "Large-to-small reuse lost capacity or logical bounds");
+  const auto usage = budget.snapshot().total;
+  Check(usage.live_capacity_bytes - usage.live_requested_bytes == lp.output_bytes - sp.output_bytes,
+        "Held larger output was charged as a smaller allocation");
+  result.reset();
+  evaluate(large, lp, op.HistogramFittingBufferCapacities(lp, options), &held);
+  Check(profile.reused_buffers == 7, "Small request shrank reusable backing");
+  evaluate(small, sp, op.HistogramFittingBufferCapacities(sp, options), &result);
+  Check(profile.reused_buffers == 6, "Held large output was overwritten");
+  Compare(held->results(), std::span(expected).first(32));
+  held.reset(); result.reset(); // Smaller late release must not replace larger output.
+  Check(op.HistogramFittingBufferCapacities(sp, options) == large_bytes,
+        "Late small release discarded larger cached output");
+
+  // A snapshot cannot authorize a larger backing that arrives after planning.
+  evaluate(small, sp, small_bytes, &result);
+  Check(profile.reused_buffers == 0 && profile.buffer_capacity_bytes == small_bytes,
+        "Stale snapshot consumed unadmitted larger backing");
+  result.reset();
+  evaluate(large, lp, large_bytes, &result); result.reset();
+  const auto caps = op.HistogramFittingBufferCapacities(sp, options);
+  HostStorageBound expanded;
+  Ok(ComputeHistogramFittingCapacityBound(sp, caps, &expanded));
+  ResourceReservation pressure, attempt;
+  Ok(budget.TryReserve(limit - budget.snapshot().committed_bytes() - sp.evaluation.peak_bytes,
+                       &pressure));
+  Check(!budget.TryReserve(expanded.peak_bytes, &attempt).ok(), "Pressure must reject larger envelope");
+  evaluate(small, sp, small_bytes, &result);
+  Check(profile.buffer_capacity_bytes == small_bytes, "Exact fallback retained oversized backing");
+  result.reset(); pressure.Reset();
+  // Cached backing from this domain cannot be silently lent to the default one.
+  Ok(op.EvaluateHistogramNodes({prepared.get(), small, options,
+      HistogramFittingProfileMode::kWall, &profile, false, small_bytes}, &result));
+  Compare(result->results(), std::span(expected).subspan(32));
+  Check(profile.reused_buffers == 0, "Cross-domain cached backing was reused");
+  result.reset(); prepared.reset();
+  Ok(gpu.TrimPreparationCache());
+  const auto end = budget.snapshot();
+  Check(!end.committed_bytes() && !end.total.backing_count && !end.open_reservations,
+        "Capacity reuse leaked a charge or reservation");
+  // Bounds fail atomically, including overflow and unused scratch capacity.
+  auto sentinel = expanded;
+  auto invalid = small_bytes; invalid[0] = sp.output_bytes - 1;
+  Check(!ComputeHistogramFittingCapacityBound(sp, invalid, &expanded).ok() &&
+        expanded == sentinel, "Capacity bound accepted undersized output");
+  invalid = small_bytes; invalid[0] = SIZE_MAX;
+  Check(!ComputeHistogramFittingCapacityBound(sp, invalid, &expanded).ok() &&
+        expanded == sentinel, "Capacity bound overflowed");
+  auto no_scratch = sp; no_scratch.scratch_bytes = 0;
+  invalid = small_bytes; invalid[2] = 1;
+  Check(!ComputeHistogramFittingCapacityBound(no_scratch, invalid, &expanded).ok() &&
+        expanded == sentinel, "Capacity bound accepted unused scratch backing");
+}
 } // namespace
 int main() try {
   {
@@ -582,6 +703,7 @@ int main() try {
     OverflowValidation(*gpu);
     Profiles(*gpu);
     SubmissionVariants(*gpu);
+    CapacityReuse(*gpu);
   }
   Check(DefaultResourceBudget().snapshot().total.live_capacity_bytes == 0 &&
             DefaultResourceBudget().snapshot().total.pending_count == 0,

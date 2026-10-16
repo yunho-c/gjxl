@@ -141,6 +141,18 @@ int main() try {
           "Whole-cohort preflight did not return to CPU admission");
     Released(*limited);
   }
+  for (size_t repetition = 0; repetition < 2; ++repetition) {
+    ReferenceWorkflowStats stats;
+    bool handled = false;
+    Ok(Run(fixture, *gpu, domain, &stats, &handled, 64, 64 * 1024 * 1024,
+           kMaximumTreeLeaves, ReferenceFittingBackend::kGpu, 4));
+    Check(handled && stats.histogram_gpu_nodes && !stats.histogram_admission_fallbacks,
+          "Capacity reuse changed fitting eligibility");
+    Check(domain->snapshot().idle_capacity_bytes > 0,
+          "Default GPU fitting did not retain reusable backing");
+    Ok(gpu->TrimPreparationCache());
+    Released(*domain);
+  }
   for (size_t kind = 0; kind < 5; ++kind) {
     ReferenceWorkflowStats stats;
     bool handled = false;

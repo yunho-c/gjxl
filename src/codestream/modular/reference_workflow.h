@@ -108,7 +108,7 @@ struct ReferenceWorkflowStats {
   size_t histogram_gpu_preparations = 0, histogram_gpu_batches = 0,
          histogram_gpu_nodes = 0, histogram_gpu_rows = 0,
          histogram_gpu_properties = 0, histogram_cpu_nodes = 0,
-         histogram_admission_fallbacks = 0;
+         histogram_admission_fallbacks = 0, histogram_capacity_retries = 0;
   size_t histogram_prepared_bytes = 0, histogram_dispatch_bytes = 0,
          histogram_peak_scratch_bytes = 0;
   // Synchronous caller-wall operation times, including copies/allocations and

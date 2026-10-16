@@ -566,6 +566,9 @@ public:
     const tree_gpu_internal::TreeStatisticsInput& input,
     std::unique_ptr<tree_gpu_internal::PreparedGpuTreeSplitCosts>* out) override;
   histogram_gpu_internal::HistogramFittingDeviceLimits histogram_fitting_limits() const noexcept override;
+  std::array<size_t, 3> HistogramFittingBufferCapacities(
+    const histogram_gpu_internal::HistogramFittingEvaluationPlan &plan,
+    histogram_gpu_internal::HistogramFittingExecutionOptions options) override;
   Status HistogramFittingProfileStorageBound(
       const histogram_gpu_internal::HistogramFittingEvaluationPlan &plan,
       histogram_gpu_internal::HistogramFittingProfileMode mode,
@@ -671,12 +674,13 @@ private:
     MetalAqScratchArena kind,
     size_t required_capacity_bytes,
     DeviceScratchArena* arena,
-    bool* reused = nullptr);
+    bool* reused = nullptr,
+    size_t maximum_capacity_bytes = 0);
 
   void ReleaseAqScratchArena(
     MetalAqScratchArena kind,
     DeviceScratchArena arena,
-    bool reusable) noexcept;
+    bool reusable, bool prefer_larger = false) noexcept;
 
   void DropAqScratchArenaLocked(size_t index) noexcept;
   bool ReservePreparationCacheBytesLocked(size_t bytes) noexcept;

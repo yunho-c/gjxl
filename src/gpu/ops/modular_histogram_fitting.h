@@ -68,9 +68,12 @@ struct HistogramFittingExecutionOptions {
   // Storage choices, not learned-policy or automatic GPU crossover controls.
   size_t histogram_shards = 4, maximum_active_properties = 64;
   size_t maximum_scratch_bytes = 64 * 1024 * 1024;
-  // Private experiments; neither changes learned arithmetic or public routing.
-  // Reuse is opportunistic, exact-capacity, and subject to domain admission.
-  bool reuse_buffers = false, multiple_encoders = false;
+  // Reuse is opportunistic and subject to domain admission. Larger backing is
+  // bounded by the caller's admitted per-buffer capacities. These storage
+  // defaults do not select GPU fitting or change learned arithmetic.
+  // Fresh and exact-size reuse remain available as diagnostic controls.
+  bool reuse_buffers = true, multiple_encoders = false;
+  bool reuse_larger_buffers = true;
 };
 enum class HistogramFittingProfileMode : uint8_t { kDisabled, kWall, kStage };
 // Opt-in submission trace, in nanoseconds relative to system mach time on
@@ -111,6 +114,8 @@ struct HistogramFittingBatchProfile {
   // Bits 0/1/2 identify reused output/dispatch/scratch backing, respectively.
   uint32_t reused_buffers = 0;
   size_t reused_buffer_bytes = 0, compute_encoders = 0;
+  // Output, dispatch, scratch: logical request and actual backing capacity.
+  std::array<size_t, 3> buffer_requested_bytes{}, buffer_capacity_bytes{};
   HistogramFittingWaitTrace wait_trace;
   HistogramFittingQueueTrace queue_trace;
   bool operator==(const HistogramFittingBatchProfile &) const = default;
@@ -175,6 +180,13 @@ ComputeHistogramFittingColumnLayout(const HistogramFittingShape &shape,
     HistogramFittingExecutionOptions options,
     HistogramFittingEvaluationPlan *out,
     const HistogramFittingDeviceLimits *limits = nullptr);
+// Zero capacities mean logical request sizes. The envelope includes every byte
+// of larger backing. Execution cannot consume a larger cache entry that arrived
+// after this snapshot was admitted. Order: output, dispatch, scratch.
+[[nodiscard]] Status ComputeHistogramFittingCapacityBound(
+    const HistogramFittingEvaluationPlan &plan,
+    const std::array<size_t, 3> &capacities,
+    resource_budget_internal::HostStorageBound *out);
 // Compose unmodified plans from the same cohort with the CPU row-order vector.
 // Excludes borrowed CPU samples/trees/features, old outputs, backend/driver
 // memory and inline controls. Those remain separately charged by the workflow.
@@ -206,6 +218,7 @@ struct HistogramFittingInput {
   // Published together with results, only on success. Never retained.
   HistogramFittingBatchProfile *profile = nullptr;
   bool trace_wait = false;
+  std::array<size_t, 3> buffer_capacity_limits{};
 };
 // Checks ownership metadata, shapes and parent summaries without reading row
 // indices or native GPU buffers. The backend must additionally verify its
@@ -262,6 +275,11 @@ protected:
 class GpuModularHistogramFitting {
 public:
   virtual ~GpuModularHistogramFitting() = default;
+  // Advisory, without borrowing/activating backing. Call after shape planning,
+  // reserve the capacity bound, and pass this same snapshot into evaluation.
+  [[nodiscard]] virtual std::array<size_t, 3> HistogramFittingBufferCapacities(
+      const HistogramFittingEvaluationPlan &plan,
+      HistogramFittingExecutionOptions options) = 0;
   [[nodiscard]] virtual HistogramFittingDeviceLimits
   histogram_fitting_limits() const noexcept = 0;
   // Additional transient host backing for the optional diagnostic path.

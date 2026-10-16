@@ -130,6 +130,17 @@ def summarize(result):
         batches=sum(bool(b.get("reused_buffers", 0)) for b in batches),
         masks={str(mask): sum(b.get("reused_buffers", 0) == mask for b in batches) for mask in range(8)},
         compute_encoders=sum(b.get("compute_encoders", 0) for b in batches))
+    if batches and "buffer_capacity_bytes" in batches[0]:
+        for b in batches:
+            require(all(c >= r for c, r in zip(b["buffer_capacity_bytes"], b["buffer_requested_bytes"])),
+                    "Histogram capacity is smaller than logical request")
+        summary["reuse"].update(
+            requested_bytes=[sum(b["buffer_requested_bytes"][i] for b in batches) for i in range(3)],
+            capacity_bytes=[sum(b["buffer_capacity_bytes"][i] for b in batches) for i in range(3)],
+            allocated_bytes=[sum(b["buffer_capacity_bytes"][i] for b in batches
+                                 if not b["reused_buffers"] & (1 << i)) for i in range(3)],
+            peak_buffer_capacity=max(sum(b["buffer_capacity_bytes"]) for b in batches))
+    summary["capacity_retries"] = result.get("histogram_capacity_retries", 0)
     return summary
 
 
@@ -171,7 +182,11 @@ def main():
             case = dict(input=str(source.resolve()), name=source.stem, input_sha256=sha(source), runs=[])
             report["cases"].append(case)
             for repeat in range(args.repeats + 1):
-                if len(variants) == 4:
+                if len(variants) == 3:
+                    # Six measured rounds balance positions and ordered pairs.
+                    orders = ((0,1,2),(1,2,0),(2,0,1),(2,1,0),(1,0,2),(0,2,1))
+                    order = [variants[i] for i in orders[repeat % 6]]
+                elif len(variants) == 4:
                     orders = ((0, 1, 3, 2), (1, 2, 0, 3), (2, 3, 1, 0), (3, 0, 2, 1))
                     order = [variants[i] for i in orders[repeat % 4]]
                 else:

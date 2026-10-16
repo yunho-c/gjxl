@@ -20,11 +20,97 @@ template <class A> void Array(std::ostream &out, const A &a) {
   for (size_t i = 0; i < a.size(); ++i) out << (i ? "," : "") << a[i];
   out << ']';
 }
+void CapacityProbe(std::ostream &out, GpuBackend &gpu, size_t repetitions) {
+  auto &op = *QueryGpuModularHistogramFitting(gpu);
+  struct Batch {
+    size_t fits, rows;
+    std::vector<HistogramTrainingSamples> samples;
+    std::vector<HistogramTreeFitter> fitters;
+    std::unique_ptr<PreparedGpuHistogramRows> prepared;
+    std::vector<HistogramFittingNodeInput> nodes;
+    std::vector<HistogramPropertyResult> expected;
+    HistogramFittingEvaluationPlan plan;
+  };
+  std::array<Batch, 3> batches{{{1, 16384}, {10, 32768}, {32, 131072}}};
+  for (auto &b : batches) {
+    b.samples.reserve(b.fits); b.fitters.resize(b.fits); b.expected.resize(b.fits * 16);
+    for (size_t i = 0; i < b.fits; ++i) b.samples.push_back(Fixture(6 + 3 * i, b.rows, 2));
+    std::vector<HistogramFittingSource> sources;
+    std::vector<HistogramFittingNodeShape> shapes;
+    for (size_t i = 0; i < b.fits; ++i) {
+      sources.push_back({uint32_t(i + 1), &b.samples[i]});
+      Ok(b.fitters[i].Initialize(b.samples[i])); Ok(b.fitters[i].Advance());
+      Check(b.fitters[i].ready(), "Variable probe root is not ready");
+      b.nodes.push_back(HistogramFittingNodeView(i, b.fitters[i].node()));
+      shapes.push_back(b.nodes.back().shape);
+      Ok(EvaluateHistogramNodeOnCpu(b.fitters[i], sources[i].source_id,
+                                   std::span(b.expected).subspan(i * 16, 16)));
+    }
+    Ok(op.PrepareHistogramRows(sources, &b.prepared));
+    Ok(ComputeHistogramFittingEvaluationPlan(b.prepared->shapes(), shapes, {}, &b.plan));
+  }
+  ResourceBudget budget(256 * 1024 * 1024);
+  constexpr size_t orders[6][3] = {{0,1,2},{1,2,0},{2,0,1},{2,1,0},{1,0,2},{0,2,1}};
+  constexpr size_t sequence[] = {2, 0, 1, 0, 2};
+  out << "{\"schema\":2,\"mode\":\"capacity\",\"synthetic\":true,\"warmups\":3,\"repetitions\":"
+      << repetitions << ",\"records\":[";
+  bool comma = false;
+  for (size_t iteration = 0; iteration < repetitions + 3; ++iteration) {
+    for (size_t variant : orders[iteration % 6]) {
+      Ok(gpu.TrimPreparationCache()); // Each policy starts the same size sequence cold.
+      HistogramFittingExecutionOptions options;
+      options.reuse_buffers = variant != 0;
+      options.reuse_larger_buffers = variant == 2;
+      for (size_t step = 0; step < std::size(sequence); ++step) {
+        auto &b = batches[sequence[step]];
+        const auto capacities = op.HistogramFittingBufferCapacities(b.plan, options);
+        HostStorageBound bound;
+        Ok(ComputeHistogramFittingCapacityBound(b.plan, capacities, &bound));
+        ResourceReservation reservation;
+        Ok(budget.TryReserve(bound.peak_bytes, &reservation));
+        ResourceContextScope scope({&reservation, ResourceClass::kPreparation});
+        HistogramFittingBatchProfile p;
+        std::unique_ptr<PreparedGpuHistogramEvaluation> result;
+        const auto start = Clock::now();
+        Ok(op.EvaluateHistogramNodes({b.prepared.get(), b.nodes, options,
+            HistogramFittingProfileMode::kWall, &p, true, capacities}, &result));
+        const auto call_ns = Nanoseconds(start);
+        Check(SameResults(result->results(), b.expected), "Variable CPU/GPU results differ");
+        const auto release = Clock::now(); result.reset();
+        const auto release_ns = Nanoseconds(release);
+        reservation.Reset();
+        const auto &t = p.wait_trace;
+        out << (comma ? "," : "") << "{\"fits\":" << b.fits << ",\"rows_per_fit\":" << b.rows
+            << ",\"variant\":" << variant << ",\"iteration\":" << iteration << ",\"step\":" << step
+            << ",\"warmup\":" << (iteration < 3 ? "true" : "false")
+            << ",\"exact\":true,\"call_ns\":" << call_ns << ",\"output_release_ns\":" << release_ns
+            << ",\"reused_buffers\":" << p.reused_buffers
+            << ",\"reused_buffer_bytes\":" << p.reused_buffer_bytes
+            << ",\"compute_encoders\":" << p.compute_encoders
+            << ",\"idle_bytes\":" << budget.snapshot().total.idle_capacity_bytes
+            << ",\"buffer_requested_bytes\":"; Array(out, p.buffer_requested_bytes);
+        out << ",\"buffer_capacity_bytes\":"; Array(out, p.buffer_capacity_bytes);
+        out << ",\"wall_ns\":"; Array(out, p.wall_nanoseconds);
+        out << ",\"wait_trace\":{\"commit_begin\":" << t.commit_begin
+            << ",\"kernel_begin\":" << t.kernel_begin << ",\"kernel_end\":" << t.kernel_end
+            << ",\"gpu_begin\":" << t.gpu_begin << ",\"gpu_end\":" << t.gpu_end
+            << ",\"blocking_end\":" << t.blocking_end << "}}";
+        comma = true;
+      }
+    }
+  }
+  Ok(gpu.TrimPreparationCache());
+  Check(!budget.snapshot().committed_bytes() && !budget.snapshot().open_reservations,
+        "Variable probe leaked storage");
+  out << "],\"passed\":true}\n";
+}
 }
 int main(int argc, char **argv) try {
-  Check(argc == 2 || argc == 3, "histogram_submission_probe OUTPUT.json [repetitions]");
+  Check(argc >= 2 && argc <= 4, "histogram_submission_probe OUTPUT.json [repetitions [fixed|capacity]]");
   Check(!std::filesystem::exists(argv[1]), "Refusing to overwrite probe output");
-  const size_t repetitions = argc == 3 ? std::stoul(argv[2]) : 20;
+  const size_t repetitions = argc >= 3 ? std::stoul(argv[2]) : 20;
+  const std::string mode = argc == 4 ? argv[3] : "fixed";
+  Check(mode == "fixed" || mode == "capacity", "Invalid probe mode");
   Check(repetitions > 0 && repetitions <= 1000, "Invalid repetition count");
   std::unique_ptr<GpuBackend> gpu;
   Ok(CreateEmbeddedMetalBackend({}, &gpu));
@@ -32,6 +118,11 @@ int main(int argc, char **argv) try {
   Check(op, "No native Metal histogram fitter");
   std::ofstream out(argv[1]);
   Check(bool(out), "Cannot create probe output");
+  if (mode == "capacity") {
+    CapacityProbe(out, *gpu, repetitions);
+    Check(bool(out), "Capacity probe output write failed");
+    return 0;
+  }
   out << "{\"schema\":1,\"synthetic\":true,\"warmups\":3,\"repetitions\":"
       << repetitions << ",\"records\":[";
   bool comma = false;
@@ -64,6 +155,7 @@ int main(int argc, char **argv) try {
         const size_t variant = orders[iteration % 4][order];
         HistogramFittingExecutionOptions options;
         options.reuse_buffers = variant & 1;
+        options.reuse_larger_buffers = false; // Preserve the exact-size controls.
         options.multiple_encoders = variant & 2;
         HistogramFittingBatchProfile profile;
         std::unique_ptr<PreparedGpuHistogramEvaluation> result;

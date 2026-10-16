@@ -51,7 +51,7 @@ int main(int argc, char **argv) try {
   std::string learning_schedule = "cohorts", feature_window = "8";
   std::string gpu_profile_mode = "gpu-off", histogram_shards, active_properties;
   std::string wait_trace = "off", ready_target = "32", flush_us = "500";
-  std::string fit_buffers = "fresh", fit_encoders = "single";
+  std::string fit_buffers = "capacity", fit_encoders = "single";
   bool private_flags = false;
   int positional = 1;
   std::vector<std::string_view> named;
@@ -123,20 +123,24 @@ int main(int argc, char **argv) try {
         "[--learning-schedule=cohorts|pipeline] [--feature-window=8|16] "
         "[--gpu-profile=gpu-off|gpu-wall|gpu-stage] [--histogram-shards=N] [--active-properties=N] "
         "[--gpu-wait-trace=off|on] [--fit-ready-target=N] [--fit-flush-us=N] "
-        "[--fit-buffers=fresh|reuse] [--fit-encoders=single|multiple]");
+        "[--fit-buffers=fresh|reuse|capacity (default: capacity)] "
+        "[--fit-encoders=single|multiple]");
   Check(gpu_profile_mode == "gpu-off" || gpu_profile_mode == "gpu-wall" ||
             gpu_profile_mode == "gpu-stage", "Unknown histogram GPU profiling mode");
   const bool gpu_profile_enabled = gpu_profile_mode != "gpu-off";
   Check(wait_trace == "off" || wait_trace == "on", "Invalid GPU wait trace control");
   Check(wait_trace != "on" || gpu_profile_enabled, "Wait trace requires GPU wall/stage profiling");
-  Check(fit_buffers == "fresh" || fit_buffers == "reuse", "Invalid fitting buffer control");
+  Check(fit_buffers == "fresh" || fit_buffers == "reuse" || fit_buffers == "capacity",
+        "Invalid fitting buffer control");
   Check(fit_encoders == "single" || fit_encoders == "multiple", "Invalid fitting encoder control");
-  const bool submission_output = named_control("--fit-buffers") || named_control("--fit-encoders");
+  const std::string fitter_flag = argc >= 13 ? argv[12] : "fitter-cpu";
+  // Record the effective GPU buffer policy even when no override is supplied.
+  const bool submission_output = named_control("--fit-buffers") || named_control("--fit-encoders") ||
+      fitter_flag == "fitter-gpu" || fitter_flag == "fitter-auto";
   const bool trace_output = named_control("--gpu-wait-trace") ||
       named_control("--fit-ready-target") || named_control("--fit-flush-us") || submission_output;
   const bool gpu_profile_output = argc >= 16 || named_control("--gpu-profile") ||
       named_control("--histogram-shards") || named_control("--active-properties") || trace_output;
-  const std::string fitter_flag = argc >= 13 ? argv[12] : "fitter-cpu";
   const bool public_api = fitter_flag == "public";
   Check((!public_api || (argc == 13 && !private_flags)) &&
             (public_api || fitter_flag == "fitter-cpu" || fitter_flag == "fitter-resumable" ||
@@ -255,7 +259,8 @@ int main(int argc, char **argv) try {
 #endif
   }
   options.entropy.cpu_participants = entropy_participants;
-  options.fitting_execution.reuse_buffers = fit_buffers == "reuse";
+  options.fitting_execution.reuse_buffers = fit_buffers != "fresh";
+  options.fitting_execution.reuse_larger_buffers = fit_buffers == "capacity";
   options.fitting_execution.multiple_encoders = fit_encoders == "multiple";
   options.tokenization.cpu_participants = tokenization_participants;
   // Keep feature production fixed at four while varying local learning.
@@ -365,7 +370,7 @@ int main(int argc, char **argv) try {
   output.close();
   const auto memory = budget.snapshot();
   encoded = {};
-  // The reuse experiment intentionally keeps idle backing beyond one encode.
+  // Buffer reuse intentionally keeps idle backing beyond one encode.
   // Retain its footprint in the snapshot above, then explicitly retire it
   // outside the encode interval before asserting that every owner released.
   if (gpu && options.fitting_execution.reuse_buffers)
@@ -376,7 +381,7 @@ int main(int argc, char **argv) try {
         "Completed encode leaked managed storage");
   std::ofstream out(directory / "result.json");
   out.exceptions(std::ios::failbit | std::ios::badbit);
-  out << std::setprecision(17) << std::boolalpha << "{\"schema\":" << (trace_output ? 10 : gpu_profile_output ? 8 : fitter_diagnostics ? 7 : public_api ? 6 : tokenization_diagnostics ? 5 : selection_diagnostics ? 4 : entropy_diagnostics ? 3 : parallel_diagnostics ? 2 : 1)
+  out << std::setprecision(17) << std::boolalpha << "{\"schema\":" << (trace_output ? 11 : gpu_profile_output ? 8 : fitter_diagnostics ? 7 : public_api ? 6 : tokenization_diagnostics ? 5 : selection_diagnostics ? 4 : entropy_diagnostics ? 3 : parallel_diagnostics ? 2 : 1)
       << ",\"public_api\":" << public_api
       << ",\"gpu_submissions\":" << (backend ? backend->stats().committed_submissions - submissions : 0)
       << ",\"route\":" << std::quoted(route)
@@ -504,6 +509,8 @@ int main(int argc, char **argv) try {
       << ",\"peak_scratch_bytes\":" << stats.histogram_peak_scratch_bytes
       << ",\"preparation_seconds\":" << stats.histogram_preparation_seconds
       << ",\"evaluation_seconds\":" << stats.histogram_evaluation_seconds << '}';
+  if (trace_output)
+    out << ",\"histogram_capacity_retries\":" << stats.histogram_capacity_retries;
   if (gpu_profile_output) {
     out << ",\"histogram_gpu_profile\":{\"mode\":" << std::quoted(gpu_profile_mode)
         << ",\"shards\":" << options.fitting_execution.histogram_shards
@@ -532,10 +539,13 @@ int main(int argc, char **argv) try {
       out << ",\"gpu_ns\":"; Array(out, b.gpu_nanoseconds);
       out << ",\"dispatches\":"; Array(out, b.dispatches);
       out << ",\"command_buffer_gpu_ns\":" << b.command_buffer_gpu_nanoseconds;
-      if (trace_output)
+      if (trace_output) {
         out << ",\"reused_buffers\":" << b.reused_buffers
             << ",\"reused_buffer_bytes\":" << b.reused_buffer_bytes
             << ",\"compute_encoders\":" << b.compute_encoders;
+        out << ",\"buffer_requested_bytes\":"; Array(out, b.buffer_requested_bytes);
+        out << ",\"buffer_capacity_bytes\":"; Array(out, b.buffer_capacity_bytes);
+      }
       if (gpu_profile.trace_wait) {
         const auto &t = b.wait_trace;
         const auto &q = b.queue_trace;
