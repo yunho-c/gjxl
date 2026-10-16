@@ -83,7 +83,9 @@ void Case(GpuBackend &gpu, unsigned kind) {
        {{256, 256}, channels, 1, wp, owner->weighted_views()},
        {},
        {{256, 256}, channels, 1, wp, owner->weighted_views()}}};
-  for (unsigned variant = 0; variant < 4; ++variant) {
+  for (unsigned scenario = 0; scenario < 8; ++scenario) {
+    const unsigned variant = scenario / 2;
+    const bool deferred = scenario % 2;
     HistogramSamplingOptions options;
     options.maximum_channel_size = 256; // Omit final channel, preserving holes.
     options.maximum_property_values = variant == 0 ? 2 : variant == 1 ? 8 : 256;
@@ -113,6 +115,8 @@ void Case(GpuBackend &gpu, unsigned kind) {
     Check(Same(raster.samples(), selected.samples()),
           "Selected CPU rows differ from raster oracle");
     options.row_backend = HistogramRowBackend::kGpu;
+    options.defer_gpu_row_materialization = deferred;
+    options.gpu_row_diagnostics = true;
     options.row_generator = generator;
     options.row_source = owner.get();
     HostStorageBound bound;
@@ -139,6 +143,19 @@ void Case(GpuBackend &gpu, unsigned kind) {
               device.stats().rows.gpu_rows == device.stats().selected_samples &&
               budget.snapshot().peak_backing_bytes <= bound.peak_bytes,
           "Metal row coverage or admitted storage differs");
+    const auto &diagnostics = device.stats().rows;
+    Check(diagnostics.diagnostic_calls == 1 &&
+              diagnostics.replay_rows == device.samples().total_samples &&
+              diagnostics.retained_rows == device.samples().weights.size() &&
+              diagnostics.duplicate_hits ==
+                  diagnostics.replay_rows - diagnostics.retained_rows &&
+              diagnostics.occupied_probes <= diagnostics.lookup_probes &&
+              diagnostics.duplicate_hits <= diagnostics.occupied_probes &&
+              diagnostics.deferred_calls == size_t{deferred} &&
+              diagnostics.contiguous_materializations ==
+                  size_t{deferred &&
+                         diagnostics.replay_rows == diagnostics.retained_rows},
+          "GPU replay counters or deferred materialization mismatch");
     // Matching weighted rows alone are insufficient: exercise the fitter too.
     DecisionTree a, b, c;
     Ok(LearnPreparedHistogramTree(raster, &a));
@@ -165,12 +182,62 @@ void Case(GpuBackend &gpu, unsigned kind) {
   Check(!feature_budget.snapshot().committed_bytes(),
         "Histogram rows retained borrowed features");
 }
+void SaturatedAlias(GpuBackend &gpu) {
+  // A table-growth alias can retain a saturated row in its second slot. The
+  // pinned native behavior rejects the next matching row instead of wrapping
+  // its weight. Both planes fit the existing GPU feature producer.
+  const std::array<Extent2D, 2> shapes{{{150, 200}, {200, 250}}};
+  std::array<std::vector<int32_t>, 2> pixels;
+  std::array<ModularChannelView, 2> channels;
+  std::array<ModularStreamFeatureSlice, 2> jobs;
+  for (size_t c = 0; c < shapes.size(); ++c) {
+    const auto [w, h] = shapes[c];
+    pixels[c].assign(w * h, 1);
+    channels[c] = {pixels[c], {shapes[c]}, w};
+    jobs[c] = {channels[c], {}, 0, static_cast<uint32_t>(c)};
+  }
+  ModularStreamFeatureStoragePlan plan;
+  Ok(ComputeModularStreamFeatureStoragePlan(jobs, 1, &plan));
+  ResourceBudget budget(size_t{64} << 20);
+  ResourceReservation reserve;
+  Ok(budget.Reserve(plan.gpu_preparation.peak_bytes, &reserve));
+  std::unique_ptr<PreparedGpuModularStreamFeatures> owner;
+  {
+    ResourceContextScope scope({&reserve, ResourceClass::kPreparation});
+    Ok(QueryGpuModularStreamProcessing(gpu)->PrepareModularStreamFeatures(
+        jobs, &owner, 1, WeightedFeatureBackend::kGpu));
+  }
+  HistogramTrainingImage image{
+      {256, 256}, channels, 0, {}, owner->weighted_views()};
+  HistogramSamplingOptions options;
+  options.sampling_fraction = 1;
+  options.maximum_property_values = 8;
+  options.predictor_count = options.property_count = 1;
+  options.predictors = {Predictor::kZero};
+  options.properties = {9};
+  for (unsigned mode = 0; mode < 3; ++mode) {
+    options.row_backend =
+        mode ? HistogramRowBackend::kGpu : HistogramRowBackend::kRasterCpu;
+    options.defer_gpu_row_materialization = mode == 2;
+    options.row_generator = dynamic_cast<HistogramRowGenerator *>(&gpu);
+    options.row_source = owner.get();
+    PreparedHistogramSamples output;
+    const auto status = PrepareHistogramSamples({&image, 1}, &output, options);
+    Check(status.code() == StatusCode::kUnsupported &&
+              output.samples().weights.empty(),
+          "Saturated row alias was accepted or published");
+  }
+  owner.reset();
+  reserve.Reset();
+  Check(!budget.snapshot().committed_bytes(), "Alias fixture leaked features");
+}
 } // namespace
 int main() try {
   std::unique_ptr<GpuBackend> gpu;
   Ok(CreateEmbeddedMetalBackend({}, &gpu));
   for (unsigned kind = 0; kind < 4; ++kind)
     Case(*gpu, kind);
+  SaturatedAlias(*gpu);
   std::cout << "Selected CPU/Metal rows, dedup weights, cuts, trees, bounds "
                "and failures match\n";
   return 0;

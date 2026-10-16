@@ -14,6 +14,8 @@ Status Invalid() { return Status::InvalidArgument("Invalid reference learning wo
 HistogramSamplingOptions SamplingOptions(const ReferenceWorkflowOptions &options) {
   HistogramSamplingOptions sampling;
   sampling.row_backend = options.sample_rows;
+  sampling.defer_gpu_row_materialization = options.defer_gpu_row_materialization;
+  sampling.gpu_row_diagnostics = options.gpu_row_diagnostics;
   sampling.row_generator = options.row_generator;
   sampling.row_source = options.row_source;
   if (sampling.row_backend == HistogramRowBackend::kGpu && !sampling.row_source)

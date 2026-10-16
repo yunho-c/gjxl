@@ -21,10 +21,16 @@ def competing(exclude=()):
         pid, ppid, args = line.strip().split(None, 2)
         if int(pid) in {os.getpid(), *exclude} or "ps -axo" in args:
             continue
-        executable = Path(args.split()[0]).name
+        executable_path = args.split()[0]
+        executable = Path(executable_path).name
         runner = ("python" in executable.lower() or executable == "Python") and (
-            "qualification.py" in args or "run_histogram_attribution.py" in args)
-        binary = executable.startswith("gjxl_") or executable in {"ctest", "ninja", "clang", "clang++", "metal"}
+            "qualification.py" in args or "qualify_" in args or
+            "run_histogram_attribution.py" in args)
+        # Research captures also freeze executables as "profile", "baseline",
+        # etc. Recognize their repository path, not just the gjxl_ prefix.
+        binary = ("/GitHub/gjxl" in executable_path or
+                  executable.startswith("gjxl_") or
+                  executable in {"ctest", "ninja", "clang", "clang++", "metal", "samply"})
         build = executable == "cmake" and "--build" in args
         if runner or binary or build:
             found.append({"pid": int(pid), "command": args})

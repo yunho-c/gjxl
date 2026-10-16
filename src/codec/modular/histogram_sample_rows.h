@@ -15,7 +15,13 @@ struct HistogramRowProfile {
   double gather_seconds = 0, selection_seconds = 0, generation_seconds = 0,
          replay_seconds = 0, allocation_copy_seconds = 0,
          submit_wait_seconds = 0;
+  double table_growth_seconds = 0, materialization_seconds = 0;
   size_t gpu_calls = 0, gpu_rows = 0, output_bytes = 0, dispatch_bytes = 0;
+  // GPU replay counters are opt-in; disabled timing runs omit hot-loop counts.
+  size_t diagnostic_calls = 0, replay_rows = 0, retained_rows = 0,
+         lookup_probes = 0, occupied_probes = 0, duplicate_hits = 0,
+         saturated_rows = 0, table_growths = 0, rehashed_rows = 0,
+         deferred_calls = 0, contiguous_materializations = 0;
 };
 inline void MergeHistogramRowProfile(HistogramRowProfile &to,
                                      const HistogramRowProfile &from) {
@@ -24,12 +30,24 @@ inline void MergeHistogramRowProfile(HistogramRowProfile &to,
                      &HistogramRowProfile::generation_seconds,
                      &HistogramRowProfile::replay_seconds,
                      &HistogramRowProfile::allocation_copy_seconds,
-                     &HistogramRowProfile::submit_wait_seconds})
+                     &HistogramRowProfile::submit_wait_seconds,
+                     &HistogramRowProfile::table_growth_seconds,
+                     &HistogramRowProfile::materialization_seconds})
     to.*field += from.*field;
   for (auto field :
        {&HistogramRowProfile::gpu_calls, &HistogramRowProfile::gpu_rows,
         &HistogramRowProfile::output_bytes,
-        &HistogramRowProfile::dispatch_bytes})
+        &HistogramRowProfile::dispatch_bytes,
+        &HistogramRowProfile::diagnostic_calls,
+        &HistogramRowProfile::replay_rows, &HistogramRowProfile::retained_rows,
+        &HistogramRowProfile::lookup_probes,
+        &HistogramRowProfile::occupied_probes,
+        &HistogramRowProfile::duplicate_hits,
+        &HistogramRowProfile::saturated_rows,
+        &HistogramRowProfile::table_growths,
+        &HistogramRowProfile::rehashed_rows,
+        &HistogramRowProfile::deferred_calls,
+        &HistogramRowProfile::contiguous_materializations})
     to.*field += from.*field;
 }
 class HistogramRowSource {
@@ -70,6 +88,8 @@ public:
       size_t predictors,
       resource_budget_internal::HostStorageBound *out) const = 0;
   // Synchronous and failure-atomic. The completed source remains immutable.
+  // Request spans are borrowed only until return; the result retains no borrow
+  // of positions, slices or mappings. It owns its completed row storage.
   [[nodiscard]] virtual Status
   GenerateHistogramRows(const HistogramRowRequest &,
                         std::unique_ptr<PreparedHistogramRows> *,

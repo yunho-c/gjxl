@@ -1,0 +1,4090 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "baseline_revision": "d523147c000d84ebb60e190b24ccb291dedf7291",
+  "candidate_production_files": {
+    "src/codec/modular/histogram_sample_preparation.cpp": "d199d7939c96a25384b20d1cda0a9a82846f60b184d1f3ca8f8712a892bae53d",
+    "src/codec/modular/histogram_sample_preparation.h": "438f5322f77796c8dece1ce85cae678f1c2e290f5252f6175d7bb9c0c37089af",
+    "src/codec/modular/histogram_sample_rows.h": "1f4fd5ff640903cbe14549a7331ede5b06121faaa95011f91d6cd40d56d43562",
+    "src/codestream/modular/reference_learning_workflow.cpp": "a7293c6613b115b6af966cb796aed6d7945e3b4d4a10235f8be99759c8ed9d87",
+    "src/codestream/modular/reference_workflow.h": "d2fd66c5574bad8a4dcb1d3ac673abd78101cce161784ea4901e251066f83512",
+    "tools/modular_reference_learning/hybrid_profile.cpp": "01e8c204a2fdfc272f0b01204910bfeb387906b27a463d4043a95983302494a1"
+  },
+  "analysis_tool_sha256": "0131642d2e0060c8c8dcef2db292e856f01034b68f1e0831abda02aa6da26b29",
+  "timing_boundary": "EncodeReferenceModularImage caller wall, excluding backend creation, input/output I/O and independent decode. Preparation, fitting and row times are overlapping per-scope wall sums, not elapsed or CPU time.",
+  "reference_revision": "e8ff09762481785938d8e4e01333ed3917571161",
+  "preparation_differential_cases": 119,
+  "focused_ctest_cases": 6,
+  "metal_row_fixture_configuration_combinations": 32,
+  "saturated_alias_modes": [
+    "raster",
+    "metal",
+    "metal-deferred"
+  ],
+  "test_logs": {
+    "build/sample-rows-deferred/tests.log": "05c29d789b1807269d9da89f5c2223bf9e18860d5cf3801c2883c1dfffa226a7",
+    "build/sample-rows-deferred/reference-tests.log": "8d6a000dc71b7579a97a643ea5916756b4692db169b6afe26f0df596391f95f2"
+  },
+  "captures": {
+    "within-build": {
+      "raw_manifest": "build/sample-rows-deferred/within-build/manifest.json",
+      "raw_manifest_sha256": "2bc3ccc06ce8db09dd6c525614e75dd5a54ec2acaad1d82f824e837f3b4d543a",
+      "binaries": {
+        "baseline": {
+          "path": "build/sample-rows-deferred/within-build/gjxl_sample_materialization_baseline",
+          "sha256": "40d2cd39112fadd106c507f11441d9203ba6542b0959412c3dfb83d507dd94ae"
+        },
+        "candidate": {
+          "path": "build/sample-rows-deferred/within-build/gjxl_sample_materialization_candidate",
+          "sha256": "40d2cd39112fadd106c507f11441d9203ba6542b0959412c3dfb83d507dd94ae"
+        }
+      },
+      "source_archive_sha256": "c55afdbd55f556a463aa429ad3fc143590002c4383796ed7ec2ce186f7813749",
+      "dependencies": {
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/lib/libjxl.0.13.0.dylib": "4f8ddedf97c285896288feea92c628558814b111803e62a8e626b0af396e5a0f",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/lib/libjxl_cms.0.13.0.dylib": "d7f96ab701f3af7a140d25ec33254818a571fb986d67132916df0a92afdd3d23",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlienc.1.2.0.dylib": "ec5708da20bc6d10ab99a4f7f9ba028bd9638bddf08891737913ca4c921e5ea6",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlidec.1.2.0.dylib": "21f9823cccddc7adb566b4f48c022864d55aa7afec8a28a5d53323511177c8f7",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlicommon.1.2.0.dylib": "9e372bbe8af0af943059714d086ceae105c8aea94018858666a97647c729711a"
+      },
+      "inputs": [
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+          "sha256": "a1c487b0160d8f3e8cb86753131b919ac3de28e908fde757050ebccdb4407b6d"
+        },
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1039.pam",
+          "sha256": "22f487129343ed6d403346653ef99900e2552728ba2e4f5c63c90d058132f302"
+        },
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1049.pam",
+          "sha256": "0b3feae4d3bf1a13f89d5f4c3d976c8ea1e93e49a65548919cb5474c3cd1d62d"
+        }
+      ],
+      "route": "auto",
+      "predictors": "best",
+      "participants": 14,
+      "warmups": 1,
+      "repeats": 3,
+      "candidate_metal_mode": "metal-deferred",
+      "accepted": 24,
+      "excluded": 0,
+      "excluded_attempts": [],
+      "environment": {
+        "device": [
+          "Metal: Apple M4 Pro"
+        ],
+        "platform": [
+          "macOS-27.0.1-arm64-arm-64bit-Mach-O"
+        ],
+        "cpu": [
+          "Apple M4 Pro"
+        ],
+        "physical_memory_bytes": [
+          51539607552
+        ],
+        "power": [
+          "Now drawing from 'AC Power'\n -InternalBattery-0 (id=35782755)\t90%; AC attached; not charging present: true"
+        ],
+        "thermal": [
+          "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded"
+        ],
+        "ordinary_background_work": "Spotlight/media-analysis and desktop activity retained in raw process snapshots; not peak throughput evidence"
+      },
+      "comparison": "Same candidate executable: immediate versus deferred"
+    },
+    "timed-ac-retry": {
+      "raw_manifest": "build/sample-rows-deferred/timed-ac-retry/manifest.json",
+      "raw_manifest_sha256": "c7ec9d725e032227340571afa6d5ebb3ea994c8f3dd4a6fe13942003c6572343",
+      "binaries": {
+        "baseline": {
+          "path": "build/sample-rows-deferred/timed-ac-retry/gjxl_sample_materialization_baseline",
+          "sha256": "2505e79dfc23a0ae9ed76aaa1d9dc0f6946ff11dcb462643494ad9835f116594"
+        },
+        "candidate": {
+          "path": "build/sample-rows-deferred/timed-ac-retry/gjxl_sample_materialization_candidate",
+          "sha256": "40d2cd39112fadd106c507f11441d9203ba6542b0959412c3dfb83d507dd94ae"
+        }
+      },
+      "source_archive_sha256": "6109e2c90220f38aeb0b3373195c70193ffc959e4e073615bae0b32457c19437",
+      "dependencies": {
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/lib/libjxl.0.13.0.dylib": "4f8ddedf97c285896288feea92c628558814b111803e62a8e626b0af396e5a0f",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/lib/libjxl_cms.0.13.0.dylib": "d7f96ab701f3af7a140d25ec33254818a571fb986d67132916df0a92afdd3d23",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlienc.1.2.0.dylib": "ec5708da20bc6d10ab99a4f7f9ba028bd9638bddf08891737913ca4c921e5ea6",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlidec.1.2.0.dylib": "21f9823cccddc7adb566b4f48c022864d55aa7afec8a28a5d53323511177c8f7",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlicommon.1.2.0.dylib": "9e372bbe8af0af943059714d086ceae105c8aea94018858666a97647c729711a"
+      },
+      "inputs": [
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+          "sha256": "a1c487b0160d8f3e8cb86753131b919ac3de28e908fde757050ebccdb4407b6d"
+        },
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1039.pam",
+          "sha256": "22f487129343ed6d403346653ef99900e2552728ba2e4f5c63c90d058132f302"
+        },
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1049.pam",
+          "sha256": "0b3feae4d3bf1a13f89d5f4c3d976c8ea1e93e49a65548919cb5474c3cd1d62d"
+        }
+      ],
+      "route": "auto",
+      "predictors": "best",
+      "participants": 14,
+      "warmups": 1,
+      "repeats": 3,
+      "candidate_metal_mode": "metal-deferred",
+      "accepted": 48,
+      "excluded": 0,
+      "excluded_attempts": [],
+      "environment": {
+        "device": [
+          "Metal: Apple M4 Pro"
+        ],
+        "platform": [
+          "macOS-27.0.1-arm64-arm-64bit-Mach-O"
+        ],
+        "cpu": [
+          "Apple M4 Pro"
+        ],
+        "physical_memory_bytes": [
+          51539607552
+        ],
+        "power": [
+          "Now drawing from 'AC Power'\n -InternalBattery-0 (id=35782755)\t90%; AC attached; not charging present: true"
+        ],
+        "thermal": [
+          "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded"
+        ],
+        "ordinary_background_work": "Spotlight/media-analysis and desktop activity retained in raw process snapshots; not peak throughput evidence"
+      },
+      "comparison": "Frozen d523147 versus candidate; raster/selected are controls and metal requests deferred only on candidate"
+    },
+    "coverage": {
+      "raw_manifest": "build/sample-rows-deferred/coverage/manifest.json",
+      "raw_manifest_sha256": "91cd3b9ea58577602f95a16c0f6dd81aa06bbdb943aea45cf14f58ba2826ed57",
+      "binaries": {
+        "baseline": {
+          "path": "build/sample-rows-deferred/coverage/gjxl_sample_materialization_baseline",
+          "sha256": "2505e79dfc23a0ae9ed76aaa1d9dc0f6946ff11dcb462643494ad9835f116594"
+        },
+        "candidate": {
+          "path": "build/sample-rows-deferred/coverage/gjxl_sample_materialization_candidate",
+          "sha256": "40d2cd39112fadd106c507f11441d9203ba6542b0959412c3dfb83d507dd94ae"
+        }
+      },
+      "source_archive_sha256": "6374ee51b2ccf03ad3b514b1ae82da7a3b5c841e6f5cb984e35f9f7635caa7f4",
+      "dependencies": {
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/lib/libjxl.0.13.0.dylib": "4f8ddedf97c285896288feea92c628558814b111803e62a8e626b0af396e5a0f",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/lib/libjxl_cms.0.13.0.dylib": "d7f96ab701f3af7a140d25ec33254818a571fb986d67132916df0a92afdd3d23",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlienc.1.2.0.dylib": "ec5708da20bc6d10ab99a4f7f9ba028bd9638bddf08891737913ca4c921e5ea6",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlidec.1.2.0.dylib": "21f9823cccddc7adb566b4f48c022864d55aa7afec8a28a5d53323511177c8f7",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlicommon.1.2.0.dylib": "9e372bbe8af0af943059714d086ceae105c8aea94018858666a97647c729711a"
+      },
+      "inputs": [
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/photo-macan.pam",
+          "sha256": "00f553eeed5f5706240e027011628cb4c96a8c1879775480e20f50e2679f2e6e"
+        },
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/alpha-ria.pam",
+          "sha256": "e9167882740846d65e4a88cb513912d39996351c8527583a3bf825fc197220a9"
+        },
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/palette-358.pam",
+          "sha256": "bf34ee41d73e578df86a4d3b88017b48e72adc16fb1df2e22e30a483c17d0214"
+        },
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/alpha16-ramp.pam",
+          "sha256": "dc0197fd31ce47cdb6db6b3f08d1da38b735f125bbd24d44b4ade3cd397eb0ae"
+        },
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-inputs/alpha16-local.pam",
+          "sha256": "82db67d7b6747b9b1d2810d9cbd967962818b8990a7746f1e2ef31d1ff3f166d"
+        }
+      ],
+      "route": "auto",
+      "predictors": "best",
+      "participants": 14,
+      "warmups": 0,
+      "repeats": 1,
+      "candidate_metal_mode": "metal-deferred",
+      "accepted": 30,
+      "excluded": 0,
+      "excluded_attempts": [],
+      "environment": {
+        "device": [
+          "Metal: Apple M4 Pro"
+        ],
+        "platform": [
+          "macOS-27.0.1-arm64-arm-64bit-Mach-O"
+        ],
+        "cpu": [
+          "Apple M4 Pro"
+        ],
+        "physical_memory_bytes": [
+          51539607552
+        ],
+        "power": [
+          "Now drawing from 'AC Power'\n -InternalBattery-0 (id=35782755)\t90%; AC attached; not charging present: true"
+        ],
+        "thermal": [
+          "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded"
+        ],
+        "ordinary_background_work": "Spotlight/media-analysis and desktop activity retained in raw process snapshots; not peak throughput evidence"
+      },
+      "comparison": "Frozen d523147 versus candidate; raster/selected are controls and metal requests deferred only on candidate",
+      "row_coverage": [
+        {
+          "input": "photo-macan.pam",
+          "mode": "raster",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "photo-macan.pam",
+          "mode": "raster",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "photo-macan.pam",
+          "mode": "selected",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "photo-macan.pam",
+          "mode": "selected",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "photo-macan.pam",
+          "mode": "metal",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "photo-macan.pam",
+          "mode": "metal",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha-ria.pam",
+          "mode": "raster",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha-ria.pam",
+          "mode": "raster",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha-ria.pam",
+          "mode": "selected",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha-ria.pam",
+          "mode": "selected",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha-ria.pam",
+          "mode": "metal",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha-ria.pam",
+          "mode": "metal",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "palette-358.pam",
+          "mode": "raster",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "palette-358.pam",
+          "mode": "raster",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "palette-358.pam",
+          "mode": "selected",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "palette-358.pam",
+          "mode": "selected",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "palette-358.pam",
+          "mode": "metal",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "palette-358.pam",
+          "mode": "metal",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha16-ramp.pam",
+          "mode": "raster",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha16-ramp.pam",
+          "mode": "raster",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha16-ramp.pam",
+          "mode": "selected",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha16-ramp.pam",
+          "mode": "selected",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha16-ramp.pam",
+          "mode": "metal",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha16-ramp.pam",
+          "mode": "metal",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "raster",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "raster",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "selected",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "selected",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "metal",
+          "build": "baseline",
+          "gpu_calls": 12,
+          "gpu_rows": 1030284,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "metal",
+          "build": "candidate",
+          "gpu_calls": 12,
+          "gpu_rows": 1030284,
+          "deferred_calls": 12,
+          "contiguous_materializations": 11
+        }
+      ]
+    },
+    "all-predictors": {
+      "raw_manifest": "build/sample-rows-deferred/all-predictors/manifest.json",
+      "raw_manifest_sha256": "4fb2c0dec9705c2b05129a760f9c06f8ffaffa6f1355308ebf3935514ae7185b",
+      "binaries": {
+        "baseline": {
+          "path": "build/sample-rows-deferred/all-predictors/gjxl_sample_materialization_baseline",
+          "sha256": "2505e79dfc23a0ae9ed76aaa1d9dc0f6946ff11dcb462643494ad9835f116594"
+        },
+        "candidate": {
+          "path": "build/sample-rows-deferred/all-predictors/gjxl_sample_materialization_candidate",
+          "sha256": "40d2cd39112fadd106c507f11441d9203ba6542b0959412c3dfb83d507dd94ae"
+        }
+      },
+      "source_archive_sha256": "37e6f4f2b96b028b13cb4434ad69cf0480e71bc9e0d1cc65d0bfda94bbc0212d",
+      "dependencies": {
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/lib/libjxl.0.13.0.dylib": "4f8ddedf97c285896288feea92c628558814b111803e62a8e626b0af396e5a0f",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/lib/libjxl_cms.0.13.0.dylib": "d7f96ab701f3af7a140d25ec33254818a571fb986d67132916df0a92afdd3d23",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlienc.1.2.0.dylib": "ec5708da20bc6d10ab99a4f7f9ba028bd9638bddf08891737913ca4c921e5ea6",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlidec.1.2.0.dylib": "21f9823cccddc7adb566b4f48c022864d55aa7afec8a28a5d53323511177c8f7",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlicommon.1.2.0.dylib": "9e372bbe8af0af943059714d086ceae105c8aea94018858666a97647c729711a"
+      },
+      "inputs": [
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-inputs/alpha16-local.pam",
+          "sha256": "82db67d7b6747b9b1d2810d9cbd967962818b8990a7746f1e2ef31d1ff3f166d"
+        }
+      ],
+      "route": "auto",
+      "predictors": "all",
+      "participants": 14,
+      "warmups": 0,
+      "repeats": 1,
+      "candidate_metal_mode": "metal-deferred",
+      "accepted": 6,
+      "excluded": 0,
+      "excluded_attempts": [],
+      "environment": {
+        "device": [
+          "Metal: Apple M4 Pro"
+        ],
+        "platform": [
+          "macOS-27.0.1-arm64-arm-64bit-Mach-O"
+        ],
+        "cpu": [
+          "Apple M4 Pro"
+        ],
+        "physical_memory_bytes": [
+          51539607552
+        ],
+        "power": [
+          "Now drawing from 'AC Power'\n -InternalBattery-0 (id=35782755)\t90%; AC attached; not charging present: true"
+        ],
+        "thermal": [
+          "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded"
+        ],
+        "ordinary_background_work": "Spotlight/media-analysis and desktop activity retained in raw process snapshots; not peak throughput evidence"
+      },
+      "comparison": "Frozen d523147 versus candidate; raster/selected are controls and metal requests deferred only on candidate",
+      "row_coverage": [
+        {
+          "input": "alpha16-local.pam",
+          "mode": "raster",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "raster",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "selected",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "selected",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "metal",
+          "build": "baseline",
+          "gpu_calls": 12,
+          "gpu_rows": 1030284,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "metal",
+          "build": "candidate",
+          "gpu_calls": 12,
+          "gpu_rows": 1030284,
+          "deferred_calls": 12,
+          "contiguous_materializations": 11
+        }
+      ]
+    }
+  },
+  "summaries": [
+    {
+      "study": "within-build",
+      "input": "photo-large-1029.pam",
+      "mode": "metal",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 4.223507416,
+            "minimum": 4.178524375,
+            "maximum": 4.277110583,
+            "values": [
+              4.178524375,
+              4.277110583,
+              4.223507416
+            ]
+          },
+          "process_cpu": {
+            "median": 36.75577,
+            "minimum": 36.528575,
+            "maximum": 36.80622,
+            "values": [
+              36.528575,
+              36.80622,
+              36.75577
+            ]
+          },
+          "preparation": {
+            "median": 3.7152694200000003,
+            "minimum": 3.6284003799999995,
+            "maximum": 3.761384923000001,
+            "values": [
+              3.761384923000001,
+              3.6284003799999995,
+              3.7152694200000003
+            ]
+          },
+          "fitting": {
+            "median": 25.402358707999994,
+            "minimum": 25.262094295,
+            "maximum": 25.610550753999995,
+            "values": [
+              25.610550753999995,
+              25.402358707999994,
+              25.262094295
+            ]
+          },
+          "gather": {
+            "median": 3.6386264509999995,
+            "minimum": 3.5538164630000004,
+            "maximum": 3.6817313400000007,
+            "values": [
+              3.6817313400000007,
+              3.5538164630000004,
+              3.6386264509999995
+            ]
+          },
+          "selection": {
+            "median": 0.089452083,
+            "minimum": 0.08906319899999998,
+            "maximum": 0.08997912099999998,
+            "values": [
+              0.08906319899999998,
+              0.08997912099999998,
+              0.089452083
+            ]
+          },
+          "generation": {
+            "median": 0.400488458,
+            "minimum": 0.36401412099999986,
+            "maximum": 0.41913053999999994,
+            "values": [
+              0.41913053999999994,
+              0.36401412099999986,
+              0.400488458
+            ]
+          },
+          "replay": {
+            "median": 3.146220048999999,
+            "minimum": 3.097218991999999,
+            "maximum": 3.170506009,
+            "values": [
+              3.170506009,
+              3.097218991999999,
+              3.146220048999999
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 775387292,
+            "minimum": 774800306,
+            "maximum": 778073684,
+            "values": [
+              774800306,
+              778073684,
+              775387292
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 4.165085125,
+            "minimum": 4.142282334,
+            "maximum": 4.191848667,
+            "values": [
+              4.142282334,
+              4.191848667,
+              4.165085125
+            ]
+          },
+          "process_cpu": {
+            "median": 36.191592,
+            "minimum": 36.168884,
+            "maximum": 36.298577,
+            "values": [
+              36.168884,
+              36.191592,
+              36.298577
+            ]
+          },
+          "preparation": {
+            "median": 2.8103592039999987,
+            "minimum": 2.7912361280000004,
+            "maximum": 2.9027199219999975,
+            "values": [
+              2.7912361280000004,
+              2.9027199219999975,
+              2.8103592039999987
+            ]
+          },
+          "fitting": {
+            "median": 25.523156670999978,
+            "minimum": 25.457608160000003,
+            "maximum": 25.68078833999998,
+            "values": [
+              25.523156670999978,
+              25.457608160000003,
+              25.68078833999998
+            ]
+          },
+          "gather": {
+            "median": 2.7284638269999992,
+            "minimum": 2.7156253310000023,
+            "maximum": 2.823663794000001,
+            "values": [
+              2.7156253310000023,
+              2.823663794000001,
+              2.7284638269999992
+            ]
+          },
+          "selection": {
+            "median": 0.08840329300000004,
+            "minimum": 0.08787516400000002,
+            "maximum": 0.08889667099999994,
+            "values": [
+              0.08787516400000002,
+              0.08840329300000004,
+              0.08889667099999994
+            ]
+          },
+          "generation": {
+            "median": 0.407293248,
+            "minimum": 0.38623471299999995,
+            "maximum": 0.4354503799999998,
+            "values": [
+              0.407293248,
+              0.4354503799999998,
+              0.38623471299999995
+            ]
+          },
+          "replay": {
+            "median": 2.2500828829999993,
+            "minimum": 2.210004840999999,
+            "maximum": 2.2974333799999984,
+            "values": [
+              2.210004840999999,
+              2.2974333799999984,
+              2.2500828829999993
+            ]
+          },
+          "materialization": {
+            "median": 0.02103796999999999,
+            "minimum": 0.019905166000000002,
+            "maximum": 0.024057584999999996,
+            "values": [
+              0.02103796999999999,
+              0.019905166000000002,
+              0.024057584999999996
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 777261430,
+            "minimum": 776224220,
+            "maximum": 780097244,
+            "values": [
+              780097244,
+              776224220,
+              777261430
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 1.3832647902707107,
+        "process_cpu": 1.5349372357047586,
+        "preparation": 24.356516680289676,
+        "fitting": -0.4755383718045847,
+        "gather": 25.01390665562444,
+        "selection": 1.1724601203528917,
+        "generation": -1.6991226249022162,
+        "replay": 28.482978051227846,
+        "materialization": null,
+        "peak_backing_bytes": -0.24170347119900626
+      }
+    },
+    {
+      "study": "within-build",
+      "input": "photo-large-1039.pam",
+      "mode": "metal",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 3.697960958,
+            "minimum": 3.65621275,
+            "maximum": 3.703578,
+            "values": [
+              3.703578,
+              3.697960958,
+              3.65621275
+            ]
+          },
+          "process_cpu": {
+            "median": 26.280944,
+            "minimum": 26.244738,
+            "maximum": 26.368313,
+            "values": [
+              26.280944,
+              26.368313,
+              26.244738
+            ]
+          },
+          "preparation": {
+            "median": 3.2281325119999997,
+            "minimum": 3.0858401580000003,
+            "maximum": 3.537955221000001,
+            "values": [
+              3.537955221000001,
+              3.2281325119999997,
+              3.0858401580000003
+            ]
+          },
+          "fitting": {
+            "median": 16.232131000000006,
+            "minimum": 16.00658387899999,
+            "maximum": 16.506401713000002,
+            "values": [
+              16.232131000000006,
+              16.506401713000002,
+              16.00658387899999
+            ]
+          },
+          "gather": {
+            "median": 3.152835795,
+            "minimum": 3.017894459999998,
+            "maximum": 3.465770587,
+            "values": [
+              3.465770587,
+              3.152835795,
+              3.017894459999998
+            ]
+          },
+          "selection": {
+            "median": 0.07749734100000003,
+            "minimum": 0.07733366199999998,
+            "maximum": 0.07762148999999997,
+            "values": [
+              0.07749734100000003,
+              0.07733366199999998,
+              0.07762148999999997
+            ]
+          },
+          "generation": {
+            "median": 0.383364874,
+            "minimum": 0.3451168729999999,
+            "maximum": 0.4382135399999999,
+            "values": [
+              0.4382135399999999,
+              0.383364874,
+              0.3451168729999999
+            ]
+          },
+          "replay": {
+            "median": 2.6899145809999996,
+            "minimum": 2.593207623999999,
+            "maximum": 2.9477320860000007,
+            "values": [
+              2.9477320860000007,
+              2.6899145809999996,
+              2.593207623999999
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 697411130,
+            "minimum": 696617515,
+            "maximum": 698017284,
+            "values": [
+              698017284,
+              696617515,
+              697411130
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 3.576702958,
+            "minimum": 3.546266791,
+            "maximum": 3.62774275,
+            "values": [
+              3.62774275,
+              3.576702958,
+              3.546266791
+            ]
+          },
+          "process_cpu": {
+            "median": 25.627358,
+            "minimum": 25.477325,
+            "maximum": 25.645438,
+            "values": [
+              25.477325,
+              25.645438,
+              25.627358
+            ]
+          },
+          "preparation": {
+            "median": 2.372231631000001,
+            "minimum": 2.3236011280000004,
+            "maximum": 2.4259120370000007,
+            "values": [
+              2.4259120370000007,
+              2.372231631000001,
+              2.3236011280000004
+            ]
+          },
+          "fitting": {
+            "median": 16.085862037,
+            "minimum": 16.065104629000007,
+            "maximum": 16.146409671999997,
+            "values": [
+              16.065104629000007,
+              16.085862037,
+              16.146409671999997
+            ]
+          },
+          "gather": {
+            "median": 2.307875622,
+            "minimum": 2.2579261340000003,
+            "maximum": 2.361172835000001,
+            "values": [
+              2.361172835000001,
+              2.307875622,
+              2.2579261340000003
+            ]
+          },
+          "selection": {
+            "median": 0.07789403800000001,
+            "minimum": 0.07774849799999997,
+            "maximum": 0.079429379,
+            "values": [
+              0.079429379,
+              0.07774849799999997,
+              0.07789403800000001
+            ]
+          },
+          "generation": {
+            "median": 0.34983640500000024,
+            "minimum": 0.334416201,
+            "maximum": 0.3616699589999998,
+            "values": [
+              0.3616699589999998,
+              0.334416201,
+              0.34983640500000024
+            ]
+          },
+          "replay": {
+            "median": 1.893409582,
+            "minimum": 1.827999366,
+            "maximum": 1.9168583829999988,
+            "values": [
+              1.9168583829999988,
+              1.893409582,
+              1.827999366
+            ]
+          },
+          "materialization": {
+            "median": 0.020034503000000016,
+            "minimum": 0.018631586000000002,
+            "maximum": 0.020245886000000005,
+            "values": [
+              0.020034503000000016,
+              0.020245886000000005,
+              0.018631586000000002
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 698358920,
+            "minimum": 697427580,
+            "maximum": 699688402,
+            "values": [
+              697427580,
+              699688402,
+              698358920
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 3.2790503030508233,
+        "process_cpu": 2.4869198001411186,
+        "preparation": 26.51380876771142,
+        "fitting": 0.9011075810071212,
+        "gather": 26.800005707242992,
+        "selection": -0.5118846593717086,
+        "generation": 8.745837522923338,
+        "replay": 29.610791533160572,
+        "materialization": null,
+        "peak_backing_bytes": -0.1359011864350279
+      }
+    },
+    {
+      "study": "within-build",
+      "input": "photo-large-1049.pam",
+      "mode": "metal",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 3.015315416,
+            "minimum": 3.006869333,
+            "maximum": 3.05392,
+            "values": [
+              3.05392,
+              3.006869333,
+              3.015315416
+            ]
+          },
+          "process_cpu": {
+            "median": 24.074991,
+            "minimum": 23.915637,
+            "maximum": 24.174822,
+            "values": [
+              23.915637,
+              24.074991,
+              24.174822
+            ]
+          },
+          "preparation": {
+            "median": 2.976168709999999,
+            "minimum": 2.922568710999999,
+            "maximum": 2.9957504990000015,
+            "values": [
+              2.976168709999999,
+              2.922568710999999,
+              2.9957504990000015
+            ]
+          },
+          "fitting": {
+            "median": 14.642731911999997,
+            "minimum": 14.616572662000005,
+            "maximum": 14.77220625,
+            "values": [
+              14.77220625,
+              14.616572662000005,
+              14.642731911999997
+            ]
+          },
+          "gather": {
+            "median": 2.907127824,
+            "minimum": 2.855475294,
+            "maximum": 2.9271677059999996,
+            "values": [
+              2.907127824,
+              2.855475294,
+              2.9271677059999996
+            ]
+          },
+          "selection": {
+            "median": 0.07421062199999998,
+            "minimum": 0.07367587300000003,
+            "maximum": 0.074299794,
+            "values": [
+              0.07367587300000003,
+              0.074299794,
+              0.07421062199999998
+            ]
+          },
+          "generation": {
+            "median": 0.3689313360000001,
+            "minimum": 0.333888706,
+            "maximum": 0.38662541600000006,
+            "values": [
+              0.3689313360000001,
+              0.333888706,
+              0.38662541600000006
+            ]
+          },
+          "replay": {
+            "median": 2.4625947829999997,
+            "minimum": 2.445181541999999,
+            "maximum": 2.464381884999999,
+            "values": [
+              2.4625947829999997,
+              2.445181541999999,
+              2.464381884999999
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 679907980,
+            "minimum": 679907980,
+            "maximum": 679907980,
+            "values": [
+              679907980,
+              679907980,
+              679907980
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 2.964210542,
+            "minimum": 2.921903334,
+            "maximum": 3.021901917,
+            "values": [
+              2.964210542,
+              2.921903334,
+              3.021901917
+            ]
+          },
+          "process_cpu": {
+            "median": 23.505636,
+            "minimum": 23.423002,
+            "maximum": 23.709273,
+            "values": [
+              23.423002,
+              23.505636,
+              23.709273
+            ]
+          },
+          "preparation": {
+            "median": 2.327335004,
+            "minimum": 2.2662090029999984,
+            "maximum": 2.3420661270000007,
+            "values": [
+              2.2662090029999984,
+              2.327335004,
+              2.3420661270000007
+            ]
+          },
+          "fitting": {
+            "median": 14.800512368000001,
+            "minimum": 14.738266796000003,
+            "maximum": 14.803661666000012,
+            "values": [
+              14.803661666000012,
+              14.800512368000001,
+              14.738266796000003
+            ]
+          },
+          "gather": {
+            "median": 2.256061912999998,
+            "minimum": 2.1919580019999994,
+            "maximum": 2.2678685789999995,
+            "values": [
+              2.1919580019999994,
+              2.256061912999998,
+              2.2678685789999995
+            ]
+          },
+          "selection": {
+            "median": 0.07462421399999998,
+            "minimum": 0.07417699200000002,
+            "maximum": 0.07479016800000002,
+            "values": [
+              0.07462421399999998,
+              0.07417699200000002,
+              0.07479016800000002
+            ]
+          },
+          "generation": {
+            "median": 0.3643131690000001,
+            "minimum": 0.36194216600000007,
+            "maximum": 0.3769237529999999,
+            "values": [
+              0.36194216600000007,
+              0.3643131690000001,
+              0.3769237529999999
+            ]
+          },
+          "replay": {
+            "median": 1.8136498330000008,
+            "minimum": 1.7534312509999994,
+            "maximum": 1.814241509,
+            "values": [
+              1.7534312509999994,
+              1.8136498330000008,
+              1.814241509
+            ]
+          },
+          "materialization": {
+            "median": 0.016080745000000004,
+            "minimum": 0.015222252000000007,
+            "maximum": 0.019363417000000004,
+            "values": [
+              0.015222252000000007,
+              0.016080745000000004,
+              0.019363417000000004
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 679907980,
+            "minimum": 679907980,
+            "maximum": 679907980,
+            "values": [
+              679907980,
+              679907980,
+              679907980
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 1.6948433894784287,
+        "process_cpu": 2.364923002463437,
+        "preparation": 21.800971961700355,
+        "fitting": -1.077534280817516,
+        "gather": 22.39550341147991,
+        "selection": -0.5573218346020647,
+        "generation": 1.2517687031063152,
+        "replay": 26.352080109965826,
+        "materialization": null,
+        "peak_backing_bytes": 0.0
+      }
+    },
+    {
+      "study": "timed-ac-retry",
+      "input": "photo-large-1029.pam",
+      "mode": "raster",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 4.158257209,
+            "minimum": 4.114938375,
+            "maximum": 4.163570292,
+            "values": [
+              4.114938375,
+              4.158257209,
+              4.163570292
+            ]
+          },
+          "process_cpu": {
+            "median": 37.160585,
+            "minimum": 36.9562,
+            "maximum": 37.324362,
+            "values": [
+              37.160585,
+              36.9562,
+              37.324362
+            ]
+          },
+          "preparation": {
+            "median": 3.4907144270000012,
+            "minimum": 3.4374147010000016,
+            "maximum": 3.5430435429999996,
+            "values": [
+              3.4907144270000012,
+              3.5430435429999996,
+              3.4374147010000016
+            ]
+          },
+          "fitting": {
+            "median": 25.170444415999995,
+            "minimum": 25.116205957999988,
+            "maximum": 25.205111125,
+            "values": [
+              25.116205957999988,
+              25.170444415999995,
+              25.205111125
+            ]
+          },
+          "gather": {
+            "median": 3.4045232869999995,
+            "minimum": 3.359339621999999,
+            "maximum": 3.4326426690000007,
+            "values": [
+              3.4045232869999995,
+              3.4326426690000007,
+              3.359339621999999
+            ]
+          },
+          "selection": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "generation": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "replay": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 778963978,
+            "minimum": 777806026,
+            "maximum": 779700313,
+            "values": [
+              778963978,
+              777806026,
+              779700313
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 4.156594875,
+            "minimum": 4.147359958,
+            "maximum": 4.159514208,
+            "values": [
+              4.147359958,
+              4.159514208,
+              4.156594875
+            ]
+          },
+          "process_cpu": {
+            "median": 37.210956,
+            "minimum": 36.987594,
+            "maximum": 37.314532,
+            "values": [
+              36.987594,
+              37.210956,
+              37.314532
+            ]
+          },
+          "preparation": {
+            "median": 3.502668788,
+            "minimum": 3.4715177910000006,
+            "maximum": 3.5124171310000003,
+            "values": [
+              3.502668788,
+              3.4715177910000006,
+              3.5124171310000003
+            ]
+          },
+          "fitting": {
+            "median": 25.244814954999992,
+            "minimum": 25.014545374999987,
+            "maximum": 25.26165466400002,
+            "values": [
+              25.244814954999992,
+              25.26165466400002,
+              25.014545374999987
+            ]
+          },
+          "gather": {
+            "median": 3.395344123000001,
+            "minimum": 3.3708785900000002,
+            "maximum": 3.4186801199999968,
+            "values": [
+              3.395344123000001,
+              3.3708785900000002,
+              3.4186801199999968
+            ]
+          },
+          "selection": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "generation": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "replay": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 779560586,
+            "minimum": 776718764,
+            "maximum": 781500202,
+            "values": [
+              779560586,
+              781500202,
+              776718764
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 0.03997669976745222,
+        "process_cpu": -0.13554953454044671,
+        "preparation": -0.34246172953977805,
+        "fitting": -0.29546772305983904,
+        "gather": 0.2696167194699117,
+        "selection": null,
+        "generation": null,
+        "replay": null,
+        "materialization": null,
+        "peak_backing_bytes": -0.07658993443211415
+      }
+    },
+    {
+      "study": "timed-ac-retry",
+      "input": "photo-large-1029.pam",
+      "mode": "metal",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 4.244002625,
+            "minimum": 4.153309791,
+            "maximum": 4.278239333,
+            "values": [
+              4.153309791,
+              4.278239333,
+              4.244002625
+            ]
+          },
+          "process_cpu": {
+            "median": 37.048032,
+            "minimum": 37.02893,
+            "maximum": 37.095107,
+            "values": [
+              37.048032,
+              37.02893,
+              37.095107
+            ]
+          },
+          "preparation": {
+            "median": 3.6048705459999986,
+            "minimum": 3.60015238,
+            "maximum": 3.7057232039999977,
+            "values": [
+              3.60015238,
+              3.6048705459999986,
+              3.7057232039999977
+            ]
+          },
+          "fitting": {
+            "median": 25.11125558099999,
+            "minimum": 25.046292330000007,
+            "maximum": 25.162870125,
+            "values": [
+              25.162870125,
+              25.046292330000007,
+              25.11125558099999
+            ]
+          },
+          "gather": {
+            "median": 3.5327224129999997,
+            "minimum": 3.526216080999999,
+            "maximum": 3.6269927069999985,
+            "values": [
+              3.526216080999999,
+              3.5327224129999997,
+              3.6269927069999985
+            ]
+          },
+          "selection": {
+            "median": 0.09417274,
+            "minimum": 0.09083633499999999,
+            "maximum": 0.09749558499999993,
+            "values": [
+              0.09083633499999999,
+              0.09417274,
+              0.09749558499999993
+            ]
+          },
+          "generation": {
+            "median": 0.37294949600000005,
+            "minimum": 0.35197125200000007,
+            "maximum": 0.3808566669999999,
+            "values": [
+              0.35197125200000007,
+              0.37294949600000005,
+              0.3808566669999999
+            ]
+          },
+          "replay": {
+            "median": 3.0813352559999974,
+            "minimum": 3.0634644499999992,
+            "maximum": 3.1464560230000016,
+            "values": [
+              3.0813352559999974,
+              3.0634644499999992,
+              3.1464560230000016
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 778514817,
+            "minimum": 776546755,
+            "maximum": 778792967,
+            "values": [
+              778792967,
+              776546755,
+              778514817
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 4.08523,
+            "minimum": 4.074948667,
+            "maximum": 4.122901584,
+            "values": [
+              4.074948667,
+              4.122901584,
+              4.08523
+            ]
+          },
+          "process_cpu": {
+            "median": 36.128571,
+            "minimum": 35.936483,
+            "maximum": 36.278998,
+            "values": [
+              36.278998,
+              36.128571,
+              35.936483
+            ]
+          },
+          "preparation": {
+            "median": 2.7580167949999996,
+            "minimum": 2.7204302579999995,
+            "maximum": 2.7811988879999996,
+            "values": [
+              2.7204302579999995,
+              2.7580167949999996,
+              2.7811988879999996
+            ]
+          },
+          "fitting": {
+            "median": 25.267094835999984,
+            "minimum": 25.162978672999984,
+            "maximum": 25.40983024799998,
+            "values": [
+              25.162978672999984,
+              25.267094835999984,
+              25.40983024799998
+            ]
+          },
+          "gather": {
+            "median": 2.6827583780000013,
+            "minimum": 2.6460413739999993,
+            "maximum": 2.7033955389999997,
+            "values": [
+              2.6460413739999993,
+              2.6827583780000013,
+              2.7033955389999997
+            ]
+          },
+          "selection": {
+            "median": 0.08917615999999999,
+            "minimum": 0.08908962599999998,
+            "maximum": 0.08972736499999998,
+            "values": [
+              0.08908962599999998,
+              0.08917615999999999,
+              0.08972736499999998
+            ]
+          },
+          "generation": {
+            "median": 0.3884352060000001,
+            "minimum": 0.371048958,
+            "maximum": 0.40179625,
+            "values": [
+              0.371048958,
+              0.3884352060000001,
+              0.40179625
+            ]
+          },
+          "replay": {
+            "median": 2.2021566609999996,
+            "minimum": 2.1838724570000005,
+            "maximum": 2.209635745000001,
+            "values": [
+              2.1838724570000005,
+              2.2021566609999996,
+              2.209635745000001
+            ]
+          },
+          "materialization": {
+            "median": 0.021731451999999995,
+            "minimum": 0.019813590000000006,
+            "maximum": 0.02853278799999998,
+            "values": [
+              0.019813590000000006,
+              0.021731451999999995,
+              0.02853278799999998
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 775973705,
+            "minimum": 775741801,
+            "maximum": 778200935,
+            "values": [
+              778200935,
+              775973705,
+              775741801
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 3.741105720923066,
+        "process_cpu": 2.4818079405675264,
+        "preparation": 23.49193237853372,
+        "fitting": -0.6205952326729047,
+        "gather": 24.05974587395351,
+        "selection": 5.305760456794628,
+        "generation": -4.1522270886779955,
+        "replay": 28.532390082775162,
+        "materialization": null,
+        "peak_backing_bytes": 0.3264050914011052
+      }
+    },
+    {
+      "study": "timed-ac-retry",
+      "input": "photo-large-1039.pam",
+      "mode": "raster",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 3.629562416,
+            "minimum": 3.617604167,
+            "maximum": 3.630748166,
+            "values": [
+              3.617604167,
+              3.630748166,
+              3.629562416
+            ]
+          },
+          "process_cpu": {
+            "median": 26.39907,
+            "minimum": 26.362452,
+            "maximum": 26.425504,
+            "values": [
+              26.39907,
+              26.425504,
+              26.362452
+            ]
+          },
+          "preparation": {
+            "median": 2.8692990020000013,
+            "minimum": 2.864778034,
+            "maximum": 2.9432618379999993,
+            "values": [
+              2.864778034,
+              2.9432618379999993,
+              2.8692990020000013
+            ]
+          },
+          "fitting": {
+            "median": 15.938702630999998,
+            "minimum": 15.931124625999994,
+            "maximum": 16.01487150000001,
+            "values": [
+              15.938702630999998,
+              16.01487150000001,
+              15.931124625999994
+            ]
+          },
+          "gather": {
+            "median": 2.800946163,
+            "minimum": 2.7982862950000005,
+            "maximum": 2.871867365999999,
+            "values": [
+              2.800946163,
+              2.871867365999999,
+              2.7982862950000005
+            ]
+          },
+          "selection": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "generation": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "replay": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 696527661,
+            "minimum": 696181810,
+            "maximum": 697890191,
+            "values": [
+              696181810,
+              697890191,
+              696527661
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 3.625121292,
+            "minimum": 3.603575541,
+            "maximum": 3.639106,
+            "values": [
+              3.625121292,
+              3.639106,
+              3.603575541
+            ]
+          },
+          "process_cpu": {
+            "median": 26.325771,
+            "minimum": 26.318055,
+            "maximum": 26.361934,
+            "values": [
+              26.361934,
+              26.325771,
+              26.318055
+            ]
+          },
+          "preparation": {
+            "median": 2.8497933449999993,
+            "minimum": 2.8333175350000004,
+            "maximum": 2.900396669999999,
+            "values": [
+              2.8497933449999993,
+              2.8333175350000004,
+              2.900396669999999
+            ]
+          },
+          "fitting": {
+            "median": 16.037842293,
+            "minimum": 15.964562968999994,
+            "maximum": 16.089638964000002,
+            "values": [
+              15.964562968999994,
+              16.089638964000002,
+              16.037842293
+            ]
+          },
+          "gather": {
+            "median": 2.7774380029999994,
+            "minimum": 2.7607567079999997,
+            "maximum": 2.817235376999999,
+            "values": [
+              2.7774380029999994,
+              2.7607567079999997,
+              2.817235376999999
+            ]
+          },
+          "selection": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "generation": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "replay": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 698367275,
+            "minimum": 695413301,
+            "maximum": 698861583,
+            "values": [
+              695413301,
+              698861583,
+              698367275
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 0.12235976382228841,
+        "process_cpu": 0.277657508389495,
+        "preparation": 0.679805659375543,
+        "fitting": -0.6220058451130273,
+        "gather": 0.8392935326833162,
+        "selection": null,
+        "generation": null,
+        "replay": null,
+        "materialization": null,
+        "peak_backing_bytes": -0.2641121240409827
+      }
+    },
+    {
+      "study": "timed-ac-retry",
+      "input": "photo-large-1039.pam",
+      "mode": "metal",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 3.643174083,
+            "minimum": 3.609878125,
+            "maximum": 3.676607792,
+            "values": [
+              3.609878125,
+              3.676607792,
+              3.643174083
+            ]
+          },
+          "process_cpu": {
+            "median": 26.293068,
+            "minimum": 26.224769,
+            "maximum": 26.36403,
+            "values": [
+              26.224769,
+              26.293068,
+              26.36403
+            ]
+          },
+          "preparation": {
+            "median": 3.074102127,
+            "minimum": 3.0704203790000015,
+            "maximum": 3.150163542,
+            "values": [
+              3.0704203790000015,
+              3.150163542,
+              3.074102127
+            ]
+          },
+          "fitting": {
+            "median": 15.947717750000002,
+            "minimum": 15.921814323999993,
+            "maximum": 16.219638074000006,
+            "values": [
+              15.921814323999993,
+              16.219638074000006,
+              15.947717750000002
+            ]
+          },
+          "gather": {
+            "median": 3.0092808819999997,
+            "minimum": 3.0030981219999995,
+            "maximum": 3.0821170799999997,
+            "values": [
+              3.0030981219999995,
+              3.0821170799999997,
+              3.0092808819999997
+            ]
+          },
+          "selection": {
+            "median": 0.08034912999999999,
+            "minimum": 0.08034637700000002,
+            "maximum": 0.08219017399999998,
+            "values": [
+              0.08034912999999999,
+              0.08219017399999998,
+              0.08034637700000002
+            ]
+          },
+          "generation": {
+            "median": 0.338288039,
+            "minimum": 0.3281567070000001,
+            "maximum": 0.37861695199999995,
+            "values": [
+              0.3281567070000001,
+              0.37861695199999995,
+              0.338288039
+            ]
+          },
+          "replay": {
+            "median": 2.5927041280000007,
+            "minimum": 2.588398345000001,
+            "maximum": 2.6193615789999987,
+            "values": [
+              2.5927041280000007,
+              2.6193615789999987,
+              2.588398345000001
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 695791021,
+            "minimum": 691879875,
+            "maximum": 697704461,
+            "values": [
+              691879875,
+              695791021,
+              697704461
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 3.568709375,
+            "minimum": 3.5651965,
+            "maximum": 3.570036958,
+            "values": [
+              3.5651965,
+              3.568709375,
+              3.570036958
+            ]
+          },
+          "process_cpu": {
+            "median": 25.593497,
+            "minimum": 25.551093,
+            "maximum": 25.737567,
+            "values": [
+              25.551093,
+              25.737567,
+              25.593497
+            ]
+          },
+          "preparation": {
+            "median": 2.3402796659999994,
+            "minimum": 2.3196355349999984,
+            "maximum": 2.3458155409999994,
+            "values": [
+              2.3196355349999984,
+              2.3458155409999994,
+              2.3402796659999994
+            ]
+          },
+          "fitting": {
+            "median": 15.945888967000007,
+            "minimum": 15.938180219,
+            "maximum": 16.095570878999997,
+            "values": [
+              15.945888967000007,
+              16.095570878999997,
+              15.938180219
+            ]
+          },
+          "gather": {
+            "median": 2.2660020799999985,
+            "minimum": 2.2559702,
+            "maximum": 2.273445425999999,
+            "values": [
+              2.2559702,
+              2.2660020799999985,
+              2.273445425999999
+            ]
+          },
+          "selection": {
+            "median": 0.07769941599999998,
+            "minimum": 0.07721458500000002,
+            "maximum": 0.07892508600000002,
+            "values": [
+              0.07721458500000002,
+              0.07892508600000002,
+              0.07769941599999998
+            ]
+          },
+          "generation": {
+            "median": 0.3462710769999999,
+            "minimum": 0.3373396730000002,
+            "maximum": 0.3483894990000004,
+            "values": [
+              0.3483894990000004,
+              0.3462710769999999,
+              0.3373396730000002
+            ]
+          },
+          "replay": {
+            "median": 1.8383477860000002,
+            "minimum": 1.828676298,
+            "maximum": 1.8560547920000008,
+            "values": [
+              1.828676298,
+              1.8383477860000002,
+              1.8560547920000008
+            ]
+          },
+          "materialization": {
+            "median": 0.020498912,
+            "minimum": 0.017643660000000005,
+            "maximum": 0.021107824999999997,
+            "values": [
+              0.017643660000000005,
+              0.021107824999999997,
+              0.020498912
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 697684594,
+            "minimum": 695497884,
+            "maximum": 698863653,
+            "values": [
+              698863653,
+              695497884,
+              697684594
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 2.0439514089505506,
+        "process_cpu": 2.660667062512456,
+        "preparation": 23.871115229217654,
+        "fitting": 0.011467364977635341,
+        "gather": 24.69954886717023,
+        "selection": 3.2977507037101894,
+        "generation": -2.3598345432484846,
+        "replay": 29.095350057621395,
+        "materialization": null,
+        "peak_backing_bytes": -0.2721468002387484
+      }
+    },
+    {
+      "study": "timed-ac-retry",
+      "input": "photo-large-1049.pam",
+      "mode": "raster",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 3.008004792,
+            "minimum": 2.990989958,
+            "maximum": 3.0237305,
+            "values": [
+              3.008004792,
+              3.0237305,
+              2.990989958
+            ]
+          },
+          "process_cpu": {
+            "median": 24.426383,
+            "minimum": 24.347857,
+            "maximum": 24.54464,
+            "values": [
+              24.347857,
+              24.54464,
+              24.426383
+            ]
+          },
+          "preparation": {
+            "median": 2.793265627,
+            "minimum": 2.7834025339999995,
+            "maximum": 2.9019745409999986,
+            "values": [
+              2.9019745409999986,
+              2.793265627,
+              2.7834025339999995
+            ]
+          },
+          "fitting": {
+            "median": 14.557213836999999,
+            "minimum": 14.553839002000007,
+            "maximum": 14.564492829999994,
+            "values": [
+              14.564492829999994,
+              14.557213836999999,
+              14.553839002000007
+            ]
+          },
+          "gather": {
+            "median": 2.716716040000001,
+            "minimum": 2.6992720039999996,
+            "maximum": 2.8144429500000006,
+            "values": [
+              2.8144429500000006,
+              2.716716040000001,
+              2.6992720039999996
+            ]
+          },
+          "selection": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "generation": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "replay": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 671302060,
+            "minimum": 668034522,
+            "maximum": 671605224,
+            "values": [
+              668034522,
+              671605224,
+              671302060
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 3.043419208,
+            "minimum": 2.978261792,
+            "maximum": 3.065215334,
+            "values": [
+              3.065215334,
+              2.978261792,
+              3.043419208
+            ]
+          },
+          "process_cpu": {
+            "median": 24.421584,
+            "minimum": 24.367562,
+            "maximum": 24.432401,
+            "values": [
+              24.421584,
+              24.432401,
+              24.367562
+            ]
+          },
+          "preparation": {
+            "median": 2.795917832,
+            "minimum": 2.7937020049999997,
+            "maximum": 2.889040665000001,
+            "values": [
+              2.889040665000001,
+              2.7937020049999997,
+              2.795917832
+            ]
+          },
+          "fitting": {
+            "median": 14.585362418000004,
+            "minimum": 14.478170503999998,
+            "maximum": 14.603878285999995,
+            "values": [
+              14.478170503999998,
+              14.585362418000004,
+              14.603878285999995
+            ]
+          },
+          "gather": {
+            "median": 2.708880372999999,
+            "minimum": 2.7042493730000006,
+            "maximum": 2.7950589210000008,
+            "values": [
+              2.7950589210000008,
+              2.7042493730000006,
+              2.708880372999999
+            ]
+          },
+          "selection": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "generation": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "replay": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 669856908,
+            "minimum": 669300364,
+            "maximum": 671758973,
+            "values": [
+              671758973,
+              669856908,
+              669300364
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": -1.177339081845452,
+        "process_cpu": 0.019646789293370492,
+        "preparation": -0.09494997448018516,
+        "fitting": -0.1933651680547488,
+        "gather": 0.28842421823378483,
+        "selection": null,
+        "generation": null,
+        "replay": null,
+        "materialization": null,
+        "peak_backing_bytes": 0.21527596682781036
+      }
+    },
+    {
+      "study": "timed-ac-retry",
+      "input": "photo-large-1049.pam",
+      "mode": "metal",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 3.0268245,
+            "minimum": 3.015310209,
+            "maximum": 3.068602833,
+            "values": [
+              3.015310209,
+              3.0268245,
+              3.068602833
+            ]
+          },
+          "process_cpu": {
+            "median": 24.257628,
+            "minimum": 24.194065,
+            "maximum": 24.403332,
+            "values": [
+              24.194065,
+              24.257628,
+              24.403332
+            ]
+          },
+          "preparation": {
+            "median": 3.0029835499999993,
+            "minimum": 2.992914791,
+            "maximum": 3.009159657000002,
+            "values": [
+              3.009159657000002,
+              2.992914791,
+              3.0029835499999993
+            ]
+          },
+          "fitting": {
+            "median": 14.484995049999998,
+            "minimum": 14.470061965,
+            "maximum": 14.565031709999994,
+            "values": [
+              14.470061965,
+              14.484995049999998,
+              14.565031709999994
+            ]
+          },
+          "gather": {
+            "median": 2.934534498000002,
+            "minimum": 2.9272373810000007,
+            "maximum": 2.9414433670000006,
+            "values": [
+              2.9414433670000006,
+              2.9272373810000007,
+              2.934534498000002
+            ]
+          },
+          "selection": {
+            "median": 0.07841287399999994,
+            "minimum": 0.078368668,
+            "maximum": 0.07872782800000007,
+            "values": [
+              0.07841287399999994,
+              0.078368668,
+              0.07872782800000007
+            ]
+          },
+          "generation": {
+            "median": 0.35771408100000024,
+            "minimum": 0.3427421259999997,
+            "maximum": 0.3618036579999997,
+            "values": [
+              0.35771408100000024,
+              0.3618036579999997,
+              0.3427421259999997
+            ]
+          },
+          "replay": {
+            "median": 2.503471583000001,
+            "minimum": 2.485035454,
+            "maximum": 2.5107117889999997,
+            "values": [
+              2.503471583000001,
+              2.485035454,
+              2.5107117889999997
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 679884580,
+            "minimum": 679884580,
+            "maximum": 679884580,
+            "values": [
+              679884580,
+              679884580,
+              679884580
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 2.952897625,
+            "minimum": 2.943321916,
+            "maximum": 2.995155708,
+            "values": [
+              2.952897625,
+              2.995155708,
+              2.943321916
+            ]
+          },
+          "process_cpu": {
+            "median": 23.576408,
+            "minimum": 23.521462,
+            "maximum": 23.769837,
+            "values": [
+              23.576408,
+              23.769837,
+              23.521462
+            ]
+          },
+          "preparation": {
+            "median": 2.2610101730000003,
+            "minimum": 2.2286081189999996,
+            "maximum": 2.32581334,
+            "values": [
+              2.2286081189999996,
+              2.32581334,
+              2.2610101730000003
+            ]
+          },
+          "fitting": {
+            "median": 14.625905161000006,
+            "minimum": 14.613692918000002,
+            "maximum": 14.689191701000002,
+            "values": [
+              14.625905161000006,
+              14.613692918000002,
+              14.689191701000002
+            ]
+          },
+          "gather": {
+            "median": 2.1922442869999985,
+            "minimum": 2.1638855460000004,
+            "maximum": 2.254432374,
+            "values": [
+              2.1638855460000004,
+              2.254432374,
+              2.1922442869999985
+            ]
+          },
+          "selection": {
+            "median": 0.07478737299999999,
+            "minimum": 0.07363004000000002,
+            "maximum": 0.07508320400000004,
+            "values": [
+              0.07363004000000002,
+              0.07508320400000004,
+              0.07478737299999999
+            ]
+          },
+          "generation": {
+            "median": 0.362476711,
+            "minimum": 0.3500280820000001,
+            "maximum": 0.368440247,
+            "values": [
+              0.3500280820000001,
+              0.368440247,
+              0.362476711
+            ]
+          },
+          "replay": {
+            "median": 1.753199492,
+            "minimum": 1.7386848700000002,
+            "maximum": 1.8092416659999997,
+            "values": [
+              1.7386848700000002,
+              1.8092416659999997,
+              1.753199492
+            ]
+          },
+          "materialization": {
+            "median": 0.017242877999999996,
+            "minimum": 0.013598546999999996,
+            "maximum": 0.017879621,
+            "values": [
+              0.013598546999999996,
+              0.017242877999999996,
+              0.017879621
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 679907980,
+            "minimum": 679907980,
+            "maximum": 679907980,
+            "values": [
+              679907980,
+              679907980,
+              679907980
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 2.4423905317272343,
+        "process_cpu": 2.808271278626251,
+        "preparation": 24.70787350799838,
+        "fitting": -0.9728005464524347,
+        "gather": 25.294990108513037,
+        "selection": 4.623604282123306,
+        "generation": -1.3314069121030059,
+        "replay": 29.969267320419213,
+        "materialization": null,
+        "peak_backing_bytes": -0.003441760658851045
+      }
+    }
+  ],
+  "output_invariants": [
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+      "predictors": "best",
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+      "bytes": 10507251,
+      "width": 4000,
+      "height": 3000,
+      "channels": 3,
+      "bits": 8,
+      "work": {
+        "local_trees": true,
+        "selection_calls": 192,
+        "learning_calls": 193,
+        "fits": 192,
+        "empty_learning_calls": 1,
+        "scanned_pixels": 36000000,
+        "selected_samples": 23460354,
+        "distinct_samples": 23460354,
+        "tree_nodes": 240143
+      }
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1039.pam",
+      "predictors": "best",
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a",
+      "bytes": 7138537,
+      "width": 4000,
+      "height": 3000,
+      "channels": 3,
+      "bits": 8,
+      "work": {
+        "local_trees": true,
+        "selection_calls": 192,
+        "learning_calls": 193,
+        "fits": 192,
+        "empty_learning_calls": 1,
+        "scanned_pixels": 31344224,
+        "selected_samples": 20432794,
+        "distinct_samples": 20432447,
+        "tree_nodes": 120547
+      }
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1049.pam",
+      "predictors": "best",
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c",
+      "bytes": 7015756,
+      "width": 4000,
+      "height": 3000,
+      "channels": 3,
+      "bits": 8,
+      "work": {
+        "local_trees": true,
+        "selection_calls": 192,
+        "learning_calls": 193,
+        "fits": 192,
+        "empty_learning_calls": 1,
+        "scanned_pixels": 29871324,
+        "selected_samples": 19470891,
+        "distinct_samples": 19470845,
+        "tree_nodes": 105821
+      }
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/photo-macan.pam",
+      "predictors": "best",
+      "output_sha256": "f481f6499e30c1ea81874a1fd3e42cb3d42ecc3116d09d90516141a844290f73",
+      "bytes": 252179,
+      "width": 500,
+      "height": 500,
+      "channels": 3,
+      "bits": 8,
+      "work": {
+        "local_trees": false,
+        "selection_calls": 5,
+        "learning_calls": 1,
+        "fits": 1,
+        "empty_learning_calls": 0,
+        "scanned_pixels": 750000,
+        "selected_samples": 488592,
+        "distinct_samples": 488592,
+        "tree_nodes": 879
+      }
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/alpha-ria.pam",
+      "predictors": "best",
+      "output_sha256": "2a34abb6966cc6631a621473d09bd628b41509ba74c51e34e9ea5f42c07c4908",
+      "bytes": 228118,
+      "width": 500,
+      "height": 500,
+      "channels": 4,
+      "bits": 8,
+      "work": {
+        "local_trees": false,
+        "selection_calls": 5,
+        "learning_calls": 1,
+        "fits": 1,
+        "empty_learning_calls": 0,
+        "scanned_pixels": 1000000,
+        "selected_samples": 651456,
+        "distinct_samples": 651456,
+        "tree_nodes": 821
+      }
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/palette-358.pam",
+      "predictors": "best",
+      "output_sha256": "21594dc56ecb681fc085998da5bce09fe929091d3181b8f09cdc1812c3157a27",
+      "bytes": 1241,
+      "width": 72,
+      "height": 72,
+      "channels": 4,
+      "bits": 8,
+      "work": {
+        "local_trees": false,
+        "selection_calls": 1,
+        "learning_calls": 1,
+        "fits": 1,
+        "empty_learning_calls": 0,
+        "scanned_pixels": 20854,
+        "selected_samples": 13702,
+        "distinct_samples": 13701,
+        "tree_nodes": 55
+      }
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/alpha16-ramp.pam",
+      "predictors": "best",
+      "output_sha256": "aa070fa2eed327d0af1bc47ff114314dfb3ae19eaf4704caae51a8d84a59fc81",
+      "bytes": 47547,
+      "width": 513,
+      "height": 257,
+      "channels": 4,
+      "bits": 16,
+      "work": {
+        "local_trees": false,
+        "selection_calls": 7,
+        "learning_calls": 1,
+        "fits": 1,
+        "empty_learning_calls": 0,
+        "scanned_pixels": 527364,
+        "selected_samples": 344788,
+        "distinct_samples": 344448,
+        "tree_nodes": 477
+      }
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-inputs/alpha16-local.pam",
+      "predictors": "best",
+      "output_sha256": "2f358569a8f68155121cf26bed66595d216b862af53a50c9eaf11172c7edab98",
+      "bytes": 469451,
+      "width": 769,
+      "height": 513,
+      "channels": 4,
+      "bits": 16,
+      "work": {
+        "local_trees": true,
+        "selection_calls": 12,
+        "learning_calls": 13,
+        "fits": 12,
+        "empty_learning_calls": 1,
+        "scanned_pixels": 1578012,
+        "selected_samples": 1030284,
+        "distinct_samples": 1030283,
+        "tree_nodes": 7253
+      }
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-inputs/alpha16-local.pam",
+      "predictors": "all",
+      "output_sha256": "b062ec5e3a56cb672fe96540cdd1cf658801d90b6dde83475c9b4e5762c69b07",
+      "bytes": 468088,
+      "width": 769,
+      "height": 513,
+      "channels": 4,
+      "bits": 16,
+      "work": {
+        "local_trees": true,
+        "selection_calls": 12,
+        "learning_calls": 13,
+        "fits": 12,
+        "empty_learning_calls": 1,
+        "scanned_pixels": 1578012,
+        "selected_samples": 1030284,
+        "distinct_samples": 1030283,
+        "tree_nodes": 8441
+      }
+    }
+  ],
+  "diagnostics": {
+    "raw_manifest": "build/sample-rows-deferred/diagnostics.json",
+    "raw_manifest_sha256": "517cbd883819337e6228cbd27d4b1a966774cbd40f81593223af7ebc6fe718cd",
+    "note": "Single diagnostic captures only. rows-on counters and timings are excluded from paired speed estimates.",
+    "runs": [
+      {
+        "name": "baseline-samply-verified",
+        "attempt": 0,
+        "command": [
+          "samply",
+          "record",
+          "--save-only",
+          "--unstable-presymbolicate",
+          "--rate",
+          "1000",
+          "-o",
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-deferred/baseline-samply-verified-0.json.gz",
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-deferred/baseline-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-deferred/baseline-samply-verified-0-encode",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "metal"
+        ],
+        "profiled": true,
+        "result": {
+          "schema": 5,
+          "route": "auto",
+          "device": "Metal: Apple M4 Pro",
+          "buffering": "auto",
+          "predictors": "best",
+          "width": 4000,
+          "height": 3000,
+          "channels": 3,
+          "bits": 8,
+          "bytes": 10507251,
+          "exact_decode": true,
+          "total": {
+            "wall": 4.347406417,
+            "cpu": 37.43164
+          },
+          "profile_wall": [
+            0.024721084,
+            0.425579708,
+            3.3661972080000004,
+            0.092392334,
+            0,
+            1.7500000000000002e-06,
+            0.001795917,
+            0,
+            0.404521042
+          ],
+          "profile_cpu": [
+            0.024148,
+            4.479449,
+            28.08264,
+            0.029587000000000002,
+            0,
+            1e-06,
+            0.001758,
+            0,
+            4.785921
+          ],
+          "work": {
+            "local_trees": true,
+            "selection_calls": 192,
+            "learning_calls": 193,
+            "fits": 192,
+            "empty_learning_calls": 1,
+            "scanned_pixels": 36000000,
+            "selected_samples": 23460354,
+            "distinct_samples": 23460354,
+            "tree_nodes": 240143
+          },
+          "routing": {
+            "feature_batches": 5,
+            "feature_samples": 36000000,
+            "gpu_feature_batches": 4,
+            "gpu_feature_samples": 33079296,
+            "cpu_feature_batches": 1,
+            "token_batches": 5,
+            "token_samples": 36000000,
+            "cpu_feature_peak_participants": 4,
+            "learning_reused_features": 36000000,
+            "learning_computed_features": 0
+          },
+          "learning": {
+            "requested_participants": 14,
+            "cpu_ceiling": 14,
+            "peak_participants": 14,
+            "waves": 18,
+            "memory_limited_waves": 0
+          },
+          "entropy": {
+            "requested_participants": 14,
+            "admitted_participants": 14,
+            "memory_reductions": 0,
+            "peak_stream_participants": 14,
+            "stream_jobs": 192,
+            "parallel_calls": 1,
+            "model_work_seconds": 4.26899667,
+            "emission_work_seconds": 1.2401861980000002
+          },
+          "selection": {
+            "requested_participants": 14,
+            "peak_participants": 14,
+            "waves": 14,
+            "memory_limited_waves": 0,
+            "wall_seconds": 0.425579167,
+            "work_seconds": 4.745558248000002
+          },
+          "tokenization": {
+            "requested_participants": 14,
+            "admitted_participants": 1,
+            "memory_reductions": 0,
+            "peak_participants": 1,
+            "stream_jobs": 0,
+            "parallel_calls": 0,
+            "generated_tokens": 0,
+            "borrowed_tokens": 36000000
+          },
+          "detail_work": {
+            "sample_preparation": 3.7952283380000003,
+            "fitting": 26.009580161000002
+          },
+          "detail_wall": {
+            "learning": 3.244176418,
+            "features": 0.122016958,
+            "gpu_tokens": 0.082566417
+          },
+          "sample_rows": {
+            "requested": "metal",
+            "gpu_calls": 192,
+            "gpu_rows": 23460354,
+            "gather_work": 3.7153937949999998,
+            "selection_work": 0.09526537799999998,
+            "generation_work": 0.39632428700000005,
+            "replay_work": 3.2210934960000026,
+            "allocation_copy_work": 0.01688587100000001,
+            "submit_wait_work": 0.37755146999999983,
+            "output_bytes": 609969204,
+            "dispatch_bytes": 97957888
+          },
+          "memory": {
+            "peak_backing_bytes": 780650849,
+            "peak_committed_bytes": 1902521368,
+            "maximum_stage_bytes": 1392307800,
+            "peak_feature_samples": 8306688,
+            "peak_feature_bytes": 166150272
+          },
+          "histogram_fitting": {
+            "schema": 3,
+            "enabled": false
+          }
+        }
+      },
+      {
+        "name": "deferred-samply-verified",
+        "attempt": 0,
+        "command": [
+          "samply",
+          "record",
+          "--save-only",
+          "--unstable-presymbolicate",
+          "--rate",
+          "1000",
+          "-o",
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-deferred/deferred-samply-verified-0.json.gz",
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-deferred/candidate-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-deferred/deferred-samply-verified-0-encode",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "metal-deferred"
+        ],
+        "profiled": true,
+        "result": {
+          "schema": 5,
+          "route": "auto",
+          "device": "Metal: Apple M4 Pro",
+          "buffering": "auto",
+          "predictors": "best",
+          "width": 4000,
+          "height": 3000,
+          "channels": 3,
+          "bits": 8,
+          "bytes": 10507251,
+          "exact_decode": true,
+          "total": {
+            "wall": 4.198323667,
+            "cpu": 36.224436
+          },
+          "profile_wall": [
+            0.015508375,
+            0.435495792,
+            3.246790791,
+            0.091334417,
+            0,
+            1.584e-06,
+            0.001916125,
+            0,
+            0.378771334
+          ],
+          "profile_cpu": [
+            0.015264,
+            4.445191,
+            27.152917,
+            0.029799,
+            0,
+            2e-06,
+            0.001881,
+            0,
+            4.551392
+          ],
+          "work": {
+            "local_trees": true,
+            "selection_calls": 192,
+            "learning_calls": 193,
+            "fits": 192,
+            "empty_learning_calls": 1,
+            "scanned_pixels": 36000000,
+            "selected_samples": 23460354,
+            "distinct_samples": 23460354,
+            "tree_nodes": 240143
+          },
+          "routing": {
+            "feature_batches": 5,
+            "feature_samples": 36000000,
+            "gpu_feature_batches": 4,
+            "gpu_feature_samples": 33079296,
+            "cpu_feature_batches": 1,
+            "token_batches": 5,
+            "token_samples": 36000000,
+            "cpu_feature_peak_participants": 4,
+            "learning_reused_features": 36000000,
+            "learning_computed_features": 0
+          },
+          "learning": {
+            "requested_participants": 14,
+            "cpu_ceiling": 14,
+            "peak_participants": 14,
+            "waves": 18,
+            "memory_limited_waves": 0
+          },
+          "entropy": {
+            "requested_participants": 14,
+            "admitted_participants": 14,
+            "memory_reductions": 0,
+            "peak_stream_participants": 14,
+            "stream_jobs": 192,
+            "parallel_calls": 1,
+            "model_work_seconds": 4.045158006,
+            "emission_work_seconds": 1.112764209
+          },
+          "selection": {
+            "requested_participants": 14,
+            "peak_participants": 14,
+            "waves": 14,
+            "memory_limited_waves": 0,
+            "wall_seconds": 0.435495333,
+            "work_seconds": 4.745112953999999
+          },
+          "tokenization": {
+            "requested_participants": 14,
+            "admitted_participants": 1,
+            "memory_reductions": 0,
+            "peak_participants": 1,
+            "stream_jobs": 0,
+            "parallel_calls": 0,
+            "generated_tokens": 0,
+            "borrowed_tokens": 36000000
+          },
+          "detail_work": {
+            "sample_preparation": 2.8800944229999996,
+            "fitting": 25.80730359199999
+          },
+          "detail_wall": {
+            "learning": 3.161996542,
+            "features": 0.084790542,
+            "gpu_tokens": 0.081288084
+          },
+          "sample_rows": {
+            "requested": "metal-deferred",
+            "gpu_calls": 192,
+            "gpu_rows": 23460354,
+            "gather_work": 2.803214283999998,
+            "selection_work": 0.09179036800000001,
+            "generation_work": 0.4054367100000001,
+            "replay_work": 2.3037462090000016,
+            "allocation_copy_work": 0.015500788000000007,
+            "submit_wait_work": 0.3876389970000003,
+            "output_bytes": 609969204,
+            "dispatch_bytes": 97957888,
+            "diagnostics": false,
+            "diagnostic_calls": 0,
+            "table_growth_work": 0,
+            "materialization_work": 0.021013533000000015,
+            "replay_rows": 0,
+            "retained_rows": 0,
+            "lookup_probes": 0,
+            "occupied_probes": 0,
+            "duplicate_hits": 0,
+            "saturated_rows": 0,
+            "table_growths": 0,
+            "rehashed_rows": 0,
+            "deferred_calls": 192,
+            "contiguous_materializations": 192
+          },
+          "memory": {
+            "peak_backing_bytes": 778344770,
+            "peak_committed_bytes": 1902541856,
+            "maximum_stage_bytes": 1392307800,
+            "peak_feature_samples": 8306688,
+            "peak_feature_bytes": 166150272
+          },
+          "histogram_fitting": {
+            "schema": 3,
+            "enabled": false
+          }
+        }
+      },
+      {
+        "name": "immediate-diagnostics",
+        "attempt": 0,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-deferred/candidate-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-deferred/immediate-diagnostics-0-encode",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "metal",
+          "rows-on"
+        ],
+        "profiled": false,
+        "result": {
+          "schema": 5,
+          "route": "auto",
+          "device": "Metal: Apple M4 Pro",
+          "buffering": "auto",
+          "predictors": "best",
+          "width": 4000,
+          "height": 3000,
+          "channels": 3,
+          "bits": 8,
+          "bytes": 10507251,
+          "exact_decode": true,
+          "total": {
+            "wall": 4.27069175,
+            "cpu": 36.887772
+          },
+          "profile_wall": [
+            0.018135,
+            0.423986667,
+            3.3345433320000004,
+            0.090688166,
+            0,
+            1.708e-06,
+            0.001640833,
+            0,
+            0.373693875
+          ],
+          "profile_cpu": [
+            0.017977,
+            4.431211,
+            27.839566,
+            0.029312000000000005,
+            0,
+            3e-06,
+            0.00164,
+            0,
+            4.540076
+          ],
+          "work": {
+            "local_trees": true,
+            "selection_calls": 192,
+            "learning_calls": 193,
+            "fits": 192,
+            "empty_learning_calls": 1,
+            "scanned_pixels": 36000000,
+            "selected_samples": 23460354,
+            "distinct_samples": 23460354,
+            "tree_nodes": 240143
+          },
+          "routing": {
+            "feature_batches": 5,
+            "feature_samples": 36000000,
+            "gpu_feature_batches": 4,
+            "gpu_feature_samples": 33079296,
+            "cpu_feature_batches": 1,
+            "token_batches": 5,
+            "token_samples": 36000000,
+            "cpu_feature_peak_participants": 4,
+            "learning_reused_features": 36000000,
+            "learning_computed_features": 0
+          },
+          "learning": {
+            "requested_participants": 14,
+            "cpu_ceiling": 14,
+            "peak_participants": 14,
+            "waves": 18,
+            "memory_limited_waves": 0
+          },
+          "entropy": {
+            "requested_participants": 14,
+            "admitted_participants": 14,
+            "memory_reductions": 0,
+            "peak_stream_participants": 14,
+            "stream_jobs": 192,
+            "parallel_calls": 1,
+            "model_work_seconds": 3.9585327489999997,
+            "emission_work_seconds": 1.1105802839999999
+          },
+          "selection": {
+            "requested_participants": 14,
+            "peak_participants": 14,
+            "waves": 14,
+            "memory_limited_waves": 0,
+            "wall_seconds": 0.42398625,
+            "work_seconds": 4.565223181000002
+          },
+          "tokenization": {
+            "requested_participants": 14,
+            "admitted_participants": 1,
+            "memory_reductions": 0,
+            "peak_participants": 1,
+            "stream_jobs": 0,
+            "parallel_calls": 0,
+            "generated_tokens": 0,
+            "borrowed_tokens": 36000000
+          },
+          "detail_work": {
+            "sample_preparation": 3.746203868000002,
+            "fitting": 25.391859043
+          },
+          "detail_wall": {
+            "learning": 3.246832041,
+            "features": 0.087706875,
+            "gpu_tokens": 0.081151916
+          },
+          "sample_rows": {
+            "requested": "metal",
+            "gpu_calls": 192,
+            "gpu_rows": 23460354,
+            "gather_work": 3.667881579000001,
+            "selection_work": 0.09095433299999997,
+            "generation_work": 0.3872350479999998,
+            "replay_work": 3.1854186650000003,
+            "allocation_copy_work": 0.014891466000000003,
+            "submit_wait_work": 0.37017521499999995,
+            "output_bytes": 609969204,
+            "dispatch_bytes": 97957888,
+            "diagnostics": true,
+            "diagnostic_calls": 192,
+            "table_growth_work": 1.0031326619999998,
+            "materialization_work": 0,
+            "replay_rows": 23460354,
+            "retained_rows": 23460354,
+            "lookup_probes": 46920708,
+            "occupied_probes": 23663289,
+            "duplicate_hits": 0,
+            "saturated_rows": 0,
+            "table_growths": 565,
+            "rehashed_rows": 22873570,
+            "deferred_calls": 0,
+            "contiguous_materializations": 0
+          },
+          "memory": {
+            "peak_backing_bytes": 779078368,
+            "peak_committed_bytes": 1902541856,
+            "maximum_stage_bytes": 1392307800,
+            "peak_feature_samples": 8306688,
+            "peak_feature_bytes": 166150272
+          },
+          "histogram_fitting": {
+            "schema": 3,
+            "enabled": false
+          }
+        }
+      },
+      {
+        "name": "deferred-diagnostics",
+        "attempt": 0,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-deferred/candidate-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-deferred/deferred-diagnostics-0-encode",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "metal-deferred",
+          "rows-on"
+        ],
+        "profiled": false,
+        "result": {
+          "schema": 5,
+          "route": "auto",
+          "device": "Metal: Apple M4 Pro",
+          "buffering": "auto",
+          "predictors": "best",
+          "width": 4000,
+          "height": 3000,
+          "channels": 3,
+          "bits": 8,
+          "bytes": 10507251,
+          "exact_decode": true,
+          "total": {
+            "wall": 4.114552542,
+            "cpu": 35.976319
+          },
+          "profile_wall": [
+            0.017789167,
+            0.415888,
+            3.1912302919999997,
+            0.089275251,
+            0,
+            1.792e-06,
+            0.0017995,
+            0,
+            0.371681167
+          ],
+          "profile_cpu": [
+            0.017782,
+            4.425828,
+            26.907404,
+            0.029779,
+            0,
+            1e-06,
+            0.0018,
+            0,
+            4.566848
+          ],
+          "work": {
+            "local_trees": true,
+            "selection_calls": 192,
+            "learning_calls": 193,
+            "fits": 192,
+            "empty_learning_calls": 1,
+            "scanned_pixels": 36000000,
+            "selected_samples": 23460354,
+            "distinct_samples": 23460354,
+            "tree_nodes": 240143
+          },
+          "routing": {
+            "feature_batches": 5,
+            "feature_samples": 36000000,
+            "gpu_feature_batches": 4,
+            "gpu_feature_samples": 33079296,
+            "cpu_feature_batches": 1,
+            "token_batches": 5,
+            "token_samples": 36000000,
+            "cpu_feature_peak_participants": 4,
+            "learning_reused_features": 36000000,
+            "learning_computed_features": 0
+          },
+          "learning": {
+            "requested_participants": 14,
+            "cpu_ceiling": 14,
+            "peak_participants": 14,
+            "waves": 18,
+            "memory_limited_waves": 0
+          },
+          "entropy": {
+            "requested_participants": 14,
+            "admitted_participants": 14,
+            "memory_reductions": 0,
+            "peak_stream_participants": 14,
+            "stream_jobs": 192,
+            "parallel_calls": 1,
+            "model_work_seconds": 3.944158829,
+            "emission_work_seconds": 1.115474256
+          },
+          "selection": {
+            "requested_participants": 14,
+            "peak_participants": 14,
+            "waves": 14,
+            "memory_limited_waves": 0,
+            "wall_seconds": 0.4158875,
+            "work_seconds": 4.559179585
+          },
+          "tokenization": {
+            "requested_participants": 14,
+            "admitted_participants": 1,
+            "memory_reductions": 0,
+            "peak_participants": 1,
+            "stream_jobs": 0,
+            "parallel_calls": 0,
+            "generated_tokens": 0,
+            "borrowed_tokens": 36000000
+          },
+          "detail_work": {
+            "sample_preparation": 2.797038623,
+            "fitting": 25.525276821999984
+          },
+          "detail_wall": {
+            "learning": 3.1128086239999995,
+            "features": 0.078418208,
+            "gpu_tokens": 0.0791335
+          },
+          "sample_rows": {
+            "requested": "metal-deferred",
+            "gpu_calls": 192,
+            "gpu_rows": 23460354,
+            "gather_work": 2.718538341000001,
+            "selection_work": 0.08890066900000004,
+            "generation_work": 0.41072866199999986,
+            "replay_work": 2.2166637050000007,
+            "allocation_copy_work": 0.014679949000000003,
+            "submit_wait_work": 0.3938975340000001,
+            "output_bytes": 609969204,
+            "dispatch_bytes": 97957888,
+            "diagnostics": true,
+            "diagnostic_calls": 192,
+            "table_growth_work": 0.8702603009999997,
+            "materialization_work": 0.019976665000000005,
+            "replay_rows": 23460354,
+            "retained_rows": 23460354,
+            "lookup_probes": 46920708,
+            "occupied_probes": 23663289,
+            "duplicate_hits": 0,
+            "saturated_rows": 0,
+            "table_growths": 565,
+            "rehashed_rows": 22873570,
+            "deferred_calls": 192,
+            "contiguous_materializations": 192
+          },
+          "memory": {
+            "peak_backing_bytes": 777514929,
+            "peak_committed_bytes": 1902541856,
+            "maximum_stage_bytes": 1392307800,
+            "peak_feature_samples": 8306688,
+            "peak_feature_bytes": 166150272
+          },
+          "histogram_fitting": {
+            "schema": 3,
+            "enabled": false
+          }
+        }
+      }
+    ]
+  },
+  "sampled_attribution": {
+    "baseline": {
+      "raw_attribution": "build/sample-rows-deferred/baseline-verified-attribution.json",
+      "raw_sha256": "c761a676170f4c315031ee885e34b06e9b737f38342383a0285fb826183b6f10",
+      "scope": "Sampled CPU inside PrepareHistogramSamples across all workers. Inclusive function rows overlap; nearest preparer source rows are disjoint. Not caller wall time or GPU execution time.",
+      "profile_sha256": "fedc0221dbc083d9ccc0d1377291d41dc36935e77815e3d927f978d2c3b6ab46",
+      "sidecar_sha256": "fa1960a4582d0fd82f3c24050cbefca3866b3ec45e2b1da09ffa3d3faad4d6e7",
+      "binary_sha256": "2505e79dfc23a0ae9ed76aaa1d9dc0f6946ff11dcb462643494ad9835f116594",
+      "source_sha256": "e2d36368cc28c3cee8f329444b3db37e2acc5d6ba69a86722caf068346266229",
+      "attribution": {
+        "current": {
+          "preparation_cpu_ms": 2417.445,
+          "process_sampled_cpu_ms": 38298.03,
+          "positive_samples": 1465,
+          "active_threads": 176,
+          "native_symbol_resolution_percent": 99.95386672148662,
+          "preparer_source_resolution_percent": 100.0,
+          "inclusive_top_12": [
+            {
+              "name": "gjxl::modular_internal::PrepareHistogramSamples(std::__1::span<gjxl::modular_internal::HistogramTrainingImage const, 18446744073709551615>, gjxl::modular_internal::PreparedHistogramSamples*, gjxl::modular_internal::HistogramSamplingOptions)",
+              "cpu_ms": 2417.445,
+              "percent": 100.0
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::GatherGpu(std::__1::span<gjxl::modular_internal::HistogramTrainingImage const, 18446744073709551615>)",
+              "cpu_ms": 2404.908,
+              "percent": 99.48139461290742
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Gather(std::__1::span<gjxl::modular_internal::HistogramTrainingImage const, 18446744073709551615>)",
+              "cpu_ms": 2404.908,
+              "percent": 99.48139461290742
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Add(gjxl::modular_internal::HistogramSampleBuilder::CandidateRow const&)",
+              "cpu_ms": 1345.801,
+              "percent": 55.670387537255245
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::BeginChannel(unsigned long, unsigned long)",
+              "cpu_ms": 598.113,
+              "percent": 24.741534967703505
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::SameRow(gjxl::modular_internal::HistogramSampleBuilder::CandidateRow const&, unsigned long) const",
+              "cpu_ms": 289.496,
+              "percent": 11.975287958981486
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Insert(unsigned long, unsigned long, unsigned long)",
+              "cpu_ms": 275.474,
+              "percent": 11.395254080237606
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Hash(unsigned long, bool) const",
+              "cpu_ms": 266.674,
+              "percent": 11.031233388970588
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Hash(gjxl::modular_internal::HistogramSampleBuilder::CandidateRow const&) const",
+              "cpu_ms": 241.113,
+              "percent": 9.973877378802827
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Hash(unsigned long, bool) const::'lambda'()::operator()() const",
+              "cpu_ms": 31.959,
+              "percent": 1.3220155991139406
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::CandidateRow::CandidateRow()",
+              "cpu_ms": 21.885,
+              "percent": 0.9052946395884911
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Allocate()",
+              "cpu_ms": 6.078,
+              "percent": 0.25142247290010733
+            }
+          ],
+          "nearest_preparer_source_top_10": [
+            {
+              "line": 629,
+              "text": "        if (auto status = Add(candidate); !status.ok())",
+              "cpu_ms": 377.069,
+              "percent": 15.597831594927703
+            },
+            {
+              "line": 500,
+              "text": "        Insert(row, Hash(row, false), Hash(row, true));",
+              "cpu_ms": 179.976,
+              "percent": 7.444884992212853
+            },
+            {
+              "line": 470,
+              "text": "    for (size_t p = 0; p < s.predictor_count; ++p)",
+              "cpu_ms": 149.559,
+              "percent": 6.186655746045929
+            },
+            {
+              "line": 597,
+              "text": "      if (auto status = options.row_generator->GenerateHistogramRows(",
+              "cpu_ms": 137.934,
+              "percent": 5.705776139684667
+            },
+            {
+              "line": 541,
+              "text": "      s.values[p].push_back(candidate.dynamics[p]);",
+              "cpu_ms": 132.418,
+              "percent": 5.477601351840476
+            },
+            {
+              "line": 540,
+              "text": "    for (size_t p = 0; p < s.property_count - s.static_property_count; ++p)",
+              "cpu_ms": 111.529,
+              "percent": 4.613507235945389
+            },
+            {
+              "line": 619,
+              "text": "        for (size_t p = 0; p < dynamics; ++p)",
+              "cpu_ms": 109.594,
+              "percent": 4.533464049854288
+            },
+            {
+              "line": 471,
+              "text": "      if (candidate.residuals[p] != s.residuals[p][row])",
+              "cpu_ms": 108.743,
+              "percent": 4.498261594369262
+            },
+            {
+              "line": 484,
+              "text": "    else if (dedup[second] == kUnused)",
+              "cpu_ms": 102.563,
+              "percent": 4.242619790729469
+            },
+            {
+              "line": 450,
+              "text": "      first = first * factor1 + row.residuals[p].symbol;",
+              "cpu_ms": 95.351,
+              "percent": 3.9442882878410885
+            }
+          ]
+        },
+        "previous": {
+          "preparation_cpu_ms": 3803.92,
+          "process_sampled_cpu_ms": 38298.03,
+          "positive_samples": 1513,
+          "active_threads": 176,
+          "native_symbol_resolution_percent": 99.89790078837588,
+          "preparer_source_resolution_percent": 100.0,
+          "inclusive_top_12": [
+            {
+              "name": "gjxl::modular_internal::PrepareHistogramSamples(std::__1::span<gjxl::modular_internal::HistogramTrainingImage const, 18446744073709551615>, gjxl::modular_internal::PreparedHistogramSamples*, gjxl::modular_internal::HistogramSamplingOptions)",
+              "cpu_ms": 3803.92,
+              "percent": 100.0
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::GatherGpu(std::__1::span<gjxl::modular_internal::HistogramTrainingImage const, 18446744073709551615>)",
+              "cpu_ms": 3768.252,
+              "percent": 99.06233569580853
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Gather(std::__1::span<gjxl::modular_internal::HistogramTrainingImage const, 18446744073709551615>)",
+              "cpu_ms": 3768.252,
+              "percent": 99.06233569580853
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Add(gjxl::modular_internal::HistogramSampleBuilder::CandidateRow const&)",
+              "cpu_ms": 1906.934,
+              "percent": 50.13075984773602
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::BeginChannel(unsigned long, unsigned long)",
+              "cpu_ms": 859.169,
+              "percent": 22.58641086037561
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Hash(unsigned long, bool) const",
+              "cpu_ms": 395.927,
+              "percent": 10.40839449830701
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Hash(gjxl::modular_internal::HistogramSampleBuilder::CandidateRow const&) const",
+              "cpu_ms": 392.615,
+              "percent": 10.321326421165535
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Insert(unsigned long, unsigned long, unsigned long)",
+              "cpu_ms": 386.823,
+              "percent": 10.16906244085049
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::SameRow(gjxl::modular_internal::HistogramSampleBuilder::CandidateRow const&, unsigned long) const",
+              "cpu_ms": 328.114,
+              "percent": 8.625680876569433
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Hash(unsigned long, bool) const::'lambda'()::operator()() const",
+              "cpu_ms": 42.335,
+              "percent": 1.1129308713116994
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::CandidateRow::CandidateRow()",
+              "cpu_ms": 29.9,
+              "percent": 0.7860312519716502
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Allocate()",
+              "cpu_ms": 16.911,
+              "percent": 0.44456770910008625
+            }
+          ],
+          "nearest_preparer_source_top_10": [
+            {
+              "line": 597,
+              "text": "      if (auto status = options.row_generator->GenerateHistogramRows(",
+              "cpu_ms": 459.389,
+              "percent": 12.076726114113862
+            },
+            {
+              "line": 629,
+              "text": "        if (auto status = Add(candidate); !status.ok())",
+              "cpu_ms": 406.017,
+              "percent": 10.673647185009148
+            },
+            {
+              "line": 541,
+              "text": "      s.values[p].push_back(candidate.dynamics[p]);",
+              "cpu_ms": 305.869,
+              "percent": 8.040889398304907
+            },
+            {
+              "line": 540,
+              "text": "    for (size_t p = 0; p < s.property_count - s.static_property_count; ++p)",
+              "cpu_ms": 222.129,
+              "percent": 5.839476119371596
+            },
+            {
+              "line": 470,
+              "text": "    for (size_t p = 0; p < s.predictor_count; ++p)",
+              "cpu_ms": 211.53,
+              "percent": 5.560842499316495
+            },
+            {
+              "line": 484,
+              "text": "    else if (dedup[second] == kUnused)",
+              "cpu_ms": 200.141,
+              "percent": 5.261440829460136
+            },
+            {
+              "line": 619,
+              "text": "        for (size_t p = 0; p < dynamics; ++p)",
+              "cpu_ms": 190.447,
+              "percent": 5.00659845632926
+            },
+            {
+              "line": 500,
+              "text": "        Insert(row, Hash(row, false), Hash(row, true));",
+              "cpu_ms": 187.094,
+              "percent": 4.918452543691771
+            },
+            {
+              "line": 429,
+              "text": "      h = second ? (h * factor) ^ s.values[p][row]",
+              "cpu_ms": 183.028,
+              "percent": 4.81156280889188
+            },
+            {
+              "line": 450,
+              "text": "      first = first * factor1 + row.residuals[p].symbol;",
+              "cpu_ms": 149.941,
+              "percent": 3.9417495636080675
+            }
+          ]
+        }
+      }
+    },
+    "deferred": {
+      "raw_attribution": "build/sample-rows-deferred/deferred-verified-attribution.json",
+      "raw_sha256": "178f44df35913bd06dda92130a0c9ccfa8009b7f84aff00a9015816f11cab7ce",
+      "scope": "Sampled CPU inside PrepareHistogramSamples across all workers. Inclusive function rows overlap; nearest preparer source rows are disjoint. Not caller wall time or GPU execution time.",
+      "profile_sha256": "81d581060d0747be40ca172fced577b6323324b3b09abbb5f1f4aed23fecbd62",
+      "sidecar_sha256": "8ebd8e85073c7e89801e7c15ce7bdc556ea7f2fd7034eded81bcf7501fb68d8b",
+      "binary_sha256": "40d2cd39112fadd106c507f11441d9203ba6542b0959412c3dfb83d507dd94ae",
+      "source_sha256": "d199d7939c96a25384b20d1cda0a9a82846f60b184d1f3ca8f8712a892bae53d",
+      "attribution": {
+        "current": {
+          "preparation_cpu_ms": 1565.728,
+          "process_sampled_cpu_ms": 37114.433,
+          "positive_samples": 1193,
+          "active_threads": 176,
+          "native_symbol_resolution_percent": 99.9552980331843,
+          "preparer_source_resolution_percent": 100.0,
+          "inclusive_top_12": [
+            {
+              "name": "gjxl::modular_internal::PrepareHistogramSamples(std::__1::span<gjxl::modular_internal::HistogramTrainingImage const, 18446744073709551615>, gjxl::modular_internal::PreparedHistogramSamples*, gjxl::modular_internal::HistogramSamplingOptions)",
+              "cpu_ms": 1565.728,
+              "percent": 100.0
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Gather(std::__1::span<gjxl::modular_internal::HistogramTrainingImage const, 18446744073709551615>)",
+              "cpu_ms": 1555.419,
+              "percent": 99.34158423429868
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::GatherGpu(std::__1::span<gjxl::modular_internal::HistogramTrainingImage const, 18446744073709551615>)",
+              "cpu_ms": 1555.419,
+              "percent": 99.34158423429868
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::ReplayGpu<true, false>(gjxl::modular_internal::HistogramSampleBuilder::CompactRows const&, std::__1::span<gjxl::modular_internal::HistogramRowSlice const, 18446744073709551615>, std::__1::vector<unsigned int, gjxl::resource_budget_internal::ManagedAllocator<unsigned int, (gjxl::resource_budget_internal::ResourceClass)10>>&)",
+              "cpu_ms": 1383.731,
+              "percent": 88.37620582885405
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Add<true, false>(gjxl::modular_internal::HistogramSampleBuilder::CandidateRow const&, gjxl::modular_internal::HistogramSampleBuilder::DeferredRows*, unsigned long)",
+              "cpu_ms": 802.448,
+              "percent": 51.25079196386601
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::BeginChannel<true, false>(unsigned long, unsigned long, gjxl::modular_internal::HistogramSampleBuilder::DeferredRows const*)",
+              "cpu_ms": 447.739,
+              "percent": 28.59621850027591
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Hash<true>(unsigned long, bool, gjxl::modular_internal::HistogramSampleBuilder::DeferredRows const*) const",
+              "cpu_ms": 248.563,
+              "percent": 15.875235034437654
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::SameRow<true>(gjxl::modular_internal::HistogramSampleBuilder::CandidateRow const&, unsigned long, gjxl::modular_internal::HistogramSampleBuilder::DeferredRows const*) const",
+              "cpu_ms": 243.46,
+              "percent": 15.549316356353083
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Insert(unsigned long, unsigned long, unsigned long)",
+              "cpu_ms": 167.073,
+              "percent": 10.670627337570766
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::CompactRows::Residual(unsigned long, unsigned long) const",
+              "cpu_ms": 139.034,
+              "percent": 8.87983097958266
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::ResidualAt<true>(unsigned long, unsigned long, gjxl::modular_internal::HistogramSampleBuilder::DeferredRows const*) const",
+              "cpu_ms": 136.795,
+              "percent": 8.736830407324899
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Hash(gjxl::modular_internal::HistogramSampleBuilder::CandidateRow const&) const",
+              "cpu_ms": 132.122,
+              "percent": 8.438374992335834
+            }
+          ],
+          "nearest_preparer_source_top_10": [
+            {
+              "line": 601,
+              "text": "      if (!SameRow<Deferred>(candidate, old, deferred))",
+              "cpu_ms": 199.188,
+              "percent": 12.721749882482781
+            },
+            {
+              "line": 682,
+              "text": "        if (auto status = Add<Deferred, Diagnostics>(candidate, &deferred, row);",
+              "cpu_ms": 178.968,
+              "percent": 11.430337836456907
+            },
+            {
+              "line": 435,
+              "text": "              std::to_integer<uint8_t>(value[1])};",
+              "cpu_ms": 134.884,
+              "percent": 8.614778556684175
+            },
+            {
+              "line": 747,
+              "text": "      if (auto status = options.row_generator->GenerateHistogramRows(",
+              "cpu_ms": 134.386,
+              "percent": 8.582972265936357
+            },
+            {
+              "line": 430,
+              "text": "      return std::to_integer<uint8_t>(DynamicColumn(p)[row]);",
+              "cpu_ms": 122.984,
+              "percent": 7.854748717529482
+            },
+            {
+              "line": 539,
+              "text": "      dedup[first] = static_cast<uint32_t>(row);",
+              "cpu_ms": 86.74,
+              "percent": 5.539914978846901
+            },
+            {
+              "line": 615,
+              "text": "    const size_t row = s.weights.size();",
+              "cpu_ms": 84.264,
+              "percent": 5.381777677859756
+            },
+            {
+              "line": 541,
+              "text": "      dedup[second] = static_cast<uint32_t>(row);",
+              "cpu_ms": 51.935,
+              "percent": 3.3169873694536984
+            },
+            {
+              "line": 678,
+              "text": "        for (size_t p = 0; p < source.dynamics; ++p)",
+              "cpu_ms": 42.878,
+              "percent": 2.738534406997895
+            },
+            {
+              "line": 511,
+              "text": "    for (size_t p = 0; p < s.property_count - s.static_property_count; ++p) {",
+              "cpu_ms": 42.842,
+              "percent": 2.7362351570643177
+            }
+          ]
+        },
+        "previous": {
+          "preparation_cpu_ms": 2794.126,
+          "process_sampled_cpu_ms": 37114.433,
+          "positive_samples": 1243,
+          "active_threads": 176,
+          "native_symbol_resolution_percent": 99.88931954147843,
+          "preparer_source_resolution_percent": 100.0,
+          "inclusive_top_12": [
+            {
+              "name": "gjxl::modular_internal::PrepareHistogramSamples(std::__1::span<gjxl::modular_internal::HistogramTrainingImage const, 18446744073709551615>, gjxl::modular_internal::PreparedHistogramSamples*, gjxl::modular_internal::HistogramSamplingOptions)",
+              "cpu_ms": 2794.126,
+              "percent": 100.0
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Gather(std::__1::span<gjxl::modular_internal::HistogramTrainingImage const, 18446744073709551615>)",
+              "cpu_ms": 2766.406,
+              "percent": 99.00791875527446
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::GatherGpu(std::__1::span<gjxl::modular_internal::HistogramTrainingImage const, 18446744073709551615>)",
+              "cpu_ms": 2766.406,
+              "percent": 99.00791875527446
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::ReplayGpu<true, false>(gjxl::modular_internal::HistogramSampleBuilder::CompactRows const&, std::__1::span<gjxl::modular_internal::HistogramRowSlice const, 18446744073709551615>, std::__1::vector<unsigned int, gjxl::resource_budget_internal::ManagedAllocator<unsigned int, (gjxl::resource_budget_internal::ResourceClass)10>>&)",
+              "cpu_ms": 2375.458,
+              "percent": 85.0161374254418
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Add<true, false>(gjxl::modular_internal::HistogramSampleBuilder::CandidateRow const&, gjxl::modular_internal::HistogramSampleBuilder::DeferredRows*, unsigned long)",
+              "cpu_ms": 1189.692,
+              "percent": 42.578323239538946
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::BeginChannel<true, false>(unsigned long, unsigned long, gjxl::modular_internal::HistogramSampleBuilder::DeferredRows const*)",
+              "cpu_ms": 886.671,
+              "percent": 31.73339355490769
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Hash<true>(unsigned long, bool, gjxl::modular_internal::HistogramSampleBuilder::DeferredRows const*) const",
+              "cpu_ms": 445.292,
+              "percent": 15.936718673388388
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Insert(unsigned long, unsigned long, unsigned long)",
+              "cpu_ms": 377.42,
+              "percent": 13.507622777211909
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::SameRow<true>(gjxl::modular_internal::HistogramSampleBuilder::CandidateRow const&, unsigned long, gjxl::modular_internal::HistogramSampleBuilder::DeferredRows const*) const",
+              "cpu_ms": 324.737,
+              "percent": 11.622131571732986
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::CompactRows::Dynamic(unsigned long, unsigned long) const",
+              "cpu_ms": 279.167,
+              "percent": 9.991210131540239
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::DynamicAt<true>(unsigned long, unsigned long, gjxl::modular_internal::HistogramSampleBuilder::DeferredRows const*) const",
+              "cpu_ms": 213.752,
+              "percent": 7.650048709328069
+            },
+            {
+              "name": "gjxl::modular_internal::HistogramSampleBuilder::Hash(gjxl::modular_internal::HistogramSampleBuilder::CandidateRow const&) const",
+              "cpu_ms": 204.799,
+              "percent": 7.329626509327067
+            }
+          ],
+          "nearest_preparer_source_top_10": [
+            {
+              "line": 601,
+              "text": "      if (!SameRow<Deferred>(candidate, old, deferred))",
+              "cpu_ms": 335.564,
+              "percent": 12.00962304491637
+            },
+            {
+              "line": 747,
+              "text": "      if (auto status = options.row_generator->GenerateHistogramRows(",
+              "cpu_ms": 329.841,
+              "percent": 11.804800499333243
+            },
+            {
+              "line": 430,
+              "text": "      return std::to_integer<uint8_t>(DynamicColumn(p)[row]);",
+              "cpu_ms": 279.167,
+              "percent": 9.991210131540239
+            },
+            {
+              "line": 539,
+              "text": "      dedup[first] = static_cast<uint32_t>(row);",
+              "cpu_ms": 208.059,
+              "percent": 7.446299844745727
+            },
+            {
+              "line": 682,
+              "text": "        if (auto status = Add<Deferred, Diagnostics>(candidate, &deferred, row);",
+              "cpu_ms": 203.087,
+              "percent": 7.268355113548924
+            },
+            {
+              "line": 435,
+              "text": "              std::to_integer<uint8_t>(value[1])};",
+              "cpu_ms": 168.83,
+              "percent": 6.042318778752282
+            },
+            {
+              "line": 615,
+              "text": "    const size_t row = s.weights.size();",
+              "cpu_ms": 118.307,
+              "percent": 4.234132605329895
+            },
+            {
+              "line": 678,
+              "text": "        for (size_t p = 0; p < source.dynamics; ++p)",
+              "cpu_ms": 91.673,
+              "percent": 3.2809186128327785
+            },
+            {
+              "line": 540,
+              "text": "    else if (dedup[second] == kUnused)",
+              "cpu_ms": 84.128,
+              "percent": 3.010887841135296
+            },
+            {
+              "line": 426,
+              "text": "      std::memcpy(&value, StaticColumn(p) + 4 * row, sizeof(value));",
+              "cpu_ms": 79.62,
+              "percent": 2.8495493760839703
+            }
+          ]
+        }
+      }
+    }
+  },
+  "exclusions": [
+    {
+      "record": "build/sample-rows-deferred/pilot-timing-exclusion.json",
+      "sha256": "5dc224d6d880d411d6f2059d4938c75c1684bf8e4f4c0757f70aaf630063b367",
+      "detail": {
+        "capture": "pilot/manifest.json",
+        "exclude_all_timings": true,
+        "reason": "Observed concurrent gjxl-parallel-tree-fitting workflow queue profiler with generic executable name profile after pilot. The original guard recognized only gjxl_ executable names and missed this job. Exact bytes/decode checks passed, but overlap-free timing is not established. Updated guard recognizes executable paths under GitHub/gjxl."
+      }
+    },
+    {
+      "record": "build/sample-rows-deferred/diagnostics-self-detection.json",
+      "sha256": "eda1442ba3ed292d38d555f009e2c90f983d5a69bfcbb8bf80f0c2fc1c7fe652",
+      "detail": {
+        "status": "excluded_self_detection",
+        "input": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+        "input_sha256": "a1c487b0160d8f3e8cb86753131b919ac3de28e908fde757050ebccdb4407b6d",
+        "reason": "Diagnostic wrapper falsely classified its own newly spawned Samply target during a process-tree snapshot race. These attempts are retained separately and not used for timing conclusions.",
+        "recorded_attempts": 22
+      }
+    },
+    {
+      "record": "build/sample-rows-deferred/power-check-exclusion.json",
+      "sha256": "5d7ccd0fedf10b9f688cb82c56208936eba501e27ca46ea4f76c40490fc3ad77",
+      "detail": {
+        "status": "excluded_in_full",
+        "reason": "The runner aborted at its post-encode AC-power check. AC power was present when rechecked; no timing from this partial capture is used. A fresh full capture is stored under timed-ac-retry.",
+        "raw_manifest": "build/sample-rows-deferred/timed/manifest.json",
+        "raw_manifest_sha256": "9cb6f2e175c4c90c6bb25a8f9f8a5d877b596f1481ce7e36cd0ae112e344a2c9",
+        "recorded_observations": 29,
+        "recorded_error": "Power changed during encode"
+      }
+    }
+  ],
+  "accepted_paired_encodes": 108,
+  "excluded_paired_attempts": 0
+}

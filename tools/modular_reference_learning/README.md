@@ -584,9 +584,9 @@ captures without changing their statistics or reports.
 
 ## Selected sample-row prototype
 
-`hybrid_profile` accepts a final optional `raster|selected|metal` argument after
-the tokenization participant count. It compares the existing native row path,
-selected-only CPU rows and Metal rows while reusing the same completed weighted
+`hybrid_profile` accepts an optional `raster|selected|metal|metal-deferred`
+argument after the tokenization participant count. It compares the existing
+native row path, selected-only CPU rows and Metal rows while reusing the same completed weighted
 features. Metal includes native bin lookup and compact-row generation; ordered
 deduplication stays on CPU. The workflow prototype uses GPU rows for local
 learning scopes and selected CPU rows for shared/global scopes.
@@ -601,3 +601,13 @@ before/after binaries in alternating order, with warmups, process/power
 snapshots, exact decode and byte checks, and overlap exclusion/retry. It measures
 the native CPU materialization and ordered deduplication improvement shared by
 all row modes. See the [CPU follow-up report](../../docs/modular-sample-materialization.md).
+
+The additional `metal-deferred` mode keeps native ordered deduplication, stores
+retained source-row indices, then copies or compacts complete learner columns.
+An optional final `rows-on` argument enables replay counters and table-growth
+timing; omit it or use `rows-off` for speed comparisons. The paired runner's
+`--candidate-metal-mode metal-deferred` compares immediate baseline replay with
+deferred candidate replay. Passing the same executable as both binaries isolates
+the two replay modes within one build. See the
+[deferred materialization report](../../docs/modular-deferred-sample-materialization.md)
+and `analyze_sample_preparation_samply.py` for sampled CPU attribution.

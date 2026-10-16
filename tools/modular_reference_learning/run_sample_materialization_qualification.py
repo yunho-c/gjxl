@@ -30,6 +30,8 @@ def main():
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--participants", type=int, default=14)
+    parser.add_argument("--candidate-metal-mode", choices=["metal", "metal-deferred"],
+                        default="metal")
     args = parser.parse_args()
     require(args.repeats > 0 and args.warmups >= 0 and args.participants > 0,
             "Invalid repetition or participant count")
@@ -63,6 +65,7 @@ def main():
         inputs=[dict(path=str(p.resolve()), sha256=sha(p)) for p in args.input],
         modes=args.modes, route=args.route, predictors=args.predictors,
         repeats=args.repeats, warmups=args.warmups, participants=args.participants,
+        candidate_metal_mode=args.candidate_metal_mode,
         timing="EncodeReferenceModularImage caller wall, excluding backend creation, input/output I/O and independent decode; preparation/replay are overlapping per-scope wall sums",
         observations=[])
     expected = {}
@@ -75,10 +78,11 @@ def main():
         while True:
             quiet()
             directory = out / f"{source.stem}-{mode}-{label}-{repetition}-{attempt}"
+            actual_mode = args.candidate_metal_mode if label == "candidate" and mode == "metal" else mode
             argv = [binaries[label]["path"], str(source), str(directory), args.route,
-                    "auto", args.predictors, "fit-off", *([str(args.participants)] * 5), mode]
+                    "auto", args.predictors, "fit-off", *([str(args.participants)] * 5), actual_mode]
             before = snapshot()
-            require("'AC Power'" in before["power"], "AC power required")
+            require("'AC Power'" in before["power"], f"AC power required: {before['power']}")
             collisions = []
             with (out / (directory.name + ".log")).open("x") as log:
                 process = subprocess.Popen(argv, stdout=log, stderr=subprocess.STDOUT)
@@ -87,7 +91,7 @@ def main():
                     time.sleep(.5)
             after = snapshot()
             require(process.returncode == 0, f"Encode failed: {directory.name}")
-            require("'AC Power'" in after["power"], "Power changed during encode")
+            require("'AC Power'" in after["power"], f"Power changed during encode: {after['power']}")
             result = json.loads((directory / "result.json").read_text())
             digest = sha(directory / "output.jxl")
             require(result["exact_decode"] and digest == expected.setdefault(str(source), digest),

@@ -33,6 +33,8 @@ struct ReferenceWorkflowOptions {
   // Private sample-row experiment. GPU batching is initially local-scope only;
   // global scopes use selected CPU rows. No public policy/default changes.
   HistogramRowBackend sample_rows = HistogramRowBackend::kRasterCpu;
+  bool defer_gpu_row_materialization = false;
+  bool gpu_row_diagnostics = false;
   HistogramRowGenerator *row_generator = nullptr;
   const HistogramRowSource *row_source =
       nullptr; // Borrowed for a joined local batch.
