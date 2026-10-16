@@ -432,16 +432,51 @@ struct HistogramSampleBuilder {
       residuals();
     return (h >> 16) & (dedup.size() - 1);
   }
-  bool SameRow(size_t a, size_t b) const {
+  // Keep a candidate local until the ordered native lookup has decided whether
+  // it needs a new row. This avoids writing and then removing duplicate rows,
+  // and hashing freshly appended, scattered columns for every selected pixel.
+  struct CandidateRow {
+    std::array<HistogramResidualToken, 14> residuals;
+    std::array<uint32_t, 2> statics;
+    std::array<uint8_t, 16> dynamics;
+  };
+  std::array<size_t, 2> Hash(const CandidateRow &row) const {
     const auto &s = output->samples_;
-    bool same = true;
+    constexpr uint64_t factor1 = 0x1e35a7bd, factor2 = 0x1e35a7bd1e35a7bdull;
+    uint64_t first = factor1, second = factor2;
+    // The two native hashes visit residuals on opposite sides of properties.
+    // Share the property traversal without changing either hash's arithmetic.
+    for (size_t p = 0; p < s.predictor_count; ++p) {
+      first = first * factor1 + row.residuals[p].symbol;
+      first = first * factor1 + row.residuals[p].extra_bits;
+    }
+    for (size_t p = 0; p < s.static_property_count; ++p) {
+      first = first * factor1 + row.statics[p];
+      second = (second * factor2) ^ row.statics[p];
+    }
+    for (size_t p = 0; p < s.property_count - s.static_property_count; ++p) {
+      first = first * factor1 + row.dynamics[p];
+      second = (second * factor2) ^ row.dynamics[p];
+    }
+    for (size_t p = 0; p < s.predictor_count; ++p) {
+      second = (second * factor2) ^ row.residuals[p].symbol;
+      second = (second * factor2) ^ row.residuals[p].extra_bits;
+    }
+    return {(first >> 16) & (dedup.size() - 1),
+            (second >> 16) & (dedup.size() - 1)};
+  }
+  bool SameRow(const CandidateRow &candidate, size_t row) const {
+    const auto &s = output->samples_;
     for (size_t p = 0; p < s.predictor_count; ++p)
-      same &= s.residuals[p][a] == s.residuals[p][b];
+      if (candidate.residuals[p] != s.residuals[p][row])
+        return false;
     for (size_t p = 0; p < s.static_property_count; ++p)
-      same &= s.static_values[p][a] == s.static_values[p][b];
+      if (candidate.statics[p] != s.static_values[p][row])
+        return false;
     for (size_t p = 0; p < s.property_count - s.static_property_count; ++p)
-      same &= s.values[p][a] == s.values[p][b];
-    return same;
+      if (candidate.dynamics[p] != s.values[p][row])
+        return false;
+    return true;
   }
   void Insert(size_t row, size_t first, size_t second) {
     if (dedup[first] == kUnused)
@@ -466,48 +501,45 @@ struct HistogramSampleBuilder {
   }
   Status Add(const PredictionProperties &properties,
              const std::array<HistogramResidualToken, 14> &tokens) {
+    const auto &s = output->samples_;
+    CandidateRow candidate;
+    candidate.residuals = tokens;
+    for (size_t p = 0; p < s.static_property_count; ++p)
+      candidate.statics[p] =
+          static_mapping[p]
+                        [std::clamp<int64_t>(properties[p], -511, 511) + 511];
+    for (size_t p = s.static_property_count; p < s.property_count; ++p)
+      candidate.dynamics[p - s.static_property_count] =
+          mapping[p - s.static_property_count]
+                 [std::clamp<int64_t>(properties[s.properties[p]], -511, 511) +
+                  511];
+    return Add(candidate);
+  }
+  Status Add(const CandidateRow &candidate) {
     auto &s = output->samples_;
     if (s.total_samples >= plan.stats.selected_samples)
       return Status::Internal("Histogram sample preflight count mismatch");
-    for (size_t p = 0; p < s.predictor_count; ++p)
-      s.residuals[p].push_back(tokens[p]);
-    for (size_t p = 0; p < s.static_property_count; ++p)
-      s.static_values[p].push_back(
-          static_mapping[p]
-                        [std::clamp<int64_t>(properties[p], -511, 511) + 511]);
-    for (size_t p = s.static_property_count; p < s.property_count; ++p)
-      s.values[p - s.static_property_count].push_back(
-          mapping[p - s.static_property_count]
-                 [std::clamp<int64_t>(properties[s.properties[p]], -511, 511) +
-                  511]);
-    return DeduplicateLastRow();
-  }
-  Status DeduplicateLastRow() {
-    auto &s = output->samples_;
-    const size_t row = s.weights.size();
-    s.weights.push_back(1);
     ++s.total_samples;
-    // Neither the row nor the table size changes before insertion, so reuse
-    // the lookup positions instead of hashing every new row a second time.
-    const size_t first = Hash(row, false), second = Hash(row, true);
+    const auto [first, second] = Hash(candidate);
     for (const size_t position : {first, second}) {
       const auto old = dedup[position];
-      if (old == kUnused || !SameRow(row, old))
+      if (old == kUnused || !SameRow(candidate, old))
         continue;
       if (s.weights[old] == UINT16_MAX)
         return Status::Unsupported(
             "Reference deduplication would overflow a row weight");
       if (++s.weights[old] == UINT16_MAX)
         dedup[position] = kUnused;
-      for (size_t p = 0; p < s.predictor_count; ++p)
-        s.residuals[p].pop_back();
-      for (size_t p = 0; p < s.static_property_count; ++p)
-        s.static_values[p].pop_back();
-      for (size_t p = 0; p < s.property_count - s.static_property_count; ++p)
-        s.values[p].pop_back();
-      s.weights.pop_back();
       return Status::Ok();
     }
+    const size_t row = s.weights.size();
+    for (size_t p = 0; p < s.predictor_count; ++p)
+      s.residuals[p].push_back(candidate.residuals[p]);
+    for (size_t p = 0; p < s.static_property_count; ++p)
+      s.static_values[p].push_back(candidate.statics[p]);
+    for (size_t p = 0; p < s.property_count - s.static_property_count; ++p)
+      s.values[p].push_back(candidate.dynamics[p]);
+    s.weights.push_back(1);
     Insert(row, first, second);
     return Status::Ok();
   }
@@ -574,28 +606,27 @@ struct HistogramSampleBuilder {
       return Status::Internal("Invalid completed histogram row layout");
     Timer replay{profile.replay_seconds};
     const auto *bytes = prepared->bytes().data();
-    auto &samples = output->samples_;
     for (const auto &slice : slices) {
       const auto [w, h] = slice.features.source.descriptor.extent;
       BeginChannel(w, h);
       for (size_t row = slice.first_row;
            row < slice.first_row + slice.row_count; ++row) {
+        CandidateRow candidate;
         for (size_t p = 0; p < statics; ++p) {
-          uint32_t bin;
-          std::memcpy(&bin, bytes + 4 * (p * rows + row), sizeof(bin));
-          samples.static_values[p].push_back(bin);
+          std::memcpy(&candidate.statics[p], bytes + 4 * (p * rows + row),
+                      sizeof(uint32_t));
         }
         for (size_t p = 0; p < dynamics; ++p)
-          samples.values[p].push_back(
-              std::to_integer<uint8_t>(bytes[(4 * statics + p) * rows + row]));
-        for (size_t p = 0; p < samples.predictor_count; ++p) {
+          candidate.dynamics[p] =
+              std::to_integer<uint8_t>(bytes[(4 * statics + p) * rows + row]);
+        for (size_t p = 0; p < s.predictor_count; ++p) {
           const size_t offset =
               (4 * statics + dynamics) * rows + 2 * (p * rows + row);
-          samples.residuals[p].push_back(
-              {std::to_integer<uint8_t>(bytes[offset]),
-               std::to_integer<uint8_t>(bytes[offset + 1])});
+          candidate.residuals[p] = {
+              std::to_integer<uint8_t>(bytes[offset]),
+              std::to_integer<uint8_t>(bytes[offset + 1])};
         }
-        if (auto status = DeduplicateLastRow(); !status.ok())
+        if (auto status = Add(candidate); !status.ok())
           return status;
       }
     }

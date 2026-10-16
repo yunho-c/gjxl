@@ -595,3 +595,9 @@ learning scopes and selected CPU rows for shared/global scopes.
 independent decoding and byte identity, and waits for competing codec work.
 See [implementation and measured results](../../docs/modular-sample-rows-prototype.md)
 for the timing boundary, qualification and current opt-in status.
+
+The follow-up `run_sample_materialization_qualification.py` compares frozen
+before/after binaries in alternating order, with warmups, process/power
+snapshots, exact decode and byte checks, and overlap exclusion/retry. It measures
+the native CPU materialization and ordered deduplication improvement shared by
+all row modes. See the [CPU follow-up report](../../docs/modular-sample-materialization.md).
