@@ -25,7 +25,7 @@ def competing(exclude=()):
         executable = Path(executable_path).name
         runner = ("python" in executable.lower() or executable == "Python") and (
             "qualification.py" in args or "qualify_" in args or
-            "run_histogram_attribution.py" in args)
+            "run_histogram_attribution.py" in args or "run_weighted_presets.py" in args)
         # Research captures also freeze executables as "profile", "baseline",
         # etc. Recognize their repository path, not just the gjxl_ prefix.
         binary = ("/GitHub/gjxl" in executable_path or

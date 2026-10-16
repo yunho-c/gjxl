@@ -83,9 +83,19 @@ void Case(GpuBackend &gpu, unsigned kind) {
        {{256, 256}, channels, 1, wp, owner->weighted_views()},
        {},
        {{256, 256}, channels, 1, wp, owner->weighted_views()}}};
-  for (unsigned scenario = 0; scenario < 8; ++scenario) {
-    const unsigned variant = scenario / 2;
+  const HistogramTrainingImage unique_image{
+      {256, 256},
+      std::span(channels).subspan(1, 1),
+      0,
+      wp,
+      owner->weighted_views().subspan(1, 1)};
+  for (unsigned scenario = 0; scenario < 20; ++scenario) {
+    const unsigned variant = scenario / 4;
     const bool deferred = scenario % 2;
+    const bool proof = (scenario / 2) % 2;
+    const auto training = variant == 4
+                              ? std::span(&unique_image, 1)
+                              : std::span<const HistogramTrainingImage>(images);
     HistogramSamplingOptions options;
     options.maximum_channel_size = 256; // Omit final channel, preserving holes.
     options.maximum_property_values = variant == 0 ? 2 : variant == 1 ? 8 : 256;
@@ -105,13 +115,14 @@ void Case(GpuBackend &gpu, unsigned kind) {
         options.predictors[p] = static_cast<Predictor>(13 - p);
     }
     PreparedHistogramSamples raster, selected, device;
-    Ok(PrepareHistogramSamples(images, &raster, options));
+    Ok(PrepareHistogramSamples(training, &raster, options));
     if (kind == 2 && variant == 2)
       Check(std::ranges::find(raster.samples().weights, UINT16_MAX) !=
                 raster.samples().weights.end(),
             "Uniform fixture did not exercise saturated dedup weights");
     options.row_backend = HistogramRowBackend::kSelectedCpu;
-    Ok(PrepareHistogramSamples(images, &selected, options));
+    options.use_unique_row_proof = proof;
+    Ok(PrepareHistogramSamples(training, &selected, options));
     Check(Same(raster.samples(), selected.samples()),
           "Selected CPU rows differ from raster oracle");
     options.row_backend = HistogramRowBackend::kGpu;
@@ -121,7 +132,8 @@ void Case(GpuBackend &gpu, unsigned kind) {
     options.row_source = owner.get();
     HostStorageBound bound;
     ArmNextManagedHostAllocationFailureForTest();
-    Ok(ComputeHistogramSamplePreparationStorageBound(images, options, &bound));
+    Ok(ComputeHistogramSamplePreparationStorageBound(training, options,
+                                                     &bound));
     Check(ManagedHostAllocationFailurePendingForTest(),
           "GPU row storage planning allocated");
     DisarmManagedHostAllocationFailureForTest();
@@ -130,7 +142,7 @@ void Case(GpuBackend &gpu, unsigned kind) {
     Ok(budget.Reserve(bound.peak_bytes, &reserve));
     {
       ResourceContextScope scope({&reserve, ResourceClass::kPreparation});
-      Ok(PrepareHistogramSamples(images, &device, options));
+      Ok(PrepareHistogramSamples(training, &device, options));
     }
     Check(Same(raster.samples(), device.samples()),
           "Metal rows, weights or quantizer cuts differ");
@@ -144,6 +156,8 @@ void Case(GpuBackend &gpu, unsigned kind) {
               budget.snapshot().peak_backing_bytes <= bound.peak_bytes,
           "Metal row coverage or admitted storage differs");
     const auto &diagnostics = device.stats().rows;
+    const bool unique = proof && variant == 4;
+    const bool bulk = deferred || unique;
     Check(diagnostics.diagnostic_calls == 1 &&
               diagnostics.replay_rows == device.samples().total_samples &&
               diagnostics.retained_rows == device.samples().weights.size() &&
@@ -151,9 +165,15 @@ void Case(GpuBackend &gpu, unsigned kind) {
                   diagnostics.replay_rows - diagnostics.retained_rows &&
               diagnostics.occupied_probes <= diagnostics.lookup_probes &&
               diagnostics.duplicate_hits <= diagnostics.occupied_probes &&
-              diagnostics.deferred_calls == size_t{deferred} &&
+              diagnostics.unique_calls == size_t{unique} &&
+              diagnostics.unique_rows ==
+                  (unique ? diagnostics.replay_rows : 0) &&
+              (!unique ||
+               (!diagnostics.lookup_probes && !diagnostics.table_growths &&
+                !diagnostics.rehashed_rows)) &&
+              diagnostics.deferred_calls == size_t{bulk} &&
               diagnostics.contiguous_materializations ==
-                  size_t{deferred &&
+                  size_t{bulk &&
                          diagnostics.replay_rows == diagnostics.retained_rows},
           "GPU replay counters or deferred materialization mismatch");
     // Matching weighted rows alone are insufficient: exercise the fitter too.
@@ -165,12 +185,12 @@ void Case(GpuBackend &gpu, unsigned kind) {
     const auto *old = device.samples().weights.data();
     for (bool completion : {false, true}) {
       Ok(ArmNextMetalSubmissionFailureForTest(gpu, !completion, completion));
-      const auto status = PrepareHistogramSamples(images, &device, options);
+      const auto status = PrepareHistogramSamples(training, &device, options);
       Check(!status.ok() && device.samples().weights.data() == old,
             "Failed row submission/completion changed the published samples");
     }
     Ok(ArmNextMetalAllocationFailureForTest(gpu));
-    Check(!PrepareHistogramSamples(images, &device, options).ok() &&
+    Check(!PrepareHistogramSamples(training, &device, options).ok() &&
               device.samples().weights.data() == old,
           "Failed row allocation changed the published samples");
     device = {};
@@ -215,17 +235,21 @@ void SaturatedAlias(GpuBackend &gpu) {
   options.predictor_count = options.property_count = 1;
   options.predictors = {Predictor::kZero};
   options.properties = {9};
-  for (unsigned mode = 0; mode < 3; ++mode) {
-    options.row_backend =
-        mode ? HistogramRowBackend::kGpu : HistogramRowBackend::kRasterCpu;
-    options.defer_gpu_row_materialization = mode == 2;
-    options.row_generator = dynamic_cast<HistogramRowGenerator *>(&gpu);
-    options.row_source = owner.get();
-    PreparedHistogramSamples output;
-    const auto status = PrepareHistogramSamples({&image, 1}, &output, options);
-    Check(status.code() == StatusCode::kUnsupported &&
-              output.samples().weights.empty(),
-          "Saturated row alias was accepted or published");
+  for (bool proof : {false, true}) {
+    for (unsigned mode = 0; mode < 3; ++mode) {
+      options.use_unique_row_proof = proof;
+      options.row_backend =
+          mode ? HistogramRowBackend::kGpu : HistogramRowBackend::kRasterCpu;
+      options.defer_gpu_row_materialization = mode == 2;
+      options.row_generator = dynamic_cast<HistogramRowGenerator *>(&gpu);
+      options.row_source = owner.get();
+      PreparedHistogramSamples output;
+      const auto status =
+          PrepareHistogramSamples({&image, 1}, &output, options);
+      Check(status.code() == StatusCode::kUnsupported &&
+                output.samples().weights.empty(),
+            "Saturated row alias was accepted or published");
+    }
   }
   owner.reset();
   reserve.Reset();

@@ -328,6 +328,7 @@ int main(int argc, char **argv) try {
     Require(argc == 2, "preparation-self-test takes no arguments");
     const auto count = capture::RunPreparationDifferentialTests();
     std::cout << "{\"preparation_differential_cases\":" << count
+              << ",\"unique_proof_variants\":2"
               << ",\"samples_exact\":true,\"tree_exact\":true,\"reference_"
                  "weight_overflow_rejected\":true}\n";
     return 0;

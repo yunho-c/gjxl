@@ -611,3 +611,12 @@ deferred candidate replay. Passing the same executable as both binaries isolates
 the two replay modes within one build. See the
 [deferred materialization report](../../docs/modular-deferred-sample-materialization.md)
 and `analyze_sample_preparation_samply.py` for sampled CPU attribution.
+
+`raster-unique`, `selected-unique`, and `metal-unique` enable the optional
+geometry/bin uniqueness proof. Proven scopes omit ordered deduplication; every
+unproved scope retains native lookup and weight behavior. `metal-unique` uses
+deferred replay for its fallback. The profile reports proof time, attempted and
+proven scopes, and the number of rows covered. Use the paired runner's
+`--baseline-metal-mode metal-deferred --candidate-unique-rows` to compare this
+experiment with the committed deferred mode on both CPU and Metal rows. See
+[the uniqueness experiment](../../docs/modular-unique-sample-rows.md).

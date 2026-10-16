@@ -40,6 +40,9 @@ struct HistogramSamplingOptions {
   // are copied into the prepared result.
   std::span<const HistogramMultiplierRange> multipliers;
   HistogramRowBackend row_backend = HistogramRowBackend::kRasterCpu;
+  // Private experiment: bypass native dedup only after the active property
+  // mappings prove that every included pixel has a distinct row key.
+  bool use_unique_row_proof = false;
   // Private GPU replay experiment and diagnostic counters. CPU rows ignore
   // these flags. Deferred replay reuses the completed selection-index storage.
   bool defer_gpu_row_materialization = false;

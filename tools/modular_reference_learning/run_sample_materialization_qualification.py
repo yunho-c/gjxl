@@ -32,6 +32,9 @@ def main():
     parser.add_argument("--participants", type=int, default=14)
     parser.add_argument("--candidate-metal-mode", choices=["metal", "metal-deferred"],
                         default="metal")
+    parser.add_argument("--baseline-metal-mode", choices=["metal", "metal-deferred"],
+                        default="metal")
+    parser.add_argument("--candidate-unique-rows", action="store_true")
     args = parser.parse_args()
     require(args.repeats > 0 and args.warmups >= 0 and args.participants > 0,
             "Invalid repetition or participant count")
@@ -66,6 +69,8 @@ def main():
         modes=args.modes, route=args.route, predictors=args.predictors,
         repeats=args.repeats, warmups=args.warmups, participants=args.participants,
         candidate_metal_mode=args.candidate_metal_mode,
+        baseline_metal_mode=args.baseline_metal_mode,
+        candidate_unique_rows=args.candidate_unique_rows,
         timing="EncodeReferenceModularImage caller wall, excluding backend creation, input/output I/O and independent decode; preparation/replay are overlapping per-scope wall sums",
         observations=[])
     expected = {}
@@ -78,7 +83,11 @@ def main():
         while True:
             quiet()
             directory = out / f"{source.stem}-{mode}-{label}-{repetition}-{attempt}"
-            actual_mode = args.candidate_metal_mode if label == "candidate" and mode == "metal" else mode
+            actual_mode = mode
+            if mode == "metal":
+                actual_mode = args.candidate_metal_mode if label == "candidate" else args.baseline_metal_mode
+            if label == "candidate" and args.candidate_unique_rows:
+                actual_mode = mode + "-unique"
             argv = [binaries[label]["path"], str(source), str(directory), args.route,
                     "auto", args.predictors, "fit-off", *([str(args.participants)] * 5), actual_mode]
             before = snapshot()

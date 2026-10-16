@@ -11,11 +11,14 @@ namespace gjxl::modular_internal {
 enum class HistogramRowBackend { kRasterCpu, kSelectedCpu, kGpu };
 struct HistogramRowProfile {
   // Sums of scope wall times; concurrent scopes overlap. gather includes all
-  // other intervals below. GPU generation includes allocation/copy/submit/wait.
+  // other intervals below except uniqueness_seconds, which precedes gathering.
+  // GPU generation includes allocation/copy/submit/wait.
   double gather_seconds = 0, selection_seconds = 0, generation_seconds = 0,
          replay_seconds = 0, allocation_copy_seconds = 0,
          submit_wait_seconds = 0;
   double table_growth_seconds = 0, materialization_seconds = 0;
+  double uniqueness_seconds = 0;
+  size_t uniqueness_checks = 0, unique_calls = 0, unique_rows = 0;
   size_t gpu_calls = 0, gpu_rows = 0, output_bytes = 0, dispatch_bytes = 0;
   // GPU replay counters are opt-in; disabled timing runs omit hot-loop counts.
   size_t diagnostic_calls = 0, replay_rows = 0, retained_rows = 0,
@@ -32,7 +35,8 @@ inline void MergeHistogramRowProfile(HistogramRowProfile &to,
                      &HistogramRowProfile::allocation_copy_seconds,
                      &HistogramRowProfile::submit_wait_seconds,
                      &HistogramRowProfile::table_growth_seconds,
-                     &HistogramRowProfile::materialization_seconds})
+                     &HistogramRowProfile::materialization_seconds,
+                     &HistogramRowProfile::uniqueness_seconds})
     to.*field += from.*field;
   for (auto field :
        {&HistogramRowProfile::gpu_calls, &HistogramRowProfile::gpu_rows,
@@ -47,7 +51,9 @@ inline void MergeHistogramRowProfile(HistogramRowProfile &to,
         &HistogramRowProfile::table_growths,
         &HistogramRowProfile::rehashed_rows,
         &HistogramRowProfile::deferred_calls,
-        &HistogramRowProfile::contiguous_materializations})
+        &HistogramRowProfile::contiguous_materializations,
+        &HistogramRowProfile::uniqueness_checks,
+        &HistogramRowProfile::unique_calls, &HistogramRowProfile::unique_rows})
     to.*field += from.*field;
 }
 class HistogramRowSource {

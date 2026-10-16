@@ -180,7 +180,7 @@ CheckPreparedTree(native::PreparedHistogramSamples &prepared,
 }
 
 namespace {
-void CheckPreparationCase(
+bool CheckPreparationCase(
     const std::vector<jxl::Image> &images,
     std::span<const jxl::ModularOptions> options, size_t start,
     const std::vector<jxl::ModularMultiplierInfo> &multipliers = {}) {
@@ -192,21 +192,6 @@ void CheckPreparationCase(
   native_options.multipliers = native_multipliers;
   const auto borrowed = BorrowReferenceImages(std::span(images).subspan(start),
                                               options.subspan(start));
-  using namespace gjxl::resource_budget_internal;
-  HostStorageBound bound;
-  Ok(native::ComputeHistogramSamplePreparationStorageBound(
-      borrowed.images, native_options, &bound));
-  ResourceBudget budget(bound.peak_bytes);
-  ResourceReservation reservation;
-  Ok(budget.Reserve(bound.peak_bytes, &reservation));
-  native::PreparedHistogramSamples prepared;
-  {
-    ResourceContextScope scope({&reservation, ResourceClass::kPreparation});
-    Ok(native::PrepareHistogramSamples(borrowed.images, &prepared,
-                                       native_options));
-  }
-  Require(budget.snapshot().peak_backing_bytes <= bound.peak_bytes,
-          "Preparation exceeded storage bound");
   std::vector<Fixture> fixtures;
   Session session;
   session.captured = &fixtures;
@@ -218,21 +203,44 @@ void CheckPreparationCase(
     Require(tree.ok(), "Synthetic reference preparation failed");
     expected = std::move(tree).value_();
   }
-  if (prepared.samples().total_samples) {
-    Require(fixtures.size() == 1, "Synthetic reference capture count mismatch");
-    CheckPreparedSamples(prepared, fixtures.front());
-  } else {
-    Require(fixtures.empty(),
-            "Empty reference preparation unexpectedly fitted");
+  bool proven = false;
+  for (bool proof : {false, true}) {
+    native_options.use_unique_row_proof = proof;
+    using namespace gjxl::resource_budget_internal;
+    HostStorageBound bound;
+    Ok(native::ComputeHistogramSamplePreparationStorageBound(
+        borrowed.images, native_options, &bound));
+    ResourceBudget budget(bound.peak_bytes);
+    ResourceReservation reservation;
+    Ok(budget.Reserve(bound.peak_bytes, &reservation));
+    native::PreparedHistogramSamples prepared;
+    {
+      ResourceContextScope scope({&reservation, ResourceClass::kPreparation});
+      Ok(native::PrepareHistogramSamples(borrowed.images, &prepared,
+                                         native_options));
+    }
+    Require(budget.snapshot().peak_backing_bytes <= bound.peak_bytes,
+            "Preparation exceeded storage bound");
+    if (prepared.samples().total_samples) {
+      Require(fixtures.size() == 1,
+              "Synthetic reference capture count mismatch");
+      CheckPreparedSamples(prepared, fixtures.front());
+    } else {
+      Require(fixtures.empty(),
+              "Empty reference preparation unexpectedly fitted");
+    }
+    if (proof)
+      proven = prepared.stats().rows.unique_calls != 0;
+    CheckPreparedTree(prepared, expected);
   }
-  CheckPreparedTree(prepared, expected);
+  return proven;
 }
-void CheckPreparationCase(
+bool CheckPreparationCase(
     const std::vector<jxl::Image> &images, const jxl::ModularOptions &option,
     size_t start,
     const std::vector<jxl::ModularMultiplierInfo> &multipliers = {}) {
   const std::vector<jxl::ModularOptions> options(images.size(), option);
-  CheckPreparationCase(images, options, start, multipliers);
+  return CheckPreparationCase(images, options, start, multipliers);
 }
 } // namespace
 
@@ -344,16 +352,20 @@ size_t RunPreparationDifferentialTests() {
     const std::vector<jxl::ModularOptions> overflow_options(special.size(),
                                                             overflow_option);
     const auto borrowed = BorrowReferenceImages(special, overflow_options);
-    native::PreparedHistogramSamples prepared;
-    const auto status = native::PrepareHistogramSamples(
-        borrowed.images, &prepared, NativeSamplingOptions(overflow_option));
-    Require(
-        status.code() == gjxl::StatusCode::kUnsupported &&
-            prepared.samples().weights.empty(),
-        "Saturated duplicate alias was accepted or published: " +
-            std::string(status.message()) +
-            ", rows=" + std::to_string(prepared.samples().weights.size()) +
-            ", selected=" + std::to_string(prepared.samples().total_samples));
+    for (bool proof : {false, true}) {
+      auto native_options = NativeSamplingOptions(overflow_option);
+      native_options.use_unique_row_proof = proof;
+      native::PreparedHistogramSamples prepared;
+      const auto status = native::PrepareHistogramSamples(
+          borrowed.images, &prepared, native_options);
+      Require(
+          status.code() == gjxl::StatusCode::kUnsupported &&
+              prepared.samples().weights.empty(),
+          "Saturated duplicate alias was accepted or published: " +
+              std::string(status.message()) +
+              ", rows=" + std::to_string(prepared.samples().weights.size()) +
+              ", selected=" + std::to_string(prepared.samples().total_samples));
+    }
     std::vector<Fixture> fixtures;
     Session session;
     session.captured = &fixtures;
@@ -436,6 +448,20 @@ size_t RunPreparationDifferentialTests() {
       CheckPreparationCase(special, options, 2);
     }
   }
-  return cases + 5 + 18;
+  special.clear();
+  for (size_t i = 0; i < 3; ++i) {
+    special.emplace_back(&manager);
+    if (i == 1)
+      continue;
+    add_channel(special.back(), 31, 37, -1);
+    add_channel(special.back(), 32, 37, 2);
+  }
+  option.predictor = jxl::Predictor::Variable;
+  Require(CheckPreparationCase(special, option, 0),
+          "Known unique native fixture did not exercise the proof");
+  option.max_property_values = 8;
+  Require(!CheckPreparationCase(special, option, 0),
+          "Coarse coordinate bins incorrectly proved unique");
+  return cases + 5 + 18 + 2;
 }
 } // namespace reference_learning

@@ -47,11 +47,13 @@ int main(int argc, char **argv) try {
         "hybrid_profile INPUT OUT cpu|shared-cpu|hybrid|auto auto|buffered "
         "best|all [fit-off|fit-on [learning-participants [cpu-ceiling "
         "[entropy-participants [selection-participants "
-        "[tokenization-participants [raster|selected|metal|metal-deferred "
+        "[tokenization-participants [raster|selected|metal|metal-deferred|"
+        "raster-unique|selected-unique|metal-unique "
         "[rows-off|rows-on]]]]]]]]");
   const std::string row_mode = argc >= 13 ? argv[12] : "raster";
-  const bool gpu_rows = row_mode == "metal" || row_mode == "metal-deferred";
-  Check(row_mode == "raster" || row_mode == "selected" || gpu_rows,
+  const bool gpu_rows = row_mode == "metal" || row_mode == "metal-deferred" || row_mode == "metal-unique";
+  Check(row_mode == "raster" || row_mode == "selected" ||
+            row_mode == "raster-unique" || row_mode == "selected-unique" || gpu_rows,
         "Invalid sample row mode");
   const std::string row_diagnostics = argc >= 14 ? argv[13] : "rows-off";
   Check(row_diagnostics == "rows-off" || row_diagnostics == "rows-on",
@@ -104,10 +106,11 @@ int main(int argc, char **argv) try {
     }
   ReferenceWorkflowOptions options;
   options.sample_rows = gpu_rows ? HistogramRowBackend::kGpu
-                        : row_mode == "selected"
+                        : row_mode == "selected" || row_mode == "selected-unique"
                             ? HistogramRowBackend::kSelectedCpu
                             : HistogramRowBackend::kRasterCpu;
-  options.defer_gpu_row_materialization = row_mode == "metal-deferred";
+  options.use_unique_row_proof = row_mode.ends_with("-unique");
+  options.defer_gpu_row_materialization = row_mode == "metal-deferred" || row_mode == "metal-unique";
   options.gpu_row_diagnostics = row_diagnostics == "rows-on";
   Check(!gpu_rows || route != "cpu",
         "Metal sample rows require a hybrid feature owner");
@@ -193,6 +196,10 @@ int main(int argc, char **argv) try {
   if (stats.rows.gpu_calls && options.defer_gpu_row_materialization)
     Check(stats.rows.deferred_calls == stats.rows.gpu_calls,
           "GPU deferred materialization coverage mismatch");
+  Check(stats.rows.unique_calls <= stats.rows.uniqueness_checks &&
+            stats.rows.unique_rows <= stats.distinct_samples &&
+            (options.use_unique_row_proof || !stats.rows.uniqueness_checks),
+        "Unique-row proof population mismatch");
   const size_t bytes = encoded.size();
   std::filesystem::create_directories(directory);
   std::ofstream output(directory / "output.jxl", std::ios::binary);
@@ -294,7 +301,12 @@ int main(int argc, char **argv) try {
       << ",\"table_growths\":" << stats.rows.table_growths
       << ",\"rehashed_rows\":" << stats.rows.rehashed_rows
       << ",\"deferred_calls\":" << stats.rows.deferred_calls
-      << ",\"contiguous_materializations\":" << stats.rows.contiguous_materializations;
+      << ",\"contiguous_materializations\":" << stats.rows.contiguous_materializations
+      << ",\"unique_proof\":" << (options.use_unique_row_proof ? "true" : "false")
+      << ",\"uniqueness_work\":" << stats.rows.uniqueness_seconds
+      << ",\"uniqueness_checks\":" << stats.rows.uniqueness_checks
+      << ",\"unique_calls\":" << stats.rows.unique_calls
+      << ",\"unique_rows\":" << stats.rows.unique_rows;
   out << "},\"memory\":{\"peak_backing_bytes\":" << memory.peak_backing_bytes
       << ",\"peak_committed_bytes\":" << memory.peak_committed_bytes
       << ",\"maximum_stage_bytes\":" << stats.maximum_stage_bytes
