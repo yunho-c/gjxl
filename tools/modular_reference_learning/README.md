@@ -27,20 +27,22 @@ python3 tools/modular_reference_learning/run_hybrid_qualification.py \
 
 Driver arguments are `INPUT OUT ROUTE BUFFERING PREDICTORS`:
 
-- `cpu`: ordinary scalar workflow, with no Metal backend.
+- `cpu`: CPU workflow, with no Metal backend; the private driver defaults to
+  serial stages unless explicit participant limits are supplied.
 - `shared-cpu`: bounded CPU feature preparation shared by learning and Metal
   token generation.
 - `hybrid`: requests GPU features for supported shapes, plus Metal tokens;
   oversized metadata or unavailable optional feature pipelines select CPU
   preparation before execution.
 - `auto`: chooses the feature producer using the existing batch crossover,
-  plus Metal tokens. This is a private route, not public automatic GPU routing.
+  plus Metal tokens. This route name does not mean public automatic backend
+  selection; with the trailing `public` flag it selects explicit Metal.
 
 Buffering is `auto|buffered`; predictors are `best|all`. The repeated runner
 holds these at `auto best`, uses the same four-participant CPU ceiling and
 estimated direct ANS/64-cluster policy for every route, and rotates serial
 fresh-process route order. One warmup per route/input precedes measured calls.
-The ordinary CPU workflow remains serial. Use repeated `--input` arguments for
+The private driver's default CPU control remains serial. Use repeated `--input` arguments for
 multiple images. With no `--routes`, all four controls run; check the projected
 runtime before launching a large corpus.
 
@@ -59,6 +61,47 @@ Use the [integration plan](../../docs/gpu-histogram-learner-integration.md)
 for ownership, admission, routing and validation boundaries.
 The [2026-10-14 qualification](../../docs/gpu-histogram-learner-qualification.md)
 records matched full-resolution and crossover results on Apple M4 Pro.
+
+## Integrated public CPU/Metal profiling
+
+The [integrated profile](../../docs/modular-parallel-workflow-profile.md) compares
+the public learned encoder with explicit CPU and Metal backends, a fixed
+14-participant domain, and the integrated parallel stages. It includes complete
+call timing, local learning-wave/job lifetimes, detailed fitting phases and
+separate all-thread Samply captures. Job lifetimes measure scheduling activity,
+not hardware CPU utilization.
+
+```sh
+build/release/gjxl_modular_hybrid_profile INPUT.pam OUT auto auto best schedule 14 14 14 14 14 public
+python3 tools/modular_reference_learning/run_parallel_profile.py \
+  --binary build/release/gjxl_modular_hybrid_profile \
+  --input /path/to/photo-large-1029.pam \
+  --input /path/to/photo-large-1039.pam \
+  --input /path/to/photo-large-1049.pam \
+  --out build/parallel-workflow-profile --repeats 3
+```
+
+The trailing `public` flag selects schema 6 and requires `auto best` policy
+arguments with matching learning, CPU-ceiling, entropy, selection and token
+participant limits. `fit-off` keeps top-level timers; `schedule` adds wave/job
+records; `fit-on` adds detailed fitter probes as well. Diagnostic storage and
+backend initialization are outside the encoder timer. The runner freezes local
+source edits, checks AC power and historical output hashes, and retains all
+observations. See the report for analysis commands and measurement boundaries.
+
+The [fitting scheduling follow-up](../../docs/modular-fitting-scheduling.md)
+uses `run_fitting_schedule_qualification.py` to compare the frozen profiler
+from that capture with a newly built executable. It interleaves CPU/Metal
+before/after controls and retains separate schedule traces. Local feature
+cohorts can now span several producer batches under the same aggregate sample
+ceiling; `learning.waves` counts joined queue invocations, not groups of one
+job per participant.
+
+The [work-reduction integration](../../docs/modular-fitting-work-reduction-integration.md)
+uses `--baseline-variant after` to select that qualified scheduling executable
+as its control. `--diagnostic-mode fit-on` adds separate detailed captures and
+checks logical fitter-work parity across implementations, with complete work
+counter equality across CPU/Metal routes within each implementation.
 
 ## Parallel local learning
 
@@ -81,7 +124,9 @@ configuration has one warmup and three measured repetitions by default.
 
 Explicit participant arguments select schema 2: `detail_wall.learning` is
 elapsed preparation/fitting time; `detail_work` contains overlapping per-job
-time sums. Feature and token routing remain fixed. Older invocations keep
+time sums. Cohort alignment can change feature batch boundaries and automatic
+producer routing across participant counts; the runner records those changes
+and requires stable routing within each repeated condition. Older invocations keep
 serial learning and schema 1. See the [implementation and results](../../docs/parallel-tree-fitting.md).
 
 ## Histogram fitting attribution

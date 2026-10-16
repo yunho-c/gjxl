@@ -16,6 +16,10 @@ The baseline is `5ae11e4`, the current `feat/modular` merge. Its fitter and
 learning scheduler are identical to `a7ceac3`. The candidate is the uncommitted
 source snapshot retained with this report's measurements.
 
+The subsequent [continuous-scheduler integration](modular-fitting-work-reduction-integration.md)
+checks this work reduction with the newer fitting queues and feature cohorts.
+The measurements below retain the original wave scheduler.
+
 ## Why this work can be removed
 
 Previously, every considered node/property visited its rows once to collect

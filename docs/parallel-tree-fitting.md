@@ -3,6 +3,11 @@
 Branch: `perf/parallel-tree-fitting`, based on the committed attribution work
 at `e3db25a`. This implements step 2 of the tree-fitting acceleration plan.
 
+The subsequent [fitting scheduling update](modular-fitting-scheduling.md)
+replaces the bounded waves described here with a bounded ready queue and
+shared feature cohorts. The measurements below describe the original wave
+scheduler, with its recorded revisions and routing.
+
 The [fitting profile](modular-histogram-fitting-profile.md) found 192 independent
 local fits in each 12 MP photograph. Fitting consumed 69–72% of the encoder
 interval. This slice runs existing local sample preparation and fitting across
