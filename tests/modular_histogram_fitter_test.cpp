@@ -6,6 +6,7 @@
 
 namespace {
 using namespace histogram_fitting_test;
+using gjxl::modular_internal::HistogramFittingProfile;
 HistogramTreeLearningOptions Options() {
   HistogramTreeLearningOptions o;
   o.maximum_leaves = 4096;

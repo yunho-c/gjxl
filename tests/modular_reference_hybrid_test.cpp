@@ -20,6 +20,9 @@ using test::modular_workflow_fixture::Make;
 namespace reference = gjxl::test::modular_reference;
 size_t files = 0, samples = 0, gpu_batches = 0, faults = 0;
 bool pipeline = false;
+HistogramRowBackend combined_rows = HistogramRowBackend::kRasterCpu;
+ReferenceFittingBackend combined_fitter = ReferenceFittingBackend::kCpu;
+bool combined_unique = false;
 size_t pipeline_window = 16, participants = 4;
 void Check(bool value, const char *message) {
   if (!value)
@@ -97,6 +100,12 @@ void Case(GpuBackend &gpu, Fixture f, ReferenceWorkflowOptions options,
     Ok(PrepareReferenceModularFrame(f.view(), options, budget, &cpu));
   }
   options.gpu = &gpu;
+  options.sample_rows = combined_rows;
+  options.use_unique_row_proof = combined_unique;
+  options.defer_gpu_row_materialization = combined_rows == HistogramRowBackend::kGpu;
+  options.gpu_row_diagnostics = combined_rows == HistogramRowBackend::kGpu;
+  options.fitting_backend = combined_fitter;
+  if (combined_fitter != ReferenceFittingBackend::kCpu) options.fitting_minimum_rows = 64;
   if (pipeline) {
     options.learning_schedule = ReferenceLearningSchedule::kPipeline;
     options.feature_window_samples = pipeline_window * 1024 * 1024;
@@ -108,6 +117,17 @@ void Case(GpuBackend &gpu, Fixture f, ReferenceWorkflowOptions options,
     Ok(PrepareReferenceModularFrame(f.view(), options, budget, &hybrid));
   }
   SameDecisions(cpu, hybrid);
+  if (combined_rows == HistogramRowBackend::kGpu && hybrid.stats().local_trees) {
+    const auto &rows = hybrid.stats().rows;
+    Check(rows.gpu_calls && rows.gpu_rows == hybrid.stats().selected_samples &&
+              rows.retained_rows == hybrid.stats().distinct_samples &&
+              rows.deferred_calls == rows.gpu_calls,
+          "Combined workflow lost row ownership or preparation diagnostics");
+  }
+  if (combined_unique)
+    Check(hybrid.stats().rows.uniqueness_checks != 0, "Combined workflow lost uniqueness control");
+  if (combined_fitter == ReferenceFittingBackend::kGpu)
+    Check(hybrid.stats().histogram_gpu_batches != 0, "Combined workflow did not exercise GPU fitting");
   Check(hybrid.stats().learning_peak_participants >= 1 &&
             hybrid.stats().learning_peak_participants <= participants &&
             (!hybrid.stats().local_trees || hybrid.stats().learning_peak_participants == participants),
@@ -346,7 +366,37 @@ int main(int argc, char **argv) try {
   pipeline = focused || (argc == 2 && std::string_view(argv[1]) == "--pipeline");
   std::unique_ptr<GpuBackend> gpu;
   Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &gpu));
-  if (focused) {
+  if (argc == 2 && std::string_view(argv[1]) == "--combined") {
+    combined_unique = true;
+    ReferenceWorkflowOptions all;
+    all.predictors = ReferencePredictors::kAll;
+    for (auto rows : {HistogramRowBackend::kSelectedCpu, HistogramRowBackend::kGpu}) {
+      combined_rows = rows;
+      for (auto fitter : {ReferenceFittingBackend::kCpu,
+                          ReferenceFittingBackend::kResumableCpu, ReferenceFittingBackend::kGpu}) {
+        combined_fitter = fitter;
+        Case(*gpu, Make({2049, 17}, 4, 16, 1), all, WeightedFeatureBackend::kGpu);
+      }
+      combined_fitter = ReferenceFittingBackend::kCpu;
+      pipeline = true;
+      Case(*gpu, Make({2049, 17}, 4, 16, 1), all, WeightedFeatureBackend::kGpu);
+      MixedCohort(*gpu);
+      pipeline = false;
+      MixedCohort(*gpu);
+    }
+    combined_fitter = ReferenceFittingBackend::kGpu;
+    MixedCohort(*gpu);
+    combined_fitter = ReferenceFittingBackend::kCpu;
+    pipeline = true;
+    Case(*gpu, Make({2049, 1537}, 3, 8, 3), {}, WeightedFeatureBackend::kAuto, true);
+    auto unsupported = all;
+    unsupported.learning_schedule = ReferenceLearningSchedule::kPipeline;
+    unsupported.fitting_backend = ReferenceFittingBackend::kGpu;
+    ReferenceModularFrame frame;
+    ResourceBudget budget;
+    Check(PrepareReferenceModularFrame({}, unsupported, budget, &frame).code() ==
+              StatusCode::kUnsupported, "Pipeline silently accepted GPU fitting");
+  } else if (focused) {
     ReferenceWorkflowOptions all;
     all.predictors = ReferencePredictors::kAll;
     for (size_t p : {1, 2, 4}) {
