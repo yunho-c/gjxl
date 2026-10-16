@@ -70,7 +70,9 @@ Status Run(const Fixture &f, GpuBackend &gpu,
            const std::shared_ptr<const ExecutionDomain> &domain,
            ReferenceWorkflowStats *stats, bool *handled,
            size_t minimum_rows = 64, size_t scratch = 64 * 1024 * 1024,
-           size_t leaves = kMaximumTreeLeaves) try {
+           size_t leaves = kMaximumTreeLeaves,
+           ReferenceFittingBackend backend = ReferenceFittingBackend::kGpu,
+           size_t request_count = 4) try {
   auto resources = CurrentResourceContext();
   resources.domain = domain.get();
   ResourceContextScope context(resources);
@@ -86,15 +88,15 @@ Status Run(const Fixture &f, GpuBackend &gpu,
   }
   ReferenceWorkflowOptions options;
   options.gpu = &gpu;
-  options.fitting_backend = ReferenceFittingBackend::kGpu;
+  options.fitting_backend = backend;
   options.fitting_minimum_rows = minimum_rows;
   options.fitting_execution.maximum_scratch_bytes = scratch;
   stats->local_trees = true;
   const auto status = TryLearnHistogramBatch(
-      requests, f.sampling, 4, options,
+      std::span(requests).first(request_count), f.sampling, 4, options,
       codestream_internal::WorkflowAdmission::Budget(*domain), stats, handled);
   if (status.ok() && *handled)
-    for (size_t i = 0; i < requests.size(); ++i)
+    for (size_t i = 0; i < request_count; ++i)
       Check(records[i].tree == f.expected[i],
             "GPU workflow tree differs from native CPU tree");
   return status;
@@ -109,6 +111,16 @@ int main() try {
   Ok(CreateEmbeddedMetalBackend({}, &gpu));
   Fixture fixture;
   auto domain = Domain();
+  for (size_t count : {size_t{3}, size_t{4}}) {
+    ReferenceWorkflowStats stats;
+    bool handled = false;
+    Ok(Run(fixture, *gpu, domain, &stats, &handled, 64, 64 * 1024 * 1024,
+           kMaximumTreeLeaves, ReferenceFittingBackend::kAuto, count));
+    Check(handled == (count == 4) &&
+              bool(stats.histogram_gpu_nodes) == (count == 4),
+          "Experimental automatic mode changed small-cohort routing");
+    Released(*domain);
+  }
   for (size_t cutoff : {size_t{1}, size_t{64}, size_t{8192}})
     for (size_t scratch : {size_t{1}, size_t{64 * 1024 * 1024}}) {
       ReferenceWorkflowStats stats;

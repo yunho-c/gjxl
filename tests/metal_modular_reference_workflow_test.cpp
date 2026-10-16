@@ -289,6 +289,9 @@ void Workflow(GpuBackend &gpu, const Fixture &f, ReferenceWorkflowOptions option
       f.extent == Extent2D{769, 513})
     Check(metal.stats().local_trees && metal.stats().histogram_gpu_nodes > 0,
           "Local workflow did not exercise GPU histogram fitting");
+  if (options.fitting_backend == ReferenceFittingBackend::kAuto)
+    Check(!metal.stats().histogram_gpu_nodes && !metal.stats().histogram_cpu_nodes,
+          "Small shared fit did not retain the ordinary CPU fitter");
   if (f.extent == Extent2D{257, 257})
     Check(profile.adaptive_gpu.feature_preparation.gpu_calls == 1 &&
               profile.adaptive_gpu.feature_preparation.gpu_samples > 0,
@@ -406,6 +409,9 @@ int main() try {
                          SampleByteOrder::kBigEndian), histogram);
   histogram.buffering = ReferenceBuffering::kBuffered;
   Workflow(*gpu, Fixture(PackedModularFormat::kRgb16, {257, 3}, false,
+                         SampleByteOrder::kLittleEndian), histogram);
+  histogram.fitting_backend = ReferenceFittingBackend::kAuto;
+  Workflow(*gpu, Fixture(PackedModularFormat::kRgb8, {17, 19}, false,
                          SampleByteOrder::kLittleEndian), histogram);
   PublicC();
   std::cout << cases << " CPU/Metal codestream pairs and " << samples_checked

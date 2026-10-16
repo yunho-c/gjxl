@@ -1,11 +1,13 @@
 # Batched GPU histogram fitting
 
 Status: the operation/storage contract, resumable CPU reference, Metal
-evaluator and private learner integration are implemented. CPU
+evaluator and private learner integration are implemented and qualified. CPU
 consolidation is committed as `3aca01c`; its paired performance qualification
 is recorded in [the baseline report](gpu-histogram-fitting-baseline.md).
-Complete-call qualification determines whether GPU fitting should be preferred.
-The public encoder continues to use the ordinary CPU histogram fitter.
+The [complete-call qualification](gpu-histogram-fitting-qualification.md)
+preserves exact bytes and decoding across 160 encodes but finds no consistent
+GPU fitting speedup. The public encoder continues to use the ordinary CPU
+histogram fitter; GPU fitting remains a private opt-in experiment.
 
 This effort targets the native quantized, weighted histogram learner. The older
 `GpuModularTreeStatistics` operation evaluates sorted rows using integer Q12
@@ -131,7 +133,7 @@ are representation/admission bounds, not a truncation of learning samples.
 Preparation has a retained device arena for descriptors and aligned columns,
 retained host shape metadata, and a conservative fresh host staging arena.
 The planner also reports the separate host row-order bound required by the
-future CPU integration. CPU sample columns, trees, feature owners and any old
+CPU integration. CPU sample columns, trees, feature owners and any old
 output remain separately charged.
 
 Evaluation uses a dispatch arena for node descriptors, row indices, parent
@@ -242,16 +244,20 @@ managed allocations occur after successful initialization.
 The CPU-overhead replay used seven genuine captured fits: Macan Best/All,
 alpha16-ramp All, gray-patches Best, flower reference local fits 0/48, and
 noise16 All. With one warmup per mode and five alternating measured pairs on
-M4 Pro/AC, the sum of per-fit medians changes by **-0.11%**; individual changes
-range from **-1.60% to +0.56%**. All trees match the captured reference, and
+M4 Pro/AC, the sum of per-fit medians changes by **-0.04%**; individual changes
+range from **-0.62% to +1.11%**. All trees match the captured reference, and
 measured managed peaks match the resumable bounds exactly. This compares
 ordinary and resumable fitting in the same refactored CPU-only Release binary;
 it does not measure the refactor's end-to-end effect against the frozen encoder
 baseline. Timings include validation, initialization, evaluation, partitioning
 and publication, and exclude native sample conversion and reference-tree
-comparison. The first timing pass overlapped another qualification and was
-discarded; the replacement monitored competing encoder/compiler processes
-throughout each measured invocation.
+comparison. These are replacement measurements of the same frozen binary.
+Earlier timings are superseded: the first pass overlapped another experiment,
+and the initial replacement used a process-name column that macOS could
+truncate. The corrected monitor reads unlimited command arguments, follows
+competing controllers through gaps between child processes, and checks every
+200 milliseconds. All seven accepted replay invocations have empty activity
+logs. Correctness and source/binary hashes are unchanged by this timing rerun.
 
 Raw timings, fixture/source/binary hashes and test evidence are in
 [`gpu-histogram-fitting-cpu-reference-results.json`](gpu-histogram-fitting-cpu-reference-results.json).

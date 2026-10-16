@@ -35,7 +35,9 @@ struct ReferenceWorkflowOptions {
   // still precedes stream placement and always runs as one job.
   size_t selection_cpu_participants = 0;
   ReferenceFittingBackend fitting_backend = ReferenceFittingBackend::kCpu;
-  size_t fitting_minimum_rows = 1024, fitting_batch_fits = 64;
+  // Private experiments use the measured 16K-row cutoff; GPU fitting remains
+  // disabled by default. This is not a guaranteed CPU/GPU speed crossover.
+  size_t fitting_minimum_rows = 16384, fitting_batch_fits = 64;
   histogram_gpu_internal::HistogramFittingExecutionOptions fitting_execution;
 };
 struct ReferenceLearningStats {
