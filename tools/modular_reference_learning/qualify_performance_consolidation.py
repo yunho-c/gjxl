@@ -150,11 +150,11 @@ def main():
         for label, provenance in report["sources"].items():
             require(source_files(Path(provenance["root"])) == provenance["files"], f"{label} sources changed")
         for provenance in report["binaries"].values():
-            require(sha(provenance["path"]) == provenance["sha256"], "Frozen binary changed")
+            require(sha(Path(provenance["path"])) == provenance["sha256"], "Frozen binary changed")
         for path, digest in dependencies.items():
-            require(sha(path) == digest, "Dependency changed")
+            require(sha(Path(path)) == digest, "Dependency changed")
         for case in report["cases"]:
-            require(sha(case["input"]) == case["input_sha256"], "Input changed")
+            require(sha(Path(case["input"])) == case["input_sha256"], "Input changed")
         report["status"] = "passed"
     except BaseException as error:
         report.update(status="failed", error=str(error))

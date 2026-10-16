@@ -118,6 +118,8 @@ int main(int argc, char **argv) try {
   Check(gpu_profile_mode == "gpu-off" || gpu_profile_mode == "gpu-wall" ||
             gpu_profile_mode == "gpu-stage", "Unknown histogram GPU profiling mode");
   const bool gpu_profile_enabled = gpu_profile_mode != "gpu-off";
+  const bool gpu_profile_output = argc >= 16 || named_control("--gpu-profile") ||
+      named_control("--histogram-shards") || named_control("--active-properties");
   const std::string fitter_flag = argc >= 13 ? argv[12] : "fitter-cpu";
   const bool public_api = fitter_flag == "public";
   Check((!public_api || (argc == 13 && !private_flags)) &&
@@ -346,7 +348,7 @@ int main(int argc, char **argv) try {
         "Completed encode leaked managed storage");
   std::ofstream out(directory / "result.json");
   out.exceptions(std::ios::failbit | std::ios::badbit);
-  out << std::setprecision(17) << std::boolalpha << "{\"schema\":" << (argc >= 16 ? 8 : fitter_diagnostics ? 7 : public_api ? 6 : tokenization_diagnostics ? 5 : selection_diagnostics ? 4 : entropy_diagnostics ? 3 : parallel_diagnostics ? 2 : 1)
+  out << std::setprecision(17) << std::boolalpha << "{\"schema\":" << (gpu_profile_output ? 8 : fitter_diagnostics ? 7 : public_api ? 6 : tokenization_diagnostics ? 5 : selection_diagnostics ? 4 : entropy_diagnostics ? 3 : parallel_diagnostics ? 2 : 1)
       << ",\"public_api\":" << public_api
       << ",\"gpu_submissions\":" << (backend ? backend->stats().committed_submissions - submissions : 0)
       << ",\"route\":" << std::quoted(route)
@@ -471,7 +473,7 @@ int main(int argc, char **argv) try {
       << ",\"peak_scratch_bytes\":" << stats.histogram_peak_scratch_bytes
       << ",\"preparation_seconds\":" << stats.histogram_preparation_seconds
       << ",\"evaluation_seconds\":" << stats.histogram_evaluation_seconds << '}';
-  if (argc >= 16) {
+  if (gpu_profile_output) {
     out << ",\"histogram_gpu_profile\":{\"mode\":" << std::quoted(gpu_profile_mode)
         << ",\"shards\":" << options.fitting_execution.histogram_shards
         << ",\"active_properties\":" << options.fitting_execution.maximum_active_properties
