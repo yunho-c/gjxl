@@ -1,0 +1,1918 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "base_revision": "2f9c4de657312e94ec57eeebbebcebf4e3a474e6",
+  "artifact_directory": "/Users/yunhocho/GitHub/gjxl-training-row-hash-reuse/build/sample-hash-qualification",
+  "manifest_sha256": "7eb4262b19f6877c36054c65e68631f3fdc9b45bc9691954e9e0827d6abae6bf",
+  "source_archive_sha256": "e646e03f2bfa9776bca3871ac1945c9144acb9c6bf53ae2c477807701dbae47e",
+  "sampler_sha256": "ee458913c02cffe62bc8ad269d5144ffa0bcd61e4c077a4141c1e8f0a6478caf",
+  "runner_sha256": "274045ab5f41942c54a938d6e15079eb788de469d40c3909937e1b16cf61f52f",
+  "baseline_manifest_sha256": "5dfee520e05141b865eb67dc57e6e8cf38d9eac0f8ea75ae79ff75dccfff0088",
+  "binaries": {
+    "baseline": {
+      "sha256": "f51d3eead249edddbc7ce2d55b760a82558ede2fbd4cc63d3662ea29c9f0bc5a",
+      "libraries": "/Users/yunhocho/GitHub/gjxl-training-row-hash-reuse/build/sample-hash-qualification/baseline:\n\t/System/Library/Frameworks/Metal.framework/Versions/A/Metal (compatibility version 1.0.0, current version 382.5.3)\n\t/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation (compatibility version 300.0.0, current version 5027.0.69, weak)\n\t/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics (compatibility version 64.0.0, current version 2050.0.0)\n\t@rpath/libjxl.0.13.dylib (compatibility version 0.13.0, current version 0.13.0)\n\t@rpath/libjxl_cms.0.13.dylib (compatibility version 0.13.0, current version 0.13.0)\n\t@rpath/libbrotlienc.1.dylib (compatibility version 1.0.0, current version 1.2.0)\n\t@rpath/libbrotlidec.1.dylib (compatibility version 1.0.0, current version 1.2.0)\n\t@rpath/libbrotlicommon.1.dylib (compatibility version 1.0.0, current version 1.2.0)\n\t/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 2200.27.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)\n\t/usr/lib/libobjc.A.dylib (compatibility version 1.0.0, current version 228.0.0)"
+    },
+    "reuse": {
+      "sha256": "c7b03c8e5174a93adb3da352a8f091be4c5e1fd94576533ee569ce94c3ded42f",
+      "libraries": "/Users/yunhocho/GitHub/gjxl-training-row-hash-reuse/build/sample-hash-qualification/reuse:\n\t/System/Library/Frameworks/Metal.framework/Versions/A/Metal (compatibility version 1.0.0, current version 382.5.3)\n\t/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation (compatibility version 300.0.0, current version 5027.0.69, weak)\n\t/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics (compatibility version 64.0.0, current version 2050.0.0)\n\t@rpath/libjxl.0.13.dylib (compatibility version 0.13.0, current version 0.13.0)\n\t@rpath/libjxl_cms.0.13.dylib (compatibility version 0.13.0, current version 0.13.0)\n\t@rpath/libbrotlienc.1.dylib (compatibility version 1.0.0, current version 1.2.0)\n\t@rpath/libbrotlidec.1.dylib (compatibility version 1.0.0, current version 1.2.0)\n\t@rpath/libbrotlicommon.1.dylib (compatibility version 1.0.0, current version 1.2.0)\n\t/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 2200.27.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)\n\t/usr/lib/libobjc.A.dylib (compatibility version 1.0.0, current version 228.0.0)"
+    }
+  },
+  "inputs": [
+    {
+      "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+      "sha256": "a1c487b0160d8f3e8cb86753131b919ac3de28e908fde757050ebccdb4407b6d"
+    },
+    {
+      "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1039.pam",
+      "sha256": "22f487129343ed6d403346653ef99900e2552728ba2e4f5c63c90d058132f302"
+    },
+    {
+      "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1049.pam",
+      "sha256": "0b3feae4d3bf1a13f89d5f4c3d976c8ea1e93e49a65548919cb5474c3cd1d62d"
+    }
+  ],
+  "participants": 14,
+  "repeats": 3,
+  "complete_encodes": 48,
+  "warmup_encodes": 12,
+  "measured_encodes": 36,
+  "exact_bytes_and_decodes": true,
+  "competing_job_interruptions": 0,
+  "qualification": {
+    "release_suites": 7,
+    "reference_suites": 2,
+    "preparation_differential_cases": 119,
+    "reference_weight_overflow_rejected": true,
+    "logs": {
+      "build/hash-reuse-release-tests.log": "34e4b102250da07d30a76fcfd1a3ec62f51b2ef3900a1be2c79fa74051250d5e",
+      "build/hash-reuse-reference-tests.log": "0e6276f52a966a5b30c6a3fe3d65febd10a663bb32dfcd7934a063d91ee7e48b",
+      "build/reference/bin/Testing/Temporary/LastTest.log": "787bec4a9190d9f4bca28b4060e01b5021dbb868756279e3991410e5b33671f5"
+    }
+  },
+  "scope": "Public default learned encoder, explicit CPU/Metal, AC power, active desktop. Training includes selection, preparation and fitting. I/O, backend initialization and independent decoding excluded.",
+  "timing": [
+    {
+      "input": "photo-large-1029",
+      "route": "cpu",
+      "baseline": {
+        "wall": {
+          "median": 4.049206417,
+          "minimum": 4.028931125,
+          "maximum": 4.079173916
+        },
+        "cpu": {
+          "median": 41.526047,
+          "minimum": 41.348912,
+          "maximum": 41.724521
+        },
+        "training": {
+          "median": 2.968091209,
+          "minimum": 2.9497115,
+          "maximum": 2.975771042
+        }
+      },
+      "reuse": {
+        "wall": {
+          "median": 3.995127333,
+          "minimum": 3.9137295,
+          "maximum": 4.334869333
+        },
+        "cpu": {
+          "median": 40.726556,
+          "minimum": 40.320901,
+          "maximum": 40.848634
+        },
+        "training": {
+          "median": 2.938087458,
+          "minimum": 2.840178417,
+          "maximum": 3.128238959
+        }
+      }
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "metal",
+      "baseline": {
+        "wall": {
+          "median": 4.491978917,
+          "minimum": 4.391625,
+          "maximum": 4.645698584
+        },
+        "cpu": {
+          "median": 38.330103,
+          "minimum": 38.317501,
+          "maximum": 38.842564
+        },
+        "training": {
+          "median": 3.5209542519999992,
+          "minimum": 3.4311675379999995,
+          "maximum": 3.6773770819999996
+        }
+      },
+      "reuse": {
+        "wall": {
+          "median": 4.466228417,
+          "minimum": 4.327187667,
+          "maximum": 4.538016292
+        },
+        "cpu": {
+          "median": 38.154878,
+          "minimum": 37.910147,
+          "maximum": 38.274047
+        },
+        "training": {
+          "median": 3.4803347900000006,
+          "minimum": 3.3740372099999996,
+          "maximum": 3.5628863349999995
+        }
+      }
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "cpu",
+      "baseline": {
+        "wall": {
+          "median": 3.06212775,
+          "minimum": 3.045499667,
+          "maximum": 3.065487959
+        },
+        "cpu": {
+          "median": 29.749862,
+          "minimum": 29.589384,
+          "maximum": 30.273448
+        },
+        "training": {
+          "median": 2.119567792,
+          "minimum": 2.072081459,
+          "maximum": 2.135999583
+        }
+      },
+      "reuse": {
+        "wall": {
+          "median": 2.974494917,
+          "minimum": 2.966892291,
+          "maximum": 2.975125417
+        },
+        "cpu": {
+          "median": 29.689779,
+          "minimum": 29.368593,
+          "maximum": 29.837286
+        },
+        "training": {
+          "median": 2.04711375,
+          "minimum": 2.030106625,
+          "maximum": 2.048272834
+        }
+      }
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "metal",
+      "baseline": {
+        "wall": {
+          "median": 3.9006545,
+          "minimum": 3.898721458,
+          "maximum": 3.927358459
+        },
+        "cpu": {
+          "median": 27.587607,
+          "minimum": 27.524298,
+          "maximum": 27.592692
+        },
+        "training": {
+          "median": 3.047715336,
+          "minimum": 3.042073501,
+          "maximum": 3.078461162999999
+        }
+      },
+      "reuse": {
+        "wall": {
+          "median": 3.830306917,
+          "minimum": 3.803631292,
+          "maximum": 3.946866667
+        },
+        "cpu": {
+          "median": 26.876043,
+          "minimum": 26.838156,
+          "maximum": 27.237136
+        },
+        "training": {
+          "median": 2.978203545,
+          "minimum": 2.9507777429999997,
+          "maximum": 3.0715389569999996
+        }
+      }
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "cpu",
+      "baseline": {
+        "wall": {
+          "median": 3.009138167,
+          "minimum": 3.005052166,
+          "maximum": 3.328926416
+        },
+        "cpu": {
+          "median": 28.052101,
+          "minimum": 26.747273,
+          "maximum": 28.154374
+        },
+        "training": {
+          "median": 2.114437584,
+          "minimum": 2.096849667,
+          "maximum": 2.39621825
+        }
+      },
+      "reuse": {
+        "wall": {
+          "median": 3.033922041,
+          "minimum": 2.917404417,
+          "maximum": 3.686538625
+        },
+        "cpu": {
+          "median": 27.470537,
+          "minimum": 25.987907,
+          "maximum": 27.691141
+        },
+        "training": {
+          "median": 2.121683167,
+          "minimum": 2.0216775,
+          "maximum": 2.668171375
+        }
+      }
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "metal",
+      "baseline": {
+        "wall": {
+          "median": 3.260979583,
+          "minimum": 3.250099875,
+          "maximum": 3.265001625
+        },
+        "cpu": {
+          "median": 25.545796,
+          "minimum": 25.467344,
+          "maximum": 25.755249
+        },
+        "training": {
+          "median": 2.442239459,
+          "minimum": 2.422292336,
+          "maximum": 2.4607188330000005
+        }
+      },
+      "reuse": {
+        "wall": {
+          "median": 3.169477,
+          "minimum": 3.1502635,
+          "maximum": 3.253598
+        },
+        "cpu": {
+          "median": 25.128866,
+          "minimum": 24.465559,
+          "maximum": 25.131832
+        },
+        "training": {
+          "median": 2.3575847509999996,
+          "minimum": 2.3445243780000005,
+          "maximum": 2.395760375
+        }
+      }
+    }
+  ],
+  "runs": [
+    {
+      "input": "photo-large-1029",
+      "route": "cpu",
+      "build": "baseline",
+      "repetition": 0,
+      "warmup": true,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 10507251,
+        "wall": 4.140580542,
+        "cpu": 40.436323,
+        "stages": [
+          0.019778,
+          0.469555625,
+          3.022168583,
+          0.235193208,
+          0,
+          1.999e-06,
+          0.001431708,
+          0,
+          0.3651385
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 3.9176944609999995,
+        "emission_work": 1.0738728370000001,
+        "peak_committed": 1876936376,
+        "peak_backing": 850805983
+      },
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "cpu",
+      "build": "reuse",
+      "repetition": 0,
+      "warmup": true,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 10507251,
+        "wall": 3.925657583,
+        "cpu": 40.300424,
+        "stages": [
+          0.011958875,
+          0.445088166,
+          2.85160025,
+          0.222926625,
+          0,
+          2.208e-06,
+          0.001447042,
+          0,
+          0.364624917
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 3.909304047,
+        "emission_work": 1.0590813360000002,
+        "peak_committed": 1876936376,
+        "peak_backing": 849651814
+      },
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "metal",
+      "build": "reuse",
+      "repetition": 0,
+      "warmup": true,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 10507251,
+        "wall": 4.36083075,
+        "cpu": 37.683885,
+        "stages": [
+          0.011702083,
+          0.439083,
+          3.410394042,
+          0.09459662599999999,
+          0,
+          1.7909999999999999e-06,
+          0.001251083,
+          0,
+          0.375997958
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 3.9945342990000006,
+        "emission_work": 1.1390585000000002,
+        "peak_committed": 1902505608,
+        "peak_backing": 779569731
+      },
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "metal",
+      "build": "baseline",
+      "repetition": 0,
+      "warmup": true,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 10507251,
+        "wall": 4.371037292,
+        "cpu": 38.50162,
+        "stages": [
+          0.012182417,
+          0.427202,
+          3.420589833,
+          0.09668633300000001,
+          0,
+          1.792e-06,
+          0.001145791,
+          0,
+          0.384229709
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 4.053736291,
+        "emission_work": 1.1861346670000001,
+        "peak_committed": 1902505608,
+        "peak_backing": 775919188
+      },
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "cpu",
+      "build": "baseline",
+      "repetition": 0,
+      "warmup": true,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7138537,
+        "wall": 2.940899583,
+        "cpu": 29.75767,
+        "stages": [
+          0.012387458,
+          0.391632416,
+          2.04296125,
+          0.170624167,
+          0,
+          1.917e-06,
+          0.000944833,
+          0,
+          0.308307416
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.9867271709999996,
+        "emission_work": 1.2143384210000001,
+        "peak_committed": 1709089940,
+        "peak_backing": 762403309
+      },
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a"
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "cpu",
+      "build": "reuse",
+      "repetition": 0,
+      "warmup": true,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7138537,
+        "wall": 3.053892042,
+        "cpu": 29.178535,
+        "stages": [
+          0.01237975,
+          0.3947725,
+          2.146986291,
+          0.1691355,
+          0,
+          1.9590000000000002e-06,
+          0.00092975,
+          0,
+          0.315699291
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 3.0632413800000005,
+        "emission_work": 1.2436395869999999,
+        "peak_committed": 1709089940,
+        "peak_backing": 756405723
+      },
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a"
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "metal",
+      "build": "reuse",
+      "repetition": 0,
+      "warmup": true,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7138537,
+        "wall": 3.819243166,
+        "cpu": 26.883712,
+        "stages": [
+          0.012593292,
+          0.390013459,
+          3.002810832,
+          0.087757125,
+          0,
+          1.9579999999999997e-06,
+          0.00083575,
+          0,
+          0.309143833
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.9866575440000003,
+        "emission_work": 1.223743998,
+        "peak_committed": 1672421416,
+        "peak_backing": 697157370
+      },
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a"
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "metal",
+      "build": "baseline",
+      "repetition": 0,
+      "warmup": true,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7138537,
+        "wall": 3.844679083,
+        "cpu": 27.359808,
+        "stages": [
+          0.01279725,
+          0.394590625,
+          3.025690915,
+          0.08669895700000002,
+          0,
+          2.25e-06,
+          0.000888333,
+          0,
+          0.308352666
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.9777472140000003,
+        "emission_work": 1.2281467080000001,
+        "peak_committed": 1672421416,
+        "peak_backing": 698828759
+      },
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a"
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "cpu",
+      "build": "baseline",
+      "repetition": 0,
+      "warmup": true,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7015756,
+        "wall": 2.985877916,
+        "cpu": 27.455538,
+        "stages": [
+          0.012835542,
+          0.400589292,
+          2.084884709,
+          0.165838334,
+          0,
+          2.249e-06,
+          0.000829333,
+          0,
+          0.308343542
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.876260386,
+        "emission_work": 1.2981263349999999,
+        "peak_committed": 1646158218,
+        "peak_backing": 730515393
+      },
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c"
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "cpu",
+      "build": "reuse",
+      "repetition": 0,
+      "warmup": true,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7015756,
+        "wall": 2.982132291,
+        "cpu": 27.241439,
+        "stages": [
+          0.012510416,
+          0.402733042,
+          2.074104916,
+          0.169411417,
+          0,
+          2e-06,
+          0.000948166,
+          0,
+          0.30944125
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.889919548,
+        "emission_work": 1.2909232140000002,
+        "peak_committed": 1646158218,
+        "peak_backing": 730968265
+      },
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c"
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "metal",
+      "build": "reuse",
+      "repetition": 0,
+      "warmup": true,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7015756,
+        "wall": 3.076208792,
+        "cpu": 25.005078,
+        "stages": [
+          0.014116458,
+          0.380242042,
+          2.285627164,
+          0.07056016700000001,
+          0,
+          1.4579999999999998e-06,
+          0.000857375,
+          0,
+          0.311324833
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.8989895800000003,
+        "emission_work": 1.305196256,
+        "peak_committed": 1603007551,
+        "peak_backing": 675206998
+      },
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c"
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "metal",
+      "build": "baseline",
+      "repetition": 0,
+      "warmup": true,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7015756,
+        "wall": 3.209959333,
+        "cpu": 25.400441,
+        "stages": [
+          0.01275575,
+          0.390625708,
+          2.4070795,
+          0.07766350000000001,
+          0,
+          1.916e-06,
+          0.000882,
+          0,
+          0.307099
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.848558494,
+        "emission_work": 1.2954805849999997,
+        "peak_committed": 1603007551,
+        "peak_backing": 670547844
+      },
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c"
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "cpu",
+      "build": "reuse",
+      "repetition": 1,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 10507251,
+        "wall": 3.9137295,
+        "cpu": 40.320901,
+        "stages": [
+          0.012794208,
+          0.432474667,
+          2.840178417,
+          0.218233792,
+          0,
+          2e-06,
+          0.001285791,
+          0,
+          0.381210167
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 4.056505747,
+        "emission_work": 1.134677423,
+        "peak_committed": 1876936376,
+        "peak_backing": 849372259
+      },
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "cpu",
+      "build": "baseline",
+      "repetition": 1,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 10507251,
+        "wall": 4.028931125,
+        "cpu": 41.348912,
+        "stages": [
+          0.012951167,
+          0.424531708,
+          2.9497115,
+          0.221032083,
+          0,
+          2.2909999999999997e-06,
+          0.001559583,
+          0,
+          0.392734833
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 4.1220070810000005,
+        "emission_work": 1.2492962899999998,
+        "peak_committed": 1876936376,
+        "peak_backing": 851327114
+      },
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "metal",
+      "build": "baseline",
+      "repetition": 1,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 10507251,
+        "wall": 4.391625,
+        "cpu": 38.317501,
+        "stages": [
+          0.012479875,
+          0.433109,
+          3.4311675379999995,
+          0.09484387400000001,
+          0,
+          2.042e-06,
+          0.00131125,
+          0,
+          0.391007041
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 4.110378913,
+        "emission_work": 1.197348247,
+        "peak_committed": 1902505608,
+        "peak_backing": 774880348
+      },
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "metal",
+      "build": "reuse",
+      "repetition": 1,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 10507251,
+        "wall": 4.327187667,
+        "cpu": 38.154878,
+        "stages": [
+          0.012243125,
+          0.428772542,
+          3.3740372099999996,
+          0.08855795799999999,
+          0,
+          1.749e-06,
+          0.001329291,
+          0,
+          0.393055833
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 4.145162958,
+        "emission_work": 1.21356191,
+        "peak_committed": 1902505608,
+        "peak_backing": 777046418
+      },
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "cpu",
+      "build": "reuse",
+      "repetition": 1,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7138537,
+        "wall": 2.974494917,
+        "cpu": 29.368593,
+        "stages": [
+          0.012524833,
+          0.426276666,
+          2.030106625,
+          0.1751355,
+          0,
+          2.208e-06,
+          0.000845208,
+          0,
+          0.315424375
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 3.0401645349999997,
+        "emission_work": 1.255962501,
+        "peak_committed": 1709089940,
+        "peak_backing": 759669536
+      },
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a"
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "cpu",
+      "build": "baseline",
+      "repetition": 1,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7138537,
+        "wall": 3.045499667,
+        "cpu": 29.749862,
+        "stages": [
+          0.012678333,
+          0.40797375,
+          2.135999583,
+          0.168821416,
+          0,
+          1.958e-06,
+          0.000857917,
+          0,
+          0.305401833
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.97515792,
+        "emission_work": 1.194876589,
+        "peak_committed": 1709089940,
+        "peak_backing": 759356969
+      },
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a"
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "metal",
+      "build": "baseline",
+      "repetition": 1,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7138537,
+        "wall": 3.9006545,
+        "cpu": 27.587607,
+        "stages": [
+          0.012246292,
+          0.404515542,
+          3.042073501,
+          0.089833707,
+          0,
+          1.6250000000000001e-06,
+          0.000944834,
+          0,
+          0.335101125
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 3.20035104,
+        "emission_work": 1.352267038,
+        "peak_committed": 1672421416,
+        "peak_backing": 690155962
+      },
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a"
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "metal",
+      "build": "reuse",
+      "repetition": 1,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7138537,
+        "wall": 3.830306917,
+        "cpu": 26.876043,
+        "stages": [
+          0.012799875,
+          0.410260875,
+          2.978203545,
+          0.085455458,
+          0,
+          1.584e-06,
+          0.000899458,
+          0,
+          0.326825291
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 3.1438493770000004,
+        "emission_work": 1.2998228799999998,
+        "peak_committed": 1672421416,
+        "peak_backing": 695689117
+      },
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a"
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "cpu",
+      "build": "reuse",
+      "repetition": 1,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7015756,
+        "wall": 3.033922041,
+        "cpu": 27.470537,
+        "stages": [
+          0.012997167,
+          0.402489084,
+          2.121683167,
+          0.169283167,
+          0,
+          1.917e-06,
+          0.000828833,
+          0,
+          0.314220292
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.9245699180000004,
+        "emission_work": 1.3277607829999998,
+        "peak_committed": 1646158218,
+        "peak_backing": 730457390
+      },
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c"
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "cpu",
+      "build": "baseline",
+      "repetition": 1,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7015756,
+        "wall": 3.009138167,
+        "cpu": 28.052101,
+        "stages": [
+          0.014848292,
+          0.405134833,
+          2.096849667,
+          0.164073875,
+          0,
+          2.3330000000000004e-06,
+          0.000927208,
+          0,
+          0.315097125
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.948281581,
+        "emission_work": 1.3066828300000002,
+        "peak_committed": 1646158218,
+        "peak_backing": 731150058
+      },
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c"
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "metal",
+      "build": "baseline",
+      "repetition": 1,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7015756,
+        "wall": 3.265001625,
+        "cpu": 25.755249,
+        "stages": [
+          0.012743417,
+          0.3815785,
+          2.4607188330000005,
+          0.074830791,
+          0,
+          1.709e-06,
+          0.000942084,
+          0,
+          0.320470875
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.983495742000001,
+        "emission_work": 1.349507589,
+        "peak_committed": 1603007551,
+        "peak_backing": 672661145
+      },
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c"
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "metal",
+      "build": "reuse",
+      "repetition": 1,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7015756,
+        "wall": 3.169477,
+        "cpu": 25.131832,
+        "stages": [
+          0.012801209,
+          0.385005083,
+          2.3575847509999996,
+          0.07440329300000001,
+          0,
+          1.7909999999999999e-06,
+          0.000792416,
+          0,
+          0.32520625
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 3.024894839,
+        "emission_work": 1.3697140010000002,
+        "peak_committed": 1603007551,
+        "peak_backing": 673557315
+      },
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c"
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "cpu",
+      "build": "baseline",
+      "repetition": 2,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 10507251,
+        "wall": 4.049206417,
+        "cpu": 41.526047,
+        "stages": [
+          0.012615084,
+          0.427800834,
+          2.968091209,
+          0.219045292,
+          0,
+          2.708e-06,
+          0.001422,
+          0,
+          0.393219667
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 4.130848875,
+        "emission_work": 1.2121953309999995,
+        "peak_committed": 1876936376,
+        "peak_backing": 848541312
+      },
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "cpu",
+      "build": "reuse",
+      "repetition": 2,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 10507251,
+        "wall": 3.995127333,
+        "cpu": 40.848634,
+        "stages": [
+          0.012350833,
+          0.425611,
+          2.938087458,
+          0.215974292,
+          0,
+          2.334e-06,
+          0.001390709,
+          0,
+          0.374607333
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 3.9939228049999995,
+        "emission_work": 1.130444585,
+        "peak_committed": 1876936376,
+        "peak_backing": 850515640
+      },
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "metal",
+      "build": "reuse",
+      "repetition": 2,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 10507251,
+        "wall": 4.466228417,
+        "cpu": 38.274047,
+        "stages": [
+          0.012558875,
+          0.449573625,
+          3.4803347900000006,
+          0.094381459,
+          0,
+          1.583e-06,
+          0.001502416,
+          0,
+          0.399028542
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 4.195544043,
+        "emission_work": 1.2524284920000002,
+        "peak_committed": 1902505608,
+        "peak_backing": 777709074
+      },
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "metal",
+      "build": "baseline",
+      "repetition": 2,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 10507251,
+        "wall": 4.491978917,
+        "cpu": 38.842564,
+        "stages": [
+          0.012537208,
+          0.444304,
+          3.5209542519999992,
+          0.09755799999999999,
+          0,
+          2.125e-06,
+          0.001307333,
+          0,
+          0.387116375
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 4.084472882000001,
+        "emission_work": 1.1999496200000002,
+        "peak_committed": 1902505608,
+        "peak_backing": 777051332
+      },
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "cpu",
+      "build": "baseline",
+      "repetition": 2,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7138537,
+        "wall": 3.065487959,
+        "cpu": 30.273448,
+        "stages": [
+          0.014502625,
+          0.419445083,
+          2.072081459,
+          0.224583292,
+          0,
+          2.0830000000000002e-06,
+          0.000877584,
+          0,
+          0.320260042
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 3.110833008,
+        "emission_work": 1.2474887920000002,
+        "peak_committed": 1709089940,
+        "peak_backing": 756531856
+      },
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a"
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "cpu",
+      "build": "reuse",
+      "repetition": 2,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7138537,
+        "wall": 2.966892291,
+        "cpu": 29.837286,
+        "stages": [
+          0.012981291,
+          0.403189292,
+          2.048272834,
+          0.171039334,
+          0,
+          2.3759999999999998e-06,
+          0.00088525,
+          0,
+          0.3163305
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 3.0618439610000006,
+        "emission_work": 1.253332377,
+        "peak_committed": 1709089940,
+        "peak_backing": 760780154
+      },
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a"
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "metal",
+      "build": "reuse",
+      "repetition": 2,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7138537,
+        "wall": 3.803631292,
+        "cpu": 27.237136,
+        "stages": [
+          0.012582125,
+          0.411130125,
+          2.9507777429999997,
+          0.08638362499999999,
+          0,
+          2.334e-06,
+          0.000949166,
+          0,
+          0.326463042
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 3.129868914,
+        "emission_work": 1.314589374,
+        "peak_committed": 1672421416,
+        "peak_backing": 697353129
+      },
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a"
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "metal",
+      "build": "baseline",
+      "repetition": 2,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7138537,
+        "wall": 3.898721458,
+        "cpu": 27.592692,
+        "stages": [
+          0.013158709,
+          0.4106055,
+          3.047715336,
+          0.091374876,
+          0,
+          1.6250000000000001e-06,
+          0.0010915,
+          0,
+          0.318624417
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 3.0686794210000006,
+        "emission_work": 1.2748584979999997,
+        "peak_committed": 1672421416,
+        "peak_backing": 697120645
+      },
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a"
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "cpu",
+      "build": "baseline",
+      "repetition": 2,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7015756,
+        "wall": 3.005052166,
+        "cpu": 28.154374,
+        "stages": [
+          0.013015458,
+          0.387275959,
+          2.114437584,
+          0.16448125,
+          0,
+          2.208e-06,
+          0.000836041,
+          0,
+          0.31279675
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.939750457,
+        "emission_work": 1.296115127,
+        "peak_committed": 1646158218,
+        "peak_backing": 733238939
+      },
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c"
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "cpu",
+      "build": "reuse",
+      "repetition": 2,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7015756,
+        "wall": 2.917404417,
+        "cpu": 27.691141,
+        "stages": [
+          0.012852791,
+          0.398761416,
+          2.0216775,
+          0.164567917,
+          0,
+          2.209e-06,
+          0.0008755,
+          0,
+          0.306055
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.858566825,
+        "emission_work": 1.278812381,
+        "peak_committed": 1646158218,
+        "peak_backing": 734311576
+      },
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c"
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "metal",
+      "build": "reuse",
+      "repetition": 2,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7015756,
+        "wall": 3.1502635,
+        "cpu": 25.128866,
+        "stages": [
+          0.01271225,
+          0.393948375,
+          2.3445243780000005,
+          0.074645623,
+          0,
+          2.041e-06,
+          0.000787792,
+          0,
+          0.310038333
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.889703751,
+        "emission_work": 1.2901170020000001,
+        "peak_committed": 1603007551,
+        "peak_backing": 669806422
+      },
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c"
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "metal",
+      "build": "baseline",
+      "repetition": 2,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7015756,
+        "wall": 3.250099875,
+        "cpu": 25.545796,
+        "stages": [
+          0.012929458,
+          0.404037625,
+          2.422292336,
+          0.07735870800000001,
+          0,
+          1.668e-06,
+          0.000886292,
+          0,
+          0.318887333
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.9614108309999994,
+        "emission_work": 1.3531320840000003,
+        "peak_committed": 1603007551,
+        "peak_backing": 669787578
+      },
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c"
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "cpu",
+      "build": "reuse",
+      "repetition": 3,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 10507251,
+        "wall": 4.334869333,
+        "cpu": 40.726556,
+        "stages": [
+          0.012586,
+          0.495427083,
+          3.128238959,
+          0.261277042,
+          0,
+          2.4589999999999997e-06,
+          0.001474333,
+          0,
+          0.408080209
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 4.383218255,
+        "emission_work": 1.177039042,
+        "peak_committed": 1876936376,
+        "peak_backing": 849725823
+      },
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "cpu",
+      "build": "baseline",
+      "repetition": 3,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 10507251,
+        "wall": 4.079173916,
+        "cpu": 41.724521,
+        "stages": [
+          0.01283825,
+          0.462353792,
+          2.975771042,
+          0.219260917,
+          0,
+          1.957e-06,
+          0.001274209,
+          0,
+          0.381707584
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 4.024117925,
+        "emission_work": 1.1786606179999999,
+        "peak_committed": 1876936376,
+        "peak_backing": 849188903
+      },
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "metal",
+      "build": "baseline",
+      "repetition": 3,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 10507251,
+        "wall": 4.645698584,
+        "cpu": 38.330103,
+        "stages": [
+          0.012471583,
+          0.451622041,
+          3.6773770819999996,
+          0.091605458,
+          0,
+          1.959e-06,
+          0.001241708,
+          0,
+          0.383880709
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 4.1178977880000005,
+        "emission_work": 1.0997270759999997,
+        "peak_committed": 1902505608,
+        "peak_backing": 779422305
+      },
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "metal",
+      "build": "reuse",
+      "repetition": 3,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 10507251,
+        "wall": 4.538016292,
+        "cpu": 37.910147,
+        "stages": [
+          0.012710791,
+          0.442996375,
+          3.5628863349999995,
+          0.09816058300000001,
+          0,
+          2.626e-06,
+          0.001270792,
+          0,
+          0.391210375
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 4.165792539,
+        "emission_work": 1.17669924,
+        "peak_committed": 1902505608,
+        "peak_backing": 780135367
+      },
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "cpu",
+      "build": "reuse",
+      "repetition": 3,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7138537,
+        "wall": 2.975125417,
+        "cpu": 29.689779,
+        "stages": [
+          0.012588084,
+          0.403762209,
+          2.04711375,
+          0.177034042,
+          0,
+          1.793e-06,
+          0.000904042,
+          0,
+          0.31996175
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 3.086030286,
+        "emission_work": 1.2723555349999998,
+        "peak_committed": 1709089940,
+        "peak_backing": 759503040
+      },
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a"
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "cpu",
+      "build": "baseline",
+      "repetition": 3,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7138537,
+        "wall": 3.06212775,
+        "cpu": 29.589384,
+        "stages": [
+          0.012212375,
+          0.4186775,
+          2.119567792,
+          0.189340041,
+          0,
+          2.458e-06,
+          0.00089175,
+          0,
+          0.304462666
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.980838408,
+        "emission_work": 1.1723080059999997,
+        "peak_committed": 1709089940,
+        "peak_backing": 759874899
+      },
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a"
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "metal",
+      "build": "baseline",
+      "repetition": 3,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7138537,
+        "wall": 3.927358459,
+        "cpu": 27.524298,
+        "stages": [
+          0.013072916,
+          0.417308125,
+          3.078461162999999,
+          0.085584956,
+          0,
+          2.042e-06,
+          0.000945375,
+          0,
+          0.316618041
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 3.061506955,
+        "emission_work": 1.2595208759999998,
+        "peak_committed": 1672421416,
+        "peak_backing": 697487811
+      },
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a"
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "metal",
+      "build": "reuse",
+      "repetition": 3,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7138537,
+        "wall": 3.946866667,
+        "cpu": 26.838156,
+        "stages": [
+          0.012469166,
+          0.408815833,
+          3.0715389569999996,
+          0.09999725000000001,
+          0,
+          1.833e-06,
+          0.000902375,
+          0,
+          0.337175417
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 3.2419286759999992,
+        "emission_work": 1.336247827,
+        "peak_committed": 1672421416,
+        "peak_backing": 692511946
+      },
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a"
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "cpu",
+      "build": "reuse",
+      "repetition": 3,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7015756,
+        "wall": 3.686538625,
+        "cpu": 25.987907,
+        "stages": [
+          0.012499334,
+          0.441929459,
+          2.668171375,
+          0.235384083,
+          0,
+          2.5829999999999997e-06,
+          0.001463125,
+          0,
+          0.314074167
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.927498332,
+        "emission_work": 1.3335482459999999,
+        "peak_committed": 1646158218,
+        "peak_backing": 730179640
+      },
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c"
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "cpu",
+      "build": "baseline",
+      "repetition": 3,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "cpu",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7015756,
+        "wall": 3.328926416,
+        "cpu": 26.747273,
+        "stages": [
+          0.013229125,
+          0.400427709,
+          2.39621825,
+          0.192750333,
+          0,
+          3.2500000000000002e-06,
+          0.001212208,
+          0,
+          0.30965825
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.8801684590000005,
+        "emission_work": 1.290493914,
+        "peak_committed": 1646158218,
+        "peak_backing": 731490283
+      },
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c"
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "metal",
+      "build": "baseline",
+      "repetition": 3,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7015756,
+        "wall": 3.260979583,
+        "cpu": 25.467344,
+        "stages": [
+          0.012794125,
+          0.410565167,
+          2.442239459,
+          0.07404849899999999,
+          0,
+          1.791e-06,
+          0.000979125,
+          0,
+          0.306910584
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 2.872426887000001,
+        "emission_work": 1.2752115780000004,
+        "peak_committed": 1603007551,
+        "peak_backing": 672496825
+      },
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c"
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "metal",
+      "build": "reuse",
+      "repetition": 3,
+      "warmup": false,
+      "result": {
+        "schema": 1,
+        "route": "metal",
+        "participants": 14,
+        "exact_decode": true,
+        "bytes": 7015756,
+        "wall": 3.253598,
+        "cpu": 24.465559,
+        "stages": [
+          0.012862,
+          0.409603083,
+          2.395760375,
+          0.072512459,
+          0,
+          1.876e-06,
+          0.000880542,
+          0,
+          0.348127041
+        ],
+        "stream_jobs": 192,
+        "entropy_participants": 14,
+        "model_work": 3.348697243,
+        "emission_work": 1.368014082,
+        "peak_committed": 1603007551,
+        "peak_backing": 668333444
+      },
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c"
+    }
+  ]
+}
