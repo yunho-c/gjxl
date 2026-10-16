@@ -68,8 +68,31 @@ struct HistogramFittingExecutionOptions {
   // Storage choices, not learned-policy or automatic GPU crossover controls.
   size_t histogram_shards = 4, maximum_active_properties = 64;
   size_t maximum_scratch_bytes = 64 * 1024 * 1024;
+  // Private experiments; neither changes learned arithmetic or public routing.
+  // Reuse is opportunistic, exact-capacity, and subject to domain admission.
+  bool reuse_buffers = false, multiple_encoders = false;
 };
 enum class HistogramFittingProfileMode : uint8_t { kDisabled, kWall, kStage };
+// Opt-in submission trace, in nanoseconds relative to system mach time on
+// Metal. GPU endpoints and host endpoints share this clock. No completion
+// callback is installed: completion-to-wake includes notification/scheduling.
+struct HistogramFittingWaitTrace {
+  uint64_t commit_begin = 0, commit_end = 0, wait_begin = 0;
+  uint64_t blocking_begin = 0, blocking_end = 0, cpu_resumed = 0;
+  uint64_t gpu_begin = 0, gpu_end = 0;
+  // Metal CPU-driver scheduling endpoints, not shader execution timestamps.
+  uint64_t kernel_begin = 0, kernel_end = 0;
+  bool operator==(const HistogramFittingWaitTrace &) const = default;
+};
+struct HistogramFittingQueueTrace {
+  // Reason: 1 = ready target, 2 = CPU idle, 3 = deadline. Snapshots are taken
+  // under the queue lock. Next/ready ages overlap other jobs' CPU/GPU work.
+  size_t reason = 0, ready = 0, cpu_queued = 0, cpu_running = 0, live = 0;
+  size_t resume_ready = 0, resume_cpu_queued = 0, resume_cpu_running = 0;
+  uint64_t next_nanoseconds = 0, oldest_ready_nanoseconds = 0;
+  uint64_t publish_nanoseconds = 0;
+  bool operator==(const HistogramFittingQueueTrace &) const = default;
+};
 // Caller-owned diagnostics. Wall phases partition the operation interior up to
 // transient release, excluding final inline publication. Wait overlaps device
 // execution and concurrent CPU fits. Stage mode adds encoder
@@ -85,12 +108,18 @@ struct HistogramFittingBatchProfile {
   std::array<uint64_t, 8> wall_nanoseconds{};
   std::array<uint64_t, 5> gpu_nanoseconds{}, dispatches{};
   uint64_t command_buffer_gpu_nanoseconds = 0;
+  // Bits 0/1/2 identify reused output/dispatch/scratch backing, respectively.
+  uint32_t reused_buffers = 0;
+  size_t reused_buffer_bytes = 0, compute_encoders = 0;
+  HistogramFittingWaitTrace wait_trace;
+  HistogramFittingQueueTrace queue_trace;
   bool operator==(const HistogramFittingBatchProfile &) const = default;
 };
 struct HistogramFittingProfile {
   HistogramFittingProfileMode mode = HistogramFittingProfileMode::kDisabled;
   std::span<HistogramFittingBatchProfile> batches;
   size_t written = 0, dropped = 0;
+  bool trace_wait = false;
 };
 struct HistogramFittingScratchLayout {
   size_t shard_histograms_offset = 0, shard_extra_offset = 0,
@@ -176,6 +205,7 @@ struct HistogramFittingInput {
       HistogramFittingProfileMode::kDisabled;
   // Published together with results, only on success. Never retained.
   HistogramFittingBatchProfile *profile = nullptr;
+  bool trace_wait = false;
 };
 // Checks ownership metadata, shapes and parent summaries without reading row
 // indices or native GPU buffers. The backend must additionally verify its

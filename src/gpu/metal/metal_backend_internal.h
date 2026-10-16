@@ -268,6 +268,9 @@ enum class MetalAqScratchArena : uint8_t {
   kResidentInput,
   kAcTokenization,
   kAcTokenOutput,
+  kHistogramDispatch,
+  kHistogramScratch,
+  kHistogramOutput,
   kCount,
 };
 
@@ -646,6 +649,8 @@ private:
   friend struct MetalButteraugliTrafficTestAccess;
   friend struct MetalDcProcessingTestAccess;
   friend class MetalCompletedVarDctFrame;
+  friend class MetalHistogramEvaluation;
+  friend struct MetalHistogramScratchLease;
   friend Status EmptyMetalAqScratchArenasForTesting(GpuBackend& backend);
 
   Status PrepareDeviceButteraugliImpl(
@@ -665,7 +670,8 @@ private:
   Status AcquireAqScratchArena(
     MetalAqScratchArena kind,
     size_t required_capacity_bytes,
-    DeviceScratchArena* arena);
+    DeviceScratchArena* arena,
+    bool* reused = nullptr);
 
   void ReleaseAqScratchArena(
     MetalAqScratchArena kind,
@@ -820,7 +826,9 @@ private:
     const char* label,
     ComputeEncodeCallback encode,
     const void* context,
-    std::unique_ptr<GpuSubmission>* submission);
+    std::unique_ptr<GpuSubmission>* submission,
+    bool trace_timing = false,
+    size_t compute_encoders = 1);
 
   [[nodiscard]] gpu_profile_internal::GpuProfilingCapabilities
   ProfilingCapabilities() const;
@@ -829,7 +837,8 @@ private:
     const char* label,
     std::span<const MetalProfiledComputeStage> stages,
     gpu_profile_internal::GpuProfilingMode mode,
-    std::unique_ptr<GpuSubmission>* submission);
+    std::unique_ptr<GpuSubmission>* submission,
+    bool trace_timing = false);
 
   Status ValidateTransformBatch(
     const AcStrategyInfo& strategy_info,
@@ -990,6 +999,10 @@ Status CreateAqPipelines(
 [[nodiscard]] Status GetMetalSubmissionGpuDuration(
   GpuSubmission& submission,
   uint64_t* nanoseconds);
+
+[[nodiscard]] Status WaitMetalSubmissionTraced(
+  GpuSubmission& submission,
+  histogram_gpu_internal::HistogramFittingWaitTrace* trace);
 
 [[nodiscard]] Status GetMetalSubmissionGpuProfile(
   GpuSubmission& submission,

@@ -50,6 +50,8 @@ int main(int argc, char **argv) try {
   std::string row_mode = "raster", row_diagnostics = "rows-off";
   std::string learning_schedule = "cohorts", feature_window = "8";
   std::string gpu_profile_mode = "gpu-off", histogram_shards, active_properties;
+  std::string wait_trace = "off", ready_target = "32", flush_us = "500";
+  std::string fit_buffers = "fresh", fit_encoders = "single";
   bool private_flags = false;
   int positional = 1;
   std::vector<std::string_view> named;
@@ -72,6 +74,11 @@ int main(int argc, char **argv) try {
     else if (key == "--gpu-profile") gpu_profile_mode = value;
     else if (key == "--histogram-shards") histogram_shards = value;
     else if (key == "--active-properties") active_properties = value;
+    else if (key == "--gpu-wait-trace") wait_trace = value;
+    else if (key == "--fit-buffers") fit_buffers = value;
+    else if (key == "--fit-encoders") fit_encoders = value;
+    else if (key == "--fit-ready-target") ready_target = value;
+    else if (key == "--fit-flush-us") flush_us = value;
     else Check(false, "Unknown named profile control");
     private_flags = true;
   }
@@ -114,12 +121,21 @@ int main(int argc, char **argv) try {
         "fitter-gpu|fitter-auto [minimum-rows [batch-fits]]]]]]]]] "
         "[--sample-rows=MODE] [--row-diagnostics=rows-off|rows-on] "
         "[--learning-schedule=cohorts|pipeline] [--feature-window=8|16] "
-        "[--gpu-profile=gpu-off|gpu-wall|gpu-stage] [--histogram-shards=N] [--active-properties=N]");
+        "[--gpu-profile=gpu-off|gpu-wall|gpu-stage] [--histogram-shards=N] [--active-properties=N] "
+        "[--gpu-wait-trace=off|on] [--fit-ready-target=N] [--fit-flush-us=N] "
+        "[--fit-buffers=fresh|reuse] [--fit-encoders=single|multiple]");
   Check(gpu_profile_mode == "gpu-off" || gpu_profile_mode == "gpu-wall" ||
             gpu_profile_mode == "gpu-stage", "Unknown histogram GPU profiling mode");
   const bool gpu_profile_enabled = gpu_profile_mode != "gpu-off";
+  Check(wait_trace == "off" || wait_trace == "on", "Invalid GPU wait trace control");
+  Check(wait_trace != "on" || gpu_profile_enabled, "Wait trace requires GPU wall/stage profiling");
+  Check(fit_buffers == "fresh" || fit_buffers == "reuse", "Invalid fitting buffer control");
+  Check(fit_encoders == "single" || fit_encoders == "multiple", "Invalid fitting encoder control");
+  const bool submission_output = named_control("--fit-buffers") || named_control("--fit-encoders");
+  const bool trace_output = named_control("--gpu-wait-trace") ||
+      named_control("--fit-ready-target") || named_control("--fit-flush-us") || submission_output;
   const bool gpu_profile_output = argc >= 16 || named_control("--gpu-profile") ||
-      named_control("--histogram-shards") || named_control("--active-properties");
+      named_control("--histogram-shards") || named_control("--active-properties") || trace_output;
   const std::string fitter_flag = argc >= 13 ? argv[12] : "fitter-cpu";
   const bool public_api = fitter_flag == "public";
   Check((!public_api || (argc == 13 && !private_flags)) &&
@@ -194,6 +210,10 @@ int main(int argc, char **argv) try {
                             : ReferenceFittingBackend::kCpu;
   if (argc >= 14) options.fitting_minimum_rows = std::stoull(argv[13]);
   if (argc >= 15) options.fitting_batch_fits = std::stoull(argv[14]);
+  options.fitting_ready_target = std::stoull(ready_target);
+  options.fitting_flush_microseconds = std::stoull(flush_us);
+  Check(options.fitting_ready_target > 0 && options.fitting_ready_target <= 256 &&
+            options.fitting_flush_microseconds <= 1000000, "Invalid fitting queue controls");
   if (!histogram_shards.empty()) options.fitting_execution.histogram_shards = std::stoull(histogram_shards);
   if (!active_properties.empty()) options.fitting_execution.maximum_active_properties = std::stoull(active_properties);
   options.learning_schedule = learning_schedule == "pipeline" ? ReferenceLearningSchedule::kPipeline
@@ -235,6 +255,8 @@ int main(int argc, char **argv) try {
 #endif
   }
   options.entropy.cpu_participants = entropy_participants;
+  options.fitting_execution.reuse_buffers = fit_buffers == "reuse";
+  options.fitting_execution.multiple_encoders = fit_encoders == "multiple";
   options.tokenization.cpu_participants = tokenization_participants;
   // Keep feature production fixed at four while varying local learning.
   std::shared_ptr<const ExecutionDomain> domain;
@@ -253,6 +275,7 @@ int main(int argc, char **argv) try {
   std::vector<histogram_gpu_internal::HistogramFittingBatchProfile> gpu_records(
       gpu_profile_enabled ? 16384 : 0);
   gpu_profile.batches = gpu_records;
+  gpu_profile.trace_wait = wait_trace == "on";
   gpu_profile.mode = gpu_profile_mode == "gpu-stage"
       ? histogram_gpu_internal::HistogramFittingProfileMode::kStage
       : histogram_gpu_internal::HistogramFittingProfileMode::kWall;
@@ -342,13 +365,18 @@ int main(int argc, char **argv) try {
   output.close();
   const auto memory = budget.snapshot();
   encoded = {};
+  // The reuse experiment intentionally keeps idle backing beyond one encode.
+  // Retain its footprint in the snapshot above, then explicitly retire it
+  // outside the encode interval before asserting that every owner released.
+  if (gpu && options.fitting_execution.reuse_buffers)
+    Ok(gpu->TrimPreparationCache());
   const auto released = budget.snapshot();
   Check(!released.committed_bytes() && !released.total.backing_count &&
             !released.total.pending_count && !released.open_reservations,
         "Completed encode leaked managed storage");
   std::ofstream out(directory / "result.json");
   out.exceptions(std::ios::failbit | std::ios::badbit);
-  out << std::setprecision(17) << std::boolalpha << "{\"schema\":" << (gpu_profile_output ? 8 : fitter_diagnostics ? 7 : public_api ? 6 : tokenization_diagnostics ? 5 : selection_diagnostics ? 4 : entropy_diagnostics ? 3 : parallel_diagnostics ? 2 : 1)
+  out << std::setprecision(17) << std::boolalpha << "{\"schema\":" << (trace_output ? 10 : gpu_profile_output ? 8 : fitter_diagnostics ? 7 : public_api ? 6 : tokenization_diagnostics ? 5 : selection_diagnostics ? 4 : entropy_diagnostics ? 3 : parallel_diagnostics ? 2 : 1)
       << ",\"public_api\":" << public_api
       << ",\"gpu_submissions\":" << (backend ? backend->stats().committed_submissions - submissions : 0)
       << ",\"route\":" << std::quoted(route)
@@ -456,7 +484,10 @@ int main(int argc, char **argv) try {
       << ",\"peak_committed_bytes\":" << memory.peak_committed_bytes
       << ",\"maximum_stage_bytes\":" << stats.maximum_stage_bytes
       << ",\"peak_feature_samples\":" << stats.peak_feature_samples
-      << ",\"peak_feature_bytes\":" << stats.peak_feature_bytes << "},\"histogram_fitting\":";
+      << ",\"peak_feature_bytes\":" << stats.peak_feature_bytes;
+  if (trace_output)
+    out << ",\"idle_bytes_after_encode\":" << memory.total.idle_capacity_bytes;
+  out << "},\"histogram_fitting\":";
   WriteHistogramProfile(out, fitting_profile, fitting_profile_enabled);
   out << ",\"histogram_gpu\":{\"route\":" << std::quoted(fitter_flag)
       << ",\"minimum_rows\":" << options.fitting_minimum_rows
@@ -476,8 +507,14 @@ int main(int argc, char **argv) try {
   if (gpu_profile_output) {
     out << ",\"histogram_gpu_profile\":{\"mode\":" << std::quoted(gpu_profile_mode)
         << ",\"shards\":" << options.fitting_execution.histogram_shards
-        << ",\"active_properties\":" << options.fitting_execution.maximum_active_properties
-        << ",\"wall_phases\":[";
+        << ",\"active_properties\":" << options.fitting_execution.maximum_active_properties;
+    if (trace_output)
+      out << ",\"wait_trace\":" << gpu_profile.trace_wait
+          << ",\"ready_target\":" << options.fitting_ready_target
+          << ",\"flush_microseconds\":" << options.fitting_flush_microseconds
+          << ",\"buffers\":" << std::quoted(fit_buffers)
+          << ",\"encoders\":" << std::quoted(fit_encoders);
+    out << ",\"wall_phases\":[";
     for (size_t i = 0; i < histogram_gpu_internal::kHistogramFittingWallPhases.size(); ++i)
       out << (i ? "," : "") << std::quoted(histogram_gpu_internal::kHistogramFittingWallPhases[i]);
     out << "],\"gpu_stages\":[";
@@ -494,7 +531,29 @@ int main(int argc, char **argv) try {
       Array(out, b.wall_nanoseconds);
       out << ",\"gpu_ns\":"; Array(out, b.gpu_nanoseconds);
       out << ",\"dispatches\":"; Array(out, b.dispatches);
-      out << ",\"command_buffer_gpu_ns\":" << b.command_buffer_gpu_nanoseconds << '}';
+      out << ",\"command_buffer_gpu_ns\":" << b.command_buffer_gpu_nanoseconds;
+      if (trace_output)
+        out << ",\"reused_buffers\":" << b.reused_buffers
+            << ",\"reused_buffer_bytes\":" << b.reused_buffer_bytes
+            << ",\"compute_encoders\":" << b.compute_encoders;
+      if (gpu_profile.trace_wait) {
+        const auto &t = b.wait_trace;
+        const auto &q = b.queue_trace;
+        out << ",\"wait_trace\":{\"clock\":\"mach_nanoseconds\",\"commit_begin\":" << t.commit_begin
+            << ",\"commit_end\":" << t.commit_end << ",\"wait_begin\":" << t.wait_begin
+            << ",\"blocking_begin\":" << t.blocking_begin << ",\"blocking_end\":" << t.blocking_end
+            << ",\"cpu_resumed\":" << t.cpu_resumed << ",\"gpu_begin\":" << t.gpu_begin
+            << ",\"gpu_end\":" << t.gpu_end
+            << ",\"kernel_begin\":" << t.kernel_begin << ",\"kernel_end\":" << t.kernel_end
+            << "},\"queue_trace\":{\"reason\":" << q.reason
+            << ",\"ready\":" << q.ready << ",\"cpu_queued\":" << q.cpu_queued
+            << ",\"cpu_running\":" << q.cpu_running << ",\"live\":" << q.live
+            << ",\"resume_ready\":" << q.resume_ready << ",\"resume_cpu_queued\":" << q.resume_cpu_queued
+            << ",\"resume_cpu_running\":" << q.resume_cpu_running
+            << ",\"next_ns\":" << q.next_nanoseconds << ",\"oldest_ready_ns\":" << q.oldest_ready_nanoseconds
+            << ",\"publish_ns\":" << q.publish_nanoseconds << '}';
+      }
+      out << '}';
     }
     out << "]}";
   }

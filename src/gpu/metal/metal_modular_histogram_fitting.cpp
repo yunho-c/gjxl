@@ -9,6 +9,40 @@
 namespace gjxl::metal_internal {
 using namespace histogram_gpu_internal;
 using namespace resource_budget_internal;
+
+// Completed operations obey the backend lifetime contract. Cache only after
+// the caller releases the result view; no later batch can overwrite it early.
+class MetalHistogramEvaluation final : public PreparedGpuHistogramEvaluation {
+public:
+  explicit MetalHistogramEvaluation(MetalBackend &b) : owner(b) {}
+  ~MetalHistogramEvaluation() override {
+    owner.ReleaseAqScratchArena(MetalAqScratchArena::kHistogramOutput,
+                                std::move(buffer), reusable);
+  }
+  BackendId backend_id() const noexcept override { return backend; }
+  std::span<const HistogramPropertyResult> results() const noexcept override {
+    return host;
+  }
+  MetalBackend &owner;
+  BackendId backend = 0;
+  DeviceScratchArena buffer;
+  std::span<const HistogramPropertyResult> host;
+  bool reusable = false;
+};
+struct MetalHistogramScratchLease {
+  MetalBackend &owner;
+  DeviceScratchArena dispatch, scratch;
+  bool reusable = false;
+  ~MetalHistogramScratchLease() { Release(); }
+  void Release() noexcept {
+    owner.ReleaseAqScratchArena(MetalAqScratchArena::kHistogramDispatch,
+                                std::move(dispatch), reusable);
+    owner.ReleaseAqScratchArena(MetalAqScratchArena::kHistogramScratch,
+                                std::move(scratch), reusable);
+    dispatch = DeviceScratchArena{};
+    scratch = DeviceScratchArena{};
+  }
+};
 namespace {
 namespace wire = gjxl_histogram_fitting;
 inline constexpr char kSubmissionId[] = "modular.histogram_fitting";
@@ -27,16 +61,6 @@ public:
   ManagedVector<HistogramFittingShape> metadata;
   std::unique_ptr<DeviceBuffer> buffer;
 };
-class Completed final : public PreparedGpuHistogramEvaluation {
-public:
-  BackendId backend_id() const noexcept override { return backend; }
-  std::span<const HistogramPropertyResult> results() const noexcept override {
-    return host;
-  }
-  BackendId backend = 0;
-  std::unique_ptr<DeviceBuffer> buffer;
-  std::span<const HistogramPropertyResult> host;
-};
 struct Pending {
   std::unique_ptr<GpuSubmission> submission;
   bool completed = false;
@@ -44,8 +68,9 @@ struct Pending {
     if (submission && !completed)
       DrainMetalSubmission(*submission);
   }
-  Status Wait() {
-    auto s = submission->Wait();
+  Status Wait(HistogramFittingWaitTrace *trace = nullptr) {
+    auto s = trace ? WaitMetalSubmissionTraced(*submission, trace)
+                   : submission->Wait();
     completed = true;
     return s;
   }
@@ -104,6 +129,21 @@ void EncodeProfilePhase(MetalBackend &, MTL::ComputeCommandEncoder *encoder,
   DispatchMetalThreadgroups(encoder, grids[stage.phase], MTL::Size(128, 1, 1));
   const MTL::Resource *dependencies[] = {c.dispatch, c.output, c.scratch};
   encoder->memoryBarrier(dependencies, stage.phase == 0 ? 2 : 3);
+}
+struct EncoderSequence {
+  const Context *context;
+  mutable size_t next = 0;
+};
+void EncodeSeparate(MetalBackend &backend, MTL::ComputeCommandEncoder *encoder,
+                    const void *opaque) {
+  const auto &sequence = *static_cast<const EncoderSequence *>(opaque);
+  const size_t index = sequence.next++;
+  const auto &plan = *sequence.context->plan;
+  const size_t first = index ? ((index - 1) / 4) * plan.active_properties : 0;
+  const ProfileContext stage{
+      sequence.context, index ? 1 + (index - 1) % 4 : 0, first,
+      index ? std::min(plan.active_properties, plan.tasks - first) : 0};
+  EncodeProfilePhase(backend, encoder, &stage);
 }
 struct WallProfile {
   using Clock = std::chrono::steady_clock;
@@ -302,6 +342,8 @@ Status MetalBackend::EvaluateHistogramNodes(
     std::unique_ptr<PreparedGpuHistogramEvaluation> *out) try {
   const auto mode = input.profile_mode;
   WallProfile profile(mode != HistogramFittingProfileMode::kDisabled);
+  if (input.trace_wait && !profile.enabled)
+    return Status::InvalidArgument("Wait tracing requires histogram profiling");
   if ((profile.enabled && !input.profile) ||
       (mode != HistogramFittingProfileMode::kDisabled &&
        mode != HistogramFittingProfileMode::kWall &&
@@ -327,20 +369,38 @@ Status MetalBackend::EvaluateHistogramNodes(
     return s;
   profile.Lap(0);
   const ManagedHostScope resources(ResourceClass::kPreparation);
-  auto candidate = std::make_unique<Completed>();
+  auto candidate = std::make_unique<MetalHistogramEvaluation>(*this);
   candidate->backend = id();
-  std::unique_ptr<DeviceBuffer> dispatch, scratch;
+  MetalHistogramScratchLease backing{*this};
   Pending pending;
+  const auto allocate = [&](MetalAqScratchArena kind, size_t bytes,
+                            DeviceScratchArena *arena, uint32_t bit) {
+    bool reused = false;
+    const auto status = input.options.reuse_buffers
+        ? AcquireAqScratchArena(kind, bytes, arena, &reused)
+        : arena->Prepare(*this, bytes);
+    if (reused) {
+      profile.value.reused_buffers |= bit;
+      profile.value.reused_buffer_bytes += bytes;
+    }
+    return status;
+  };
   {
     const ResourceClassScope retained(ResourceClass::kCompletedFrame);
-    if (auto s = Allocate(plan.output_bytes, &candidate->buffer); !s.ok())
+    if (auto s = allocate(MetalAqScratchArena::kHistogramOutput,
+                          plan.output_bytes, &candidate->buffer, 1); !s.ok())
       return s;
   }
-  if (auto s = Allocate(plan.dispatch_bytes, &dispatch); !s.ok())
+  if (auto s = allocate(MetalAqScratchArena::kHistogramDispatch,
+                        plan.dispatch_bytes, &backing.dispatch, 2); !s.ok())
     return s;
   if (plan.scratch_bytes)
-    if (auto s = Allocate(plan.scratch_bytes, &scratch); !s.ok())
+    if (auto s = allocate(MetalAqScratchArena::kHistogramScratch,
+                          plan.scratch_bytes, &backing.scratch, 4); !s.ok())
       return s;
+  auto *dispatch = backing.dispatch.backing_buffer();
+  auto *scratch = backing.scratch.backing_buffer();
+  auto *result_buffer = candidate->buffer.backing_buffer();
   profile.Lap(1);
   auto *bytes = static_cast<std::byte *>(AsMetalBuffer(*dispatch)->contents());
   std::memset(bytes, 0, plan.dispatch_bytes);
@@ -391,7 +451,7 @@ Status MetalBackend::EvaluateHistogramNodes(
   const auto &s = plan.scratch;
   Context context{source->handle(),
                   AsMetalBuffer(*dispatch)->handle(),
-                  AsMetalBuffer(*candidate->buffer)->handle(),
+                  AsMetalBuffer(*result_buffer)->handle(),
                   scratch ? AsMetalBuffer(*scratch)->handle() : nullptr,
                   {},
                   &plan,
@@ -435,19 +495,26 @@ Status MetalBackend::EvaluateHistogramNodes(
     if (auto s = SubmitComputeProfiled(
             "modular.histogram_fitting", stages,
             gpu_profile_internal::GpuProfilingMode::kStage,
-            &pending.submission);
+            &pending.submission, input.trace_wait);
         !s.ok())
+      return s;
+  } else if (input.options.multiple_encoders) {
+    const EncoderSequence sequence{&context};
+    if (auto s = SubmitCompute("modular.histogram_fitting", EncodeSeparate,
+                               &sequence, &pending.submission, input.trace_wait,
+                               1 + 4 * Waves(plan)); !s.ok())
       return s;
   } else {
     if (auto s = SubmitCompute("modular.histogram_fitting", Encode, &context,
-                               &pending.submission);
+                               &pending.submission, input.trace_wait);
         !s.ok())
       return s;
   }
   profile.Lap(3);
   if (!pending.submission)
     return Status::Internal("Histogram fitting returned no submission");
-  if (auto status = pending.Wait(); !status.ok())
+  if (auto status = pending.Wait(input.trace_wait ? &profile.value.wait_trace : nullptr);
+      !status.ok())
     return status;
   profile.Lap(4);
   uint32_t status_word;
@@ -456,7 +523,7 @@ Status MetalBackend::EvaluateHistogramNodes(
       !status.ok())
     return status;
   std::span<const std::byte> output;
-  if (auto status = BorrowCompletedReadOnly(*candidate->buffer,
+  if (auto status = BorrowCompletedReadOnly(*result_buffer,
                                             plan.output_bytes, 0, &output);
       !status.ok())
     return status;
@@ -493,8 +560,9 @@ Status MetalBackend::EvaluateHistogramNodes(
   }
   profile.Lap(6);
   pending.submission.reset();
-  scratch.reset();
-  dispatch.reset();
+  backing.reusable = input.options.reuse_buffers;
+  backing.Release();
+  candidate->reusable = input.options.reuse_buffers;
   profile.Lap(7);
   if (profile.enabled) {
     profile.value.nodes = plan.nodes;
@@ -505,6 +573,9 @@ Status MetalBackend::EvaluateHistogramNodes(
     profile.value.maximum_bins = plan.maximum_bins;
     profile.value.maximum_symbols = plan.maximum_symbols;
     profile.value.scratch_bytes = plan.scratch_bytes;
+    profile.value.compute_encoders =
+        mode == HistogramFittingProfileMode::kStage || input.options.multiple_encoders
+            ? 1 + 4 * Waves(plan) : 1;
     *input.profile = profile.value;
   }
   *out = std::move(candidate);

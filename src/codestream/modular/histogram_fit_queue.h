@@ -4,6 +4,7 @@
 #include "core/managed_allocator.h"
 #include "core/thread_budget.h"
 #include "core/worker_launch_internal.h"
+#include "gpu/ops/modular_histogram_fitting.h"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -19,14 +20,19 @@ namespace gjxl::modular_internal::reference_workflow_internal {
 class HistogramFitQueue {
 public:
   enum class Result { kGpu, kDone, kFailed };
-  explicit HistogramFitQueue(size_t participants) : group_(participants) {}
+  using Trace = histogram_gpu_internal::HistogramFittingQueueTrace;
+  explicit HistogramFitQueue(size_t participants, size_t ready_target = 32,
+                             size_t flush_microseconds = 500)
+      : group_(participants), ready_target_(ready_target),
+        flush_microseconds_(flush_microseconds) {}
   ~HistogramFitQueue() { Stop(); }
   HistogramFitQueue(const HistogramFitQueue &) = delete;
   HistogramFitQueue &operator=(const HistogramFitQueue &) = delete;
   size_t participants() const { return group_.participants(); }
   template <class Function>
   Status Start(size_t count, const Function &function) {
-    if (count > states_.size() || function_)
+    if (count > states_.size() || function_ || !ready_target_ ||
+        ready_target_ > states_.size() || flush_microseconds_ > 1000000)
       return Status::InvalidArgument(
           "Invalid histogram fit queue size or reuse");
     count_ = count;
@@ -83,7 +89,17 @@ public:
   // False means a CPU task failed; callers join before inspecting job errors.
   // A true result with count=0 means all fits completed. Otherwise this caller
   // exclusively owns the returned jobs until Resume publishes completed data.
-  bool Next(std::span<size_t> jobs, size_t *count) {
+  bool Next(std::span<size_t> jobs, size_t *count, Trace *trace = nullptr) {
+    if (!trace) return NextImpl(jobs, count, nullptr);
+    *trace = {};
+    const auto begin = Clock::now();
+    const bool result = NextImpl(jobs, count, trace);
+    trace->next_nanoseconds = std::chrono::duration_cast<std::chrono::nanoseconds>(
+        Clock::now() - begin).count();
+    return result;
+  }
+private:
+  bool NextImpl(std::span<size_t> jobs, size_t *count, Trace *trace) {
     for (;;) {
       size_t cpu_job = SIZE_MAX;
       {
@@ -95,9 +111,20 @@ public:
           *count = 0;
           return true;
         }
-        const auto deadline = first_ready_ + std::chrono::microseconds(500);
-        if (ready_ && (ready_ >= std::min(size_t{32}, count_ - completed_) ||
+        const auto deadline = first_ready_ + std::chrono::microseconds(flush_microseconds_);
+        if (ready_ && (ready_ >= std::min(ready_target_, count_ - completed_) ||
                        (!queued_ && !running_) || Clock::now() >= deadline)) {
+          if (trace) {
+            trace->ready = ready_;
+            trace->cpu_queued = queued_;
+            trace->cpu_running = running_;
+            trace->live = count_ - completed_;
+            trace->reason = ready_ >= std::min(ready_target_, count_ - completed_)
+                                ? 1 : (!queued_ && !running_) ? 2 : 3;
+            trace->oldest_ready_nanoseconds =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    Clock::now() - first_ready_).count();
+          }
           *count = 0;
           for (size_t i = 0; i < count_; ++i)
             if (states_[i] == State::kGpuReady) {
@@ -122,9 +149,15 @@ public:
       }
     }
   }
-  void Resume(std::span<const size_t> jobs) {
+public:
+  void Resume(std::span<const size_t> jobs, Trace *trace = nullptr) {
     {
       std::lock_guard lock(mutex_);
+      if (trace) {
+        trace->resume_ready = ready_;
+        trace->resume_cpu_queued = queued_;
+        trace->resume_cpu_running = running_;
+      }
       for (size_t i : jobs)
         Push(i);
     }
@@ -170,6 +203,7 @@ private:
     }
   }
   thread_budget_internal::CpuWorkerGroup group_;
+  const size_t ready_target_, flush_microseconds_;
   resource_budget_internal::ManagedVector<std::thread> workers_;
   std::mutex mutex_;
   std::condition_variable changed_;

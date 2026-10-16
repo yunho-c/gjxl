@@ -1087,7 +1087,10 @@ Status MetalBackend::Allocate(
 Status MetalBackend::AcquireAqScratchArena(
   MetalAqScratchArena kind,
   size_t required_capacity_bytes,
-  DeviceScratchArena* arena) {
+  DeviceScratchArena* arena,
+  bool* reused) {
+
+  if (reused) *reused = false;
 
   const size_t index = static_cast<size_t>(kind);
   if (arena == nullptr || required_capacity_bytes == 0 ||
@@ -1099,6 +1102,10 @@ Status MetalBackend::AcquireAqScratchArena(
   const resource_budget_internal::ResourceClassScope resource_class(
     kind == MetalAqScratchArena::kResidentInput
       ? resource_budget_internal::ResourceClass::kInput
+      : kind == MetalAqScratchArena::kHistogramOutput
+          ? resource_budget_internal::ResourceClass::kCompletedFrame
+      : (kind == MetalAqScratchArena::kHistogramDispatch || kind == MetalAqScratchArena::kHistogramScratch)
+          ? resource_budget_internal::ResourceClass::kPreparation
       : (kind == MetalAqScratchArena::kAcTokenization || kind == MetalAqScratchArena::kAcTokenOutput)
           ? resource_budget_internal::ResourceClass::kSerializer
           : resource_budget_internal::ResourceClass::kAqScratch);
@@ -1130,12 +1137,14 @@ Status MetalBackend::AcquireAqScratchArena(
       candidate = DeviceScratchArena{};
     }
   }
+  const bool reused_backing = candidate.capacity_bytes() != 0;
   Status status = candidate.Prepare(*this, required_capacity_bytes);
   if (!status.ok()) {
     return status;
   }
   AsMetalBuffer(*candidate.backing_buffer())->cache_generation = generation;
   *arena = std::move(candidate);
+  if (reused) *reused = reused_backing;
   return Status::Ok();
 }
 

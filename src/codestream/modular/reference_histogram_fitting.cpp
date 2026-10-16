@@ -366,7 +366,13 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
     // Release the preparation team's grants before acquiring the fitting team.
     // The coordinator submits ready nodes while other workers drain CPU tails.
     team.reset();
-    HistogramFitQueue queue(participants);
+    auto *const diagnostic = options.fitting_gpu_profile;
+    const auto profile_mode = diagnostic ? diagnostic->mode
+                                        : HistogramFittingProfileMode::kDisabled;
+    const bool trace_wait = diagnostic && diagnostic->trace_wait &&
+                           profile_mode != HistogramFittingProfileMode::kDisabled;
+    HistogramFitQueue queue(participants, options.fitting_ready_target,
+                            options.fitting_flush_microseconds);
     if (auto s = queue.Start(jobs.size(), process); !s.ok())
       return s;
     stats->learning_peak_participants =
@@ -375,7 +381,8 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
     std::array<HistogramFittingNodeInput, kMaximumHistogramFittingFits> nodes;
     std::array<HistogramFittingNodeShape, kMaximumHistogramFittingFits> shapes;
     size_t count = 0;
-    while (queue.Next(indices, &count) && count) {
+    HistogramFitQueue::Trace queue_trace;
+    while (queue.Next(indices, &count, trace_wait ? &queue_trace : nullptr) && count) {
       for (size_t j = 0; j < count; ++j) {
         const auto &job = jobs[indices[j]];
         nodes[j] = HistogramFittingNodeView(job.gpu_fit, job.fitter.node());
@@ -395,10 +402,6 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
             return status;
           length = (length + 1) / 2;
         }
-        auto *const diagnostic = options.fitting_gpu_profile;
-        const auto profile_mode = diagnostic
-                                      ? diagnostic->mode
-                                      : HistogramFittingProfileMode::kDisabled;
         HostStorageBound profile_bound;
         if (auto s = op->HistogramFittingProfileStorageBound(plan, profile_mode,
                                                              &profile_bound);
@@ -413,6 +416,8 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
         if (!admitted.ok() && !AdmissionFailure(admitted))
           return admitted;
         std::unique_ptr<PreparedGpuHistogramEvaluation> output;
+        HistogramFittingBatchProfile batch_profile;
+        std::chrono::steady_clock::time_point evaluated;
         size_t result_first = 0;
         for (size_t j = first; j < first + length; ++j) {
           auto &job = jobs[indices[j]];
@@ -426,20 +431,13 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
           resources.reservation = &evaluation_reservation;
           ResourceContextScope scope(resources);
           Seconds timer(stats->histogram_evaluation_seconds);
-          HistogramFittingBatchProfile batch_profile;
           if (auto status = op->EvaluateHistogramNodes(
                   {prepared.get(), std::span(nodes).subspan(first, length),
-                   options.fitting_execution, profile_mode, &batch_profile},
+                   options.fitting_execution, profile_mode, &batch_profile, trace_wait},
                   &output);
               !status.ok())
             return status;
-          if (diagnostic &&
-              profile_mode != HistogramFittingProfileMode::kDisabled) {
-            if (diagnostic->written < diagnostic->batches.size())
-              diagnostic->batches[diagnostic->written++] = batch_profile;
-            else
-              ++diagnostic->dropped;
-          }
+          if (trace_wait) evaluated = std::chrono::steady_clock::now();
           if (!output || output->backend_id() != options.gpu->id() ||
               output->results().size() != result_first)
             return Status::Internal(
@@ -468,7 +466,22 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
         // end before another GPU batch while CPU workers apply these results.
         output.reset();
         evaluation_reservation.Reset();
-        queue.Resume(std::span(indices).subspan(first, length));
+        // A ready set can be split by scratch/admission limits. Attribute the
+        // queue wait once; each sub-batch still gets its own resume snapshot.
+        if (trace_wait && first == 0) batch_profile.queue_trace = queue_trace;
+        queue.Resume(std::span(indices).subspan(first, length),
+                     trace_wait ? &batch_profile.queue_trace : nullptr);
+        if (admitted.ok() && diagnostic &&
+            profile_mode != HistogramFittingProfileMode::kDisabled) {
+          if (trace_wait)
+            batch_profile.queue_trace.publish_nanoseconds =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - evaluated).count();
+          if (diagnostic->written < diagnostic->batches.size())
+            diagnostic->batches[diagnostic->written++] = batch_profile;
+          else
+            ++diagnostic->dropped;
+        }
         first += length;
       }
     }

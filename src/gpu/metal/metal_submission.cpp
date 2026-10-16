@@ -10,6 +10,7 @@
 #include <cstring>
 #include <limits>
 #include <mutex>
+#include <mach/mach_time.h>
 #include <new>
 #include <stdexcept>
 #include <string>
@@ -32,6 +33,17 @@ using gpu_profile_internal::ProfileString;
 
 constexpr size_t kMaximumDispatchTimestampSamples = 4096;
 constexpr size_t kMaximumRegisteredPipelines = 512;
+
+uint64_t MachNanoseconds() {
+  static const mach_timebase_info_data_t scale = [] {
+    mach_timebase_info_data_t value{};
+    if (mach_timebase_info(&value) != KERN_SUCCESS || !value.denom)
+      std::terminate();
+    return value;
+  }();
+  return static_cast<uint64_t>(
+    static_cast<__uint128_t>(mach_absolute_time()) * scale.numer / scale.denom);
+}
 
 struct PipelineRegistryEntry {
   MTL::ComputePipelineState* pipeline = nullptr;
@@ -179,6 +191,12 @@ public:
 
   ~MetalSubmission() override = default;
 
+  void Commit(bool trace) {
+    if (trace) commit_begin_ = MachNanoseconds();
+    command_buffer_->commit();
+    if (trace) commit_end_ = MachNanoseconds();
+  }
+
   void Drain() noexcept {
     thread_budget_internal::CpuSuspension suspension;
     auto pool = NS::TransferPtr(NS::AutoreleasePool::alloc()->init());
@@ -187,6 +205,44 @@ public:
 
   Status Wait() override {
     thread_budget_internal::CpuSuspension suspension;
+    return CompleteOnce();
+  }
+
+  Status WaitTraced(histogram_gpu_internal::HistogramFittingWaitTrace* trace) {
+    if (!trace || !commit_begin_)
+      return Status::InvalidArgument("Metal wait trace requires traced submission");
+    histogram_gpu_internal::HistogramFittingWaitTrace candidate;
+    candidate.commit_begin = commit_begin_;
+    candidate.commit_end = commit_end_;
+    candidate.wait_begin = MachNanoseconds();
+    {
+      thread_budget_internal::CpuSuspension suspension;
+      candidate.blocking_begin = MachNanoseconds();
+      (void)CompleteOnce();
+      candidate.blocking_end = MachNanoseconds();
+    }
+    candidate.cpu_resumed = MachNanoseconds();
+    if (!completion_status_.ok()) return completion_status_;
+    const double begin = command_buffer_->GPUStartTime() * 1.0e9;
+    const double end = command_buffer_->GPUEndTime() * 1.0e9;
+    if (!std::isfinite(begin) || !std::isfinite(end) || begin <= 0 ||
+        end < begin || end >= static_cast<double>(UINT64_MAX))
+      return Status::DeviceError("Metal wait trace has invalid GPU timestamps");
+    candidate.gpu_begin = static_cast<uint64_t>(begin);
+    candidate.gpu_end = static_cast<uint64_t>(end);
+    const double kernel_begin = command_buffer_->kernelStartTime() * 1.0e9;
+    const double kernel_end = command_buffer_->kernelEndTime() * 1.0e9;
+    if (!std::isfinite(kernel_begin) || !std::isfinite(kernel_end) ||
+        kernel_begin <= 0 || kernel_end < kernel_begin ||
+        kernel_end >= static_cast<double>(UINT64_MAX))
+      return Status::DeviceError("Metal wait trace has invalid CPU scheduling timestamps");
+    candidate.kernel_begin = static_cast<uint64_t>(kernel_begin);
+    candidate.kernel_end = static_cast<uint64_t>(kernel_end);
+    *trace = candidate;
+    return Status::Ok();
+  }
+
+  Status CompleteOnce() {
     std::call_once(wait_once_, [this] {
       auto pool = NS::TransferPtr(
         NS::AutoreleasePool::alloc()->init());
@@ -356,6 +412,7 @@ private:
   gpu_profile_internal::ProfileStorage<MetalIndirectDispatchRecord> indirect_;
   std::once_flag wait_once_;
   Status completion_status_;
+  uint64_t commit_begin_ = 0, commit_end_ = 0;
 };
 
 }  // namespace
@@ -364,6 +421,14 @@ void DrainMetalSubmission(GpuSubmission& submission) noexcept {
   auto* metal = dynamic_cast<MetalSubmission*>(&submission);
   if (!metal) std::terminate(); // Internal kernel/cleanup callback mismatch.
   metal->Drain();
+}
+
+Status WaitMetalSubmissionTraced(
+    GpuSubmission& submission,
+    histogram_gpu_internal::HistogramFittingWaitTrace* trace) {
+  auto* metal = dynamic_cast<MetalSubmission*>(&submission);
+  if (!metal) return Status::InvalidArgument("Wait trace requires Metal submission");
+  return metal->WaitTraced(trace);
 }
 
 void DispatchMetalThreads(
@@ -518,14 +583,16 @@ Status MetalBackend::SubmitCompute(
   const char* label,
   ComputeEncodeCallback encode,
   const void* context,
-  std::unique_ptr<GpuSubmission>* submission) {
+  std::unique_ptr<GpuSubmission>* submission,
+  bool trace_timing,
+  size_t compute_encoders) {
 
   if (submission == nullptr) {
     return Status::InvalidArgument(
       "GPU submission output pointer is null");
   }
   submission->reset();
-  if (label == nullptr || encode == nullptr) {
+  if (label == nullptr || encode == nullptr || compute_encoders == 0) {
     return Status::Internal(
       "Metal compute submission callback is invalid");
   }
@@ -548,22 +615,23 @@ Status MetalBackend::SubmitCompute(
   auto command_buffer = NS::RetainPtr(raw_command_buffer);
   raw_command_buffer->setLabel(NS::String::string(
     label, NS::UTF8StringEncoding));
-  MTL::ComputeCommandEncoder* encoder =
-    raw_command_buffer->computeCommandEncoder();
-  if (encoder == nullptr) {
-    return Status::SubmissionFailed(
-      "Failed to create Metal compute encoder");
+  for (size_t i = 0; i < compute_encoders; ++i) {
+    MTL::ComputeCommandEncoder* encoder =
+      raw_command_buffer->computeCommandEncoder();
+    if (encoder == nullptr) {
+      return Status::SubmissionFailed(
+        "Failed to create Metal compute encoder");
+    }
+    ScopedComputeEncoding encoding(encoder);
+    encode(*this, encoder, context);
   }
-
-  encode(*this, encoder, context);
-  encoder->endEncoding();
-  std::unique_ptr<GpuSubmission> pending(
+  std::unique_ptr<MetalSubmission> pending(
     new MetalSubmission(
       command_buffer,
       command_queue_,
       device_,
       fail_completion));
-  raw_command_buffer->commit();
+  pending->Commit(trace_timing);
   RecordCommittedSubmission();
   *submission = std::move(pending);
   return Status::Ok();
@@ -573,7 +641,8 @@ Status MetalBackend::SubmitComputeProfiled(
   const char* label,
   std::span<const MetalProfiledComputeStage> stages,
   GpuProfilingMode mode,
-  std::unique_ptr<GpuSubmission>* submission) {
+  std::unique_ptr<GpuSubmission>* submission,
+  bool trace_timing) {
 
   if (submission == nullptr) {
     return Status::InvalidArgument(
@@ -752,11 +821,11 @@ Status MetalBackend::SubmitComputeProfiled(
     return Status::Internal(
       "Profiled Metal submission encoded no timestamp samples");
   }
-  std::unique_ptr<GpuSubmission> pending(new MetalSubmission(
+  std::unique_ptr<MetalSubmission> pending(new MetalSubmission(
     command_buffer, command_queue_, device_, fail_completion,
     sample_buffer, std::move(profile), mode, resolved_sample_count,
     std::move(indirect)));
-  raw_command_buffer->commit();
+  pending->Commit(trace_timing);
   RecordCommittedSubmission();
   *submission = std::move(pending);
   return Status::Ok();

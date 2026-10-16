@@ -3909,6 +3909,12 @@ if(GJXL_BUILD_TESTS)
   add_test(NAME metal_modular_histogram_fitting COMMAND gjxl_metal_modular_histogram_fitting_test)
   set_tests_properties(metal_modular_histogram_fitting PROPERTIES TIMEOUT 180)
 
+  # Explicit research probe, never part of CTest timing or public routing.
+  add_executable(gjxl_modular_histogram_submission_probe
+    tools/modular_reference_learning/histogram_submission_probe.cpp)
+  target_include_directories(gjxl_modular_histogram_submission_probe PRIVATE tests)
+  target_link_libraries(gjxl_modular_histogram_submission_probe PRIVATE gjxl_codestream gjxl_metal)
+
   add_executable(gjxl_metal_modular_histogram_workflow_test tests/metal_modular_histogram_workflow_test.cpp)
   target_link_libraries(gjxl_metal_modular_histogram_workflow_test PRIVATE gjxl_codestream gjxl_metal)
   add_test(NAME metal_modular_histogram_workflow COMMAND gjxl_metal_modular_histogram_workflow_test)

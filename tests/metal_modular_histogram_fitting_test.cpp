@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 #include "gpu/metal/metal_backend.h"
+#include "gpu/metal/metal_aq_evaluation_test.h"
 #include "modular_histogram_fitting_test_helpers.h"
 #include <future>
 #include <iostream>
@@ -403,9 +404,12 @@ void Profiles(GpuBackend &gpu) {
     std::unique_ptr<PreparedGpuHistogramEvaluation> expected;
     Ok(op.EvaluateHistogramNodes({prepared.get(), {&node, 1}, execution},
                                  &expected));
-    for (auto mode : {HistogramFittingProfileMode::kDisabled,
-                      HistogramFittingProfileMode::kWall,
-                      HistogramFittingProfileMode::kStage}) {
+    for (auto [mode, trace_wait] : {
+             std::pair{HistogramFittingProfileMode::kDisabled, false},
+             std::pair{HistogramFittingProfileMode::kWall, false},
+             std::pair{HistogramFittingProfileMode::kStage, false},
+             std::pair{HistogramFittingProfileMode::kWall, true},
+             std::pair{HistogramFittingProfileMode::kStage, true}}) {
       HostStorageBound profile_bound;
       Ok(op.HistogramFittingProfileStorageBound(plan, mode, &profile_bound));
       Check((profile_bound.peak_bytes != 0) ==
@@ -420,7 +424,7 @@ void Profiles(GpuBackend &gpu) {
       HistogramFittingBatchProfile profile;
       std::unique_ptr<PreparedGpuHistogramEvaluation> output;
       Ok(op.EvaluateHistogramNodes(
-          {prepared.get(), {&node, 1}, execution, mode, &profile}, &output));
+          {prepared.get(), {&node, 1}, execution, mode, &profile, trace_wait}, &output));
       Compare(output->results(), expected->results());
       if (mode == HistogramFittingProfileMode::kDisabled) {
         Check(profile == HistogramFittingBatchProfile{},
@@ -431,6 +435,19 @@ void Profiles(GpuBackend &gpu) {
                   profile.wall_nanoseconds[4] > 0 &&
                   profile.command_buffer_gpu_nanoseconds > 0,
               "Histogram wall profile missed work");
+        const auto &t = profile.wait_trace;
+        if (trace_wait) {
+          Check(t.commit_begin > 0 && t.commit_begin <= t.commit_end &&
+                    t.commit_end <= t.wait_begin && t.wait_begin <= t.blocking_begin &&
+                    t.blocking_begin <= t.blocking_end && t.blocking_end <= t.cpu_resumed &&
+                    t.commit_begin <= t.gpu_begin && t.gpu_begin < t.gpu_end &&
+                    t.gpu_end <= t.blocking_end &&
+                    t.commit_begin <= t.kernel_begin && t.kernel_begin <= t.kernel_end &&
+                    t.kernel_end <= t.blocking_end,
+                "Histogram wait trace endpoints are inconsistent");
+        } else {
+          Check(t == HistogramFittingWaitTrace{}, "Disabled wait trace wrote endpoints");
+        }
         for (size_t phase = 0; phase < 5; ++phase) {
           const size_t dispatches = mode == HistogramFittingProfileMode::kStage
                                         ? (phase == 0 ? 1 : plan.tasks)
@@ -461,13 +478,95 @@ void Profiles(GpuBackend &gpu) {
                                      {&node, 1},
                                      execution,
                                      HistogramFittingProfileMode::kStage,
-                                     &profile},
+                                     &profile, true},
                                     &expected);
       DisarmManagedHostAllocationFailureForTest();
       Check(!s.ok() && old == expected.get() && profile == sentinel,
             "Failed profile published partial results");
       ++faults;
     }
+  }
+}
+void SubmissionVariants(GpuBackend &gpu) {
+  auto samples = Fixture(6, 1025, 2);
+  HistogramTreeFitter fitter;
+  Ok(fitter.Initialize(samples));
+  Ok(fitter.Advance());
+  auto node = HistogramFittingNodeView(0, fitter.node());
+  const HistogramFittingSource source{113, &samples};
+  auto &op = Operation(gpu);
+  std::unique_ptr<PreparedGpuHistogramRows> prepared;
+  Ok(op.PrepareHistogramRows({&source, 1}, &prepared));
+  std::vector<HistogramPropertyResult> expected(samples.property_count);
+  Ok(EvaluateHistogramNodeOnCpu(fitter, source.source_id, expected));
+  for (bool reuse : {false, true}) for (bool multiple : {false, true}) {
+    Ok(gpu.TrimPreparationCache());
+    HistogramFittingExecutionOptions options{4, 3, 64 * 1024 * 1024, reuse, multiple};
+    HistogramFittingBatchProfile profile;
+    std::unique_ptr<PreparedGpuHistogramEvaluation> first, second;
+    const auto evaluate = [&](auto *out) {
+      const auto submissions = gpu.stats().committed_submissions;
+      Ok(op.EvaluateHistogramNodes({prepared.get(), {&node, 1}, options,
+          HistogramFittingProfileMode::kWall, &profile, true}, out));
+      Check(gpu.stats().committed_submissions == submissions + 1,
+            "Encoder boundaries changed submission count");
+      Compare((*out)->results(), expected);
+      Check(profile.compute_encoders == (multiple ? 1 + 4 * profile.waves : 1),
+            "Wrong compute encoder count");
+    };
+    evaluate(&first);
+    Check(profile.reused_buffers == 0, "Cold evaluation unexpectedly reused backing");
+    evaluate(&second);
+    Check(profile.reused_buffers == (reuse ? 6u : 0u),
+          "Held output was reused or completed scratch was not reused");
+    Compare(first->results(), expected);
+    first.reset(); second.reset();
+    evaluate(&first);
+    Check(profile.reused_buffers == (reuse ? 7u : 0u),
+          "Released result backing was not reused");
+    for (bool completion : {false, true}) {
+      const auto old_profile = profile;
+      const auto *old_output = first.get();
+      Ok(ArmNextMetalSubmissionFailureForTest(gpu, !completion, completion));
+      const auto status = op.EvaluateHistogramNodes(
+          {prepared.get(), {&node, 1}, options, HistogramFittingProfileMode::kWall,
+           &profile, true}, &first);
+      Check(!status.ok() && first.get() == old_output && profile == old_profile,
+            "Submission experiment published a failed result or trace");
+      Compare(first->results(), expected);
+      ++faults;
+    }
+    first.reset();
+    Ok(gpu.TrimPreparationCache());
+    if (reuse) {
+      evaluate(&first);
+      Ok(gpu.TrimPreparationCache());
+      first.reset(); // A lease acquired before trimming cannot refill the cache.
+      evaluate(&first);
+      Check(profile.reused_buffers == 0, "Trimmed generation refilled histogram cache");
+      first.reset();
+      Ok(metal_internal::EmptyMetalAqScratchArenasForTesting(gpu));
+      evaluate(&first);
+      // Check large scratch recovery. Metal may retain small suballocations
+      // when asked to purge; their contents are still overwritten and checked.
+      Check(!(profile.reused_buffers & 4), "Purged histogram scratch was reused");
+      first.reset();
+      // Concurrent requests borrow immutable rows but exclusively acquire their
+      // own transient/result allocations, even when sharing one backend cache.
+      auto pending = std::async(std::launch::async, [&] {
+        std::unique_ptr<PreparedGpuHistogramEvaluation> result;
+        Ok(op.EvaluateHistogramNodes({prepared.get(), {&node, 1}, options}, &result));
+        return result;
+      });
+      Ok(op.EvaluateHistogramNodes({prepared.get(), {&node, 1}, options}, &first));
+      second = pending.get();
+      Compare(second->results(), expected);
+      Compare(first->results(), expected);
+      first.reset(); second.reset();
+    }
+    Ok(gpu.TrimPreparationCache());
+    Trees(gpu, {Fixture(0, 257, 2), Fixture(3, 263, 2)}, options);
+    Ok(gpu.TrimPreparationCache());
   }
 }
 } // namespace
@@ -482,6 +581,7 @@ int main() try {
     Failures(*gpu, *embedded);
     OverflowValidation(*gpu);
     Profiles(*gpu);
+    SubmissionVariants(*gpu);
   }
   Check(DefaultResourceBudget().snapshot().total.live_capacity_bytes == 0 &&
             DefaultResourceBudget().snapshot().total.pending_count == 0,

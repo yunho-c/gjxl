@@ -22,7 +22,8 @@ struct Job {
   size_t evaluations = 0;
 };
 void Run(const std::shared_ptr<const ExecutionDomain> &domain,
-         size_t participants, bool fail = false) {
+         size_t participants, bool fail = false, size_t ready_target = 32,
+         size_t flush_us = 500, bool trace_enabled = false) {
   auto resources = CurrentResourceContext();
   resources.domain = domain.get();
   ResourceContextScope resource_context(resources);
@@ -54,12 +55,18 @@ void Run(const std::shared_ptr<const ExecutionDomain> &domain,
     }
     return HistogramFitQueue::Result::kGpu;
   };
-  HistogramFitQueue queue(participants);
+  HistogramFitQueue queue(participants, ready_target, flush_us);
   Ok(queue.Start(jobs.size(), work));
   std::array<size_t, 256> ready;
   size_t count;
   bool complete;
-  while ((complete = queue.Next(ready, &count)) && count) {
+  HistogramFitQueue::Trace trace;
+  while ((complete = queue.Next(ready, &count, trace_enabled ? &trace : nullptr)) && count) {
+    if (trace_enabled)
+      Check(trace.ready == count && trace.live >= count &&
+                trace.cpu_queued + trace.cpu_running + count == trace.live &&
+                trace.reason >= 1 && trace.reason <= 3 && trace.next_nanoseconds > 0,
+            "Queue trace lost ready/live state");
     Check(std::is_sorted(ready.begin(), ready.begin() + count),
           "Ready nodes lost canonical order");
     for (size_t i : std::span(ready).first(count)) {
@@ -73,7 +80,7 @@ void Run(const std::shared_ptr<const ExecutionDomain> &domain,
       ++job.evaluations;
       job.apply = true;
     }
-    queue.Resume(std::span(ready).first(count));
+    queue.Resume(std::span(ready).first(count), trace_enabled ? &trace : nullptr);
   }
   queue.Stop();
   Check(complete != fail, "Queue failed to propagate a CPU error or complete");
@@ -101,6 +108,8 @@ int main() try {
   for (size_t participants : {size_t{1}, size_t{2}, size_t{4}}) {
     Run(domain, participants);
     Run(domain, participants, true);
+    Run(domain, participants, false, 1, 0, true);
+    Run(domain, participants, false, 64, 2000, true);
     Released(*domain);
   }
   for (auto kind : {WorkerLaunchFailureKind::kSystemError,
