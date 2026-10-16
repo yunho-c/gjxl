@@ -46,6 +46,10 @@ target_include_directories(gjxl_modular_reference_workflow_check PRIVATE "${CMAK
 target_link_libraries(gjxl_modular_reference_workflow_check PRIVATE gjxl_codestream gjxl_modular_reference)
 add_executable(gjxl_modular_hybrid_profile
   tools/modular_reference_learning/hybrid_profile.cpp src/io/pnm.cpp)
+add_executable(gjxl_ans_allocation_profile
+  tools/modular_reference_learning/ans_allocation_profile.cpp src/io/pnm.cpp)
+target_include_directories(gjxl_ans_allocation_profile PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
+target_link_libraries(gjxl_ans_allocation_profile PRIVATE gjxl_codestream gjxl_modular_reference)
 target_include_directories(gjxl_modular_hybrid_profile PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tests")
 target_link_libraries(gjxl_modular_hybrid_profile PRIVATE gjxl_codestream gjxl_modular_reference)
 if(TARGET gjxl_metal)

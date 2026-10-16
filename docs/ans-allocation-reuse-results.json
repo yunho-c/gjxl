@@ -1,0 +1,1226 @@
+{
+  "schema": 1,
+  "revision": "ebfa2d508d6defbe6446b193716d345bffbf6410",
+  "artifact_directory": "/Users/yunhocho/GitHub/gjxl-ans-allocation-reuse/build/ans-allocation/qualification",
+  "manifest_sha256": "5dfee520e05141b865eb67dc57e6e8cf38d9eac0f8ea75ae79ff75dccfff0088",
+  "reporter_sha256": "d9bf37aa97678c0e5d4f3dca3c7af12e8d57dab625d3d26b479e03532324e4d1",
+  "scope": "Fresh-process public learned estimated-ANS calls, AC power, active desktop. Three measured calls per condition after one discarded call. At 14 participants stream time is joined local model/emission wall; at one it is serial model plus emission wall. Sampled CPU is separate diagnostic evidence.",
+  "complete_encodes": 68,
+  "exact_decodes": true,
+  "inputs": [
+    {
+      "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+      "name": "photo-large-1029",
+      "sha256": "a1c487b0160d8f3e8cb86753131b919ac3de28e908fde757050ebccdb4407b6d"
+    },
+    {
+      "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1039.pam",
+      "name": "photo-large-1039",
+      "sha256": "22f487129343ed6d403346653ef99900e2552728ba2e4f5c63c90d058132f302"
+    },
+    {
+      "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1049.pam",
+      "name": "photo-large-1049",
+      "sha256": "0b3feae4d3bf1a13f89d5f4c3d976c8ea1e93e49a65548919cb5474c3cd1d62d"
+    }
+  ],
+  "binaries": {
+    "baseline": {
+      "directory": "/Users/yunhocho/GitHub/gjxl-ans-allocation-reuse/build/ans-allocation/baseline",
+      "profile_sha256": "5fdd3ad338c0fb0eca49ff34f5a23090f06d15d8b3e440720841336c65f83d14",
+      "probe_sha256": "60977b5a7df5c362125b3c8636af55315071a165999c215a9c30b6f1383ddfa9",
+      "libraries": "/Users/yunhocho/GitHub/gjxl-ans-allocation-reuse/build/ans-allocation/baseline/profile:\n\t/System/Library/Frameworks/Metal.framework/Versions/A/Metal (compatibility version 1.0.0, current version 382.5.3)\n\t/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation (compatibility version 300.0.0, current version 5027.0.69, weak)\n\t/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics (compatibility version 64.0.0, current version 2050.0.0)\n\t@rpath/libjxl.0.13.dylib (compatibility version 0.13.0, current version 0.13.0)\n\t@rpath/libjxl_cms.0.13.dylib (compatibility version 0.13.0, current version 0.13.0)\n\t@rpath/libbrotlienc.1.dylib (compatibility version 1.0.0, current version 1.2.0)\n\t@rpath/libbrotlidec.1.dylib (compatibility version 1.0.0, current version 1.2.0)\n\t@rpath/libbrotlicommon.1.dylib (compatibility version 1.0.0, current version 1.2.0)\n\t/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 2200.27.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)\n\t/usr/lib/libobjc.A.dylib (compatibility version 1.0.0, current version 228.0.0)"
+    },
+    "reuse": {
+      "directory": "/Users/yunhocho/GitHub/gjxl-ans-allocation-reuse/build/ans-allocation/qualification/candidate",
+      "profile_sha256": "f51d3eead249edddbc7ce2d55b760a82558ede2fbd4cc63d3662ea29c9f0bc5a",
+      "probe_sha256": "c93847453c17f6f683a85cc5a3c8f8e562aa8633166e25ac8a48f98235e81111",
+      "libraries": "/Users/yunhocho/GitHub/gjxl-ans-allocation-reuse/build/ans-allocation/qualification/candidate/profile:\n\t/System/Library/Frameworks/Metal.framework/Versions/A/Metal (compatibility version 1.0.0, current version 382.5.3)\n\t/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation (compatibility version 300.0.0, current version 5027.0.69, weak)\n\t/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics (compatibility version 64.0.0, current version 2050.0.0)\n\t@rpath/libjxl.0.13.dylib (compatibility version 0.13.0, current version 0.13.0)\n\t@rpath/libjxl_cms.0.13.dylib (compatibility version 0.13.0, current version 0.13.0)\n\t@rpath/libbrotlienc.1.dylib (compatibility version 1.0.0, current version 1.2.0)\n\t@rpath/libbrotlidec.1.dylib (compatibility version 1.0.0, current version 1.2.0)\n\t@rpath/libbrotlicommon.1.dylib (compatibility version 1.0.0, current version 1.2.0)\n\t/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 2200.27.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)\n\t/usr/lib/libobjc.A.dylib (compatibility version 1.0.0, current version 228.0.0)"
+    }
+  },
+  "timing": [
+    {
+      "input": "photo-large-1029",
+      "route": "cpu",
+      "participants": 1,
+      "baseline": {
+        "wall": 35.130343917,
+        "wall_range": [
+          34.572932166,
+          38.345926291
+        ],
+        "stream_wall": 2.7059098800000014,
+        "cpu": 34.811044,
+        "peak_committed": 1686504032,
+        "peak_backing": 823593449
+      },
+      "reuse": {
+        "wall": 34.0588545,
+        "wall_range": [
+          33.239520458,
+          34.171370875
+        ],
+        "stream_wall": 2.648188133,
+        "cpu": 33.906122,
+        "peak_committed": 1686504032,
+        "peak_backing": 823551181
+      },
+      "complete_speedup": 1.0314599370040467,
+      "stream_speedup": 1.021796694230561
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "cpu",
+      "participants": 14,
+      "baseline": {
+        "wall": 5.385030208,
+        "wall_range": [
+          4.682809208,
+          7.338455417
+        ],
+        "stream_wall": 1.077863125,
+        "cpu": 49.11354,
+        "peak_committed": 1891702456,
+        "peak_backing": 847854699
+      },
+      "reuse": {
+        "wall": 4.961601166,
+        "wall_range": [
+          4.079758167,
+          6.26323075
+        ],
+        "stream_wall": 0.387712542,
+        "cpu": 40.980898,
+        "peak_committed": 1876936376,
+        "peak_backing": 853171458
+      },
+      "complete_speedup": 1.0853412089834227,
+      "stream_speedup": 2.780057409130706
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "metal",
+      "participants": 14,
+      "baseline": {
+        "wall": 6.442622,
+        "wall_range": [
+          5.914479125,
+          6.6003255
+        ],
+        "stream_wall": 1.271821708,
+        "cpu": 45.33867,
+        "peak_committed": 1902505608,
+        "peak_backing": 776073744
+      },
+      "reuse": {
+        "wall": 4.98808425,
+        "wall_range": [
+          4.409266708,
+          6.344967584
+        ],
+        "stream_wall": 0.404260083,
+        "cpu": 38.272695,
+        "peak_committed": 1902505608,
+        "peak_backing": 778628429
+      },
+      "complete_speedup": 1.2916024824560652,
+      "stream_speedup": 3.1460482038242694
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "cpu",
+      "participants": 14,
+      "baseline": {
+        "wall": 4.075539541,
+        "wall_range": [
+          3.57109375,
+          4.686210875
+        ],
+        "stream_wall": 1.001358959,
+        "cpu": 35.369968,
+        "peak_committed": 1723856020,
+        "peak_backing": 758048390
+      },
+      "reuse": {
+        "wall": 3.518382709,
+        "wall_range": [
+          2.924398625,
+          5.038524625
+        ],
+        "stream_wall": 0.323843,
+        "cpu": 29.613449,
+        "peak_committed": 1709089940,
+        "peak_backing": 756908024
+      },
+      "complete_speedup": 1.158355948764413,
+      "stream_speedup": 3.092112409408263
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "metal",
+      "participants": 14,
+      "baseline": {
+        "wall": 5.099216542,
+        "wall_range": [
+          4.941636625,
+          5.7206445
+        ],
+        "stream_wall": 1.010083125,
+        "cpu": 33.344118,
+        "peak_committed": 1672421416,
+        "peak_backing": 691046500
+      },
+      "reuse": {
+        "wall": 4.009450916,
+        "wall_range": [
+          3.854895333,
+          4.198224083
+        ],
+        "stream_wall": 0.328469458,
+        "cpu": 27.421108,
+        "peak_committed": 1672421416,
+        "peak_backing": 699316867
+      },
+      "complete_speedup": 1.271799218604027,
+      "stream_speedup": 3.0751203815120003
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "cpu",
+      "participants": 14,
+      "baseline": {
+        "wall": 3.432779042,
+        "wall_range": [
+          3.389545,
+          4.237453208
+        ],
+        "stream_wall": 0.811198708,
+        "cpu": 33.759904,
+        "peak_committed": 1660924298,
+        "peak_backing": 725167394
+      },
+      "reuse": {
+        "wall": 2.938468417,
+        "wall_range": [
+          2.910121959,
+          3.602481333
+        ],
+        "stream_wall": 0.309494417,
+        "cpu": 27.817885,
+        "peak_committed": 1646158218,
+        "peak_backing": 730230914
+      },
+      "complete_speedup": 1.168220499543317,
+      "stream_speedup": 2.6210447214626167
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "metal",
+      "participants": 14,
+      "baseline": {
+        "wall": 4.065748042,
+        "wall_range": [
+          3.676583834,
+          5.416769917
+        ],
+        "stream_wall": 0.876494375,
+        "cpu": 31.979777,
+        "peak_committed": 1603007551,
+        "peak_backing": 666928641
+      },
+      "reuse": {
+        "wall": 3.22034475,
+        "wall_range": [
+          3.156163417,
+          3.575589875
+        ],
+        "stream_wall": 0.318497792,
+        "cpu": 25.605623,
+        "peak_committed": 1603007551,
+        "peak_backing": 670648836
+      },
+      "complete_speedup": 1.2625194995038962,
+      "stream_speedup": 2.751963740458207
+    }
+  ],
+  "sampling": [
+    {
+      "input": "photo-large-1029",
+      "route": "cpu",
+      "build": "baseline",
+      "analysis_sha256": "f725e7ea9498cc55af9e95b0c3a2ba57033e420fc013ce1be0319cb48d1cbd6a",
+      "attribution": {
+        "current": {
+          "stream_sampled_cpu": 11.720914,
+          "mutex_sampled_cpu": 7.125203,
+          "mutex_share": 0.6079050661066193
+        },
+        "previous": {
+          "stream_sampled_cpu": 11.720963,
+          "mutex_sampled_cpu": 7.015475,
+          "mutex_share": 0.5985408366189707
+        }
+      }
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "cpu",
+      "build": "reuse",
+      "analysis_sha256": "cbe7b7a3d69edc0dd99601e3fec9ef81122d48106e4f4349626eab19f0150524",
+      "attribution": {
+        "current": {
+          "stream_sampled_cpu": 4.236913,
+          "mutex_sampled_cpu": 1.195962,
+          "mutex_share": 0.28227202210666114
+        },
+        "previous": {
+          "stream_sampled_cpu": 4.236359,
+          "mutex_sampled_cpu": 1.057847,
+          "mutex_share": 0.24970664667465622
+        }
+      }
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "metal",
+      "build": "baseline",
+      "analysis_sha256": "2fedf88c11f74712c3e4a17fcaeb730cdeb9e688900f70391297a1663132e4b8",
+      "attribution": {
+        "current": {
+          "stream_sampled_cpu": 12.858981,
+          "mutex_sampled_cpu": 7.531025,
+          "mutex_share": 0.5856626586507904
+        },
+        "previous": {
+          "stream_sampled_cpu": 12.858429,
+          "mutex_sampled_cpu": 7.412491,
+          "mutex_share": 0.5764694116209687
+        }
+      }
+    },
+    {
+      "input": "photo-large-1029",
+      "route": "metal",
+      "build": "reuse",
+      "analysis_sha256": "769432824fd50be52ac28666e908642b1ad3017c5c9f7ae971a8a0a0c264e891",
+      "attribution": {
+        "current": {
+          "stream_sampled_cpu": 4.53887,
+          "mutex_sampled_cpu": 1.388808,
+          "mutex_share": 0.30598100408251394
+        },
+        "previous": {
+          "stream_sampled_cpu": 4.537007,
+          "mutex_sampled_cpu": 1.280355,
+          "mutex_share": 0.2822025621736973
+        }
+      }
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "cpu",
+      "build": "baseline",
+      "analysis_sha256": "85b978654f701e53947192fa94818355ba2a70e161d9a21ebcb16734a413f745",
+      "attribution": {
+        "current": {
+          "stream_sampled_cpu": 9.73627,
+          "mutex_sampled_cpu": 6.106858,
+          "mutex_share": 0.6272276754855812
+        },
+        "previous": {
+          "stream_sampled_cpu": 9.737924,
+          "mutex_sampled_cpu": 6.030757,
+          "mutex_share": 0.6193062299520925
+        }
+      }
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "cpu",
+      "build": "reuse",
+      "analysis_sha256": "c7b5c23696256da6e1fded83fb66500e8cd6740ee400d9a7ee76d4d54dd3b3c2",
+      "attribution": {
+        "current": {
+          "stream_sampled_cpu": 3.729865,
+          "mutex_sampled_cpu": 1.599273,
+          "mutex_share": 0.4287750360937996
+        },
+        "previous": {
+          "stream_sampled_cpu": 3.73041,
+          "mutex_sampled_cpu": 1.508229,
+          "mutex_share": 0.4043064971410649
+        }
+      }
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "metal",
+      "build": "baseline",
+      "analysis_sha256": "fe781229352dbe98c791b84ad41432365f95df4431048820d5bda1eaa785ec93",
+      "attribution": {
+        "current": {
+          "stream_sampled_cpu": 10.490643,
+          "mutex_sampled_cpu": 6.696769,
+          "mutex_share": 0.6383563905472714
+        },
+        "previous": {
+          "stream_sampled_cpu": 10.489716,
+          "mutex_sampled_cpu": 6.650125,
+          "mutex_share": 0.6339661626682743
+        }
+      }
+    },
+    {
+      "input": "photo-large-1039",
+      "route": "metal",
+      "build": "reuse",
+      "analysis_sha256": "c93f5324c5c86650c43f3e07e9704046bd9e80873c97631af4ab8fbe78ed1fe9",
+      "attribution": {
+        "current": {
+          "stream_sampled_cpu": 3.733312,
+          "mutex_sampled_cpu": 1.52239,
+          "mutex_share": 0.4077853659163766
+        },
+        "previous": {
+          "stream_sampled_cpu": 3.732564,
+          "mutex_sampled_cpu": 1.457868,
+          "mutex_share": 0.39058084469549614
+        }
+      }
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "cpu",
+      "build": "baseline",
+      "analysis_sha256": "608b3e861ad87e97bddd0abea87f7d822769ae46a544facc0d8ded2570990891",
+      "attribution": {
+        "current": {
+          "stream_sampled_cpu": 9.456599,
+          "mutex_sampled_cpu": 5.91007,
+          "mutex_share": 0.6249678134813583
+        },
+        "previous": {
+          "stream_sampled_cpu": 9.457471,
+          "mutex_sampled_cpu": 5.862179,
+          "mutex_share": 0.619846362732701
+        }
+      }
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "cpu",
+      "build": "reuse",
+      "analysis_sha256": "0d7abc253b719ea282dfbe55e2650e64add71ae801d2039f3dd7515d5b35ef60",
+      "attribution": {
+        "current": {
+          "stream_sampled_cpu": 3.481481,
+          "mutex_sampled_cpu": 1.616177,
+          "mutex_share": 0.46422111739228217
+        },
+        "previous": {
+          "stream_sampled_cpu": 3.48277,
+          "mutex_sampled_cpu": 1.542657,
+          "mutex_share": 0.44293967158325126
+        }
+      }
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "metal",
+      "build": "baseline",
+      "analysis_sha256": "e0fb69a480ef3dfbe05d04489c6cf8b9c2c7088653ca4d7777c6c9f9699241ff",
+      "attribution": {
+        "current": {
+          "stream_sampled_cpu": 10.361352,
+          "mutex_sampled_cpu": 6.607362,
+          "mutex_share": 0.6376930346541648
+        },
+        "previous": {
+          "stream_sampled_cpu": 10.35963,
+          "mutex_sampled_cpu": 6.579083,
+          "mutex_share": 0.6350693026681455
+        }
+      }
+    },
+    {
+      "input": "photo-large-1049",
+      "route": "metal",
+      "build": "reuse",
+      "analysis_sha256": "63c2830201ee7b23aa92d3214f7a495e47dd2132da473638ab55a0e3f0ec5a40",
+      "attribution": {
+        "current": {
+          "stream_sampled_cpu": 3.416988,
+          "mutex_sampled_cpu": 1.59811,
+          "mutex_share": 0.4676955260012619
+        },
+        "previous": {
+          "stream_sampled_cpu": 3.416179,
+          "mutex_sampled_cpu": 1.533489,
+          "mutex_share": 0.4488901196336609
+        }
+      }
+    }
+  ],
+  "probes": {
+    "baseline": [
+      {
+        "case": "0-0-0",
+        "allocations": 41,
+        "bits": 108,
+        "configs": 8,
+        "histograms": 8,
+        "peak_backing": 3324,
+        "plan": 892954
+      },
+      {
+        "case": "0-0-1",
+        "allocations": 20,
+        "bits": 108,
+        "configs": 8,
+        "histograms": 8,
+        "peak_backing": 3024,
+        "plan": 892954
+      },
+      {
+        "case": "0-1-0",
+        "allocations": 21,
+        "bits": 113,
+        "configs": 1,
+        "histograms": 1,
+        "peak_backing": 52064,
+        "plan": 454327
+      },
+      {
+        "case": "0-2-0",
+        "allocations": 32,
+        "bits": 108,
+        "configs": 28,
+        "histograms": 28,
+        "peak_backing": 50072,
+        "plan": 845935
+      },
+      {
+        "case": "0-3-0",
+        "allocations": 53,
+        "bits": 108,
+        "configs": 28,
+        "histograms": 1,
+        "peak_backing": 50072,
+        "plan": 1266388
+      },
+      {
+        "case": "0-3-1",
+        "allocations": 32,
+        "bits": 108,
+        "configs": 28,
+        "histograms": 1,
+        "peak_backing": 50072,
+        "plan": 1266388
+      },
+      {
+        "case": "1-0-0",
+        "allocations": 90,
+        "bits": 108,
+        "configs": 8,
+        "histograms": 8,
+        "peak_backing": 720960,
+        "plan": 2498718
+      },
+      {
+        "case": "1-0-1",
+        "allocations": 51,
+        "bits": 108,
+        "configs": 8,
+        "histograms": 8,
+        "peak_backing": 720960,
+        "plan": 2498718
+      },
+      {
+        "case": "1-1-0",
+        "allocations": 29,
+        "bits": 113,
+        "configs": 1,
+        "histograms": 1,
+        "peak_backing": 52152,
+        "plan": 454327
+      },
+      {
+        "case": "1-2-0",
+        "allocations": 86,
+        "bits": 108,
+        "configs": 28,
+        "histograms": 28,
+        "peak_backing": 748072,
+        "plan": 2451699
+      },
+      {
+        "case": "1-3-0",
+        "allocations": 125,
+        "bits": 108,
+        "configs": 28,
+        "histograms": 1,
+        "peak_backing": 748072,
+        "plan": 2872152
+      },
+      {
+        "case": "1-3-1",
+        "allocations": 86,
+        "bits": 108,
+        "configs": 28,
+        "histograms": 1,
+        "peak_backing": 748072,
+        "plan": 2872152
+      },
+      {
+        "case": "2-0-0",
+        "allocations": 408,
+        "bits": 129,
+        "configs": 16,
+        "histograms": 16,
+        "peak_backing": 639088,
+        "plan": 2498718
+      },
+      {
+        "case": "2-0-1",
+        "allocations": 150,
+        "bits": 129,
+        "configs": 16,
+        "histograms": 16,
+        "peak_backing": 639088,
+        "plan": 2498718
+      },
+      {
+        "case": "2-1-0",
+        "allocations": 104,
+        "bits": 139,
+        "configs": 2,
+        "histograms": 2,
+        "peak_backing": 54240,
+        "plan": 454327
+      },
+      {
+        "case": "2-2-0",
+        "allocations": 208,
+        "bits": 129,
+        "configs": 56,
+        "histograms": 56,
+        "peak_backing": 701048,
+        "plan": 2451699
+      },
+      {
+        "case": "2-3-0",
+        "allocations": 466,
+        "bits": 129,
+        "configs": 56,
+        "histograms": 2,
+        "peak_backing": 701048,
+        "plan": 2872152
+      },
+      {
+        "case": "2-3-1",
+        "allocations": 208,
+        "bits": 129,
+        "configs": 56,
+        "histograms": 2,
+        "peak_backing": 701048,
+        "plan": 2872152
+      },
+      {
+        "case": "3-0-0",
+        "allocations": 151,
+        "bits": 65685,
+        "configs": 8,
+        "histograms": 104,
+        "peak_backing": 720960,
+        "plan": 2498718
+      },
+      {
+        "case": "3-0-1",
+        "allocations": 71,
+        "bits": 65685,
+        "configs": 8,
+        "histograms": 104,
+        "peak_backing": 720960,
+        "plan": 2498718
+      },
+      {
+        "case": "3-1-0",
+        "allocations": 42,
+        "bits": 65722,
+        "configs": 1,
+        "histograms": 8,
+        "peak_backing": 52152,
+        "plan": 454327
+      },
+      {
+        "case": "3-2-0",
+        "allocations": 125,
+        "bits": 65685,
+        "configs": 28,
+        "histograms": 364,
+        "peak_backing": 748072,
+        "plan": 2451699
+      },
+      {
+        "case": "3-3-0",
+        "allocations": 186,
+        "bits": 65655,
+        "configs": 28,
+        "histograms": 273,
+        "peak_backing": 748072,
+        "plan": 2872152
+      },
+      {
+        "case": "3-3-1",
+        "allocations": 109,
+        "bits": 65655,
+        "configs": 28,
+        "histograms": 273,
+        "peak_backing": 748072,
+        "plan": 2872152
+      },
+      {
+        "case": "4-0-0",
+        "allocations": 544,
+        "bits": 131251,
+        "configs": 16,
+        "histograms": 208,
+        "peak_backing": 660928,
+        "plan": 2498718
+      },
+      {
+        "case": "4-0-1",
+        "allocations": 201,
+        "bits": 131251,
+        "configs": 16,
+        "histograms": 208,
+        "peak_backing": 660928,
+        "plan": 2498718
+      },
+      {
+        "case": "4-1-0",
+        "allocations": 47,
+        "bits": 131253,
+        "configs": 1,
+        "histograms": 8,
+        "peak_backing": 52152,
+        "plan": 454327
+      },
+      {
+        "case": "4-2-0",
+        "allocations": 108,
+        "bits": 131226,
+        "configs": 28,
+        "histograms": 247,
+        "peak_backing": 748072,
+        "plan": 2451699
+      },
+      {
+        "case": "4-3-0",
+        "allocations": 188,
+        "bits": 131226,
+        "configs": 28,
+        "histograms": 208,
+        "peak_backing": 748072,
+        "plan": 2872152
+      },
+      {
+        "case": "4-3-1",
+        "allocations": 105,
+        "bits": 131226,
+        "configs": 28,
+        "histograms": 208,
+        "peak_backing": 748072,
+        "plan": 2872152
+      },
+      {
+        "case": "5-0-0",
+        "allocations": 8339,
+        "bits": 262341,
+        "configs": 8,
+        "histograms": 104,
+        "peak_backing": 1085928,
+        "plan": 2498718
+      },
+      {
+        "case": "5-0-1",
+        "allocations": 8280,
+        "bits": 262341,
+        "configs": 8,
+        "histograms": 104,
+        "peak_backing": 1085928,
+        "plan": 2498718
+      },
+      {
+        "case": "5-1-0",
+        "allocations": 52,
+        "bits": 262487,
+        "configs": 1,
+        "histograms": 8,
+        "peak_backing": 52152,
+        "plan": 454327
+      },
+      {
+        "case": "5-2-0",
+        "allocations": 8311,
+        "bits": 262341,
+        "configs": 28,
+        "histograms": 208,
+        "peak_backing": 1113040,
+        "plan": 2451699
+      },
+      {
+        "case": "5-3-0",
+        "allocations": 8365,
+        "bits": 262341,
+        "configs": 28,
+        "histograms": 182,
+        "peak_backing": 1113040,
+        "plan": 2872152
+      },
+      {
+        "case": "5-3-1",
+        "allocations": 8306,
+        "bits": 262341,
+        "configs": 28,
+        "histograms": 182,
+        "peak_backing": 1113040,
+        "plan": 2872152
+      },
+      {
+        "case": "6-0-0",
+        "allocations": 157,
+        "bits": 26066,
+        "configs": 8,
+        "histograms": 104,
+        "peak_backing": 720960,
+        "plan": 2498718
+      },
+      {
+        "case": "6-0-1",
+        "allocations": 73,
+        "bits": 26066,
+        "configs": 8,
+        "histograms": 104,
+        "peak_backing": 720960,
+        "plan": 2498718
+      },
+      {
+        "case": "6-1-0",
+        "allocations": 42,
+        "bits": 26071,
+        "configs": 1,
+        "histograms": 8,
+        "peak_backing": 52152,
+        "plan": 454327
+      },
+      {
+        "case": "6-2-0",
+        "allocations": 127,
+        "bits": 26066,
+        "configs": 28,
+        "histograms": 364,
+        "peak_backing": 748072,
+        "plan": 2451699
+      },
+      {
+        "case": "6-3-0",
+        "allocations": 185,
+        "bits": 26066,
+        "configs": 28,
+        "histograms": 13,
+        "peak_backing": 748072,
+        "plan": 2872152
+      },
+      {
+        "case": "6-3-1",
+        "allocations": 98,
+        "bits": 26066,
+        "configs": 28,
+        "histograms": 13,
+        "peak_backing": 748072,
+        "plan": 2872152
+      }
+    ],
+    "reuse": [
+      {
+        "case": "0-0-0",
+        "allocations": 38,
+        "bits": 108,
+        "configs": 8,
+        "histograms": 8,
+        "peak_backing": 6716,
+        "plan": 835866
+      },
+      {
+        "case": "0-0-1",
+        "allocations": 17,
+        "bits": 108,
+        "configs": 8,
+        "histograms": 8,
+        "peak_backing": 6359,
+        "plan": 835866
+      },
+      {
+        "case": "0-1-0",
+        "allocations": 21,
+        "bits": 113,
+        "configs": 1,
+        "histograms": 1,
+        "peak_backing": 52064,
+        "plan": 446295
+      },
+      {
+        "case": "0-2-0",
+        "allocations": 27,
+        "bits": 108,
+        "configs": 28,
+        "histograms": 28,
+        "peak_backing": 50072,
+        "plan": 648687
+      },
+      {
+        "case": "0-3-0",
+        "allocations": 48,
+        "bits": 108,
+        "configs": 28,
+        "histograms": 1,
+        "peak_backing": 50072,
+        "plan": 1061972
+      },
+      {
+        "case": "0-3-1",
+        "allocations": 27,
+        "bits": 108,
+        "configs": 28,
+        "histograms": 1,
+        "peak_backing": 50072,
+        "plan": 1061972
+      },
+      {
+        "case": "1-0-0",
+        "allocations": 79,
+        "bits": 108,
+        "configs": 8,
+        "histograms": 8,
+        "peak_backing": 726336,
+        "plan": 2441630
+      },
+      {
+        "case": "1-0-1",
+        "allocations": 40,
+        "bits": 108,
+        "configs": 8,
+        "histograms": 8,
+        "peak_backing": 726336,
+        "plan": 2441630
+      },
+      {
+        "case": "1-1-0",
+        "allocations": 28,
+        "bits": 113,
+        "configs": 1,
+        "histograms": 1,
+        "peak_backing": 52152,
+        "plan": 446295
+      },
+      {
+        "case": "1-2-0",
+        "allocations": 38,
+        "bits": 108,
+        "configs": 28,
+        "histograms": 28,
+        "peak_backing": 715308,
+        "plan": 2254451
+      },
+      {
+        "case": "1-3-0",
+        "allocations": 77,
+        "bits": 108,
+        "configs": 28,
+        "histograms": 1,
+        "peak_backing": 715308,
+        "plan": 2667736
+      },
+      {
+        "case": "1-3-1",
+        "allocations": 38,
+        "bits": 108,
+        "configs": 28,
+        "histograms": 1,
+        "peak_backing": 715308,
+        "plan": 2667736
+      },
+      {
+        "case": "2-0-0",
+        "allocations": 386,
+        "bits": 129,
+        "configs": 16,
+        "histograms": 16,
+        "peak_backing": 644464,
+        "plan": 2441630
+      },
+      {
+        "case": "2-0-1",
+        "allocations": 128,
+        "bits": 129,
+        "configs": 16,
+        "histograms": 16,
+        "peak_backing": 644464,
+        "plan": 2441630
+      },
+      {
+        "case": "2-1-0",
+        "allocations": 102,
+        "bits": 139,
+        "configs": 2,
+        "histograms": 2,
+        "peak_backing": 54240,
+        "plan": 446295
+      },
+      {
+        "case": "2-2-0",
+        "allocations": 115,
+        "bits": 129,
+        "configs": 56,
+        "histograms": 56,
+        "peak_backing": 701048,
+        "plan": 2254451
+      },
+      {
+        "case": "2-3-0",
+        "allocations": 373,
+        "bits": 129,
+        "configs": 56,
+        "histograms": 2,
+        "peak_backing": 701048,
+        "plan": 2667736
+      },
+      {
+        "case": "2-3-1",
+        "allocations": 115,
+        "bits": 129,
+        "configs": 56,
+        "histograms": 2,
+        "peak_backing": 701048,
+        "plan": 2667736
+      },
+      {
+        "case": "3-0-0",
+        "allocations": 132,
+        "bits": 65685,
+        "configs": 8,
+        "histograms": 104,
+        "peak_backing": 726336,
+        "plan": 2441630
+      },
+      {
+        "case": "3-0-1",
+        "allocations": 52,
+        "bits": 65685,
+        "configs": 8,
+        "histograms": 104,
+        "peak_backing": 726336,
+        "plan": 2441630
+      },
+      {
+        "case": "3-1-0",
+        "allocations": 40,
+        "bits": 65722,
+        "configs": 1,
+        "histograms": 8,
+        "peak_backing": 52152,
+        "plan": 446295
+      },
+      {
+        "case": "3-2-0",
+        "allocations": 48,
+        "bits": 65685,
+        "configs": 28,
+        "histograms": 364,
+        "peak_backing": 715308,
+        "plan": 2254451
+      },
+      {
+        "case": "3-3-0",
+        "allocations": 116,
+        "bits": 65655,
+        "configs": 28,
+        "histograms": 273,
+        "peak_backing": 715308,
+        "plan": 2667736
+      },
+      {
+        "case": "3-3-1",
+        "allocations": 39,
+        "bits": 65655,
+        "configs": 28,
+        "histograms": 273,
+        "peak_backing": 715308,
+        "plan": 2667736
+      },
+      {
+        "case": "4-0-0",
+        "allocations": 506,
+        "bits": 131251,
+        "configs": 16,
+        "histograms": 208,
+        "peak_backing": 666304,
+        "plan": 2441630
+      },
+      {
+        "case": "4-0-1",
+        "allocations": 163,
+        "bits": 131251,
+        "configs": 16,
+        "histograms": 208,
+        "peak_backing": 666304,
+        "plan": 2441630
+      },
+      {
+        "case": "4-1-0",
+        "allocations": 45,
+        "bits": 131253,
+        "configs": 1,
+        "histograms": 8,
+        "peak_backing": 52152,
+        "plan": 446295
+      },
+      {
+        "case": "4-2-0",
+        "allocations": 49,
+        "bits": 131226,
+        "configs": 28,
+        "histograms": 247,
+        "peak_backing": 715308,
+        "plan": 2254451
+      },
+      {
+        "case": "4-3-0",
+        "allocations": 132,
+        "bits": 131226,
+        "configs": 28,
+        "histograms": 208,
+        "peak_backing": 715308,
+        "plan": 2667736
+      },
+      {
+        "case": "4-3-1",
+        "allocations": 49,
+        "bits": 131226,
+        "configs": 28,
+        "histograms": 208,
+        "peak_backing": 715308,
+        "plan": 2667736
+      },
+      {
+        "case": "5-0-0",
+        "allocations": 8320,
+        "bits": 262341,
+        "configs": 8,
+        "histograms": 104,
+        "peak_backing": 1091304,
+        "plan": 2441630
+      },
+      {
+        "case": "5-0-1",
+        "allocations": 8261,
+        "bits": 262341,
+        "configs": 8,
+        "histograms": 104,
+        "peak_backing": 1091304,
+        "plan": 2441630
+      },
+      {
+        "case": "5-1-0",
+        "allocations": 50,
+        "bits": 262487,
+        "configs": 1,
+        "histograms": 8,
+        "peak_backing": 52152,
+        "plan": 446295
+      },
+      {
+        "case": "5-2-0",
+        "allocations": 8259,
+        "bits": 262341,
+        "configs": 28,
+        "histograms": 208,
+        "peak_backing": 1080276,
+        "plan": 2254451
+      },
+      {
+        "case": "5-3-0",
+        "allocations": 8315,
+        "bits": 262341,
+        "configs": 28,
+        "histograms": 182,
+        "peak_backing": 1080276,
+        "plan": 2667736
+      },
+      {
+        "case": "5-3-1",
+        "allocations": 8256,
+        "bits": 262341,
+        "configs": 28,
+        "histograms": 182,
+        "peak_backing": 1080276,
+        "plan": 2667736
+      },
+      {
+        "case": "6-0-0",
+        "allocations": 138,
+        "bits": 26066,
+        "configs": 8,
+        "histograms": 104,
+        "peak_backing": 726336,
+        "plan": 2441630
+      },
+      {
+        "case": "6-0-1",
+        "allocations": 54,
+        "bits": 26066,
+        "configs": 8,
+        "histograms": 104,
+        "peak_backing": 726336,
+        "plan": 2441630
+      },
+      {
+        "case": "6-1-0",
+        "allocations": 40,
+        "bits": 26071,
+        "configs": 1,
+        "histograms": 8,
+        "peak_backing": 52152,
+        "plan": 446295
+      },
+      {
+        "case": "6-2-0",
+        "allocations": 50,
+        "bits": 26066,
+        "configs": 28,
+        "histograms": 364,
+        "peak_backing": 715308,
+        "plan": 2254451
+      },
+      {
+        "case": "6-3-0",
+        "allocations": 137,
+        "bits": 26066,
+        "configs": 28,
+        "histograms": 13,
+        "peak_backing": 715308,
+        "plan": 2667736
+      },
+      {
+        "case": "6-3-1",
+        "allocations": 50,
+        "bits": 26066,
+        "configs": 28,
+        "histograms": 13,
+        "peak_backing": 715308,
+        "plan": 2667736
+      }
+    ]
+  }
+}
