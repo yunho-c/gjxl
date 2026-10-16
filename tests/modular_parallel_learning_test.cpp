@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 #include "codec/modular/histogram_tree_profile.h"
 #include "codec/modular/profile.h"
+#include "codestream/modular/reference_learning_profile.h"
 #include "codestream/workflow_admission_scope.h"
 #include "core/thread_budget.h"
 #include "core/worker_launch_internal.h"
@@ -86,8 +87,13 @@ void SameProfile(const HistogramFittingProfile &a, const HistogramFittingProfile
             a.properties_by_active_bins == b.properties_by_active_bins &&
             a.properties_by_bin_span == b.properties_by_bin_span,
         "Parallel fitter lost profile records or distributions");
-  for (size_t i = 0; i < a.by_rows.size(); ++i)
+  uint64_t fused = 0, skipped = 0;
+  for (size_t i = 0; i < a.by_rows.size(); ++i) {
     Check(a.by_rows[i].work == b.by_rows[i].work, "Parallel fitter changed node work");
+    fused += a.by_rows[i].work.fused_property_row_visits;
+    skipped += a.by_rows[i].work.skipped_constant_properties;
+  }
+  Check(fused && skipped, "Parallel profile parity did not exercise fitter work reduction");
   for (size_t i = 0; i < a.by_depth.size(); ++i)
     Check(a.by_depth[i].nodes == b.by_depth[i].nodes && a.by_depth[i].rows == b.by_depth[i].rows,
           "Parallel fitter changed depth work");
@@ -107,6 +113,23 @@ void Encode(const ReferenceModularFrame &frame, PreparedModularEntropyOptions en
   Ok(budget.TryReserve(plan.working.peak_bytes, &reservation));
   ResourceContextScope scope({&reservation, ResourceClass::kPreparation});
   Ok(EncodePreparedModularStreams(frame.view(), entropy, out));
+}
+void CheckTrace(const LearningScheduleProfile &trace, size_t participants, size_t records) {
+  Check(trace.jobs_written == records && trace.waves_written && !trace.dropped,
+        "Schedule trace lost local jobs");
+  size_t traced = 0;
+  for (const auto &wave : trace.waves.first(trace.waves_written)) {
+    Check(wave.first_job == traced && wave.participants <= participants &&
+              wave.start <= wave.dispatch && wave.dispatch <= wave.joined &&
+              wave.joined <= wave.finish, "Invalid learning wave trace");
+    for (const auto &job : trace.jobs.subspan(wave.first_job, wave.jobs))
+      Check(job.worker < wave.participants && job.start >= wave.dispatch &&
+                job.finish <= wave.joined && job.start <= job.finish &&
+                job.preparation + job.fitting <= job.finish - job.start + 1e-6,
+            "Job trace escaped its wave or overlapped preparation/fitting");
+    traced += wave.jobs;
+  }
+  Check(traced == trace.jobs_written, "Wave trace omitted jobs");
 }
 void Parity(bool encode) {
   for (bool all : {false, true}) {
@@ -129,13 +152,24 @@ void Parity(bool encode) {
       std::array<HistogramFitRecord, 16> actual_records;
       actual.records = actual_records;
       ModularProfile modular;
+      std::array<LearningJobTiming, 32> jobs;
+      std::array<LearningWaveTiming, 32> waves;
+      LearningScheduleProfile trace;
+      trace.jobs = jobs;
+      trace.waves = waves;
       {
+        ReferenceWorkflowProfileSession scheduling(nullptr, &trace);
         HistogramFittingProfileSession session(&actual);
         ProfileSession stages(&modular);
         Ok(Prepare(f, options, domain, &parallel));
       }
       Same(serial, parallel);
       SameProfile(expected, actual);
+      CheckTrace(trace, requested ? requested : 4, parallel.streams().size());
+      Check(trace.waves_written == 1 && waves[0].jobs > waves[0].participants &&
+                parallel.stats().learning_waves == 1 &&
+                !parallel.stats().learning_memory_limited_waves,
+            "Ready local fits were split into participant-sized barriers");
       Check(parallel.stats().learning_peak_participants == (requested ? requested : 4) &&
                 modular.training_work.weighted_prediction_samples ==
                     serial.stats().scanned_pixels &&
@@ -202,7 +236,16 @@ void MemoryAdmission(Extent2D extent) {
   const size_t limit = control->snapshot().peak_committed_bytes;
   auto constrained = Domain(limit);
   options.learning_cpu_participants = 4;
-  Ok(Prepare(f, options, constrained, &parallel));
+  std::array<LearningJobTiming, 32> jobs;
+  std::array<LearningWaveTiming, 32> waves;
+  LearningScheduleProfile trace;
+  trace.jobs = jobs;
+  trace.waves = waves;
+  {
+    ReferenceWorkflowProfileSession session(nullptr, &trace);
+    Ok(Prepare(f, options, constrained, &parallel));
+  }
+  CheckTrace(trace, 4, parallel.streams().size());
   Same(serial, parallel);
   Check(parallel.stats().learning_memory_limited_waves &&
             parallel.stats().learning_peak_participants < 4 &&

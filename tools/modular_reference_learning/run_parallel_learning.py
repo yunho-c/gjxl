@@ -72,8 +72,9 @@ def main():
         "inputs": [{"name": p.stem, "path": str(p), "sha256": digest(p)} for p in inputs],
         "stages": ["input", "transforms", "training", "tokens", "model", "emission", "assembly", "gpu_input_tokens"],
         "scope": "Identical binary, automatic local trees, Best predictors, estimated direct ANS/64 clusters. "
-                 "Fixed CPU domain ceiling and maximum four CPU feature participants; vary only local "
-                 "prepare-and-fit participants. Fresh serial processes in rotating participant order, "
+                 "Fixed CPU domain ceiling and maximum four CPU feature participants; vary local "
+                 "prepare-and-fit participants. Cohort alignment may change feature batch boundaries "
+                 "and automatic producer routing; retain routing per condition. Fresh serial processes in rotating participant order, "
                  "one independently decoded output per call; all bytes checked against prior qualification. "
                  "Encoder-call wall/process CPU include admission, selection, features, local learning, "
                  "tokens, entropy and output publication/teardown; exclude input/output IO, backend "
@@ -126,9 +127,11 @@ def main():
                                 result["predictors"] == "best" and not result["histogram_fitting"]["enabled"],
                                 "Wrong profile/policy result")
                         require(checksum == reference[source.stem], "Bytes differ from prior qualification")
-                        control = (checksum, result["bytes"], result["work"], result["routing"])
+                        control = (checksum, result["bytes"], result["work"])
                         require(controls.setdefault(source.stem, control) == control,
-                                "Participant count changed bytes, learning work or routing")
+                                "Participant count changed bytes or learning work")
+                        require(controls.setdefault((source.stem, participants), result["routing"]) == result["routing"],
+                                "Repeated participant condition changed feature/token routing")
                         learning = result["learning"]
                         require(learning["requested_participants"] == participants and
                                 learning["cpu_ceiling"] == args.cpu_ceiling and

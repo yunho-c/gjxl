@@ -3,8 +3,10 @@
 // Complete-call comparison of the same histogram policy through explicit
 // routes.
 #include "codec/modular/profile.h"
+#include "codestream/modular/reference_learning_profile.h"
 #include "codestream/modular/reference_workflow.h"
 #include "codestream/workflow_admission_scope.h"
+#include "codestream/workflow_internal.h"
 #include "core/thread_budget.h"
 #include "histogram_profile_json.h"
 #include "io/pnm.h"
@@ -43,8 +45,10 @@ template <typename T> void Array(std::ostream &out, const T &a) {
 }
 } // namespace
 int main(int argc, char **argv) try {
-  Check(argc >= 6 && argc <= 12, "hybrid_profile INPUT OUT cpu|shared-cpu|hybrid|auto auto|buffered "
-                                "best|all [fit-off|fit-on [learning-participants [cpu-ceiling [entropy-participants [selection-participants [tokenization-participants]]]]]]");
+  Check(argc >= 6 && argc <= 13, "hybrid_profile INPUT OUT cpu|shared-cpu|hybrid|auto auto|buffered "
+                                "best|all [fit-off|schedule|fit-on [learning-participants [cpu-ceiling [entropy-participants [selection-participants [tokenization-participants [public]]]]]]]");
+  const bool public_api = argc == 13;
+  Check(!public_api || std::string_view(argv[12]) == "public", "Unknown public route flag");
   const bool tokenization_diagnostics = argc >= 12;
   const size_t tokenization_participants = tokenization_diagnostics ? std::stoull(argv[11]) : 1;
   Check(tokenization_participants <= 256, "Invalid tokenization participant limit");
@@ -62,13 +66,20 @@ int main(int argc, char **argv) try {
   const size_t cpu_ceiling = argc >= 9 ? std::stoull(argv[8]) : 4;
   Check(learning_participants <= 256 && cpu_ceiling > 0 && cpu_ceiling <= 256,
         "Invalid participant limit");
-  Check(fitting_mode == "fit-off" || fitting_mode == "fit-on", "Invalid fitting profile mode");
+  Check(fitting_mode == "fit-off" || fitting_mode == "fit-on" || fitting_mode == "schedule",
+        "Invalid fitting profile mode");
   const bool fitting_profile_enabled = fitting_mode == "fit-on";
+  const bool schedule_enabled = fitting_mode != "fit-off";
   const std::string route = argv[3], buffering = argv[4], predictors = argv[5];
   Check(route == "cpu" || route == "shared-cpu" || route == "hybrid" || route == "auto",
         "Invalid route");
   Check(buffering == "auto" || buffering == "buffered", "Invalid buffering policy");
   Check(predictors == "best" || predictors == "all", "Invalid predictor policy");
+  Check(!public_api || ((route == "cpu" || route == "auto") && buffering == "auto" &&
+                           predictors == "best" && learning_participants == cpu_ceiling &&
+                           entropy_participants == cpu_ceiling && selection_participants == cpu_ceiling &&
+                           tokenization_participants == cpu_ceiling),
+        "Public profile requires default policy and matching stage/CPU limits");
   const std::filesystem::path directory = argv[2];
   Check(!std::filesystem::exists(directory), "Output directory already exists");
   io::IntegerImage input;
@@ -99,12 +110,18 @@ int main(int argc, char **argv) try {
   options.predictors =
       predictors == "best" ? ReferencePredictors::kBest : ReferencePredictors::kAll;
   std::unique_ptr<GpuBackend> gpu;
+  GpuBackend *backend = nullptr;
   std::string device = "CPU";
   if (route != "cpu") {
 #if GJXL_HYBRID_PROFILE_METAL
-    Ok(CreateEmbeddedMetalBackend({}, &gpu));
-    options.gpu = gpu.get();
-    device = gpu->name();
+    if (public_api)
+      Ok(codestream_internal::BorrowProductionMetalBackend(&backend));
+    else {
+      Ok(CreateEmbeddedMetalBackend({}, &gpu));
+      backend = gpu.get();
+    }
+    options.gpu = backend;
+    device = backend->name();
     options.feature_producer = route == "shared-cpu" ? WeightedFeatureBackend::kCpu
                                : route == "hybrid"   ? WeightedFeatureBackend::kGpu
                                                      : WeightedFeatureBackend::kAuto;
@@ -122,32 +139,54 @@ int main(int argc, char **argv) try {
   context.domain = domain.get();
   ResourceContextScope resource_context(context);
   thread_budget_internal::CpuExecutionScope cpu;
-  Ok(cpu.Start(domain, cpu_ceiling));
-  thread_budget_internal::EncodeScope participation(cpu_ceiling);
+  if (!public_api) Ok(cpu.Start(domain, cpu_ceiling));
+  thread_budget_internal::EncodeScope participation(public_api ? 0 : cpu_ceiling);
   ReferenceWorkflowStats stats;
   ModularProfile profile;
   HistogramFittingProfile fitting_profile;
   // Diagnostic backing is allocated before timing and outside codec admission.
   // There is at most one fit per local group plus the global stream.
   std::vector<HistogramFitRecord> fitting_records;
+  const size_t group_count = ((view.extent.width + 255) / 256) * ((view.extent.height + 255) / 256) + 1;
+  // Canonical slots include empty DC groups in addition to image groups.
+  // DC group count never exceeds image group count.
+  std::vector<LearningJobTiming> job_records(schedule_enabled ? 2 * group_count : 0);
+  std::vector<LearningWaveTiming> wave_records(schedule_enabled ? 2 * group_count : 0);
+  LearningScheduleProfile schedule;
+  schedule.jobs = job_records;
+  schedule.waves = wave_records;
   if (fitting_profile_enabled) {
     fitting_records.resize(((view.extent.width + 255) / 256) * ((view.extent.height + 255) / 256) +
                            1);
     fitting_profile.records = fitting_records;
   }
   codestream_internal::CodestreamBuffer encoded;
+  std::vector<uint8_t> public_encoded;
+  const size_t submissions = backend ? backend->stats().committed_submissions : 0;
   double wall, process_cpu;
   {
     ProfileSession session(&profile);
     HistogramFittingProfileSession fitting_session(fitting_profile_enabled ? &fitting_profile
                                                                            : nullptr);
+    ReferenceWorkflowProfileSession workflow_session(&stats, schedule_enabled ? &schedule : nullptr);
     const auto start = std::chrono::steady_clock::now();
+    schedule.epoch = start;
     const auto cpu_start = std::clock();
-    Ok(EncodeReferenceModularImage(view, options, budget, &encoded, &stats));
+    if (public_api) {
+      gjxl::ModularEncodingOptions public_options;
+      public_options.backend = route == "cpu" ? ModularBackend::kCpu : ModularBackend::kMetal;
+      public_options.cpu_thread_count = cpu_ceiling;
+      public_options.execution_domain = domain;
+      Ok(gjxl::EncodeModularImage(input.view(), public_options, &public_encoded));
+    } else {
+      Ok(EncodeReferenceModularImage(view, options, budget, &encoded, &stats));
+    }
     wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
     process_cpu = double(std::clock() - cpu_start) / CLOCKS_PER_SEC;
   }
-  Check(reference::DecodeLossless(encoded.view()) == expected, "Exact independent decode differs");
+  const std::span<const uint8_t> bytes_view = public_api ? std::span<const uint8_t>(public_encoded) : encoded.view();
+  Check(reference::DecodeLossless(bytes_view) == expected, "Exact independent decode differs");
+  Check(!schedule.dropped, "Learning schedule trace exhausted caller storage");
   if (fitting_profile_enabled)
     Check(fitting_profile.calls == stats.fits && fitting_profile.successes == stats.fits &&
               !fitting_profile.records_dropped,
@@ -161,11 +200,11 @@ int main(int argc, char **argv) try {
               profile.training_work.reused_prediction_samples == stats.scanned_pixels &&
               profile.training_work.weighted_prediction_samples == 0,
           "Hybrid route repeated or omitted prediction features");
-  const size_t bytes = encoded.size();
+  const size_t bytes = bytes_view.size();
   std::filesystem::create_directories(directory);
   std::ofstream output(directory / "output.jxl", std::ios::binary);
   output.exceptions(std::ios::failbit | std::ios::badbit);
-  output.write(reinterpret_cast<const char *>(encoded.view().data()), bytes);
+  output.write(reinterpret_cast<const char *>(bytes_view.data()), bytes);
   output.close();
   const auto memory = budget.snapshot();
   encoded = {};
@@ -175,7 +214,9 @@ int main(int argc, char **argv) try {
         "Completed encode leaked managed storage");
   std::ofstream out(directory / "result.json");
   out.exceptions(std::ios::failbit | std::ios::badbit);
-  out << std::setprecision(17) << std::boolalpha << "{\"schema\":" << (tokenization_diagnostics ? 5 : selection_diagnostics ? 4 : entropy_diagnostics ? 3 : parallel_diagnostics ? 2 : 1)
+  out << std::setprecision(17) << std::boolalpha << "{\"schema\":" << (public_api ? 6 : tokenization_diagnostics ? 5 : selection_diagnostics ? 4 : entropy_diagnostics ? 3 : parallel_diagnostics ? 2 : 1)
+      << ",\"public_api\":" << public_api
+      << ",\"gpu_submissions\":" << (backend ? backend->stats().committed_submissions - submissions : 0)
       << ",\"route\":" << std::quoted(route)
       << ",\"device\":" << std::quoted(device) << ",\"buffering\":" << std::quoted(buffering)
       << ",\"predictors\":" << std::quoted(predictors) << ",\"width\":" << view.extent.width
@@ -199,6 +240,8 @@ int main(int argc, char **argv) try {
       << ",\"gpu_feature_batches\":" << stats.gpu_feature_batches
       << ",\"gpu_feature_samples\":" << stats.gpu_feature_samples
       << ",\"cpu_feature_batches\":" << stats.cpu_feature_batches
+      << ",\"feature_cohorts\":" << stats.feature_cohorts
+      << ",\"feature_memory_limited_cohorts\":" << stats.feature_memory_limited_cohorts
       << ",\"token_batches\":" << stats.token_batches
       << ",\"token_samples\":" << stats.token_samples << ",\"cpu_feature_peak_participants\":"
       << profile.adaptive_gpu.feature_preparation.peak_participants
@@ -244,6 +287,23 @@ int main(int argc, char **argv) try {
       << ",\"peak_feature_samples\":" << stats.peak_feature_samples
       << ",\"peak_feature_bytes\":" << stats.peak_feature_bytes << "},\"histogram_fitting\":";
   WriteHistogramProfile(out, fitting_profile, fitting_profile_enabled);
+  out << ",\"learning_schedule\":{\"enabled\":" << schedule_enabled << ",\"dropped\":" << schedule.dropped
+      << ",\"waves\":[";
+  for (size_t i = 0; i < schedule.waves_written; ++i) {
+    const auto &w = wave_records[i];
+    out << (i ? "," : "") << "{\"first_job\":" << w.first_job << ",\"jobs\":" << w.jobs
+        << ",\"participants\":" << w.participants << ",\"start\":" << w.start
+        << ",\"dispatch\":" << w.dispatch << ",\"joined\":" << w.joined << ",\"finish\":" << w.finish << '}';
+  }
+  out << "],\"jobs\":[";
+  for (size_t i = 0; i < schedule.jobs_written; ++i) {
+    const auto &j = job_records[i];
+    out << (i ? "," : "") << "{\"stream\":" << j.stream << ",\"worker\":" << j.worker
+        << ",\"start\":" << j.start << ",\"finish\":" << j.finish
+        << ",\"preparation\":" << j.preparation << ",\"fitting\":" << j.fitting
+        << ",\"calls\":" << j.calls << ",\"fits\":" << j.fits << '}';
+  }
+  out << "]}";
   out << "}\n";
   out.close();
   std::cout << route << ": " << wall << " s, " << bytes << " bytes, " << stats.gpu_feature_batches

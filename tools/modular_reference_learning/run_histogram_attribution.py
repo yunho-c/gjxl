@@ -38,7 +38,10 @@ def validate_profile(result):
     require(p["calls"] == p["successes"] == result["work"]["fits"] == len(p["fits"])
             and not p["records_dropped"], "Incomplete fit coverage")
     require(all(f["success"] for f in p["fits"]), "Failed fit included")
-    require(p["fit_seconds"] <= result["detail_wall"]["fitting"] + 1e-6,
+    # Parallel profiles expose the summed per-job fitting envelope as work,
+    # since those intervals overlap rather than subdividing caller wall time.
+    fitting = result.get("detail_work", result["detail_wall"])["fitting"]
+    require(p["fit_seconds"] <= fitting + 1e-6,
             "Fitter envelope exceeds workflow fitting interval")
     require(sum(p["stages"].values()) <= p["fit_seconds"] + 1e-6,
             "Overlapping fitting phases")

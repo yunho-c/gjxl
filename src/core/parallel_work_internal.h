@@ -34,16 +34,21 @@ struct ParallelWorkErrors {
 // admitted group must outlive this call; Storage retains each stage's allocator
 // owner. Workers use [0, spawned_workers), and a participating caller uses the
 // next index, just as the per-worker scratch planners expect.
+// Queue-draining callbacks can optionally observe launch_cancelled to stop
+// taking more work before a failed partial launch joins them. This flag is
+// only supported with return-error launch policy; ordinary task errors retain
+// the existing completion/order behavior.
 template <template <typename> class Storage, typename Function>
 Status RunParallelWork(
     size_t count, const CpuWorkerGroup& group, size_t spawned_workers,
     WorkerLaunchSite site, const ParallelWorkErrors& errors,
-    Function&& function) {
+    Function&& function, std::atomic<bool>* launch_cancelled = nullptr) {
   assert(count != 0 && group.participants() > 1);
   assert(spawned_workers == group.participants() ||
          spawned_workers + 1 == group.participants());
   assert(errors.launch_action == LaunchFailureAction::kRetrySerial ||
          errors.launch != nullptr);
+  assert(!launch_cancelled || errors.launch_action == LaunchFailureAction::kReturnError);
   const size_t cpu_thread_count = CpuThreadCount();
   auto* const tracker = ParticipantTracker();
   const auto resources = resource_budget_internal::CurrentResourceContext();
@@ -74,6 +79,7 @@ Status RunParallelWork(
   };
   const auto stop_and_join = [&] {
     next_index.store(count, std::memory_order_relaxed);
+    if (launch_cancelled) launch_cancelled->store(true, std::memory_order_relaxed);
     JoinCpuWorkers(workers);
   };
   try {

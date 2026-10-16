@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Lossless scope policy follows pinned enc_frame.cc and enc_modular.cc.
 #include "codestream/modular/reference_workflow_internal.h"
+#include "codestream/modular/reference_learning_profile.h"
 #include "codec/modular/profile.h"
 #include <algorithm>
 #include <stdexcept>
@@ -266,6 +267,8 @@ Status EncodeReferenceModularImage(PackedModularImageView input,
   *out = std::move(result);
   if (stats)
     *stats = result_stats;
+  if (active_reference_workflow_stats)
+    *active_reference_workflow_stats = result_stats;
   return Status::Ok();
 }
 } // namespace gjxl::modular_internal

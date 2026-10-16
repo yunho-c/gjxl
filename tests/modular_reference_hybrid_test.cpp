@@ -47,7 +47,7 @@ void SameDecisions(const ReferenceModularFrame &cpu, const ReferenceModularFrame
         "Hybrid workflow repeated or omitted features/tokens");
   if (b.local_trees)
     Check(b.peak_feature_samples <= 8 * 1024 * 1024,
-          "Local workflow retained more than one feature batch");
+          "Local workflow exceeded the aggregate feature-cohort limit");
   Check(cpu.streams().size() == hybrid.streams().size(), "Stream count changed");
   for (size_t i = 0; i < cpu.streams().size(); ++i) {
     const auto &x = cpu.streams()[i], &y = hybrid.streams()[i];
@@ -76,7 +76,8 @@ void Encode(const ReferenceModularFrame &frame, const PreparedModularEntropyOpti
   Ok(EncodePreparedModularStreams(frame.view(), options, out));
 }
 void Case(GpuBackend &gpu, Fixture f, ReferenceWorkflowOptions options,
-          WeightedFeatureBackend producer, bool multi_batch = false, bool wide_palette = false) {
+          WeightedFeatureBackend producer, bool multi_batch = false, bool wide_palette = false,
+          bool mixed_cohort = false) {
   std::shared_ptr<const ExecutionDomain> domain;
   Ok(ExecutionDomain::Create({size_t{2} << 30, 4}, &domain));
   const auto &budget = codestream_internal::WorkflowAdmission::Budget(*domain);
@@ -119,6 +120,13 @@ void Case(GpuBackend &gpu, Fixture f, ReferenceWorkflowOptions options,
     Check(found && hybrid.stats().cpu_feature_batches && hybrid.stats().gpu_feature_batches,
           "Wide palette did not exercise separated CPU metadata and GPU pixel batches");
   }
+  if (mixed_cohort) {
+    Check(hybrid.stats().local_trees && hybrid.stats().cpu_feature_batches > 1 &&
+              hybrid.stats().gpu_feature_batches > 1 && hybrid.stats().learning_waves == 1 &&
+              hybrid.stats().feature_cohorts == 1 &&
+              hybrid.stats().peak_feature_samples == hybrid.stats().feature_samples,
+          "Mixed feature producers still split the ready fitting cohort");
+  }
   gpu_batches += hybrid.stats().gpu_feature_batches;
   // Moves preserve source/tree identities and the independent completed token owners.
   ReferenceModularFrame moved(std::move(hybrid));
@@ -155,6 +163,83 @@ void WidePalette(GpuBackend &gpu) {
   ReferenceWorkflowOptions options;
   options.buffering = ReferenceBuffering::kBuffered;
   Case(gpu, std::move(f), options, WeightedFeatureBackend::kGpu, false, true);
+}
+Fixture MixedCohortFixture(bool alternating = true) {
+  auto f = Make({alternating ? 2049u : 5121u, 257}, 3, 16, 3);
+  // Mix wide local palette metadata (CPU features) and unpaletted groups
+  // (GPU features), alternating or in two long runs. All maps fit within
+  // the local cohort's sample ceiling.
+  for (size_t y = 0; y < f.original.height; ++y)
+    for (size_t x = 0; x < f.original.width; ++x) {
+      if (alternating ? (x / 256) % 2 != 0 : x < 2048)
+        continue;
+      for (size_t c = 0; c < 3; ++c) {
+        const auto value = static_cast<uint16_t>(((x % 256 + y * 31) % 600) * (109 + c * 191));
+        f.original.samples[(y * f.original.width + x) * 3 + c] = value;
+        const size_t pos = y * f.stride + (x * 3 + c) * 2;
+        f.bytes[pos] = value >> 8;
+        f.bytes[pos + 1] = value;
+      }
+    }
+  return f;
+}
+void MixedCohort(GpuBackend &gpu) {
+  Case(gpu, MixedCohortFixture(), {}, WeightedFeatureBackend::kGpu, false, false, true);
+}
+void CohortMemoryAdmission(GpuBackend &gpu) {
+  // A large ordinary run followed by a wide-palette run makes the second
+  // owner's admission cost larger than one fit's scratch or the first run's
+  // token output. Completing that run leaves room for the remaining owner.
+  const auto f = MixedCohortFixture(false);
+  ResourceBudget control(size_t{1} << 30);
+  ReferenceWorkflowOptions options;
+  options.learning_cpu_participants = 1;
+  options.feature_cpu_participants = 1;
+  ReferenceModularFrame cpu;
+  Ok(PrepareReferenceModularFrame(f.view(), options, control, &cpu));
+  options.gpu = &gpu;
+  options.feature_producer = WeightedFeatureBackend::kGpu;
+  bool flushed = false;
+  // Find the narrow range in which another producer owner cannot be admitted
+  // but the already prepared cohort can still fit/tokenize. The exact cutoff
+  // depends on the platform's managed storage plans, not physical free RAM.
+  for (size_t mib : {56, 60, 64, 68, 72, 80}) {
+    ResourceBudget budget(mib << 20);
+    ReferenceModularFrame hybrid;
+    const auto status = PrepareReferenceModularFrame(f.view(), options, budget, &hybrid);
+    if (status.ok()) {
+      SameDecisions(cpu, hybrid);
+      Check(budget.snapshot().peak_committed_bytes <= (mib << 20),
+            "Feature cohort exceeded its managed memory limit");
+      if (hybrid.stats().feature_memory_limited_cohorts) {
+        Check(hybrid.stats().feature_cohorts > 1, "Memory pressure did not split the cohort");
+        // The small budget tests preparation admission. Use the separate
+        // control budget for entropy serialization of both completed frames.
+        CodestreamBuffer a, b;
+        Encode(cpu, options.entropy, control, &a);
+        Encode(hybrid, options.entropy, control, &b);
+        Check(std::ranges::equal(a.view(), b.view()), "Flushed cohort changed complete bytes");
+#if GJXL_REFERENCE_WORKFLOW_ORACLE
+        Check(reference::DecodeLossless(b.view()) == f.original, "Flushed cohort decode differs");
+#endif
+        ++files;
+        samples += f.original.samples.size();
+        gpu_batches += hybrid.stats().gpu_feature_batches;
+        flushed = true;
+      }
+    } else {
+      Check((status.code() == StatusCode::kOutOfMemory || status.code() == StatusCode::kUnavailable) &&
+                !status.resource_plan_exceeded() && hybrid.streams().empty(),
+            "Constrained feature preparation leaked a partial frame or exceeded its plan");
+    }
+    hybrid = {};
+    Released(budget);
+    if (flushed)
+      break;
+  }
+  Check(flushed, "Feature cohort memory-pressure fallback was not exercised");
+  cpu = {};
+  Released(control);
 }
 void Failures(GpuBackend &gpu) {
   const auto f = Make({7, 3}, 3, 8, 3);
@@ -220,7 +305,7 @@ void Failures(GpuBackend &gpu) {
     CpuExecutionScope execution;
     Ok(execution.Start({}, 4));
     EncodeScope participation(4);
-    const auto local = Make({2049, 17}, 3, 8, 3);
+    const auto local = MixedCohortFixture();
     WorkerLaunchFaultForTesting fault{WorkerLaunchSite::kModularTreeLearning, 1};
     WorkerLaunchFaultScopeForTesting inject(&fault);
     ReferenceWorkflowStats stats;
@@ -243,6 +328,8 @@ int main(int argc, char **argv) try {
   Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &gpu));
   if (argc == 2 && std::string_view(argv[1]) == "--palette") {
     WidePalette(*gpu);
+    MixedCohort(*gpu);
+    CohortMemoryAdmission(*gpu);
   } else {
     for (size_t channels : {1, 3, 4})
       for (unsigned bits : {8, 16})

@@ -241,6 +241,28 @@ void ExtraLaunchErrors() {
     Empty(*domain);
   }
 }
+void QueueLaunchCancellation() {
+  EncodeScope encode(3);
+  CpuWorkerGroup group(3);
+  std::atomic<bool> entered{false}, cancelled{false}, stopped{false};
+  WorkerLaunchFaultForTesting fault{kSite, 1};
+  fault.context = &entered;
+  fault.before_failure = +[](void* p) noexcept {
+    Until([&] { return static_cast<std::atomic<bool>*>(p)->load(); });
+  };
+  WorkerLaunchFaultScopeForTesting inject(&fault);
+  const auto status = RunParallelWork<ManagedVector>(3, group, 2, kSite, kErrors,
+    [&](size_t, size_t) {
+      entered = true;
+      // A queue callback must learn about a failed launch before the launcher
+      // joins it, so it can stop without draining all remaining local fits.
+      Until([&] { return cancelled.load(); });
+      stopped = true;
+      return Status::Ok();
+    }, &cancelled);
+  Require(status.code() == StatusCode::kInternal && fault.triggered && cancelled && stopped,
+          "Partial launch did not cancel and join a queue callback");
+}
 }  // namespace
 
 int main() {
@@ -253,5 +275,6 @@ int main() {
     for (auto kind : {WorkerLaunchFailureKind::kSystemError, WorkerLaunchFailureKind::kBadAlloc})
       PartialLaunch(action, kind);
   ExtraLaunchErrors();
+  QueueLaunchCancellation();
   std::cout << "Parallel worker orchestration passed\n";
 }

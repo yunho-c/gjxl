@@ -53,8 +53,14 @@ struct ReferenceWorkflowStats {
   size_t maximum_stage_bytes = 0;
   size_t feature_batches = 0, feature_samples = 0, gpu_feature_batches = 0,
          gpu_feature_samples = 0, cpu_feature_batches = 0;
+  // Local fitting cohorts can retain several feature owners under one shared
+  // sample ceiling. Admission pressure flushes a nonempty cohort early.
+  size_t feature_cohorts = 0, feature_memory_limited_cohorts = 0;
   size_t token_batches = 0, token_samples = 0;
   size_t peak_feature_samples = 0, peak_feature_bytes = 0;
+  // A learning wave is now one joined ready-queue invocation, which can
+  // consume more jobs than its participant grant. Fields retain their names
+  // for existing private diagnostic readers.
   size_t learning_peak_participants = 0, learning_waves = 0,
          learning_memory_limited_waves = 0;
   // Sums of per-job wall time (overlap when local jobs run concurrently).
