@@ -387,8 +387,20 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
             return status;
           length = (length + 1) / 2;
         }
+        auto *const diagnostic = options.fitting_gpu_profile;
+        const auto profile_mode = diagnostic
+                                      ? diagnostic->mode
+                                      : HistogramFittingProfileMode::kDisabled;
+        HostStorageBound profile_bound;
+        if (auto s = op->HistogramFittingProfileStorageBound(plan, profile_mode,
+                                                             &profile_bound);
+            !s.ok())
+          return s;
+        auto evaluation_bound = plan.evaluation;
+        if (!evaluation_bound.Add(profile_bound))
+          return Status::OutOfMemory("Histogram diagnostic admission overflow");
         ResourceReservation evaluation_reservation;
-        const auto admitted = budget.TryReserve(plan.evaluation.peak_bytes,
+        const auto admitted = budget.TryReserve(evaluation_bound.peak_bytes,
                                                 &evaluation_reservation);
         if (!admitted.ok() && !AdmissionFailure(admitted))
           return admitted;
@@ -401,17 +413,25 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
         }
         if (admitted.ok()) {
           stats->maximum_stage_bytes =
-              std::max(stats->maximum_stage_bytes, plan.evaluation.peak_bytes);
+              std::max(stats->maximum_stage_bytes, evaluation_bound.peak_bytes);
           auto resources = CurrentResourceContext();
           resources.reservation = &evaluation_reservation;
           ResourceContextScope scope(resources);
           Seconds timer(stats->histogram_evaluation_seconds);
+          HistogramFittingBatchProfile batch_profile;
           if (auto status = op->EvaluateHistogramNodes(
                   {prepared.get(), std::span(nodes).subspan(first, length),
-                   options.fitting_execution},
+                   options.fitting_execution, profile_mode, &batch_profile},
                   &output);
               !status.ok())
             return status;
+          if (diagnostic &&
+              profile_mode != HistogramFittingProfileMode::kDisabled) {
+            if (diagnostic->written < diagnostic->batches.size())
+              diagnostic->batches[diagnostic->written++] = batch_profile;
+            else
+              ++diagnostic->dropped;
+          }
           if (!output || output->backend_id() != options.gpu->id() ||
               output->results().size() != result_first)
             return Status::Internal(

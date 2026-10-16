@@ -69,6 +69,29 @@ struct HistogramFittingExecutionOptions {
   size_t histogram_shards = 4, maximum_active_properties = 64;
   size_t maximum_scratch_bytes = 64 * 1024 * 1024;
 };
+enum class HistogramFittingProfileMode : uint8_t { kDisabled, kWall, kStage };
+// Caller-owned diagnostics. Wall phases partition the operation interior up to
+// transient release, excluding final inline publication. Wait overlaps device
+// execution and concurrent CPU fits. Stage mode adds encoder
+// boundaries/counters and is attribution only.
+inline constexpr std::array<const char *, 8> kHistogramFittingWallPhases = {
+    "validate_plan", "allocate",        "pack",   "record_submit", "wait",
+    "readback",      "resolve_profile", "release"};
+inline constexpr std::array<const char *, 5> kHistogramFittingGpuStages = {
+    "validate", "collect", "prefix", "costs", "select"};
+struct HistogramFittingBatchProfile {
+  size_t nodes = 0, rows = 0, tasks = 0, active_properties = 0, waves = 0;
+  size_t maximum_bins = 0, maximum_symbols = 0, scratch_bytes = 0;
+  std::array<uint64_t, 8> wall_nanoseconds{};
+  std::array<uint64_t, 5> gpu_nanoseconds{}, dispatches{};
+  uint64_t command_buffer_gpu_nanoseconds = 0;
+  bool operator==(const HistogramFittingBatchProfile &) const = default;
+};
+struct HistogramFittingProfile {
+  HistogramFittingProfileMode mode = HistogramFittingProfileMode::kDisabled;
+  std::span<HistogramFittingBatchProfile> batches;
+  size_t written = 0, dropped = 0;
+};
 struct HistogramFittingScratchLayout {
   size_t shard_histograms_offset = 0, shard_extra_offset = 0,
          shard_occupancy_offset = 0;
@@ -149,6 +172,10 @@ struct HistogramFittingInput {
   const PreparedGpuHistogramRows *prepared = nullptr;
   std::span<const HistogramFittingNodeInput> nodes;
   HistogramFittingExecutionOptions options;
+  HistogramFittingProfileMode profile_mode =
+      HistogramFittingProfileMode::kDisabled;
+  // Published together with results, only on success. Never retained.
+  HistogramFittingBatchProfile *profile = nullptr;
 };
 // Checks ownership metadata, shapes and parent summaries without reading row
 // indices or native GPU buffers. The backend must additionally verify its
@@ -207,6 +234,12 @@ public:
   virtual ~GpuModularHistogramFitting() = default;
   [[nodiscard]] virtual HistogramFittingDeviceLimits
   histogram_fitting_limits() const noexcept = 0;
+  // Additional transient host backing for the optional diagnostic path.
+  // Opaque Metal counter/driver allocations retain the driver exclusion.
+  [[nodiscard]] virtual Status HistogramFittingProfileStorageBound(
+      const HistogramFittingEvaluationPlan &plan,
+      HistogramFittingProfileMode mode,
+      resource_budget_internal::HostStorageBound *out) const = 0;
   [[nodiscard]] virtual Status
   PrepareHistogramRows(std::span<const HistogramFittingSource> sources,
                        std::unique_ptr<PreparedGpuHistogramRows> *out) = 0;

@@ -221,65 +221,72 @@ kernel void gjxl_histogram_collect(device const uchar *prepared [[buffer(0)]],
   }
 }
 
+// One SIMD group scans one symbol/extra/occupancy column. Integer prefix
+// additions are associative under the validated population bound. Every lane,
+// including padding beyond the last bin, participates in each scan/broadcast.
+// Keep the existing scratch layout and exact floating scoring unchanged.
 kernel void gjxl_histogram_prefix(device const uchar *prepared [[buffer(0)]],
                                   device uchar *dispatch [[buffer(1)]],
                                   device uchar *scratch [[buffer(3)]],
                                   constant Params &p [[buffer(4)]],
-                                  uint2 index [[thread_position_in_grid]]) {
+                                  uint2 index [[thread_position_in_grid]],
+                                  uint lane [[thread_index_in_simdgroup]],
+                                  uint width [[threads_per_simdgroup]]) {
   if (Failed(dispatch, p))
     return;
-  const uint axis = index.x, slot = index.y;
+  const uint axis = index.x / width, slot = index.y;
   const TaskDescriptor task = Task(dispatch, p, slot);
   const NodeDescriptor n =
       reinterpret_cast<device const NodeDescriptor *>(dispatch)[task.node];
   const FitDescriptor f =
       reinterpret_cast<device const FitDescriptor *>(prepared)[n.fit];
+  const uint histogram_columns = f.predictors * n.symbols;
+  if (axis >= histogram_columns + f.predictors + 1)
+    return;
   const uint bins = f.bins[task.property];
   device uchar *base = scratch + slot * p.slot_bytes;
-  device const uint *sh =
-      reinterpret_cast<device const uint *>(base + p.shard_histograms);
-  device const uint *se =
-      reinterpret_cast<device const uint *>(base + p.shard_extra);
-  device const uint *so =
-      reinterpret_cast<device const uint *>(base + p.shard_occupancy);
-  device uint *hist = reinterpret_cast<device uint *>(base + p.histograms);
-  device uint *extra = reinterpret_cast<device uint *>(base + p.extra);
-  device uint *occupied = reinterpret_cast<device uint *>(base + p.occupancy);
-  if (axis < f.predictors * n.symbols) {
+  device const uint *input;
+  device uint *output;
+  uint bin_stride, shard_stride, expected;
+  if (axis < histogram_columns) {
     const uint pred = axis / n.symbols, sym = axis % n.symbols;
-    uint sum = 0;
-    for (uint b = 0; b < bins; ++b) {
-      for (uint shard = 0; shard < p.shards; ++shard)
-        sum += sh[((shard * f.predictors + pred) * bins + b) * n.symbols + sym];
-      hist[(pred * bins + b) * n.symbols + sym] = sum;
-    }
-    device const int *parent =
-        reinterpret_cast<device const int *>(dispatch + n.parent_counts_offset);
-    if (sum != uint(parent[axis]))
-      Error(dispatch, p, kArithmeticError);
+    input = reinterpret_cast<device const uint *>(base + p.shard_histograms) +
+            pred * bins * n.symbols + sym;
+    output = reinterpret_cast<device uint *>(base + p.histograms) +
+             pred * bins * n.symbols + sym;
+    bin_stride = n.symbols;
+    shard_stride = f.predictors * bins * n.symbols;
+    expected = uint(reinterpret_cast<device const int *>(
+        dispatch + n.parent_counts_offset)[axis]);
+  } else if (axis < histogram_columns + f.predictors) {
+    const uint pred = axis - histogram_columns;
+    input = reinterpret_cast<device const uint *>(base + p.shard_extra) + pred * bins;
+    output = reinterpret_cast<device uint *>(base + p.extra) + pred * bins;
+    bin_stride = 1;
+    shard_stride = f.predictors * bins;
+    expected = reinterpret_cast<device const uint *>(
+        dispatch + n.parent_extra_offset)[pred];
+  } else {
+    input = reinterpret_cast<device const uint *>(base + p.shard_occupancy);
+    output = reinterpret_cast<device uint *>(base + p.occupancy);
+    bin_stride = 1;
+    shard_stride = bins;
+    expected = n.rows;
   }
-  if (axis < f.predictors) {
+  uint carry = 0;
+  for (uint first = 0; first < bins; first += width) {
+    const uint bin = first + lane;
     uint sum = 0;
-    for (uint b = 0; b < bins; ++b) {
+    if (bin < bins)
       for (uint shard = 0; shard < p.shards; ++shard)
-        sum += se[(shard * f.predictors + axis) * bins + b];
-      extra[axis * bins + b] = sum;
-    }
-    device const uint *parent =
-        reinterpret_cast<device const uint *>(dispatch + n.parent_extra_offset);
-    if (sum != parent[axis])
-      Error(dispatch, p, kArithmeticError);
+        sum += input[shard * shard_stride + bin * bin_stride];
+    const uint prefix = simd_prefix_inclusive_sum(sum) + carry;
+    if (bin < bins)
+      output[bin * bin_stride] = prefix;
+    carry = simd_broadcast(prefix, width - 1);
   }
-  if (axis == 0) {
-    uint sum = 0;
-    for (uint b = 0; b < bins; ++b) {
-      for (uint shard = 0; shard < p.shards; ++shard)
-        sum += so[shard * bins + b];
-      occupied[b] = sum;
-    }
-    if (sum != n.rows)
-      Error(dispatch, p, kArithmeticError);
-  }
+  if (lane == 0 && carry != expected)
+    Error(dispatch, p, kArithmeticError);
 }
 
 kernel void gjxl_histogram_costs(device const uchar *prepared [[buffer(0)]],

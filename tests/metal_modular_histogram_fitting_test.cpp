@@ -334,11 +334,13 @@ void Failures(GpuBackend &gpu, GpuBackend &foreign) {
     auto constants = node;
     constants.shape.inherited_constants = 0xffff;
     std::unique_ptr<PreparedGpuHistogramEvaluation> result;
-    Ok(op.EvaluateHistogramNodes({prepared.get(), {&constants, 1}, {}}, &result));
+    Ok(op.EvaluateHistogramNodes({prepared.get(), {&constants, 1}, {}},
+                                 &result));
     for (const auto &property : result->results()) {
       Check(property.is_constant == 1, "Inherited constant was not published");
       for (const auto &winner : property.winners)
-        Check(!winner.valid && winner.left_cost == std::numeric_limits<float>::max() &&
+        Check(!winner.valid &&
+                  winner.left_cost == std::numeric_limits<float>::max() &&
                   winner.right_cost == std::numeric_limits<float>::max(),
               "All-constant evaluation invented a split");
     }
@@ -372,6 +374,102 @@ void OverflowValidation(GpuBackend &gpu) {
         "Weighted multiset overflow escaped the 64-bit population guard");
   ++faults;
 }
+void Profiles(GpuBackend &gpu) {
+  auto samples = Fixture(3, 1025, 2);
+  // Exercise a nonempty final partial SIMD scan, including its last bin.
+  samples.thresholds[15].resize(34);
+  std::iota(samples.thresholds[15].begin(), samples.thresholds[15].end(), -17);
+  for (size_t i = 0; i < samples.weights.size(); ++i)
+    samples.values[13][i] = static_cast<uint8_t>(i % 35);
+  HistogramTreeFitter fitter;
+  Ok(fitter.Initialize(samples));
+  Ok(fitter.Advance());
+  auto node = HistogramFittingNodeView(0, fitter.node());
+  const HistogramFittingSource source{83, &samples};
+  auto &op = Operation(gpu);
+  HistogramFittingShape shape;
+  Ok(ResolveHistogramFittingSource(source, &shape));
+  HistogramFittingPreparationPlan preparation;
+  Ok(ComputeHistogramFittingPreparationPlan({&shape, 1}, &preparation));
+  const HistogramFittingExecutionOptions execution{4, 1, 64 * 1024 * 1024};
+  for (bool constants : {false, true}) {
+    node.shape.inherited_constants =
+        constants ? (1u << shape.properties) - 1 : 0;
+    HistogramFittingEvaluationPlan plan;
+    Ok(ComputeHistogramFittingEvaluationPlan({&shape, 1}, {&node.shape, 1},
+                                             execution, &plan));
+    std::unique_ptr<PreparedGpuHistogramRows> prepared;
+    Ok(op.PrepareHistogramRows({&source, 1}, &prepared));
+    std::unique_ptr<PreparedGpuHistogramEvaluation> expected;
+    Ok(op.EvaluateHistogramNodes({prepared.get(), {&node, 1}, execution},
+                                 &expected));
+    for (auto mode : {HistogramFittingProfileMode::kDisabled,
+                      HistogramFittingProfileMode::kWall,
+                      HistogramFittingProfileMode::kStage}) {
+      HostStorageBound profile_bound;
+      Ok(op.HistogramFittingProfileStorageBound(plan, mode, &profile_bound));
+      Check((profile_bound.peak_bytes != 0) ==
+                (mode == HistogramFittingProfileMode::kStage),
+            "Histogram profile reserved backing outside stage mode");
+      const size_t capacity =
+          plan.evaluation.peak_bytes + profile_bound.peak_bytes;
+      ResourceBudget budget(capacity);
+      ResourceReservation reservation;
+      Ok(budget.TryReserve(capacity, &reservation));
+      ResourceContextScope scope({&reservation, ResourceClass::kPreparation});
+      HistogramFittingBatchProfile profile;
+      std::unique_ptr<PreparedGpuHistogramEvaluation> output;
+      Ok(op.EvaluateHistogramNodes(
+          {prepared.get(), {&node, 1}, execution, mode, &profile}, &output));
+      Compare(output->results(), expected->results());
+      if (mode == HistogramFittingProfileMode::kDisabled) {
+        Check(profile == HistogramFittingBatchProfile{},
+              "Disabled profiling wrote its sink");
+      } else {
+        Check(profile.nodes == 1 && profile.rows == node.rows.size() &&
+                  profile.tasks == plan.tasks && profile.waves == plan.tasks &&
+                  profile.wall_nanoseconds[4] > 0 &&
+                  profile.command_buffer_gpu_nanoseconds > 0,
+              "Histogram wall profile missed work");
+        for (size_t phase = 0; phase < 5; ++phase) {
+          const size_t dispatches = mode == HistogramFittingProfileMode::kStage
+                                        ? (phase == 0 ? 1 : plan.tasks)
+                                        : 0;
+          Check(profile.dispatches[phase] == dispatches &&
+                    (profile.gpu_nanoseconds[phase] > 0) == (dispatches > 0),
+                "Histogram timestamp coverage differs");
+        }
+      }
+      output.reset();
+      Check(budget.snapshot().peak_backing_bytes <= capacity &&
+                budget.snapshot().total.live_capacity_bytes == 0 &&
+                budget.snapshot().total.pending_count == 0,
+            "Histogram profiling exceeded admission or leaked");
+    }
+    for (unsigned failure = 0; failure < 3; ++failure) {
+      HistogramFittingBatchProfile profile;
+      profile.rows = 913;
+      const auto sentinel = profile;
+      const auto *old = expected.get();
+      if (failure == 0)
+        ArmNextManagedHostAllocationFailureForTest();
+      else
+        Ok(ArmNextMetalSubmissionFailureForTest(gpu, failure == 1,
+                                                failure == 2));
+      const auto s =
+          op.EvaluateHistogramNodes({prepared.get(),
+                                     {&node, 1},
+                                     execution,
+                                     HistogramFittingProfileMode::kStage,
+                                     &profile},
+                                    &expected);
+      DisarmManagedHostAllocationFailureForTest();
+      Check(!s.ok() && old == expected.get() && profile == sentinel,
+            "Failed profile published partial results");
+      ++faults;
+    }
+  }
+}
 } // namespace
 int main() try {
   {
@@ -383,6 +481,7 @@ int main() try {
     Cases(*embedded, false);
     Failures(*gpu, *embedded);
     OverflowValidation(*gpu);
+    Profiles(*gpu);
   }
   Check(DefaultResourceBudget().snapshot().total.live_capacity_bytes == 0 &&
             DefaultResourceBudget().snapshot().total.pending_count == 0,

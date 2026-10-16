@@ -3,6 +3,7 @@
 #include "gpu/metal/kernels/modular_histogram_fitting_params.h"
 #include "gpu/metal/metal_backend_internal.h"
 #include "gpu/ops/modular_histogram_fitting.h"
+#include <chrono>
 #include <cstring>
 
 namespace gjxl::metal_internal {
@@ -10,6 +11,7 @@ using namespace histogram_gpu_internal;
 using namespace resource_budget_internal;
 namespace {
 namespace wire = gjxl_histogram_fitting;
+inline constexpr char kSubmissionId[] = "modular.histogram_fitting";
 static_assert(sizeof(wire::Params) == 72);
 static_assert(sizeof(wire::TaskDescriptor) == 8);
 static_assert(static_cast<uint32_t>(modular_internal::Predictor::kWeighted) ==
@@ -54,6 +56,74 @@ struct Context {
   const HistogramFittingEvaluationPlan *plan;
   wire::Params params;
 };
+struct ProfileContext {
+  const Context *context;
+  size_t phase, first, count;
+};
+size_t Waves(const HistogramFittingEvaluationPlan &plan) {
+  return plan.tasks ? (plan.tasks + plan.active_properties - 1) /
+                          plan.active_properties
+                    : 0;
+}
+size_t PrefixGroups(const Context &c) {
+  const auto &plan = *c.plan;
+  const size_t columns =
+      plan.maximum_predictors * (plan.maximum_symbols + 1) + 1;
+  const size_t simd_groups = 128 / c.pipelines[2]->threadExecutionWidth();
+  return (columns + simd_groups - 1) / simd_groups;
+}
+void EncodeProfilePhase(MetalBackend &, MTL::ComputeCommandEncoder *encoder,
+                        const void *opaque) {
+  const auto &stage = *static_cast<const ProfileContext *>(opaque);
+  const auto &c = *stage.context;
+  const auto &plan = *c.plan;
+  auto params = c.params;
+  params.first_task = static_cast<uint32_t>(stage.first);
+  params.tasks = static_cast<uint32_t>(stage.count);
+  encoder->setBuffer(c.prepared, 0, 0);
+  encoder->setBuffer(c.dispatch, 0, 1);
+  encoder->setBuffer(c.output, 0, 2);
+  if (c.scratch)
+    encoder->setBuffer(c.scratch, 0, 3);
+  const size_t tile_bins =
+      plan.tasks ? std::min(size_t{256},
+                            wire::kHistogramTileCells / plan.maximum_symbols)
+                 : 1;
+  const size_t tiles = (plan.maximum_bins + tile_bins - 1) / tile_bins;
+  const std::array<MTL::Size, 5> grids = {
+      MTL::Size(plan.nodes, 1, 1),
+      MTL::Size(plan.histogram_shards * tiles, plan.maximum_predictors,
+                stage.count),
+      MTL::Size(PrefixGroups(c), stage.count, 1),
+      MTL::Size((plan.maximum_bins * plan.maximum_predictors + 127) / 128,
+                stage.count, 1),
+      MTL::Size(stage.count, 1, 1)};
+  encoder->setBytes(&params, sizeof(params), 4);
+  encoder->setComputePipelineState(c.pipelines[stage.phase]);
+  RecordMetalComputePipelineState(c.pipelines[stage.phase]);
+  DispatchMetalThreadgroups(encoder, grids[stage.phase], MTL::Size(128, 1, 1));
+  const MTL::Resource *dependencies[] = {c.dispatch, c.output, c.scratch};
+  encoder->memoryBarrier(dependencies, stage.phase == 0 ? 2 : 3);
+}
+struct WallProfile {
+  using Clock = std::chrono::steady_clock;
+  bool enabled;
+  HistogramFittingBatchProfile value;
+  Clock::time_point last;
+  explicit WallProfile(bool active) : enabled(active) {
+    if (enabled)
+      last = Clock::now();
+  }
+  void Lap(size_t phase) {
+    if (!enabled)
+      return;
+    const auto now = Clock::now();
+    value.wall_nanoseconds[phase] =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(now - last)
+            .count();
+    last = now;
+  }
+};
 void Encode(MetalBackend &, MTL::ComputeCommandEncoder *encoder,
             const void *opaque) {
   const auto &c = *static_cast<const Context *>(opaque);
@@ -86,9 +156,7 @@ void Encode(MetalBackend &, MTL::ComputeCommandEncoder *encoder,
     launch(1, MTL::Size(plan.histogram_shards * tiles, plan.maximum_predictors,
                         count));
     encoder->memoryBarrier(dependencies, 3);
-    launch(2, MTL::Size((plan.maximum_predictors * plan.maximum_symbols + 127) /
-                            128,
-                        count, 1));
+    launch(2, MTL::Size(PrefixGroups(c), count, 1));
     encoder->memoryBarrier(dependencies, 3);
     launch(3,
            MTL::Size((plan.maximum_bins * plan.maximum_predictors + 127) / 128,
@@ -107,6 +175,40 @@ MetalBackend::histogram_fitting_limits() const noexcept {
   return {kMaximumHistogramFittingFits, kMaximumHistogramFittingRows,
           kMaximumHistogramFittingFits, buffer,
           std::min(buffer, size_t{256 * 1024 * 1024})};
+}
+
+Status MetalBackend::HistogramFittingProfileStorageBound(
+    const HistogramFittingEvaluationPlan &plan,
+    HistogramFittingProfileMode mode, HostStorageBound *out) const {
+  if (!out || !plan.nodes || plan.nodes > kMaximumHistogramFittingFits ||
+      plan.tasks > kMaximumHistogramFittingFits * 16 ||
+      (plan.tasks && !plan.active_properties) ||
+      (mode != HistogramFittingProfileMode::kDisabled &&
+       mode != HistogramFittingProfileMode::kWall &&
+       mode != HistogramFittingProfileMode::kStage))
+    return Status::InvalidArgument("Invalid histogram profile plan");
+  HostStorageBound bound;
+  if (mode == HistogramFittingProfileMode::kStage) {
+    const size_t stages = 1 + 4 * Waves(plan);
+    gpu_profile_internal::SubmissionProfileStoragePlan profile;
+    // Registered kernel labels are bounded by the common Metal registry.
+    if (auto s = gpu_profile_internal::ComputeSubmissionProfileStoragePlan(
+            {stages, stages, 8, sizeof(kSubmissionId) - 1,
+             kMaximumKernelIdBytes, sizeof(kSubmissionId) - 1},
+            &profile);
+        !s.ok())
+      return s;
+    profile.resolution.peak_bytes =
+        std::max(profile.resolution.peak_bytes, profile.recorded.peak_bytes);
+    if (!bound.AddVector<ProfileContext>(stages,
+                                         VectorCapacityPolicy::kFreshExact) ||
+        !bound.AddVector<MetalProfiledComputeStage>(
+            stages, VectorCapacityPolicy::kFreshExact) ||
+        !bound.Add(profile.resolution))
+      return Status::OutOfMemory("Histogram profiling storage overflow");
+  }
+  *out = bound;
+  return Status::Ok();
 }
 
 Status MetalBackend::PrepareHistogramRows(
@@ -198,6 +300,13 @@ Status MetalBackend::PrepareHistogramRows(
 Status MetalBackend::EvaluateHistogramNodes(
     const HistogramFittingInput &input,
     std::unique_ptr<PreparedGpuHistogramEvaluation> *out) try {
+  const auto mode = input.profile_mode;
+  WallProfile profile(mode != HistogramFittingProfileMode::kDisabled);
+  if ((profile.enabled && !input.profile) ||
+      (mode != HistogramFittingProfileMode::kDisabled &&
+       mode != HistogramFittingProfileMode::kWall &&
+       mode != HistogramFittingProfileMode::kStage))
+    return Status::InvalidArgument("Invalid histogram profile request");
   if (!out)
     return Status::InvalidArgument("Null histogram evaluation output");
   HistogramFittingEvaluationPlan plan;
@@ -216,6 +325,7 @@ Status MetalBackend::EvaluateHistogramNodes(
                                   "Histogram prepared rows", &source);
       !s.ok())
     return s;
+  profile.Lap(0);
   const ManagedHostScope resources(ResourceClass::kPreparation);
   auto candidate = std::make_unique<Completed>();
   candidate->backend = id();
@@ -231,6 +341,7 @@ Status MetalBackend::EvaluateHistogramNodes(
   if (plan.scratch_bytes)
     if (auto s = Allocate(plan.scratch_bytes, &scratch); !s.ok())
       return s;
+  profile.Lap(1);
   auto *bytes = static_cast<std::byte *>(AsMetalBuffer(*dispatch)->contents());
   std::memset(bytes, 0, plan.dispatch_bytes);
   auto *descriptors = reinterpret_cast<wire::NodeDescriptor *>(bytes);
@@ -302,14 +413,43 @@ Status MetalBackend::EvaluateHistogramNodes(
                    static_cast<uint32_t>(s.side_winners_offset)}};
   for (size_t i = 0; i < context.pipelines.size(); ++i)
     context.pipelines[i] = histogram_fitting_pipelines_[i].get();
-  if (auto status = SubmitCompute("modular.histogram_fitting", Encode, &context,
-                                  &pending.submission);
-      !status.ok())
-    return status;
+  profile.Lap(2);
+  if (mode == HistogramFittingProfileMode::kStage) {
+    gpu_profile_internal::ProfileStorage<ProfileContext> contexts;
+    gpu_profile_internal::ProfileStorage<MetalProfiledComputeStage> stages;
+    const size_t count = 1 + 4 * Waves(plan);
+    contexts.reserve(count);
+    stages.reserve(count);
+    const auto append = [&](size_t phase, size_t first, size_t tasks) {
+      contexts.push_back({&context, phase, first, tasks});
+      stages.push_back({kHistogramFittingGpuStages[phase],
+                        "modular.histogram_fitting",
+                        static_cast<uint32_t>(first), 0, EncodeProfilePhase,
+                        &contexts.back()});
+    };
+    append(0, 0, 0);
+    for (size_t first = 0; first < plan.tasks; first += plan.active_properties)
+      for (size_t phase = 1; phase < 5; ++phase)
+        append(phase, first,
+               std::min(plan.active_properties, plan.tasks - first));
+    if (auto s = SubmitComputeProfiled(
+            "modular.histogram_fitting", stages,
+            gpu_profile_internal::GpuProfilingMode::kStage,
+            &pending.submission);
+        !s.ok())
+      return s;
+  } else {
+    if (auto s = SubmitCompute("modular.histogram_fitting", Encode, &context,
+                               &pending.submission);
+        !s.ok())
+      return s;
+  }
+  profile.Lap(3);
   if (!pending.submission)
     return Status::Internal("Histogram fitting returned no submission");
   if (auto status = pending.Wait(); !status.ok())
     return status;
+  profile.Lap(4);
   uint32_t status_word;
   std::memcpy(&status_word, bytes + plan.status_offset, sizeof(status_word));
   if (auto status = CheckHistogramFittingDeviceStatus(status_word);
@@ -323,9 +463,50 @@ Status MetalBackend::EvaluateHistogramNodes(
   candidate->host = {
       reinterpret_cast<const HistogramPropertyResult *>(output.data()),
       plan.properties};
+  profile.Lap(5);
+  if (mode == HistogramFittingProfileMode::kStage) {
+    gpu_profile_internal::GpuSubmissionProfile resolved;
+    if (auto s = GetMetalSubmissionGpuProfile(*pending.submission, &resolved);
+        !s.ok())
+      return s;
+    if (resolved.stages.size() != 1 + 4 * Waves(plan))
+      return Status::Internal("Histogram profile stage coverage differs");
+    for (size_t i = 0; i < resolved.stages.size(); ++i) {
+      const size_t phase = i ? 1 + (i - 1) % 4 : 0;
+      const auto &stage = resolved.stages[i];
+      if (!stage.timestamp_valid ||
+          stage.stage_id != kHistogramFittingGpuStages[phase] ||
+          stage.dispatches.size() != 1)
+        return Status::DeviceError("Histogram profile stage is incomplete");
+      profile.value.gpu_nanoseconds[phase] += stage.gpu_nanoseconds;
+      ++profile.value.dispatches[phase];
+    }
+    profile.value.command_buffer_gpu_nanoseconds =
+        resolved.command_buffer_gpu_nanoseconds;
+  } else if (profile.enabled) {
+    // Completed command-buffer timing needs no counter samples or additional
+    // encoder boundaries, so wall mode also measures the ordinary device span.
+    if (auto s = GetMetalSubmissionGpuDuration(
+            *pending.submission, &profile.value.command_buffer_gpu_nanoseconds);
+        !s.ok())
+      return s;
+  }
+  profile.Lap(6);
   pending.submission.reset();
   scratch.reset();
   dispatch.reset();
+  profile.Lap(7);
+  if (profile.enabled) {
+    profile.value.nodes = plan.nodes;
+    profile.value.rows = plan.rows;
+    profile.value.tasks = plan.tasks;
+    profile.value.active_properties = plan.active_properties;
+    profile.value.waves = Waves(plan);
+    profile.value.maximum_bins = plan.maximum_bins;
+    profile.value.maximum_symbols = plan.maximum_symbols;
+    profile.value.scratch_bytes = plan.scratch_bytes;
+    *input.profile = profile.value;
+  }
   *out = std::move(candidate);
   return Status::Ok();
 } catch (const ManagedAllocationFailure &e) {

@@ -45,8 +45,12 @@ template <typename T> void Array(std::ostream &out, const T &a) {
 }
 } // namespace
 int main(int argc, char **argv) try {
-  Check(argc >= 6 && argc <= 15, "hybrid_profile INPUT OUT cpu|shared-cpu|hybrid|auto auto|buffered "
-                                "best|all [fit-off|schedule|fit-on [learning-participants [cpu-ceiling [entropy-participants [selection-participants [tokenization-participants [public|fitter-cpu|fitter-resumable|fitter-gpu|fitter-auto [minimum-rows [batch-fits]]]]]]]]]");
+  Check(argc >= 6 && argc <= 18, "hybrid_profile INPUT OUT cpu|shared-cpu|hybrid|auto auto|buffered "
+                                "best|all [fit-off|schedule|fit-on [learning-participants [cpu-ceiling [entropy-participants [selection-participants [tokenization-participants [public|fitter-cpu|fitter-resumable|fitter-gpu|fitter-auto [minimum-rows [batch-fits [gpu-off|gpu-wall|gpu-stage [shards [active-properties]]]]]]]]]]]]");
+  const std::string gpu_profile_mode = argc >= 16 ? argv[15] : "gpu-off";
+  Check(gpu_profile_mode == "gpu-off" || gpu_profile_mode == "gpu-wall" ||
+            gpu_profile_mode == "gpu-stage", "Unknown histogram GPU profiling mode");
+  const bool gpu_profile_enabled = gpu_profile_mode != "gpu-off";
   const std::string fitter_flag = argc >= 13 ? argv[12] : "fitter-cpu";
   const bool public_api = fitter_flag == "public";
   Check((!public_api || argc == 13) &&
@@ -116,6 +120,8 @@ int main(int argc, char **argv) try {
                             : ReferenceFittingBackend::kCpu;
   if (argc >= 14) options.fitting_minimum_rows = std::stoull(argv[13]);
   if (argc >= 15) options.fitting_batch_fits = std::stoull(argv[14]);
+  if (argc >= 17) options.fitting_execution.histogram_shards = std::stoull(argv[16]);
+  if (argc >= 18) options.fitting_execution.maximum_active_properties = std::stoull(argv[17]);
   options.selection_cpu_participants = selection_participants;
   options.learning_cpu_participants = learning_participants;
   options.buffering =
@@ -157,6 +163,14 @@ int main(int argc, char **argv) try {
   ReferenceWorkflowStats stats;
   ModularProfile profile;
   HistogramFittingProfile fitting_profile;
+  histogram_gpu_internal::HistogramFittingProfile gpu_profile;
+  std::vector<histogram_gpu_internal::HistogramFittingBatchProfile> gpu_records(
+      gpu_profile_enabled ? 16384 : 0);
+  gpu_profile.batches = gpu_records;
+  gpu_profile.mode = gpu_profile_mode == "gpu-stage"
+      ? histogram_gpu_internal::HistogramFittingProfileMode::kStage
+      : histogram_gpu_internal::HistogramFittingProfileMode::kWall;
+  if (gpu_profile_enabled) options.fitting_gpu_profile = &gpu_profile;
   // Diagnostic backing is allocated before timing and outside codec admission.
   // There is at most one fit per local group plus the global stream.
   std::vector<HistogramFitRecord> fitting_records;
@@ -200,6 +214,8 @@ int main(int argc, char **argv) try {
   const std::span<const uint8_t> bytes_view = public_api ? std::span<const uint8_t>(public_encoded) : encoded.view();
   Check(reference::DecodeLossless(bytes_view) == expected, "Exact independent decode differs");
   Check(!schedule.dropped, "Learning schedule trace exhausted caller storage");
+  Check(!gpu_profile.dropped && (!gpu_profile_enabled || gpu_profile.written == stats.histogram_gpu_batches),
+        "Histogram GPU attribution missed a batch");
   if (fitting_profile_enabled)
     Check(fitting_profile.calls == stats.fits && fitting_profile.successes == stats.fits &&
               !fitting_profile.records_dropped,
@@ -227,7 +243,7 @@ int main(int argc, char **argv) try {
         "Completed encode leaked managed storage");
   std::ofstream out(directory / "result.json");
   out.exceptions(std::ios::failbit | std::ios::badbit);
-  out << std::setprecision(17) << std::boolalpha << "{\"schema\":" << (fitter_diagnostics ? 7 : public_api ? 6 : tokenization_diagnostics ? 5 : selection_diagnostics ? 4 : entropy_diagnostics ? 3 : parallel_diagnostics ? 2 : 1)
+  out << std::setprecision(17) << std::boolalpha << "{\"schema\":" << (argc >= 16 ? 8 : fitter_diagnostics ? 7 : public_api ? 6 : tokenization_diagnostics ? 5 : selection_diagnostics ? 4 : entropy_diagnostics ? 3 : parallel_diagnostics ? 2 : 1)
       << ",\"public_api\":" << public_api
       << ",\"gpu_submissions\":" << (backend ? backend->stats().committed_submissions - submissions : 0)
       << ",\"route\":" << std::quoted(route)
@@ -315,6 +331,31 @@ int main(int argc, char **argv) try {
       << ",\"peak_scratch_bytes\":" << stats.histogram_peak_scratch_bytes
       << ",\"preparation_seconds\":" << stats.histogram_preparation_seconds
       << ",\"evaluation_seconds\":" << stats.histogram_evaluation_seconds << '}';
+  if (argc >= 16) {
+    out << ",\"histogram_gpu_profile\":{\"mode\":" << std::quoted(gpu_profile_mode)
+        << ",\"shards\":" << options.fitting_execution.histogram_shards
+        << ",\"active_properties\":" << options.fitting_execution.maximum_active_properties
+        << ",\"wall_phases\":[";
+    for (size_t i = 0; i < histogram_gpu_internal::kHistogramFittingWallPhases.size(); ++i)
+      out << (i ? "," : "") << std::quoted(histogram_gpu_internal::kHistogramFittingWallPhases[i]);
+    out << "],\"gpu_stages\":[";
+    for (size_t i = 0; i < histogram_gpu_internal::kHistogramFittingGpuStages.size(); ++i)
+      out << (i ? "," : "") << std::quoted(histogram_gpu_internal::kHistogramFittingGpuStages[i]);
+    out << "],\"batches\":[";
+    for (size_t i = 0; i < gpu_profile.written; ++i) {
+      const auto &b = gpu_records[i];
+      out << (i ? "," : "") << "{\"nodes\":" << b.nodes << ",\"rows\":" << b.rows
+          << ",\"tasks\":" << b.tasks << ",\"active_properties\":" << b.active_properties
+          << ",\"waves\":" << b.waves << ",\"maximum_bins\":" << b.maximum_bins
+          << ",\"maximum_symbols\":" << b.maximum_symbols << ",\"scratch_bytes\":" << b.scratch_bytes
+          << ",\"wall_ns\":";
+      Array(out, b.wall_nanoseconds);
+      out << ",\"gpu_ns\":"; Array(out, b.gpu_nanoseconds);
+      out << ",\"dispatches\":"; Array(out, b.dispatches);
+      out << ",\"command_buffer_gpu_ns\":" << b.command_buffer_gpu_nanoseconds << '}';
+    }
+    out << "]}";
+  }
   out << ",\"learning_schedule\":{\"enabled\":" << schedule_enabled << ",\"dropped\":" << schedule.dropped
       << ",\"waves\":[";
   for (size_t i = 0; i < schedule.waves_written; ++i) {

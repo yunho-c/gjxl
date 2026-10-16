@@ -1842,6 +1842,9 @@ Status CreateMetalBackendImpl(
     if (histogram_fitting_pipelines[i]->maxTotalThreadsPerThreadgroup() < 128 || maximum_threads.width < 128 ||
         histogram_fitting_pipelines[i]->staticThreadgroupMemoryLength() > device->maxThreadgroupMemoryLength())
       return Status::Unavailable("Metal cannot launch native histogram fitting threadgroups");
+    if (i == 2 && (histogram_fitting_pipelines[i]->threadExecutionWidth() == 0 ||
+                   128 % histogram_fitting_pipelines[i]->threadExecutionWidth() != 0))
+      return Status::Unavailable("Metal histogram prefix SIMD width is incompatible");
   }
 
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> modular_population_pipelines;

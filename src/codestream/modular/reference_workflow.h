@@ -39,6 +39,8 @@ struct ReferenceWorkflowOptions {
   // disabled by default. This is not a guaranteed CPU/GPU speed crossover.
   size_t fitting_minimum_rows = 16384, fitting_batch_fits = 64;
   histogram_gpu_internal::HistogramFittingExecutionOptions fitting_execution;
+  // Caller-owned, coordinator-only sink; disabled for ordinary encoding.
+  histogram_gpu_internal::HistogramFittingProfile *fitting_gpu_profile = nullptr;
 };
 struct ReferenceLearningStats {
   size_t first_group = 0, stop_group = 0;

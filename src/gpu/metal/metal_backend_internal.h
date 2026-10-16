@@ -562,6 +562,10 @@ public:
     const tree_gpu_internal::TreeStatisticsInput& input,
     std::unique_ptr<tree_gpu_internal::PreparedGpuTreeSplitCosts>* out) override;
   histogram_gpu_internal::HistogramFittingDeviceLimits histogram_fitting_limits() const noexcept override;
+  Status HistogramFittingProfileStorageBound(
+      const histogram_gpu_internal::HistogramFittingEvaluationPlan &plan,
+      histogram_gpu_internal::HistogramFittingProfileMode mode,
+      resource_budget_internal::HostStorageBound *out) const override;
   Status PrepareHistogramRows(
     std::span<const histogram_gpu_internal::HistogramFittingSource> sources,
     std::unique_ptr<histogram_gpu_internal::PreparedGpuHistogramRows>* out) override;
