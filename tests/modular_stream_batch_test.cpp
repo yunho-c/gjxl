@@ -108,6 +108,16 @@ void PlansAndCpu() {
   DisarmManagedHostAllocationFailureForTest();
   Ok(a);
   Ok(b);
+  HostStorageBound exact_bound, upper_bound;
+  Ok(ComputeModularStreamTokenStorageBound(features.samples, f.slices.size(), tokens.nodes,
+                                           &exact_bound));
+  Ok(ComputeModularStreamTokenStorageBound(features.samples, f.slices.size(),
+      f.trees.size() * kMaximumTreeNodes, &upper_bound));
+  Check(exact_bound == tokens.generation && upper_bound.peak_bytes >= tokens.generation.peak_bytes,
+        "Protected token completion failed to bound the exact layout");
+  Check(!ComputeModularStreamTokenStorageBound(features.samples, f.slices.size(), 0, &upper_bound).ok() &&
+        !ComputeModularStreamTokenStorageBound(features.samples, f.slices.size(), SIZE_MAX, &upper_bound).ok(),
+        "Token completion accepted an invalid node bound");
   Check(pending && features.wavefront_shapes && features.samples == f.expected_tokens.size(),
         "Batch planner allocated or miscounted samples");
   for (size_t participants : {1, 2, 4}) {

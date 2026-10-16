@@ -13,6 +13,7 @@ enum class ReferencePredictors : uint8_t { kBest, kAll };
 // Private qualification controls. Public routing remains on the ordinary CPU
 // fitter until complete-call evidence supports an automatic GPU preference.
 enum class ReferenceFittingBackend : uint8_t { kCpu, kResumableCpu, kGpu, kAuto };
+enum class ReferenceLearningSchedule : uint8_t { kCohorts, kPipeline };
 struct ReferenceWorkflowOptions {
   ReferenceBuffering buffering = ReferenceBuffering::kAutomatic;
   ReferencePredictors predictors = ReferencePredictors::kBest;
@@ -35,6 +36,10 @@ struct ReferenceWorkflowOptions {
   // still precedes stream placement and always runs as one job.
   size_t selection_cpu_participants = 0;
   ReferenceFittingBackend fitting_backend = ReferenceFittingBackend::kCpu;
+  // Private local CPU-fitting experiment. Batch shapes/producer routing remain
+  // unchanged; only their lifetimes overlap. Shared fits retain their scope.
+  ReferenceLearningSchedule learning_schedule = ReferenceLearningSchedule::kCohorts;
+  size_t feature_window_samples = 8 * 1024 * 1024;
   // Private experiments use the measured 16K-row cutoff; GPU fitting remains
   // disabled by default. This is not a guaranteed CPU/GPU speed crossover.
   size_t fitting_minimum_rows = 16384, fitting_batch_fits = 64;
@@ -67,6 +72,11 @@ struct ReferenceWorkflowStats {
   size_t feature_cohorts = 0, feature_memory_limited_cohorts = 0;
   size_t token_batches = 0, token_samples = 0;
   size_t peak_feature_samples = 0, peak_feature_bytes = 0;
+  size_t pipeline_peak_jobs = 0, pipeline_peak_batches = 0,
+         pipeline_admission_stalls = 0, pipeline_serial_fallbacks = 0;
+  // Pipeline wall includes overlapping features, fits and token generation.
+  // It must not be added to feature_seconds or token_seconds.
+  double pipeline_seconds = 0;
   // A learning wave is now one joined ready-queue invocation, which can
   // consume more jobs than its participant grant. Fields retain their names
   // for existing private diagnostic readers.
@@ -75,8 +85,10 @@ struct ReferenceWorkflowStats {
   // Sums of per-job wall time (overlap when local jobs run concurrently).
   // Preparation includes sample planning; fitting includes compaction.
   double sample_preparation_seconds = 0, fitting_seconds = 0;
-  // Caller-wall intervals. Learning includes admission, preparation, fitting,
-  // joins and diagnostic reduction. Features and GPU tokens are separate.
+  // Cohort learning includes admission, preparation, fitting and joins.
+  // With the pipeline it is the first-job-start to last-job-finish window,
+  // which overlaps feature/token operations; use pipeline_seconds for the
+  // complete combined phase. Never add overlapping wall/work intervals.
   double learning_seconds = 0, feature_seconds = 0, token_seconds = 0;
   size_t histogram_gpu_preparations = 0, histogram_gpu_batches = 0,
          histogram_gpu_nodes = 0, histogram_gpu_rows = 0,

@@ -32,6 +32,29 @@ bool Fits(const ModularTokenDeviceLimits *limits, size_t samples, size_t slices,
                        return bytes <= limits->maximum_buffer_bytes;
                      }));
 }
+Status TokenStorage(size_t samples, size_t slices, ModularStreamTokenStoragePlan p,
+                    ModularStreamTokenStoragePlan *out, const ModularTokenDeviceLimits *limits) {
+  if (!out || !samples || !slices || slices > samples ||
+      slices > kMaximumModularFeatureBatchSlices || !p.nodes || p.nodes > UINT32_MAX ||
+      p.nodes > size_t(PTRDIFF_MAX) / sizeof(ModularTokenNode) ||
+      samples > size_t(PTRDIFF_MAX) / sizeof(uint32_t) || !Valid(limits)) return Invalid();
+  p.values_bytes = samples * sizeof(uint32_t);
+  if (!Align(p.values_bytes, &p.contexts_offset) ||
+      !Align(slices * sizeof(AdaptiveModularTokenSlice), &p.nodes_offset)) return Invalid();
+  p.output_bytes = p.contexts_offset;
+  size_t end = p.nodes_offset;
+  if (!Add(samples * sizeof(uint16_t), &p.output_bytes) ||
+      !Add(p.nodes * sizeof(ModularTokenNode), &end) || !Align(end, &p.status_offset)) return Invalid();
+  p.dispatch_bytes = p.status_offset;
+  if (!Add(sizeof(uint32_t), &p.dispatch_bytes)) return Invalid();
+  if (!Fits(limits, samples, slices, {p.output_bytes, p.dispatch_bytes}))
+    return Status::Unsupported("Modular token batch exceeds device limits");
+  if (!p.retained.Add({p.output_bytes, p.output_bytes})) return Invalid();
+  p.generation = p.retained;
+  if (!p.generation.Add({p.dispatch_bytes, p.dispatch_bytes})) return Invalid();
+  *out = p;
+  return Status::Ok();
+}
 } // namespace
 Status ComputeModularStreamFeatureStoragePlan(std::span<const ModularStreamFeatureSlice> slices,
                                               size_t cpu_participants,
@@ -115,29 +138,16 @@ Status ComputeModularStreamTokenStoragePlan(size_t samples, size_t slices,
     p.maximum_contexts = std::max(p.maximum_contexts, layout.leaves);
     next += binding.slice_count;
   }
-  if (next != slices || p.nodes > UINT32_MAX ||
-      p.nodes > size_t(PTRDIFF_MAX) / sizeof(ModularTokenNode))
-    return Invalid();
-  p.values_bytes = samples * sizeof(uint32_t);
-  if (!Align(p.values_bytes, &p.contexts_offset) ||
-      !Align(slices * sizeof(AdaptiveModularTokenSlice), &p.nodes_offset))
-    return Invalid();
-  p.output_bytes = p.contexts_offset;
-  size_t end = p.nodes_offset;
-  if (!Add(samples * sizeof(uint16_t), &p.output_bytes) ||
-      !Add(p.nodes * sizeof(ModularTokenNode), &end) || !Align(end, &p.status_offset))
-    return Invalid();
-  p.dispatch_bytes = p.status_offset;
-  if (!Add(sizeof(uint32_t), &p.dispatch_bytes))
-    return Invalid();
-  if (!Fits(limits, samples, slices, {p.output_bytes, p.dispatch_bytes}))
-    return Status::Unsupported("Modular token batch exceeds device limits");
-  if (!p.retained.Add({p.output_bytes, p.output_bytes}))
-    return Invalid();
-  p.generation = p.retained;
-  if (!p.generation.Add({p.dispatch_bytes, p.dispatch_bytes}))
-    return Invalid();
-  *out = p;
+  if (next != slices) return Invalid();
+  return TokenStorage(samples, slices, p, out, limits);
+}
+Status ComputeModularStreamTokenStorageBound(size_t samples, size_t slices, size_t maximum_nodes,
+                                            HostStorageBound *out) {
+  if (!out) return Invalid();
+  ModularStreamTokenStoragePlan p;
+  p.nodes = maximum_nodes;
+  if (auto s = TokenStorage(samples, slices, p, &p, nullptr); !s.ok()) return s;
+  *out = p.generation;
   return Status::Ok();
 }
 } // namespace gjxl::modular_gpu_internal

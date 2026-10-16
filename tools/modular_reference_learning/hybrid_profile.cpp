@@ -45,8 +45,8 @@ template <typename T> void Array(std::ostream &out, const T &a) {
 }
 } // namespace
 int main(int argc, char **argv) try {
-  Check(argc >= 6 && argc <= 15, "hybrid_profile INPUT OUT cpu|shared-cpu|hybrid|auto auto|buffered "
-                                "best|all [fit-off|schedule|fit-on [learning-participants [cpu-ceiling [entropy-participants [selection-participants [tokenization-participants [public|fitter-cpu|fitter-resumable|fitter-gpu|fitter-auto [minimum-rows [batch-fits]]]]]]]]]");
+  Check(argc >= 6 && argc <= 17, "hybrid_profile INPUT OUT cpu|shared-cpu|hybrid|auto auto|buffered "
+                                "best|all [fit-off|schedule|fit-on [learning-participants [cpu-ceiling [entropy-participants [selection-participants [tokenization-participants [public|fitter-cpu|fitter-resumable|fitter-gpu|fitter-auto [minimum-rows [batch-fits [cohorts|pipeline [feature-window-Mi-samples]]]]]]]]]]]");
   const std::string fitter_flag = argc >= 13 ? argv[12] : "fitter-cpu";
   const bool public_api = fitter_flag == "public";
   Check((!public_api || argc == 13) &&
@@ -116,6 +116,15 @@ int main(int argc, char **argv) try {
                             : ReferenceFittingBackend::kCpu;
   if (argc >= 14) options.fitting_minimum_rows = std::stoull(argv[13]);
   if (argc >= 15) options.fitting_batch_fits = std::stoull(argv[14]);
+  const std::string learning_schedule = argc >= 16 ? argv[15] : "cohorts";
+  Check(learning_schedule == "cohorts" || learning_schedule == "pipeline", "Invalid learning schedule");
+  options.learning_schedule = learning_schedule == "pipeline" ? ReferenceLearningSchedule::kPipeline
+                                                               : ReferenceLearningSchedule::kCohorts;
+  if (argc >= 17) {
+    const size_t window = std::stoull(argv[16]);
+    Check(window == 8 || window == 16, "Feature window must be 8 or 16 Mi samples");
+    options.feature_window_samples = window * 1024 * 1024;
+  }
   options.selection_cpu_participants = selection_participants;
   options.learning_cpu_participants = learning_participants;
   options.buffering =
@@ -165,9 +174,11 @@ int main(int argc, char **argv) try {
   // DC group count never exceeds image group count.
   std::vector<LearningJobTiming> job_records(schedule_enabled ? 2 * group_count : 0);
   std::vector<LearningWaveTiming> wave_records(schedule_enabled ? 2 * group_count : 0);
+  std::vector<LearningBatchTiming> batch_records(schedule_enabled ? 2 * group_count : 0);
   LearningScheduleProfile schedule;
   schedule.jobs = job_records;
   schedule.waves = wave_records;
+  schedule.batches = batch_records;
   if (fitting_profile_enabled) {
     fitting_records.resize(((view.extent.width + 255) / 256) * ((view.extent.height + 255) / 256) +
                            1);
@@ -227,7 +238,7 @@ int main(int argc, char **argv) try {
         "Completed encode leaked managed storage");
   std::ofstream out(directory / "result.json");
   out.exceptions(std::ios::failbit | std::ios::badbit);
-  out << std::setprecision(17) << std::boolalpha << "{\"schema\":" << (fitter_diagnostics ? 7 : public_api ? 6 : tokenization_diagnostics ? 5 : selection_diagnostics ? 4 : entropy_diagnostics ? 3 : parallel_diagnostics ? 2 : 1)
+  out << std::setprecision(17) << std::boolalpha << "{\"schema\":" << (argc >= 16 ? 8 : fitter_diagnostics ? 7 : public_api ? 6 : tokenization_diagnostics ? 5 : selection_diagnostics ? 4 : entropy_diagnostics ? 3 : parallel_diagnostics ? 2 : 1)
       << ",\"public_api\":" << public_api
       << ",\"gpu_submissions\":" << (backend ? backend->stats().committed_submissions - submissions : 0)
       << ",\"route\":" << std::quoted(route)
@@ -265,6 +276,13 @@ int main(int argc, char **argv) try {
       << ",\"peak_participants\":" << stats.learning_peak_participants
       << ",\"waves\":" << stats.learning_waves
       << ",\"memory_limited_waves\":" << stats.learning_memory_limited_waves
+      << ",\"schedule\":" << std::quoted(learning_schedule)
+      << ",\"feature_window_samples\":" << options.feature_window_samples
+      << ",\"pipeline_seconds\":" << stats.pipeline_seconds
+      << ",\"pipeline_peak_jobs\":" << stats.pipeline_peak_jobs
+      << ",\"pipeline_peak_batches\":" << stats.pipeline_peak_batches
+      << ",\"pipeline_admission_stalls\":" << stats.pipeline_admission_stalls
+      << ",\"pipeline_serial_fallbacks\":" << stats.pipeline_serial_fallbacks
       << "},\"entropy\":{\"requested_participants\":" << entropy_participants
       << ",\"admitted_participants\":" << stats.entropy_cpu_participants
       << ",\"memory_reductions\":" << stats.entropy_memory_reductions
@@ -330,6 +348,15 @@ int main(int argc, char **argv) try {
         << ",\"start\":" << j.start << ",\"finish\":" << j.finish
         << ",\"preparation\":" << j.preparation << ",\"fitting\":" << j.fitting
         << ",\"calls\":" << j.calls << ",\"fits\":" << j.fits << '}';
+  }
+  out << "],\"batches\":[";
+  for (size_t i = 0; i < schedule.batches_written; ++i) {
+    const auto &b = batch_records[i];
+    out << (i ? "," : "") << "{\"first_stream\":" << b.first_stream
+        << ",\"stop_stream\":" << b.stop_stream << ",\"samples\":" << b.samples
+        << ",\"prepare_start\":" << b.prepare_start << ",\"ready\":" << b.ready
+        << ",\"fits_observed_done\":" << b.fits_observed_done
+        << ",\"tokenize_start\":" << b.tokenize_start << ",\"released\":" << b.released << '}';
   }
   out << "]}";
   out << "}\n";
