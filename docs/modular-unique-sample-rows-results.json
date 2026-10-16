@@ -1,0 +1,5202 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "baseline_revision": "bc759122bcfb24107961b95b89e03118b069d969",
+  "candidate_production_files": {
+    "src/codec/modular/histogram_sample_preparation.cpp": "5c9ff398c68dbc4de12e41eeed68a7f4e1da1cda57a157083f94ff619d112cf4",
+    "src/codec/modular/histogram_sample_preparation.h": "1205209b2da9af9338b1d8b11c10efc78490b1bdd2476f7610e5251656285f4e",
+    "src/codec/modular/histogram_sample_rows.h": "6d36be93b3c41d43ba88fadb9479556185f39a219038755cb85c8123e7776696",
+    "src/codestream/modular/reference_learning_workflow.cpp": "05dd7a768d07b47760ecd97c1e8708caccc96bed8c3ab82604a157acd2da7615",
+    "src/codestream/modular/reference_workflow.h": "c7c1b5d2cf789eca86ca5f28cd0001cecd9346f8cf8f8a6dd3d03a7b550fa0fb",
+    "tools/modular_reference_learning/hybrid_profile.cpp": "7f64f84c92626963de81ce94aa0d3b21e9118de4a0af7311d1bca1e35b2dc142"
+  },
+  "timing_boundary": "EncodeReferenceModularImage caller wall, excluding backend creation, input/output I/O and independent decode. Preparation, fitting and row times are overlapping per-scope wall sums, not elapsed or CPU time.",
+  "reference_revision": "e8ff09762481785938d8e4e01333ed3917571161",
+  "preparation_differential_cases": 121,
+  "unique_proof_variants": 2,
+  "native_preparations": 242,
+  "focused_ctest_cases": 6,
+  "metal_row_fixture_configuration_combinations": 80,
+  "saturated_alias_modes": [
+    "raster",
+    "metal",
+    "metal-deferred"
+  ],
+  "test_logs": {
+    "build/sample-rows-unique/tests.log": "0331affc33b785801e3c040ffdd47c37e32b27963d18f413cb56dc36ef91d744",
+    "build/sample-rows-unique/reference-tests.log": "04555bd61f5fa18ec3fdc92b2b6f236b0abc0e2a5c50f707d3655c35df997478"
+  },
+  "captures": {
+    "within-build": {
+      "raw_manifest": "build/sample-rows-unique/within-build/manifest.json",
+      "raw_manifest_sha256": "100abeb9bf89e93fc85bc13df8418342a2e295b32dfd27dd0d739ca67c613055",
+      "binaries": {
+        "baseline": {
+          "path": "build/sample-rows-unique/within-build/gjxl_sample_materialization_baseline",
+          "sha256": "2a1b60829e192e5aa9c783e6f7bf36e43b10dd471c68f260a36717ecfb258cc8"
+        },
+        "candidate": {
+          "path": "build/sample-rows-unique/within-build/gjxl_sample_materialization_candidate",
+          "sha256": "2a1b60829e192e5aa9c783e6f7bf36e43b10dd471c68f260a36717ecfb258cc8"
+        }
+      },
+      "source_archive_sha256": "f3a449ebb1c372732cedc212e1c5bc3a243b7685491ed8034ba4833bdcdc0a17",
+      "dependencies": {
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/lib/libjxl.0.13.0.dylib": "4f8ddedf97c285896288feea92c628558814b111803e62a8e626b0af396e5a0f",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/lib/libjxl_cms.0.13.0.dylib": "d7f96ab701f3af7a140d25ec33254818a571fb986d67132916df0a92afdd3d23",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlienc.1.2.0.dylib": "ec5708da20bc6d10ab99a4f7f9ba028bd9638bddf08891737913ca4c921e5ea6",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlidec.1.2.0.dylib": "21f9823cccddc7adb566b4f48c022864d55aa7afec8a28a5d53323511177c8f7",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlicommon.1.2.0.dylib": "9e372bbe8af0af943059714d086ceae105c8aea94018858666a97647c729711a"
+      },
+      "inputs": [
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+          "sha256": "a1c487b0160d8f3e8cb86753131b919ac3de28e908fde757050ebccdb4407b6d"
+        },
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1039.pam",
+          "sha256": "22f487129343ed6d403346653ef99900e2552728ba2e4f5c63c90d058132f302"
+        },
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1049.pam",
+          "sha256": "0b3feae4d3bf1a13f89d5f4c3d976c8ea1e93e49a65548919cb5474c3cd1d62d"
+        }
+      ],
+      "route": "auto",
+      "predictors": "best",
+      "participants": 14,
+      "warmups": 1,
+      "repeats": 3,
+      "candidate_metal_mode": "metal-deferred",
+      "baseline_metal_mode": "metal-deferred",
+      "candidate_unique_rows": true,
+      "accepted": 48,
+      "excluded": 2,
+      "excluded_attempts": [
+        {
+          "directory": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-unique/within-build/photo-large-1049-metal-candidate-0-0",
+          "competitors": [
+            {
+              "pid": 29122,
+              "command": "cmake --build build/release --parallel 8 --target gjxl_metal_modular_weighted_selection_test"
+            },
+            {
+              "pid": 29123,
+              "command": "/opt/homebrew/bin/ninja -j 8 gjxl_metal_modular_weighted_selection_test"
+            },
+            {
+              "pid": 29187,
+              "command": "/opt/homebrew/bin/ninja -v cmTC_43210"
+            },
+            {
+              "pid": 29188,
+              "command": "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++ -DGJXL_CXX_STORAGE_TOOLCHAIN_SUPPORTED -I/Users/yunhocho/GitHub/gjxl-gpu-weighted-presets/src -O3 -DNDEBUG -std=gnu++20 -arch arm64 -MD -MT CMakeFiles/cmTC_43210.dir/src.cxx.o -MF CMakeFiles/cmTC_43210.dir/src.cxx.o.d -o CMakeFiles/cmTC_43210.dir/src.cxx.o -c /Users/yunhocho/GitHub/gjxl-gpu-weighted-presets/build/release/CMakeFiles/CMakeScratch/TryCompile-MhYiEk/src.cxx"
+            }
+          ]
+        },
+        {
+          "directory": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-unique/within-build/photo-large-1049-metal-baseline-0-0",
+          "competitors": [
+            {
+              "pid": 30080,
+              "command": "ctest --test-dir build/release --output-on-failure -R ^metal_modular_weighted_selection$"
+            },
+            {
+              "pid": 30102,
+              "command": "/Users/yunhocho/GitHub/gjxl-gpu-weighted-presets/build/release/gjxl_metal_modular_weighted_selection_test"
+            }
+          ]
+        }
+      ],
+      "environment": {
+        "device": [
+          "Metal: Apple M4 Pro"
+        ],
+        "platform": [
+          "macOS-27.0.1-arm64-arm-64bit-Mach-O"
+        ],
+        "cpu": [
+          "Apple M4 Pro"
+        ],
+        "physical_memory_bytes": [
+          51539607552
+        ],
+        "power": [
+          "Now drawing from 'AC Power'\n -InternalBattery-0 (id=35782755)\t87%; AC attached; not charging present: true",
+          "Now drawing from 'AC Power'\n -InternalBattery-0 (id=35782755)\t88%; AC attached; not charging present: true"
+        ],
+        "thermal": [
+          "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded"
+        ],
+        "ordinary_background_work": "Spotlight/media-analysis and desktop activity retained in raw process snapshots; not peak throughput evidence"
+      },
+      "comparison": "Same candidate executable: native dedup versus guarded uniqueness"
+    },
+    "timed": {
+      "raw_manifest": "build/sample-rows-unique/timed/manifest.json",
+      "raw_manifest_sha256": "0016ea8037d8f72c45a2be7cc3839446f1f9ebf3f47c56ae7c9046f7f6fb14fd",
+      "binaries": {
+        "baseline": {
+          "path": "build/sample-rows-unique/timed/gjxl_sample_materialization_baseline",
+          "sha256": "40d2cd39112fadd106c507f11441d9203ba6542b0959412c3dfb83d507dd94ae"
+        },
+        "candidate": {
+          "path": "build/sample-rows-unique/timed/gjxl_sample_materialization_candidate",
+          "sha256": "2a1b60829e192e5aa9c783e6f7bf36e43b10dd471c68f260a36717ecfb258cc8"
+        }
+      },
+      "source_archive_sha256": "eab9d459cda31bf9cc674f23f5aa33395bc8835b559e52b29a07f080bbb024c6",
+      "dependencies": {
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/lib/libjxl.0.13.0.dylib": "4f8ddedf97c285896288feea92c628558814b111803e62a8e626b0af396e5a0f",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/lib/libjxl_cms.0.13.0.dylib": "d7f96ab701f3af7a140d25ec33254818a571fb986d67132916df0a92afdd3d23",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlienc.1.2.0.dylib": "ec5708da20bc6d10ab99a4f7f9ba028bd9638bddf08891737913ca4c921e5ea6",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlidec.1.2.0.dylib": "21f9823cccddc7adb566b4f48c022864d55aa7afec8a28a5d53323511177c8f7",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlicommon.1.2.0.dylib": "9e372bbe8af0af943059714d086ceae105c8aea94018858666a97647c729711a"
+      },
+      "inputs": [
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+          "sha256": "a1c487b0160d8f3e8cb86753131b919ac3de28e908fde757050ebccdb4407b6d"
+        },
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1039.pam",
+          "sha256": "22f487129343ed6d403346653ef99900e2552728ba2e4f5c63c90d058132f302"
+        },
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1049.pam",
+          "sha256": "0b3feae4d3bf1a13f89d5f4c3d976c8ea1e93e49a65548919cb5474c3cd1d62d"
+        }
+      ],
+      "route": "auto",
+      "predictors": "best",
+      "participants": 14,
+      "warmups": 1,
+      "repeats": 3,
+      "candidate_metal_mode": "metal-deferred",
+      "baseline_metal_mode": "metal-deferred",
+      "candidate_unique_rows": true,
+      "accepted": 48,
+      "excluded": 0,
+      "excluded_attempts": [],
+      "environment": {
+        "device": [
+          "Metal: Apple M4 Pro"
+        ],
+        "platform": [
+          "macOS-27.0.1-arm64-arm-64bit-Mach-O"
+        ],
+        "cpu": [
+          "Apple M4 Pro"
+        ],
+        "physical_memory_bytes": [
+          51539607552
+        ],
+        "power": [
+          "Now drawing from 'AC Power'\n -InternalBattery-0 (id=35782755)\t87%; AC attached; not charging present: true"
+        ],
+        "thermal": [
+          "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded"
+        ],
+        "ordinary_background_work": "Spotlight/media-analysis and desktop activity retained in raw process snapshots; not peak throughput evidence"
+      },
+      "comparison": "Frozen bc75912 native dedup versus candidate guarded uniqueness on every row mode; baseline Metal is deferred"
+    },
+    "coverage": {
+      "raw_manifest": "build/sample-rows-unique/coverage/manifest.json",
+      "raw_manifest_sha256": "e97c7ed36e918fd641c1ba3d97c247845c7ad121c986d3e5dce52704a2a949ca",
+      "binaries": {
+        "baseline": {
+          "path": "build/sample-rows-unique/coverage/gjxl_sample_materialization_baseline",
+          "sha256": "40d2cd39112fadd106c507f11441d9203ba6542b0959412c3dfb83d507dd94ae"
+        },
+        "candidate": {
+          "path": "build/sample-rows-unique/coverage/gjxl_sample_materialization_candidate",
+          "sha256": "2a1b60829e192e5aa9c783e6f7bf36e43b10dd471c68f260a36717ecfb258cc8"
+        }
+      },
+      "source_archive_sha256": "92aebe4bd366c6d592399430ec6f6c25cbe0902ad218699d15f5ff64c35032ee",
+      "dependencies": {
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/lib/libjxl.0.13.0.dylib": "4f8ddedf97c285896288feea92c628558814b111803e62a8e626b0af396e5a0f",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/lib/libjxl_cms.0.13.0.dylib": "d7f96ab701f3af7a140d25ec33254818a571fb986d67132916df0a92afdd3d23",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlienc.1.2.0.dylib": "ec5708da20bc6d10ab99a4f7f9ba028bd9638bddf08891737913ca4c921e5ea6",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlidec.1.2.0.dylib": "21f9823cccddc7adb566b4f48c022864d55aa7afec8a28a5d53323511177c8f7",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlicommon.1.2.0.dylib": "9e372bbe8af0af943059714d086ceae105c8aea94018858666a97647c729711a"
+      },
+      "inputs": [
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/photo-macan.pam",
+          "sha256": "00f553eeed5f5706240e027011628cb4c96a8c1879775480e20f50e2679f2e6e"
+        },
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/alpha-ria.pam",
+          "sha256": "e9167882740846d65e4a88cb513912d39996351c8527583a3bf825fc197220a9"
+        },
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/palette-358.pam",
+          "sha256": "bf34ee41d73e578df86a4d3b88017b48e72adc16fb1df2e22e30a483c17d0214"
+        },
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/alpha16-ramp.pam",
+          "sha256": "dc0197fd31ce47cdb6db6b3f08d1da38b735f125bbd24d44b4ade3cd397eb0ae"
+        },
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-inputs/alpha16-local.pam",
+          "sha256": "82db67d7b6747b9b1d2810d9cbd967962818b8990a7746f1e2ef31d1ff3f166d"
+        }
+      ],
+      "route": "auto",
+      "predictors": "best",
+      "participants": 14,
+      "warmups": 0,
+      "repeats": 1,
+      "candidate_metal_mode": "metal-deferred",
+      "baseline_metal_mode": "metal-deferred",
+      "candidate_unique_rows": true,
+      "accepted": 30,
+      "excluded": 0,
+      "excluded_attempts": [],
+      "environment": {
+        "device": [
+          "Metal: Apple M4 Pro"
+        ],
+        "platform": [
+          "macOS-27.0.1-arm64-arm-64bit-Mach-O"
+        ],
+        "cpu": [
+          "Apple M4 Pro"
+        ],
+        "physical_memory_bytes": [
+          51539607552
+        ],
+        "power": [
+          "Now drawing from 'AC Power'\n -InternalBattery-0 (id=35782755)\t87%; AC attached; not charging present: true"
+        ],
+        "thermal": [
+          "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded"
+        ],
+        "ordinary_background_work": "Spotlight/media-analysis and desktop activity retained in raw process snapshots; not peak throughput evidence"
+      },
+      "comparison": "Frozen bc75912 native dedup versus candidate guarded uniqueness on every row mode; baseline Metal is deferred",
+      "row_coverage": [
+        {
+          "input": "photo-macan.pam",
+          "mode": "raster",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 0,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "photo-macan.pam",
+          "mode": "raster",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 1,
+          "unique_calls": 1,
+          "unique_rows": 488592
+        },
+        {
+          "input": "photo-macan.pam",
+          "mode": "selected",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 1,
+          "unique_calls": 1,
+          "unique_rows": 488592
+        },
+        {
+          "input": "photo-macan.pam",
+          "mode": "selected",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 0,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "photo-macan.pam",
+          "mode": "metal",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 0,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "photo-macan.pam",
+          "mode": "metal",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 1,
+          "unique_calls": 1,
+          "unique_rows": 488592
+        },
+        {
+          "input": "alpha-ria.pam",
+          "mode": "raster",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 1,
+          "unique_calls": 1,
+          "unique_rows": 651456
+        },
+        {
+          "input": "alpha-ria.pam",
+          "mode": "raster",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 0,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "alpha-ria.pam",
+          "mode": "selected",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 0,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "alpha-ria.pam",
+          "mode": "selected",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 1,
+          "unique_calls": 1,
+          "unique_rows": 651456
+        },
+        {
+          "input": "alpha-ria.pam",
+          "mode": "metal",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 1,
+          "unique_calls": 1,
+          "unique_rows": 651456
+        },
+        {
+          "input": "alpha-ria.pam",
+          "mode": "metal",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 0,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "palette-358.pam",
+          "mode": "raster",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 0,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "palette-358.pam",
+          "mode": "raster",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 1,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "palette-358.pam",
+          "mode": "selected",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 1,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "palette-358.pam",
+          "mode": "selected",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 0,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "palette-358.pam",
+          "mode": "metal",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 0,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "palette-358.pam",
+          "mode": "metal",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 1,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "alpha16-ramp.pam",
+          "mode": "raster",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 1,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "alpha16-ramp.pam",
+          "mode": "raster",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 0,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "alpha16-ramp.pam",
+          "mode": "selected",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 0,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "alpha16-ramp.pam",
+          "mode": "selected",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 1,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "alpha16-ramp.pam",
+          "mode": "metal",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 1,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "alpha16-ramp.pam",
+          "mode": "metal",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 0,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "raster",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 0,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "raster",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 12,
+          "unique_calls": 9,
+          "unique_rows": 1028216
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "selected",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 12,
+          "unique_calls": 9,
+          "unique_rows": 1028216
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "selected",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 0,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "metal",
+          "build": "baseline",
+          "gpu_calls": 12,
+          "gpu_rows": 1030284,
+          "deferred_calls": 12,
+          "contiguous_materializations": 11,
+          "uniqueness_checks": 0,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "metal",
+          "build": "candidate",
+          "gpu_calls": 12,
+          "gpu_rows": 1030284,
+          "deferred_calls": 12,
+          "contiguous_materializations": 11,
+          "uniqueness_checks": 12,
+          "unique_calls": 9,
+          "unique_rows": 1028216
+        }
+      ]
+    },
+    "all-predictors": {
+      "raw_manifest": "build/sample-rows-unique/all-predictors/manifest.json",
+      "raw_manifest_sha256": "ae717b8de49e330aab175cd1ae9f52e9edd24618f9a19f09152ff8a5e6d839a2",
+      "binaries": {
+        "baseline": {
+          "path": "build/sample-rows-unique/all-predictors/gjxl_sample_materialization_baseline",
+          "sha256": "40d2cd39112fadd106c507f11441d9203ba6542b0959412c3dfb83d507dd94ae"
+        },
+        "candidate": {
+          "path": "build/sample-rows-unique/all-predictors/gjxl_sample_materialization_candidate",
+          "sha256": "2a1b60829e192e5aa9c783e6f7bf36e43b10dd471c68f260a36717ecfb258cc8"
+        }
+      },
+      "source_archive_sha256": "b638b84b1c873925d7a9fd55e529115a3a9de57a14bacf85bf418b91cb81f53a",
+      "dependencies": {
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/lib/libjxl.0.13.0.dylib": "4f8ddedf97c285896288feea92c628558814b111803e62a8e626b0af396e5a0f",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/lib/libjxl_cms.0.13.0.dylib": "d7f96ab701f3af7a140d25ec33254818a571fb986d67132916df0a92afdd3d23",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlienc.1.2.0.dylib": "ec5708da20bc6d10ab99a4f7f9ba028bd9638bddf08891737913ca4c921e5ea6",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlidec.1.2.0.dylib": "21f9823cccddc7adb566b4f48c022864d55aa7afec8a28a5d53323511177c8f7",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlicommon.1.2.0.dylib": "9e372bbe8af0af943059714d086ceae105c8aea94018858666a97647c729711a"
+      },
+      "inputs": [
+        {
+          "path": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-inputs/alpha16-local.pam",
+          "sha256": "82db67d7b6747b9b1d2810d9cbd967962818b8990a7746f1e2ef31d1ff3f166d"
+        }
+      ],
+      "route": "auto",
+      "predictors": "all",
+      "participants": 14,
+      "warmups": 0,
+      "repeats": 1,
+      "candidate_metal_mode": "metal-deferred",
+      "baseline_metal_mode": "metal-deferred",
+      "candidate_unique_rows": true,
+      "accepted": 6,
+      "excluded": 0,
+      "excluded_attempts": [],
+      "environment": {
+        "device": [
+          "Metal: Apple M4 Pro"
+        ],
+        "platform": [
+          "macOS-27.0.1-arm64-arm-64bit-Mach-O"
+        ],
+        "cpu": [
+          "Apple M4 Pro"
+        ],
+        "physical_memory_bytes": [
+          51539607552
+        ],
+        "power": [
+          "Now drawing from 'AC Power'\n -InternalBattery-0 (id=35782755)\t87%; AC attached; not charging present: true"
+        ],
+        "thermal": [
+          "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded"
+        ],
+        "ordinary_background_work": "Spotlight/media-analysis and desktop activity retained in raw process snapshots; not peak throughput evidence"
+      },
+      "comparison": "Frozen bc75912 native dedup versus candidate guarded uniqueness on every row mode; baseline Metal is deferred",
+      "row_coverage": [
+        {
+          "input": "alpha16-local.pam",
+          "mode": "raster",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 0,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "raster",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 12,
+          "unique_calls": 9,
+          "unique_rows": 1028216
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "selected",
+          "build": "candidate",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 12,
+          "unique_calls": 9,
+          "unique_rows": 1028216
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "selected",
+          "build": "baseline",
+          "gpu_calls": 0,
+          "gpu_rows": 0,
+          "deferred_calls": 0,
+          "contiguous_materializations": 0,
+          "uniqueness_checks": 0,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "metal",
+          "build": "baseline",
+          "gpu_calls": 12,
+          "gpu_rows": 1030284,
+          "deferred_calls": 12,
+          "contiguous_materializations": 11,
+          "uniqueness_checks": 0,
+          "unique_calls": 0,
+          "unique_rows": 0
+        },
+        {
+          "input": "alpha16-local.pam",
+          "mode": "metal",
+          "build": "candidate",
+          "gpu_calls": 12,
+          "gpu_rows": 1030284,
+          "deferred_calls": 12,
+          "contiguous_materializations": 11,
+          "uniqueness_checks": 12,
+          "unique_calls": 9,
+          "unique_rows": 1028216
+        }
+      ]
+    }
+  },
+  "summaries": [
+    {
+      "study": "within-build",
+      "input": "photo-large-1029.pam",
+      "mode": "raster",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 4.201797125,
+            "minimum": 4.172332125,
+            "maximum": 4.30796975,
+            "values": [
+              4.30796975,
+              4.201797125,
+              4.172332125
+            ]
+          },
+          "process_cpu": {
+            "median": 37.011393,
+            "minimum": 37.005855,
+            "maximum": 37.30287,
+            "values": [
+              37.011393,
+              37.005855,
+              37.30287
+            ]
+          },
+          "preparation": {
+            "median": 3.489746371,
+            "minimum": 3.4804707900000014,
+            "maximum": 3.533390789,
+            "values": [
+              3.4804707900000014,
+              3.489746371,
+              3.533390789
+            ]
+          },
+          "fitting": {
+            "median": 25.30143770500002,
+            "minimum": 25.257202042000007,
+            "maximum": 25.324162542,
+            "values": [
+              25.257202042000007,
+              25.30143770500002,
+              25.324162542
+            ]
+          },
+          "gather": {
+            "median": 3.390457205,
+            "minimum": 3.3864745759999995,
+            "maximum": 3.436062291000001,
+            "values": [
+              3.3864745759999995,
+              3.390457205,
+              3.436062291000001
+            ]
+          },
+          "selection": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "generation": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "replay": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "uniqueness": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_calls": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_rows": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 779112332,
+            "minimum": 777201859,
+            "maximum": 779238911,
+            "values": [
+              779112332,
+              777201859,
+              779238911
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 4.03953625,
+            "minimum": 4.022542708,
+            "maximum": 4.124791792,
+            "values": [
+              4.022542708,
+              4.03953625,
+              4.124791792
+            ]
+          },
+          "process_cpu": {
+            "median": 35.527613,
+            "minimum": 35.450083,
+            "maximum": 35.688444,
+            "values": [
+              35.527613,
+              35.688444,
+              35.450083
+            ]
+          },
+          "preparation": {
+            "median": 1.803077541,
+            "minimum": 1.7955502499999998,
+            "maximum": 1.8772480909999993,
+            "values": [
+              1.7955502499999998,
+              1.803077541,
+              1.8772480909999993
+            ]
+          },
+          "fitting": {
+            "median": 25.329346832,
+            "minimum": 25.31157790799999,
+            "maximum": 25.592781158,
+            "values": [
+              25.329346832,
+              25.31157790799999,
+              25.592781158
+            ]
+          },
+          "gather": {
+            "median": 1.7269740050000004,
+            "minimum": 1.7146272920000003,
+            "maximum": 1.7458821729999998,
+            "values": [
+              1.7146272920000003,
+              1.7269740050000004,
+              1.7458821729999998
+            ]
+          },
+          "selection": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "generation": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "replay": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "uniqueness": {
+            "median": 6.428800000000002e-05,
+            "minimum": 6.383599999999999e-05,
+            "maximum": 6.529400000000006e-05,
+            "values": [
+              6.529400000000006e-05,
+              6.428800000000002e-05,
+              6.383599999999999e-05
+            ]
+          },
+          "unique_calls": {
+            "median": 192,
+            "minimum": 192,
+            "maximum": 192,
+            "values": [
+              192,
+              192,
+              192
+            ]
+          },
+          "unique_rows": {
+            "median": 23460354,
+            "minimum": 23460354,
+            "maximum": 23460354,
+            "values": [
+              23460354,
+              23460354,
+              23460354
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 776793373,
+            "minimum": 776513894,
+            "maximum": 778116985,
+            "values": [
+              776513894,
+              778116985,
+              776793373
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 3.8617017950384636,
+        "process_cpu": 4.008981774882114,
+        "preparation": 48.33213221500331,
+        "fitting": -0.11030648663283849,
+        "gather": 49.0636837281655,
+        "selection": null,
+        "generation": null,
+        "replay": null,
+        "materialization": null,
+        "uniqueness": null,
+        "unique_calls": null,
+        "unique_rows": null,
+        "peak_backing_bytes": 0.29764116222460446
+      }
+    },
+    {
+      "study": "within-build",
+      "input": "photo-large-1029.pam",
+      "mode": "metal",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 4.11705825,
+            "minimum": 4.063813375,
+            "maximum": 4.159269333,
+            "values": [
+              4.11705825,
+              4.159269333,
+              4.063813375
+            ]
+          },
+          "process_cpu": {
+            "median": 36.220478,
+            "minimum": 36.155762,
+            "maximum": 36.293777,
+            "values": [
+              36.293777,
+              36.155762,
+              36.220478
+            ]
+          },
+          "preparation": {
+            "median": 2.732717080999999,
+            "minimum": 2.7257215429999997,
+            "maximum": 2.738379961999999,
+            "values": [
+              2.738379961999999,
+              2.7257215429999997,
+              2.732717080999999
+            ]
+          },
+          "fitting": {
+            "median": 25.401760913000004,
+            "minimum": 25.208980076000003,
+            "maximum": 25.443930241000004,
+            "values": [
+              25.443930241000004,
+              25.208980076000003,
+              25.401760913000004
+            ]
+          },
+          "gather": {
+            "median": 2.6593434520000008,
+            "minimum": 2.6536047479999993,
+            "maximum": 2.6604595410000003,
+            "values": [
+              2.6593434520000008,
+              2.6536047479999993,
+              2.6604595410000003
+            ]
+          },
+          "selection": {
+            "median": 0.08802740999999997,
+            "minimum": 0.08730354399999997,
+            "maximum": 0.08893387800000008,
+            "values": [
+              0.08893387800000008,
+              0.08730354399999997,
+              0.08802740999999997
+            ]
+          },
+          "generation": {
+            "median": 0.3827198329999998,
+            "minimum": 0.3801575879999999,
+            "maximum": 0.42367541000000003,
+            "values": [
+              0.3801575879999999,
+              0.3827198329999998,
+              0.42367541000000003
+            ]
+          },
+          "replay": {
+            "median": 2.181376551,
+            "minimum": 2.1468993289999987,
+            "maximum": 2.1882850420000004,
+            "values": [
+              2.1882850420000004,
+              2.181376551,
+              2.1468993289999987
+            ]
+          },
+          "materialization": {
+            "median": 0.01846858,
+            "minimum": 0.017940039,
+            "maximum": 0.020127754000000015,
+            "values": [
+              0.01846858,
+              0.020127754000000015,
+              0.017940039
+            ]
+          },
+          "uniqueness": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_calls": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_rows": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 780805398,
+            "minimum": 780257183,
+            "maximum": 783671724,
+            "values": [
+              780805398,
+              780257183,
+              783671724
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 3.918165667,
+            "minimum": 3.917389583,
+            "maximum": 3.933725875,
+            "values": [
+              3.933725875,
+              3.918165667,
+              3.917389583
+            ]
+          },
+          "process_cpu": {
+            "median": 34.216916,
+            "minimum": 34.177727,
+            "maximum": 34.243392,
+            "values": [
+              34.177727,
+              34.243392,
+              34.216916
+            ]
+          },
+          "preparation": {
+            "median": 0.6247082449999997,
+            "minimum": 0.616339707,
+            "maximum": 0.6265497489999996,
+            "values": [
+              0.6247082449999997,
+              0.616339707,
+              0.6265497489999996
+            ]
+          },
+          "fitting": {
+            "median": 25.34316183399999,
+            "minimum": 25.327697367000006,
+            "maximum": 25.36928021800001,
+            "values": [
+              25.36928021800001,
+              25.327697367000006,
+              25.34316183399999
+            ]
+          },
+          "gather": {
+            "median": 0.5473660380000002,
+            "minimum": 0.5435286230000002,
+            "maximum": 0.5511036199999999,
+            "values": [
+              0.5511036199999999,
+              0.5435286230000002,
+              0.5473660380000002
+            ]
+          },
+          "selection": {
+            "median": 0.08764837000000002,
+            "minimum": 0.086562706,
+            "maximum": 0.08881816799999999,
+            "values": [
+              0.08881816799999999,
+              0.08764837000000002,
+              0.086562706
+            ]
+          },
+          "generation": {
+            "median": 0.384330244,
+            "minimum": 0.37943270299999976,
+            "maximum": 0.3876973679999998,
+            "values": [
+              0.384330244,
+              0.37943270299999976,
+              0.3876973679999998
+            ]
+          },
+          "replay": {
+            "median": 0.07318753599999998,
+            "minimum": 0.07110587399999997,
+            "maximum": 0.07349216399999998,
+            "values": [
+              0.07349216399999998,
+              0.07318753599999998,
+              0.07110587399999997
+            ]
+          },
+          "materialization": {
+            "median": 0.07164883599999998,
+            "minimum": 0.06965534200000001,
+            "maximum": 0.07182407300000002,
+            "values": [
+              0.07182407300000002,
+              0.07164883599999998,
+              0.06965534200000001
+            ]
+          },
+          "uniqueness": {
+            "median": 5.9629999999999997e-05,
+            "minimum": 5.9329e-05,
+            "maximum": 6.095799999999998e-05,
+            "values": [
+              5.9629999999999997e-05,
+              6.095799999999998e-05,
+              5.9329e-05
+            ]
+          },
+          "unique_calls": {
+            "median": 192,
+            "minimum": 192,
+            "maximum": 192,
+            "values": [
+              192,
+              192,
+              192
+            ]
+          },
+          "unique_rows": {
+            "median": 23460354,
+            "minimum": 23460354,
+            "maximum": 23460354,
+            "values": [
+              23460354,
+              23460354,
+              23460354
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 778264636,
+            "minimum": 777042368,
+            "maximum": 780201734,
+            "values": [
+              780201734,
+              778264636,
+              777042368
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 4.8309392513453115,
+        "process_cpu": 5.531572498849968,
+        "preparation": 77.13966625584978,
+        "fitting": 0.23068904238849886,
+        "gather": 79.41724911130433,
+        "selection": 0.43059315274635024,
+        "generation": -0.4207806497449562,
+        "replay": 96.64489214544601,
+        "materialization": -287.9498911123648,
+        "uniqueness": null,
+        "unique_calls": null,
+        "unique_rows": null,
+        "peak_backing_bytes": 0.32540271961593037
+      }
+    },
+    {
+      "study": "within-build",
+      "input": "photo-large-1039.pam",
+      "mode": "raster",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 3.613149541,
+            "minimum": 3.594951083,
+            "maximum": 3.6405835,
+            "values": [
+              3.594951083,
+              3.6405835,
+              3.613149541
+            ]
+          },
+          "process_cpu": {
+            "median": 26.249694,
+            "minimum": 26.234234,
+            "maximum": 26.503686,
+            "values": [
+              26.249694,
+              26.234234,
+              26.503686
+            ]
+          },
+          "preparation": {
+            "median": 2.8800689080000006,
+            "minimum": 2.874802969,
+            "maximum": 2.9106504230000017,
+            "values": [
+              2.9106504230000017,
+              2.874802969,
+              2.8800689080000006
+            ]
+          },
+          "fitting": {
+            "median": 15.963481344000005,
+            "minimum": 15.95310297199999,
+            "maximum": 16.125247786000003,
+            "values": [
+              15.95310297199999,
+              16.125247786000003,
+              15.963481344000005
+            ]
+          },
+          "gather": {
+            "median": 2.7986716260000004,
+            "minimum": 2.797744622000001,
+            "maximum": 2.8025202919999996,
+            "values": [
+              2.797744622000001,
+              2.7986716260000004,
+              2.8025202919999996
+            ]
+          },
+          "selection": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "generation": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "replay": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "uniqueness": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_calls": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_rows": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 696888461,
+            "minimum": 696552130,
+            "maximum": 700144288,
+            "values": [
+              700144288,
+              696888461,
+              696552130
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 3.510302292,
+            "minimum": 3.487014667,
+            "maximum": 3.521049084,
+            "values": [
+              3.487014667,
+              3.521049084,
+              3.510302292
+            ]
+          },
+          "process_cpu": {
+            "median": 25.054082,
+            "minimum": 24.948284,
+            "maximum": 25.162902,
+            "values": [
+              24.948284,
+              25.054082,
+              25.162902
+            ]
+          },
+          "preparation": {
+            "median": 1.5364884629999993,
+            "minimum": 1.5115700030000003,
+            "maximum": 1.602941499,
+            "values": [
+              1.602941499,
+              1.5364884629999993,
+              1.5115700030000003
+            ]
+          },
+          "fitting": {
+            "median": 16.114546504999996,
+            "minimum": 16.061102078,
+            "maximum": 16.175186165000003,
+            "values": [
+              16.114546504999996,
+              16.175186165000003,
+              16.061102078
+            ]
+          },
+          "gather": {
+            "median": 1.4600280819999998,
+            "minimum": 1.4466726290000005,
+            "maximum": 1.4728777909999995,
+            "values": [
+              1.4728777909999995,
+              1.4600280819999998,
+              1.4466726290000005
+            ]
+          },
+          "selection": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "generation": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "replay": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "uniqueness": {
+            "median": 6.353200000000001e-05,
+            "minimum": 6.132799999999998e-05,
+            "maximum": 6.549200000000002e-05,
+            "values": [
+              6.132799999999998e-05,
+              6.353200000000001e-05,
+              6.549200000000002e-05
+            ]
+          },
+          "unique_calls": {
+            "median": 177,
+            "minimum": 177,
+            "maximum": 177,
+            "values": [
+              177,
+              177,
+              177
+            ]
+          },
+          "unique_rows": {
+            "median": 19841050,
+            "minimum": 19841050,
+            "maximum": 19841050,
+            "values": [
+              19841050,
+              19841050,
+              19841050
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 695282035,
+            "minimum": 692449020,
+            "maximum": 698331985,
+            "values": [
+              692449020,
+              695282035,
+              698331985
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 2.846470865181383,
+        "process_cpu": 4.554765476504219,
+        "preparation": 46.65098259517063,
+        "fitting": -0.9463171456442376,
+        "gather": 47.83139013394209,
+        "selection": null,
+        "generation": null,
+        "replay": null,
+        "materialization": null,
+        "uniqueness": null,
+        "unique_calls": null,
+        "unique_rows": null,
+        "peak_backing_bytes": 0.23051407648433386
+      }
+    },
+    {
+      "study": "within-build",
+      "input": "photo-large-1039.pam",
+      "mode": "metal",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 3.568600208,
+            "minimum": 3.565775958,
+            "maximum": 3.57427975,
+            "values": [
+              3.57427975,
+              3.565775958,
+              3.568600208
+            ]
+          },
+          "process_cpu": {
+            "median": 25.636581,
+            "minimum": 25.514798,
+            "maximum": 25.666499,
+            "values": [
+              25.666499,
+              25.636581,
+              25.514798
+            ]
+          },
+          "preparation": {
+            "median": 2.36017067,
+            "minimum": 2.3190927890000004,
+            "maximum": 2.47036338,
+            "values": [
+              2.47036338,
+              2.36017067,
+              2.3190927890000004
+            ]
+          },
+          "fitting": {
+            "median": 16.110410711000007,
+            "minimum": 15.925460542000001,
+            "maximum": 16.133118503000002,
+            "values": [
+              16.133118503000002,
+              15.925460542000001,
+              16.110410711000007
+            ]
+          },
+          "gather": {
+            "median": 2.287581299,
+            "minimum": 2.2519988429999986,
+            "maximum": 2.3998611720000005,
+            "values": [
+              2.3998611720000005,
+              2.287581299,
+              2.2519988429999986
+            ]
+          },
+          "selection": {
+            "median": 0.07771700399999999,
+            "minimum": 0.07549962800000004,
+            "maximum": 0.07789109100000002,
+            "values": [
+              0.07549962800000004,
+              0.07771700399999999,
+              0.07789109100000002
+            ]
+          },
+          "generation": {
+            "median": 0.3604682069999999,
+            "minimum": 0.3445016669999999,
+            "maximum": 0.42672167599999994,
+            "values": [
+              0.42672167599999994,
+              0.3604682069999999,
+              0.3445016669999999
+            ]
+          },
+          "replay": {
+            "median": 1.8471584999999995,
+            "minimum": 1.8271534560000002,
+            "maximum": 1.895133039999999,
+            "values": [
+              1.895133039999999,
+              1.8471584999999995,
+              1.8271534560000002
+            ]
+          },
+          "materialization": {
+            "median": 0.019170628000000002,
+            "minimum": 0.01716937399999999,
+            "maximum": 0.02451409,
+            "values": [
+              0.02451409,
+              0.019170628000000002,
+              0.01716937399999999
+            ]
+          },
+          "uniqueness": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_calls": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_rows": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 697553273,
+            "minimum": 696980786,
+            "maximum": 698364391,
+            "values": [
+              697553273,
+              698364391,
+              696980786
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 3.388386458,
+            "minimum": 3.363908875,
+            "maximum": 3.430445833,
+            "values": [
+              3.388386458,
+              3.363908875,
+              3.430445833
+            ]
+          },
+          "process_cpu": {
+            "median": 23.806882,
+            "minimum": 23.730301,
+            "maximum": 24.07003,
+            "values": [
+              23.730301,
+              23.806882,
+              24.07003
+            ]
+          },
+          "preparation": {
+            "median": 0.5925503310000003,
+            "minimum": 0.58446467,
+            "maximum": 0.6116369589999996,
+            "values": [
+              0.58446467,
+              0.5925503310000003,
+              0.6116369589999996
+            ]
+          },
+          "fitting": {
+            "median": 16.148416502000003,
+            "minimum": 16.108165743999997,
+            "maximum": 16.693287044000005,
+            "values": [
+              16.108165743999997,
+              16.148416502000003,
+              16.693287044000005
+            ]
+          },
+          "gather": {
+            "median": 0.5250391760000003,
+            "minimum": 0.5167808290000002,
+            "maximum": 0.5466540480000003,
+            "values": [
+              0.5167808290000002,
+              0.5250391760000003,
+              0.5466540480000003
+            ]
+          },
+          "selection": {
+            "median": 0.07764083599999998,
+            "minimum": 0.07756779499999995,
+            "maximum": 0.07827712100000005,
+            "values": [
+              0.07827712100000005,
+              0.07764083599999998,
+              0.07756779499999995
+            ]
+          },
+          "generation": {
+            "median": 0.3597442460000001,
+            "minimum": 0.34900975799999995,
+            "maximum": 0.3884414999999998,
+            "values": [
+              0.34900975799999995,
+              0.3597442460000001,
+              0.3884414999999998
+            ]
+          },
+          "replay": {
+            "median": 0.08519754399999997,
+            "minimum": 0.07798821000000006,
+            "maximum": 0.08710048699999999,
+            "values": [
+              0.08710048699999999,
+              0.08519754399999997,
+              0.07798821000000006
+            ]
+          },
+          "materialization": {
+            "median": 0.06298045800000004,
+            "minimum": 0.05545626299999999,
+            "maximum": 0.06503446100000002,
+            "values": [
+              0.06503446100000002,
+              0.06298045800000004,
+              0.05545626299999999
+            ]
+          },
+          "uniqueness": {
+            "median": 6.016800000000003e-05,
+            "minimum": 5.9167999999999986e-05,
+            "maximum": 6.275200000000004e-05,
+            "values": [
+              6.016800000000003e-05,
+              5.9167999999999986e-05,
+              6.275200000000004e-05
+            ]
+          },
+          "unique_calls": {
+            "median": 177,
+            "minimum": 177,
+            "maximum": 177,
+            "values": [
+              177,
+              177,
+              177
+            ]
+          },
+          "unique_rows": {
+            "median": 19841050,
+            "minimum": 19841050,
+            "maximum": 19841050,
+            "values": [
+              19841050,
+              19841050,
+              19841050
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 693835567,
+            "minimum": 693509375,
+            "maximum": 698013382,
+            "values": [
+              693509375,
+              698013382,
+              693835567
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 5.049984293449327,
+        "process_cpu": 7.137063245680064,
+        "preparation": 74.89375075574512,
+        "fitting": -0.23590826876962456,
+        "gather": 77.04828343239572,
+        "selection": 0.09800686603926856,
+        "generation": 0.20083907150230118,
+        "replay": 95.3876430203472,
+        "materialization": -228.52579477312918,
+        "uniqueness": null,
+        "unique_calls": null,
+        "unique_rows": null,
+        "peak_backing_bytes": 0.5329637382405328
+      }
+    },
+    {
+      "study": "within-build",
+      "input": "photo-large-1049.pam",
+      "mode": "raster",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 3.06104825,
+            "minimum": 3.030361375,
+            "maximum": 3.072951459,
+            "values": [
+              3.06104825,
+              3.072951459,
+              3.030361375
+            ]
+          },
+          "process_cpu": {
+            "median": 24.464311,
+            "minimum": 24.341502,
+            "maximum": 24.479709,
+            "values": [
+              24.341502,
+              24.479709,
+              24.464311
+            ]
+          },
+          "preparation": {
+            "median": 2.8805402510000007,
+            "minimum": 2.8165397929999987,
+            "maximum": 2.9292134979999975,
+            "values": [
+              2.8805402510000007,
+              2.9292134979999975,
+              2.8165397929999987
+            ]
+          },
+          "fitting": {
+            "median": 14.742109290000005,
+            "minimum": 14.670122914999995,
+            "maximum": 14.796132219000002,
+            "values": [
+              14.742109290000005,
+              14.796132219000002,
+              14.670122914999995
+            ]
+          },
+          "gather": {
+            "median": 2.776331615999999,
+            "minimum": 2.728693502000001,
+            "maximum": 2.833988746999998,
+            "values": [
+              2.776331615999999,
+              2.833988746999998,
+              2.728693502000001
+            ]
+          },
+          "selection": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "generation": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "replay": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "uniqueness": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_calls": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_rows": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 670631467,
+            "minimum": 670598934,
+            "maximum": 671128014,
+            "values": [
+              671128014,
+              670598934,
+              670631467
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 2.863862167,
+            "minimum": 2.827990708,
+            "maximum": 2.929656375,
+            "values": [
+              2.863862167,
+              2.827990708,
+              2.929656375
+            ]
+          },
+          "process_cpu": {
+            "median": 23.172532,
+            "minimum": 23.129117,
+            "maximum": 23.393952,
+            "values": [
+              23.393952,
+              23.172532,
+              23.129117
+            ]
+          },
+          "preparation": {
+            "median": 1.5464357879999997,
+            "minimum": 1.5328597019999994,
+            "maximum": 1.598664754,
+            "values": [
+              1.5328597019999994,
+              1.5464357879999997,
+              1.598664754
+            ]
+          },
+          "fitting": {
+            "median": 14.754251959999994,
+            "minimum": 14.677241117,
+            "maximum": 15.030385709000003,
+            "values": [
+              14.754251959999994,
+              14.677241117,
+              15.030385709000003
+            ]
+          },
+          "gather": {
+            "median": 1.4657553760000002,
+            "minimum": 1.447603657,
+            "maximum": 1.5014971320000001,
+            "values": [
+              1.447603657,
+              1.4657553760000002,
+              1.5014971320000001
+            ]
+          },
+          "selection": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "generation": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "replay": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "uniqueness": {
+            "median": 6.416700000000007e-05,
+            "minimum": 6.137700000000003e-05,
+            "maximum": 6.554400000000001e-05,
+            "values": [
+              6.137700000000003e-05,
+              6.554400000000001e-05,
+              6.416700000000007e-05
+            ]
+          },
+          "unique_calls": {
+            "median": 164,
+            "minimum": 164,
+            "maximum": 164,
+            "values": [
+              164,
+              164,
+              164
+            ]
+          },
+          "unique_rows": {
+            "median": 18283891,
+            "minimum": 18283891,
+            "maximum": 18283891,
+            "values": [
+              18283891,
+              18283891,
+              18283891
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 670778256,
+            "minimum": 669869613,
+            "maximum": 671334554,
+            "values": [
+              671334554,
+              670778256,
+              669869613
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 6.441782908845017,
+        "process_cpu": 5.280259067994997,
+        "preparation": 46.31438364858317,
+        "fitting": -0.08236724990382527,
+        "gather": 47.20532059092466,
+        "selection": null,
+        "generation": null,
+        "replay": null,
+        "materialization": null,
+        "uniqueness": null,
+        "unique_calls": null,
+        "unique_rows": null,
+        "peak_backing_bytes": -0.021888176625028954
+      }
+    },
+    {
+      "study": "within-build",
+      "input": "photo-large-1049.pam",
+      "mode": "metal",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 2.974602916,
+            "minimum": 2.940019375,
+            "maximum": 3.032420583,
+            "values": [
+              2.940019375,
+              2.974602916,
+              3.032420583
+            ]
+          },
+          "process_cpu": {
+            "median": 23.731682,
+            "minimum": 23.596885,
+            "maximum": 23.809928,
+            "values": [
+              23.596885,
+              23.731682,
+              23.809928
+            ]
+          },
+          "preparation": {
+            "median": 2.4089454239999983,
+            "minimum": 2.2218778680000004,
+            "maximum": 2.415569794000001,
+            "values": [
+              2.2218778680000004,
+              2.4089454239999983,
+              2.415569794000001
+            ]
+          },
+          "fitting": {
+            "median": 14.655797799999998,
+            "minimum": 14.650285920000002,
+            "maximum": 14.751648789000004,
+            "values": [
+              14.751648789000004,
+              14.655797799999998,
+              14.650285920000002
+            ]
+          },
+          "gather": {
+            "median": 2.337792082,
+            "minimum": 2.15624033,
+            "maximum": 2.346419289,
+            "values": [
+              2.15624033,
+              2.337792082,
+              2.346419289
+            ]
+          },
+          "selection": {
+            "median": 0.07498845499999995,
+            "minimum": 0.07470982699999996,
+            "maximum": 0.07598017099999997,
+            "values": [
+              0.07470982699999996,
+              0.07498845499999995,
+              0.07598017099999997
+            ]
+          },
+          "generation": {
+            "median": 0.37544820399999973,
+            "minimum": 0.36253287400000034,
+            "maximum": 0.4152280929999999,
+            "values": [
+              0.37544820399999973,
+              0.4152280929999999,
+              0.36253287400000034
+            ]
+          },
+          "replay": {
+            "median": 1.8456205530000012,
+            "minimum": 1.704291838000001,
+            "maximum": 1.905734626,
+            "values": [
+              1.704291838000001,
+              1.8456205530000012,
+              1.905734626
+            ]
+          },
+          "materialization": {
+            "median": 0.017244748999999997,
+            "minimum": 0.016233959999999995,
+            "maximum": 0.021826007,
+            "values": [
+              0.016233959999999995,
+              0.021826007,
+              0.017244748999999997
+            ]
+          },
+          "uniqueness": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_calls": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_rows": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 679915180,
+            "minimum": 679915180,
+            "maximum": 679915180,
+            "values": [
+              679915180,
+              679915180,
+              679915180
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 2.760828625,
+            "minimum": 2.7456965,
+            "maximum": 2.777067166,
+            "values": [
+              2.7456965,
+              2.777067166,
+              2.760828625
+            ]
+          },
+          "process_cpu": {
+            "median": 22.280988,
+            "minimum": 21.904619,
+            "maximum": 22.296711,
+            "values": [
+              21.904619,
+              22.296711,
+              22.280988
+            ]
+          },
+          "preparation": {
+            "median": 0.6348530840000005,
+            "minimum": 0.6308365030000003,
+            "maximum": 0.6349089189999996,
+            "values": [
+              0.6348530840000005,
+              0.6308365030000003,
+              0.6349089189999996
+            ]
+          },
+          "fitting": {
+            "median": 14.746505797000003,
+            "minimum": 14.681655914000004,
+            "maximum": 14.777991411000004,
+            "values": [
+              14.746505797000003,
+              14.681655914000004,
+              14.777991411000004
+            ]
+          },
+          "gather": {
+            "median": 0.5678307450000005,
+            "minimum": 0.5588252540000002,
+            "maximum": 0.5692208299999999,
+            "values": [
+              0.5692208299999999,
+              0.5588252540000002,
+              0.5678307450000005
+            ]
+          },
+          "selection": {
+            "median": 0.07434191200000002,
+            "minimum": 0.07234087600000001,
+            "maximum": 0.07545633199999999,
+            "values": [
+              0.07545633199999999,
+              0.07434191200000002,
+              0.07234087600000001
+            ]
+          },
+          "generation": {
+            "median": 0.3706395059999998,
+            "minimum": 0.36627299399999985,
+            "maximum": 0.3758329970000002,
+            "values": [
+              0.3758329970000002,
+              0.36627299399999985,
+              0.3706395059999998
+            ]
+          },
+          "replay": {
+            "median": 0.11621911999999997,
+            "minimum": 0.11539808299999997,
+            "maximum": 0.12248541700000005,
+            "values": [
+              0.11539808299999997,
+              0.11621911999999997,
+              0.12248541700000005
+            ]
+          },
+          "materialization": {
+            "median": 0.057752707000000035,
+            "minimum": 0.056458578000000016,
+            "maximum": 0.05781379299999999,
+            "values": [
+              0.05781379299999999,
+              0.057752707000000035,
+              0.056458578000000016
+            ]
+          },
+          "uniqueness": {
+            "median": 5.6831000000000005e-05,
+            "minimum": 5.3960999999999994e-05,
+            "maximum": 5.816899999999999e-05,
+            "values": [
+              5.6831000000000005e-05,
+              5.816899999999999e-05,
+              5.3960999999999994e-05
+            ]
+          },
+          "unique_calls": {
+            "median": 164,
+            "minimum": 164,
+            "maximum": 164,
+            "values": [
+              164,
+              164,
+              164
+            ]
+          },
+          "unique_rows": {
+            "median": 18283891,
+            "minimum": 18283891,
+            "maximum": 18283891,
+            "values": [
+              18283891,
+              18283891,
+              18283891
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 671111008,
+            "minimum": 670136265,
+            "maximum": 671779456,
+            "values": [
+              670136265,
+              671779456,
+              671111008
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 7.186649681883117,
+        "process_cpu": 6.112900046444237,
+        "preparation": 73.64601631589305,
+        "fitting": -0.6189222738867572,
+        "gather": 75.71081066737908,
+        "selection": 0.8621900531220805,
+        "generation": 1.2807886544051628,
+        "replay": 93.70297866421734,
+        "materialization": -234.90024702592103,
+        "uniqueness": null,
+        "unique_calls": null,
+        "unique_rows": null,
+        "peak_backing_bytes": 1.2948926952917827
+      }
+    },
+    {
+      "study": "timed",
+      "input": "photo-large-1029.pam",
+      "mode": "raster",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 4.217170958,
+            "minimum": 4.208519958,
+            "maximum": 4.255704208,
+            "values": [
+              4.255704208,
+              4.217170958,
+              4.208519958
+            ]
+          },
+          "process_cpu": {
+            "median": 36.936838,
+            "minimum": 36.782951,
+            "maximum": 37.012924,
+            "values": [
+              36.782951,
+              37.012924,
+              36.936838
+            ]
+          },
+          "preparation": {
+            "median": 3.502196037,
+            "minimum": 3.48147903,
+            "maximum": 3.619037215000001,
+            "values": [
+              3.619037215000001,
+              3.48147903,
+              3.502196037
+            ]
+          },
+          "fitting": {
+            "median": 25.227169382,
+            "minimum": 25.09363925900001,
+            "maximum": 25.277097334999986,
+            "values": [
+              25.277097334999986,
+              25.09363925900001,
+              25.227169382
+            ]
+          },
+          "gather": {
+            "median": 3.418333619999999,
+            "minimum": 3.3857320310000034,
+            "maximum": 3.489560076000002,
+            "values": [
+              3.489560076000002,
+              3.3857320310000034,
+              3.418333619999999
+            ]
+          },
+          "selection": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "generation": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "replay": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "uniqueness": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_calls": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_rows": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 778001351,
+            "minimum": 777628899,
+            "maximum": 782310602,
+            "values": [
+              777628899,
+              778001351,
+              782310602
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 4.096330875,
+            "minimum": 4.042642542,
+            "maximum": 4.1134895,
+            "values": [
+              4.1134895,
+              4.096330875,
+              4.042642542
+            ]
+          },
+          "process_cpu": {
+            "median": 35.500325,
+            "minimum": 35.498837,
+            "maximum": 35.559966,
+            "values": [
+              35.498837,
+              35.500325,
+              35.559966
+            ]
+          },
+          "preparation": {
+            "median": 1.8214041679999993,
+            "minimum": 1.8171796350000011,
+            "maximum": 1.822651261,
+            "values": [
+              1.8214041679999993,
+              1.822651261,
+              1.8171796350000011
+            ]
+          },
+          "fitting": {
+            "median": 25.284540548000003,
+            "minimum": 25.251307375000003,
+            "maximum": 25.53793586999999,
+            "values": [
+              25.53793586999999,
+              25.284540548000003,
+              25.251307375000003
+            ]
+          },
+          "gather": {
+            "median": 1.7433763380000005,
+            "minimum": 1.718356964999999,
+            "maximum": 1.7482943299999998,
+            "values": [
+              1.7482943299999998,
+              1.7433763380000005,
+              1.718356964999999
+            ]
+          },
+          "selection": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "generation": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "replay": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "uniqueness": {
+            "median": 6.513000000000001e-05,
+            "minimum": 6.466300000000005e-05,
+            "maximum": 6.620400000000005e-05,
+            "values": [
+              6.513000000000001e-05,
+              6.466300000000005e-05,
+              6.620400000000005e-05
+            ]
+          },
+          "unique_calls": {
+            "median": 192,
+            "minimum": 192,
+            "maximum": 192,
+            "values": [
+              192,
+              192,
+              192
+            ]
+          },
+          "unique_rows": {
+            "median": 23460354,
+            "minimum": 23460354,
+            "maximum": 23460354,
+            "values": [
+              23460354,
+              23460354,
+              23460354
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 780439910,
+            "minimum": 777421961,
+            "maximum": 781395580,
+            "values": [
+              781395580,
+              777421961,
+              780439910
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 2.8654300288862067,
+        "process_cpu": 3.889106587846003,
+        "preparation": 47.99251244769771,
+        "fitting": -0.22741816622890987,
+        "gather": 48.99923378455959,
+        "selection": null,
+        "generation": null,
+        "replay": null,
+        "materialization": null,
+        "uniqueness": null,
+        "unique_calls": null,
+        "unique_rows": null,
+        "peak_backing_bytes": -0.31343891586634864
+      }
+    },
+    {
+      "study": "timed",
+      "input": "photo-large-1029.pam",
+      "mode": "metal",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 4.14434025,
+            "minimum": 4.08383725,
+            "maximum": 4.295939416,
+            "values": [
+              4.295939416,
+              4.14434025,
+              4.08383725
+            ]
+          },
+          "process_cpu": {
+            "median": 36.087939,
+            "minimum": 35.611161,
+            "maximum": 36.260836,
+            "values": [
+              35.611161,
+              36.087939,
+              36.260836
+            ]
+          },
+          "preparation": {
+            "median": 2.7722012510000007,
+            "minimum": 2.7233028330000004,
+            "maximum": 3.1318699610000005,
+            "values": [
+              3.1318699610000005,
+              2.7722012510000007,
+              2.7233028330000004
+            ]
+          },
+          "fitting": {
+            "median": 25.404319503,
+            "minimum": 25.361289582,
+            "maximum": 26.125782374,
+            "values": [
+              26.125782374,
+              25.404319503,
+              25.361289582
+            ]
+          },
+          "gather": {
+            "median": 2.6965824159999996,
+            "minimum": 2.6409125830000004,
+            "maximum": 3.050815081000001,
+            "values": [
+              3.050815081000001,
+              2.6965824159999996,
+              2.6409125830000004
+            ]
+          },
+          "selection": {
+            "median": 0.08774686899999999,
+            "minimum": 0.08770978800000007,
+            "maximum": 0.08854249599999996,
+            "values": [
+              0.08774686899999999,
+              0.08854249599999996,
+              0.08770978800000007
+            ]
+          },
+          "generation": {
+            "median": 0.38733909300000013,
+            "minimum": 0.3511070399999998,
+            "maximum": 0.5062619949999999,
+            "values": [
+              0.5062619949999999,
+              0.38733909300000013,
+              0.3511070399999998
+            ]
+          },
+          "replay": {
+            "median": 2.218536335999999,
+            "minimum": 2.199953616,
+            "maximum": 2.4543689189999998,
+            "values": [
+              2.4543689189999998,
+              2.218536335999999,
+              2.199953616
+            ]
+          },
+          "materialization": {
+            "median": 0.021192457,
+            "minimum": 0.020126379000000017,
+            "maximum": 0.023207575999999994,
+            "values": [
+              0.021192457,
+              0.023207575999999994,
+              0.020126379000000017
+            ]
+          },
+          "uniqueness": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_calls": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_rows": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 780463376,
+            "minimum": 778237338,
+            "maximum": 780797106,
+            "values": [
+              778237338,
+              780797106,
+              780463376
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 3.909665417,
+            "minimum": 3.866363916,
+            "maximum": 4.093770583,
+            "values": [
+              4.093770583,
+              3.866363916,
+              3.909665417
+            ]
+          },
+          "process_cpu": {
+            "median": 33.976232,
+            "minimum": 33.506272,
+            "maximum": 34.06152,
+            "values": [
+              33.506272,
+              33.976232,
+              34.06152
+            ]
+          },
+          "preparation": {
+            "median": 0.6079299109999999,
+            "minimum": 0.5909369169999996,
+            "maximum": 0.7561263410000001,
+            "values": [
+              0.7561263410000001,
+              0.5909369169999996,
+              0.6079299109999999
+            ]
+          },
+          "fitting": {
+            "median": 25.262014254,
+            "minimum": 25.206823712,
+            "maximum": 25.943384679000005,
+            "values": [
+              25.943384679000005,
+              25.206823712,
+              25.262014254
+            ]
+          },
+          "gather": {
+            "median": 0.5347914159999997,
+            "minimum": 0.5172302490000001,
+            "maximum": 0.6789474599999998,
+            "values": [
+              0.6789474599999998,
+              0.5172302490000001,
+              0.5347914159999997
+            ]
+          },
+          "selection": {
+            "median": 0.08809220999999995,
+            "minimum": 0.08752154699999999,
+            "maximum": 0.08997141899999996,
+            "values": [
+              0.08809220999999995,
+              0.08997141899999996,
+              0.08752154699999999
+            ]
+          },
+          "generation": {
+            "median": 0.36524125,
+            "minimum": 0.3575142070000002,
+            "maximum": 0.4926209569999999,
+            "values": [
+              0.4926209569999999,
+              0.3575142070000002,
+              0.36524125
+            ]
+          },
+          "replay": {
+            "median": 0.080325911,
+            "minimum": 0.06817599099999996,
+            "maximum": 0.09542978900000001,
+            "values": [
+              0.09542978900000001,
+              0.06817599099999996,
+              0.080325911
+            ]
+          },
+          "materialization": {
+            "median": 0.07900713300000002,
+            "minimum": 0.066721369,
+            "maximum": 0.09390125299999995,
+            "values": [
+              0.09390125299999995,
+              0.066721369,
+              0.07900713300000002
+            ]
+          },
+          "uniqueness": {
+            "median": 5.8542e-05,
+            "minimum": 5.728899999999995e-05,
+            "maximum": 5.9625e-05,
+            "values": [
+              5.8542e-05,
+              5.728899999999995e-05,
+              5.9625e-05
+            ]
+          },
+          "unique_calls": {
+            "median": 192,
+            "minimum": 192,
+            "maximum": 192,
+            "values": [
+              192,
+              192,
+              192
+            ]
+          },
+          "unique_rows": {
+            "median": 23460354,
+            "minimum": 23460354,
+            "maximum": 23460354,
+            "values": [
+              23460354,
+              23460354,
+              23460354
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 779112808,
+            "minimum": 779065919,
+            "maximum": 781268653,
+            "values": [
+              779112808,
+              779065919,
+              781268653
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 5.6625377947672195,
+        "process_cpu": 5.8515588823179865,
+        "preparation": 78.07049864144226,
+        "fitting": 0.5601616252039143,
+        "gather": 80.16780748747567,
+        "selection": -0.39356503991037073,
+        "generation": 5.705038143413043,
+        "replay": 96.37932858269849,
+        "materialization": -272.8078013795192,
+        "uniqueness": null,
+        "unique_calls": null,
+        "unique_rows": null,
+        "peak_backing_bytes": 0.17304694128273956
+      }
+    },
+    {
+      "study": "timed",
+      "input": "photo-large-1039.pam",
+      "mode": "raster",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 3.635885834,
+            "minimum": 3.613879916,
+            "maximum": 3.653199875,
+            "values": [
+              3.635885834,
+              3.613879916,
+              3.653199875
+            ]
+          },
+          "process_cpu": {
+            "median": 26.393158,
+            "minimum": 26.286184,
+            "maximum": 26.412578,
+            "values": [
+              26.286184,
+              26.412578,
+              26.393158
+            ]
+          },
+          "preparation": {
+            "median": 2.89872496,
+            "minimum": 2.8671645770000005,
+            "maximum": 2.911096243999999,
+            "values": [
+              2.8671645770000005,
+              2.89872496,
+              2.911096243999999
+            ]
+          },
+          "fitting": {
+            "median": 15.969062629000002,
+            "minimum": 15.891976128000001,
+            "maximum": 16.035750211999996,
+            "values": [
+              15.969062629000002,
+              15.891976128000001,
+              16.035750211999996
+            ]
+          },
+          "gather": {
+            "median": 2.8317646229999984,
+            "minimum": 2.790976582999998,
+            "maximum": 2.840540538000001,
+            "values": [
+              2.790976582999998,
+              2.8317646229999984,
+              2.840540538000001
+            ]
+          },
+          "selection": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "generation": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "replay": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "uniqueness": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_calls": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_rows": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 696239390,
+            "minimum": 693399820,
+            "maximum": 699332512,
+            "values": [
+              693399820,
+              699332512,
+              696239390
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 3.521925209,
+            "minimum": 3.5068395,
+            "maximum": 3.538355625,
+            "values": [
+              3.538355625,
+              3.521925209,
+              3.5068395
+            ]
+          },
+          "process_cpu": {
+            "median": 25.093665,
+            "minimum": 24.450764,
+            "maximum": 25.187163,
+            "values": [
+              24.450764,
+              25.093665,
+              25.187163
+            ]
+          },
+          "preparation": {
+            "median": 1.5904095009999997,
+            "minimum": 1.5814017989999996,
+            "maximum": 1.6942662089999991,
+            "values": [
+              1.6942662089999991,
+              1.5904095009999997,
+              1.5814017989999996
+            ]
+          },
+          "fitting": {
+            "median": 16.088397798,
+            "minimum": 16.069805999,
+            "maximum": 16.109247372999995,
+            "values": [
+              16.109247372999995,
+              16.088397798,
+              16.069805999
+            ]
+          },
+          "gather": {
+            "median": 1.5137649209999995,
+            "minimum": 1.490699087,
+            "maximum": 1.5509407180000008,
+            "values": [
+              1.5509407180000008,
+              1.5137649209999995,
+              1.490699087
+            ]
+          },
+          "selection": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "generation": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "replay": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "uniqueness": {
+            "median": 6.092799999999999e-05,
+            "minimum": 5.916299999999997e-05,
+            "maximum": 6.162699999999998e-05,
+            "values": [
+              6.162699999999998e-05,
+              5.916299999999997e-05,
+              6.092799999999999e-05
+            ]
+          },
+          "unique_calls": {
+            "median": 177,
+            "minimum": 177,
+            "maximum": 177,
+            "values": [
+              177,
+              177,
+              177
+            ]
+          },
+          "unique_rows": {
+            "median": 19841050,
+            "minimum": 19841050,
+            "maximum": 19841050,
+            "values": [
+              19841050,
+              19841050,
+              19841050
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 696595565,
+            "minimum": 695617783,
+            "maximum": 697850089,
+            "values": [
+              696595565,
+              697850089,
+              695617783
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 3.1343290246995226,
+        "process_cpu": 4.923598002179197,
+        "preparation": 45.13417026636429,
+        "fitting": -0.747289755024716,
+        "gather": 46.54340587826461,
+        "selection": null,
+        "generation": null,
+        "replay": null,
+        "materialization": null,
+        "uniqueness": null,
+        "unique_calls": null,
+        "unique_rows": null,
+        "peak_backing_bytes": -0.05115697346569359
+      }
+    },
+    {
+      "study": "timed",
+      "input": "photo-large-1039.pam",
+      "mode": "metal",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 3.575410458,
+            "minimum": 3.505604792,
+            "maximum": 3.602681708,
+            "values": [
+              3.602681708,
+              3.575410458,
+              3.505604792
+            ]
+          },
+          "process_cpu": {
+            "median": 25.405684,
+            "minimum": 24.953439,
+            "maximum": 25.570592,
+            "values": [
+              24.953439,
+              25.570592,
+              25.405684
+            ]
+          },
+          "preparation": {
+            "median": 2.366993878,
+            "minimum": 2.345837578999999,
+            "maximum": 2.4179392090000005,
+            "values": [
+              2.4179392090000005,
+              2.366993878,
+              2.345837578999999
+            ]
+          },
+          "fitting": {
+            "median": 16.073640249,
+            "minimum": 15.987862788999994,
+            "maximum": 16.158736205999997,
+            "values": [
+              16.158736205999997,
+              16.073640249,
+              15.987862788999994
+            ]
+          },
+          "gather": {
+            "median": 2.2942132040000005,
+            "minimum": 2.2777374969999995,
+            "maximum": 2.3520130879999996,
+            "values": [
+              2.3520130879999996,
+              2.2942132040000005,
+              2.2777374969999995
+            ]
+          },
+          "selection": {
+            "median": 0.07911204299999999,
+            "minimum": 0.07719832400000001,
+            "maximum": 0.07937045699999999,
+            "values": [
+              0.07719832400000001,
+              0.07937045699999999,
+              0.07911204299999999
+            ]
+          },
+          "generation": {
+            "median": 0.36332424399999996,
+            "minimum": 0.35865333899999996,
+            "maximum": 0.40578126300000006,
+            "values": [
+              0.40578126300000006,
+              0.36332424399999996,
+              0.35865333899999996
+            ]
+          },
+          "replay": {
+            "median": 1.8495376169999995,
+            "minimum": 1.8380820420000008,
+            "maximum": 1.8673204150000005,
+            "values": [
+              1.8673204150000005,
+              1.8495376169999995,
+              1.8380820420000008
+            ]
+          },
+          "materialization": {
+            "median": 0.020080704999999994,
+            "minimum": 0.019691083999999987,
+            "maximum": 0.020534580999999996,
+            "values": [
+              0.020080704999999994,
+              0.020534580999999996,
+              0.019691083999999987
+            ]
+          },
+          "uniqueness": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_calls": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_rows": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 699498299,
+            "minimum": 696022185,
+            "maximum": 699533384,
+            "values": [
+              699533384,
+              699498299,
+              696022185
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 3.358022583,
+            "minimum": 3.347255833,
+            "maximum": 3.421943375,
+            "values": [
+              3.421943375,
+              3.347255833,
+              3.358022583
+            ]
+          },
+          "process_cpu": {
+            "median": 23.742544,
+            "minimum": 23.41228,
+            "maximum": 23.838112,
+            "values": [
+              23.41228,
+              23.838112,
+              23.742544
+            ]
+          },
+          "preparation": {
+            "median": 0.6096165419999999,
+            "minimum": 0.5761097509999997,
+            "maximum": 0.636690497,
+            "values": [
+              0.636690497,
+              0.6096165419999999,
+              0.5761097509999997
+            ]
+          },
+          "fitting": {
+            "median": 16.162273322000004,
+            "minimum": 16.057063584999995,
+            "maximum": 16.519912162999997,
+            "values": [
+              16.519912162999997,
+              16.162273322000004,
+              16.057063584999995
+            ]
+          },
+          "gather": {
+            "median": 0.546191713,
+            "minimum": 0.5117140050000001,
+            "maximum": 0.5698544569999996,
+            "values": [
+              0.5698544569999996,
+              0.546191713,
+              0.5117140050000001
+            ]
+          },
+          "selection": {
+            "median": 0.07849324799999995,
+            "minimum": 0.077546047,
+            "maximum": 0.07892536799999998,
+            "values": [
+              0.07849324799999995,
+              0.07892536799999998,
+              0.077546047
+            ]
+          },
+          "generation": {
+            "median": 0.38339274599999995,
+            "minimum": 0.35136804,
+            "maximum": 0.4012219119999998,
+            "values": [
+              0.4012219119999998,
+              0.38339274599999995,
+              0.35136804
+            ]
+          },
+          "replay": {
+            "median": 0.08244474799999994,
+            "minimum": 0.08126108600000004,
+            "maximum": 0.088323619,
+            "values": [
+              0.088323619,
+              0.08244474799999994,
+              0.08126108600000004
+            ]
+          },
+          "materialization": {
+            "median": 0.06041429300000002,
+            "minimum": 0.05953191900000001,
+            "maximum": 0.06624429699999997,
+            "values": [
+              0.06624429699999997,
+              0.06041429300000002,
+              0.05953191900000001
+            ]
+          },
+          "uniqueness": {
+            "median": 5.7031e-05,
+            "minimum": 5.558600000000001e-05,
+            "maximum": 5.858099999999999e-05,
+            "values": [
+              5.7031e-05,
+              5.558600000000001e-05,
+              5.858099999999999e-05
+            ]
+          },
+          "unique_calls": {
+            "median": 177,
+            "minimum": 177,
+            "maximum": 177,
+            "values": [
+              177,
+              177,
+              177
+            ]
+          },
+          "unique_rows": {
+            "median": 19841050,
+            "minimum": 19841050,
+            "maximum": 19841050,
+            "values": [
+              19841050,
+              19841050,
+              19841050
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 693957863,
+            "minimum": 692885818,
+            "maximum": 698991254,
+            "values": [
+              693957863,
+              692885818,
+              698991254
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 6.080081645272184,
+        "process_cpu": 6.546330340879636,
+        "preparation": 74.24511539019704,
+        "fitting": -0.5514187926752845,
+        "gather": 76.19263492827496,
+        "selection": 0.7821754773796541,
+        "generation": -5.52357909812371,
+        "replay": 95.54241302030248,
+        "materialization": -200.8574300553693,
+        "uniqueness": null,
+        "unique_calls": null,
+        "unique_rows": null,
+        "peak_backing_bytes": 0.7920585379436407
+      }
+    },
+    {
+      "study": "timed",
+      "input": "photo-large-1049.pam",
+      "mode": "raster",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 3.01418825,
+            "minimum": 2.996446125,
+            "maximum": 3.09050125,
+            "values": [
+              3.09050125,
+              2.996446125,
+              3.01418825
+            ]
+          },
+          "process_cpu": {
+            "median": 24.266539,
+            "minimum": 24.242056,
+            "maximum": 24.351939,
+            "values": [
+              24.351939,
+              24.266539,
+              24.242056
+            ]
+          },
+          "preparation": {
+            "median": 2.859579826000001,
+            "minimum": 2.8117550419999975,
+            "maximum": 2.9643292090000015,
+            "values": [
+              2.9643292090000015,
+              2.859579826000001,
+              2.8117550419999975
+            ]
+          },
+          "fitting": {
+            "median": 14.503762711000002,
+            "minimum": 14.465075209999998,
+            "maximum": 14.58545670400001,
+            "values": [
+              14.465075209999998,
+              14.58545670400001,
+              14.503762711000002
+            ]
+          },
+          "gather": {
+            "median": 2.7672297129999994,
+            "minimum": 2.7277933720000003,
+            "maximum": 2.8755465049999995,
+            "values": [
+              2.8755465049999995,
+              2.7672297129999994,
+              2.7277933720000003
+            ]
+          },
+          "selection": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "generation": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "replay": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "uniqueness": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_calls": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_rows": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 670518401,
+            "minimum": 669985525,
+            "maximum": 671473760,
+            "values": [
+              669985525,
+              671473760,
+              670518401
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 2.886568084,
+            "minimum": 2.873812542,
+            "maximum": 2.94263625,
+            "values": [
+              2.886568084,
+              2.873812542,
+              2.94263625
+            ]
+          },
+          "process_cpu": {
+            "median": 23.14423,
+            "minimum": 23.094109,
+            "maximum": 23.339804,
+            "values": [
+              23.094109,
+              23.14423,
+              23.339804
+            ]
+          },
+          "preparation": {
+            "median": 1.561940169000001,
+            "minimum": 1.5582882899999997,
+            "maximum": 1.6041692450000007,
+            "values": [
+              1.6041692450000007,
+              1.5582882899999997,
+              1.561940169000001
+            ]
+          },
+          "fitting": {
+            "median": 14.706242632000004,
+            "minimum": 14.690790246999997,
+            "maximum": 14.851599875999987,
+            "values": [
+              14.706242632000004,
+              14.690790246999997,
+              14.851599875999987
+            ]
+          },
+          "gather": {
+            "median": 1.4770571230000002,
+            "minimum": 1.4724183660000005,
+            "maximum": 1.4971997490000002,
+            "values": [
+              1.4971997490000002,
+              1.4770571230000002,
+              1.4724183660000005
+            ]
+          },
+          "selection": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "generation": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "replay": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "materialization": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "uniqueness": {
+            "median": 6.3796e-05,
+            "minimum": 6.183999999999998e-05,
+            "maximum": 6.442299999999999e-05,
+            "values": [
+              6.183999999999998e-05,
+              6.3796e-05,
+              6.442299999999999e-05
+            ]
+          },
+          "unique_calls": {
+            "median": 164,
+            "minimum": 164,
+            "maximum": 164,
+            "values": [
+              164,
+              164,
+              164
+            ]
+          },
+          "unique_rows": {
+            "median": 18283891,
+            "minimum": 18283891,
+            "maximum": 18283891,
+            "values": [
+              18283891,
+              18283891,
+              18283891
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 671773249,
+            "minimum": 670801429,
+            "maximum": 672791682,
+            "values": [
+              671773249,
+              670801429,
+              672791682
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 4.233981271740417,
+        "process_cpu": 4.624924056949375,
+        "preparation": 45.37868274218268,
+        "fitting": -1.3960509768022877,
+        "gather": 46.62325588435886,
+        "selection": null,
+        "generation": null,
+        "replay": null,
+        "materialization": null,
+        "uniqueness": null,
+        "unique_calls": null,
+        "unique_rows": null,
+        "peak_backing_bytes": -0.18714594530568895
+      }
+    },
+    {
+      "study": "timed",
+      "input": "photo-large-1049.pam",
+      "mode": "metal",
+      "performance_evidence": true,
+      "variants": {
+        "baseline": {
+          "wall": {
+            "median": 2.961541208,
+            "minimum": 2.947970125,
+            "maximum": 3.024386666,
+            "values": [
+              3.024386666,
+              2.947970125,
+              2.961541208
+            ]
+          },
+          "process_cpu": {
+            "median": 23.564501,
+            "minimum": 23.183997,
+            "maximum": 23.669187,
+            "values": [
+              23.564501,
+              23.669187,
+              23.183997
+            ]
+          },
+          "preparation": {
+            "median": 2.2625333790000006,
+            "minimum": 2.2404861270000005,
+            "maximum": 2.485123995000001,
+            "values": [
+              2.485123995000001,
+              2.2404861270000005,
+              2.2625333790000006
+            ]
+          },
+          "fitting": {
+            "median": 14.627314287999996,
+            "minimum": 14.499285889000003,
+            "maximum": 14.675365869000006,
+            "values": [
+              14.499285889000003,
+              14.627314287999996,
+              14.675365869000006
+            ]
+          },
+          "gather": {
+            "median": 2.1905228709999993,
+            "minimum": 2.172272997,
+            "maximum": 2.414086746999999,
+            "values": [
+              2.414086746999999,
+              2.172272997,
+              2.1905228709999993
+            ]
+          },
+          "selection": {
+            "median": 0.074337589,
+            "minimum": 0.07415492200000005,
+            "maximum": 0.07455345199999999,
+            "values": [
+              0.07415492200000005,
+              0.07455345199999999,
+              0.074337589
+            ]
+          },
+          "generation": {
+            "median": 0.3756114179999999,
+            "minimum": 0.34576233599999984,
+            "maximum": 0.5638100369999999,
+            "values": [
+              0.5638100369999999,
+              0.34576233599999984,
+              0.3756114179999999
+            ]
+          },
+          "replay": {
+            "median": 1.750336957,
+            "minimum": 1.7388079639999998,
+            "maximum": 1.774252876000001,
+            "values": [
+              1.774252876000001,
+              1.750336957,
+              1.7388079639999998
+            ]
+          },
+          "materialization": {
+            "median": 0.017707882999999997,
+            "minimum": 0.014902709,
+            "maximum": 0.019335215000000017,
+            "values": [
+              0.019335215000000017,
+              0.014902709,
+              0.017707882999999997
+            ]
+          },
+          "uniqueness": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_calls": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "unique_rows": {
+            "median": 0,
+            "minimum": 0,
+            "maximum": 0,
+            "values": [
+              0,
+              0,
+              0
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 679907980,
+            "minimum": 679907980,
+            "maximum": 679907980,
+            "values": [
+              679907980,
+              679907980,
+              679907980
+            ]
+          }
+        },
+        "candidate": {
+          "wall": {
+            "median": 2.762057708,
+            "minimum": 2.756183959,
+            "maximum": 2.799462041,
+            "values": [
+              2.756183959,
+              2.799462041,
+              2.762057708
+            ]
+          },
+          "process_cpu": {
+            "median": 22.058293,
+            "minimum": 22.008714,
+            "maximum": 22.101884,
+            "values": [
+              22.101884,
+              22.058293,
+              22.008714
+            ]
+          },
+          "preparation": {
+            "median": 0.6369708780000004,
+            "minimum": 0.6334988349999999,
+            "maximum": 0.6734659209999991,
+            "values": [
+              0.6369708780000004,
+              0.6734659209999991,
+              0.6334988349999999
+            ]
+          },
+          "fitting": {
+            "median": 14.71670886900001,
+            "minimum": 14.651148206999995,
+            "maximum": 14.721797994999996,
+            "values": [
+              14.651148206999995,
+              14.721797994999996,
+              14.71670886900001
+            ]
+          },
+          "gather": {
+            "median": 0.5681929080000001,
+            "minimum": 0.5677885809999998,
+            "maximum": 0.6071217900000003,
+            "values": [
+              0.5681929080000001,
+              0.6071217900000003,
+              0.5677885809999998
+            ]
+          },
+          "selection": {
+            "median": 0.07478559100000003,
+            "minimum": 0.07322669700000004,
+            "maximum": 0.07596890800000002,
+            "values": [
+              0.07322669700000004,
+              0.07478559100000003,
+              0.07596890800000002
+            ]
+          },
+          "generation": {
+            "median": 0.37351796000000004,
+            "minimum": 0.3689940519999999,
+            "maximum": 0.409343632,
+            "values": [
+              0.3689940519999999,
+              0.409343632,
+              0.37351796000000004
+            ]
+          },
+          "replay": {
+            "median": 0.12143291300000003,
+            "minimum": 0.11673816299999992,
+            "maximum": 0.1239516260000001,
+            "values": [
+              0.1239516260000001,
+              0.12143291300000003,
+              0.11673816299999992
+            ]
+          },
+          "materialization": {
+            "median": 0.061730795,
+            "minimum": 0.05865179199999999,
+            "maximum": 0.06219387099999999,
+            "values": [
+              0.061730795,
+              0.06219387099999999,
+              0.05865179199999999
+            ]
+          },
+          "uniqueness": {
+            "median": 5.8835e-05,
+            "minimum": 5.7706e-05,
+            "maximum": 5.959299999999997e-05,
+            "values": [
+              5.959299999999997e-05,
+              5.7706e-05,
+              5.8835e-05
+            ]
+          },
+          "unique_calls": {
+            "median": 164,
+            "minimum": 164,
+            "maximum": 164,
+            "values": [
+              164,
+              164,
+              164
+            ]
+          },
+          "unique_rows": {
+            "median": 18283891,
+            "minimum": 18283891,
+            "maximum": 18283891,
+            "values": [
+              18283891,
+              18283891,
+              18283891
+            ]
+          },
+          "peak_backing_bytes": {
+            "median": 673562762,
+            "minimum": 670211798,
+            "maximum": 675630889,
+            "values": [
+              673562762,
+              670211798,
+              675630889
+            ]
+          }
+        }
+      },
+      "reduction_percent": {
+        "wall": 6.735800246882806,
+        "process_cpu": 6.391851879231392,
+        "preparation": 71.8470063729389,
+        "fitting": -0.6111482890153841,
+        "gather": 74.0613113187623,
+        "selection": -0.6026587706523978,
+        "generation": 0.5573467417861799,
+        "replay": 93.06231222997596,
+        "materialization": -248.60629585140134,
+        "uniqueness": null,
+        "unique_calls": null,
+        "unique_rows": null,
+        "peak_backing_bytes": 0.9332465843392534
+      }
+    }
+  ],
+  "output_invariants": [
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+      "predictors": "best",
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+      "bytes": 10507251,
+      "width": 4000,
+      "height": 3000,
+      "channels": 3,
+      "bits": 8,
+      "work": {
+        "local_trees": true,
+        "selection_calls": 192,
+        "learning_calls": 193,
+        "fits": 192,
+        "empty_learning_calls": 1,
+        "scanned_pixels": 36000000,
+        "selected_samples": 23460354,
+        "distinct_samples": 23460354,
+        "tree_nodes": 240143
+      }
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1039.pam",
+      "predictors": "best",
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a",
+      "bytes": 7138537,
+      "width": 4000,
+      "height": 3000,
+      "channels": 3,
+      "bits": 8,
+      "work": {
+        "local_trees": true,
+        "selection_calls": 192,
+        "learning_calls": 193,
+        "fits": 192,
+        "empty_learning_calls": 1,
+        "scanned_pixels": 31344224,
+        "selected_samples": 20432794,
+        "distinct_samples": 20432447,
+        "tree_nodes": 120547
+      }
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1049.pam",
+      "predictors": "best",
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c",
+      "bytes": 7015756,
+      "width": 4000,
+      "height": 3000,
+      "channels": 3,
+      "bits": 8,
+      "work": {
+        "local_trees": true,
+        "selection_calls": 192,
+        "learning_calls": 193,
+        "fits": 192,
+        "empty_learning_calls": 1,
+        "scanned_pixels": 29871324,
+        "selected_samples": 19470891,
+        "distinct_samples": 19470845,
+        "tree_nodes": 105821
+      }
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/photo-macan.pam",
+      "predictors": "best",
+      "output_sha256": "f481f6499e30c1ea81874a1fd3e42cb3d42ecc3116d09d90516141a844290f73",
+      "bytes": 252179,
+      "width": 500,
+      "height": 500,
+      "channels": 3,
+      "bits": 8,
+      "work": {
+        "local_trees": false,
+        "selection_calls": 5,
+        "learning_calls": 1,
+        "fits": 1,
+        "empty_learning_calls": 0,
+        "scanned_pixels": 750000,
+        "selected_samples": 488592,
+        "distinct_samples": 488592,
+        "tree_nodes": 879
+      }
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/alpha-ria.pam",
+      "predictors": "best",
+      "output_sha256": "2a34abb6966cc6631a621473d09bd628b41509ba74c51e34e9ea5f42c07c4908",
+      "bytes": 228118,
+      "width": 500,
+      "height": 500,
+      "channels": 4,
+      "bits": 8,
+      "work": {
+        "local_trees": false,
+        "selection_calls": 5,
+        "learning_calls": 1,
+        "fits": 1,
+        "empty_learning_calls": 0,
+        "scanned_pixels": 1000000,
+        "selected_samples": 651456,
+        "distinct_samples": 651456,
+        "tree_nodes": 821
+      }
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/palette-358.pam",
+      "predictors": "best",
+      "output_sha256": "21594dc56ecb681fc085998da5bce09fe929091d3181b8f09cdc1812c3157a27",
+      "bytes": 1241,
+      "width": 72,
+      "height": 72,
+      "channels": 4,
+      "bits": 8,
+      "work": {
+        "local_trees": false,
+        "selection_calls": 1,
+        "learning_calls": 1,
+        "fits": 1,
+        "empty_learning_calls": 0,
+        "scanned_pixels": 20854,
+        "selected_samples": 13702,
+        "distinct_samples": 13701,
+        "tree_nodes": 55
+      }
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/alpha16-ramp.pam",
+      "predictors": "best",
+      "output_sha256": "aa070fa2eed327d0af1bc47ff114314dfb3ae19eaf4704caae51a8d84a59fc81",
+      "bytes": 47547,
+      "width": 513,
+      "height": 257,
+      "channels": 4,
+      "bits": 16,
+      "work": {
+        "local_trees": false,
+        "selection_calls": 7,
+        "learning_calls": 1,
+        "fits": 1,
+        "empty_learning_calls": 0,
+        "scanned_pixels": 527364,
+        "selected_samples": 344788,
+        "distinct_samples": 344448,
+        "tree_nodes": 477
+      }
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-inputs/alpha16-local.pam",
+      "predictors": "best",
+      "output_sha256": "2f358569a8f68155121cf26bed66595d216b862af53a50c9eaf11172c7edab98",
+      "bytes": 469451,
+      "width": 769,
+      "height": 513,
+      "channels": 4,
+      "bits": 16,
+      "work": {
+        "local_trees": true,
+        "selection_calls": 12,
+        "learning_calls": 13,
+        "fits": 12,
+        "empty_learning_calls": 1,
+        "scanned_pixels": 1578012,
+        "selected_samples": 1030284,
+        "distinct_samples": 1030283,
+        "tree_nodes": 7253
+      }
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-inputs/alpha16-local.pam",
+      "predictors": "all",
+      "output_sha256": "b062ec5e3a56cb672fe96540cdd1cf658801d90b6dde83475c9b4e5762c69b07",
+      "bytes": 468088,
+      "width": 769,
+      "height": 513,
+      "channels": 4,
+      "bits": 16,
+      "work": {
+        "local_trees": true,
+        "selection_calls": 12,
+        "learning_calls": 13,
+        "fits": 12,
+        "empty_learning_calls": 1,
+        "scanned_pixels": 1578012,
+        "selected_samples": 1030284,
+        "distinct_samples": 1030283,
+        "tree_nodes": 8441
+      }
+    }
+  ],
+  "aggregate_timing": [
+    {
+      "study": "within-build",
+      "mode": "raster",
+      "method": "Sum of the three per-input medians",
+      "summed_medians": {
+        "baseline": {
+          "wall": 10.875994916,
+          "process_cpu": 87.725398,
+          "preparation": 9.25035553,
+          "replay": 0
+        },
+        "candidate": {
+          "wall": 10.413700709,
+          "process_cpu": 83.754227,
+          "preparation": 4.886001791999999,
+          "replay": 0
+        }
+      },
+      "reduction_percent": {
+        "wall": 4.250592341854675,
+        "process_cpu": 4.52682015760133,
+        "preparation": 47.18038916283687,
+        "replay": null
+      }
+    },
+    {
+      "study": "within-build",
+      "mode": "metal",
+      "method": "Sum of the three per-input medians",
+      "summed_medians": {
+        "baseline": {
+          "wall": 10.660261374000001,
+          "process_cpu": 85.588741,
+          "preparation": 7.501833174999998,
+          "replay": 5.874155604
+        },
+        "candidate": {
+          "wall": 10.06738075,
+          "process_cpu": 80.30478600000001,
+          "preparation": 1.8521116600000005,
+          "replay": 0.2746041999999999
+        }
+      },
+      "reduction_percent": {
+        "wall": 5.561595566934374,
+        "process_cpu": 6.173656649535242,
+        "preparation": 75.3112123824321,
+        "replay": 95.32521406458814
+      }
+    },
+    {
+      "study": "timed",
+      "mode": "raster",
+      "method": "Sum of the three per-input medians",
+      "summed_medians": {
+        "baseline": {
+          "wall": 10.867245042,
+          "process_cpu": 87.596535,
+          "preparation": 9.260500823000001,
+          "replay": 0
+        },
+        "candidate": {
+          "wall": 10.504824167999999,
+          "process_cpu": 83.73822,
+          "preparation": 4.973753838,
+          "replay": 0
+        }
+      },
+      "reduction_percent": {
+        "wall": 3.3349839135798254,
+        "process_cpu": 4.404643402846931,
+        "preparation": 46.290660375010695,
+        "replay": null
+      }
+    },
+    {
+      "study": "timed",
+      "mode": "metal",
+      "method": "Sum of the three per-input medians",
+      "summed_medians": {
+        "baseline": {
+          "wall": 10.681291916,
+          "process_cpu": 85.05812399999999,
+          "preparation": 7.4017285080000015,
+          "replay": 5.818410909999999
+        },
+        "candidate": {
+          "wall": 10.029745708,
+          "process_cpu": 79.777069,
+          "preparation": 1.8545173310000003,
+          "replay": 0.28420357199999996
+        }
+      },
+      "reduction_percent": {
+        "wall": 6.099882047264504,
+        "process_cpu": 6.208760259043567,
+        "preparation": 74.94480743253979,
+        "replay": 95.11544343642791
+      }
+    }
+  ],
+  "diagnostics": {
+    "raw_manifest": "build/sample-rows-unique/diagnostics.json",
+    "raw_manifest_sha256": "0eebef4390edb179cf4e5e25967e7fa541587d6fbd035f538ad68ddc3864c490",
+    "note": "Single counter captures only; excluded from paired speed estimates.",
+    "runs": [
+      {
+        "input": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+        "label": "baseline",
+        "attempt": 0,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-unique/baseline-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-unique/photo-large-1029-baseline-diagnostic-0",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "metal-deferred",
+          "rows-on"
+        ],
+        "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+        "result": {
+          "schema": 5,
+          "route": "auto",
+          "device": "Metal: Apple M4 Pro",
+          "buffering": "auto",
+          "predictors": "best",
+          "width": 4000,
+          "height": 3000,
+          "channels": 3,
+          "bits": 8,
+          "bytes": 10507251,
+          "exact_decode": true,
+          "total": {
+            "wall": 4.167067125,
+            "cpu": 35.897808
+          },
+          "profile_wall": [
+            0.015390542,
+            0.428913375,
+            3.2345444160000003,
+            0.08946983499999998,
+            0,
+            1.833e-06,
+            0.00174,
+            0,
+            0.370570917
+          ],
+          "profile_cpu": [
+            0.015337,
+            4.41491,
+            26.889777000000002,
+            0.027951,
+            0,
+            2e-06,
+            0.001739,
+            0,
+            4.521653
+          ],
+          "work": {
+            "local_trees": true,
+            "selection_calls": 192,
+            "learning_calls": 193,
+            "fits": 192,
+            "empty_learning_calls": 1,
+            "scanned_pixels": 36000000,
+            "selected_samples": 23460354,
+            "distinct_samples": 23460354,
+            "tree_nodes": 240143
+          },
+          "routing": {
+            "feature_batches": 5,
+            "feature_samples": 36000000,
+            "gpu_feature_batches": 4,
+            "gpu_feature_samples": 33079296,
+            "cpu_feature_batches": 1,
+            "token_batches": 5,
+            "token_samples": 36000000,
+            "cpu_feature_peak_participants": 4,
+            "learning_reused_features": 36000000,
+            "learning_computed_features": 0
+          },
+          "learning": {
+            "requested_participants": 14,
+            "cpu_ceiling": 14,
+            "peak_participants": 14,
+            "waves": 18,
+            "memory_limited_waves": 0
+          },
+          "entropy": {
+            "requested_participants": 14,
+            "admitted_participants": 14,
+            "memory_reductions": 0,
+            "peak_stream_participants": 14,
+            "stream_jobs": 192,
+            "parallel_calls": 1,
+            "model_work_seconds": 3.944787458,
+            "emission_work_seconds": 1.091781834
+          },
+          "selection": {
+            "requested_participants": 14,
+            "peak_participants": 14,
+            "waves": 14,
+            "memory_limited_waves": 0,
+            "wall_seconds": 0.428912875,
+            "work_seconds": 4.585691795999996
+          },
+          "tokenization": {
+            "requested_participants": 14,
+            "admitted_participants": 1,
+            "memory_reductions": 0,
+            "peak_participants": 1,
+            "stream_jobs": 0,
+            "parallel_calls": 0,
+            "generated_tokens": 0,
+            "borrowed_tokens": 36000000
+          },
+          "detail_work": {
+            "sample_preparation": 2.712675502,
+            "fitting": 25.569487753999994
+          },
+          "detail_wall": {
+            "learning": 3.152570499,
+            "features": 0.081969291,
+            "gpu_tokens": 0.08008058399999998
+          },
+          "sample_rows": {
+            "requested": "metal-deferred",
+            "gpu_calls": 192,
+            "gpu_rows": 23460354,
+            "gather_work": 2.6381519209999995,
+            "selection_work": 0.08767932600000003,
+            "generation_work": 0.37323517500000003,
+            "replay_work": 2.1752672469999994,
+            "allocation_copy_work": 0.014635039,
+            "submit_wait_work": 0.35671595699999986,
+            "output_bytes": 609969204,
+            "dispatch_bytes": 97957888,
+            "diagnostics": true,
+            "diagnostic_calls": 192,
+            "table_growth_work": 0.8603156329999998,
+            "materialization_work": 0.020538958000000003,
+            "replay_rows": 23460354,
+            "retained_rows": 23460354,
+            "lookup_probes": 46920708,
+            "occupied_probes": 23663289,
+            "duplicate_hits": 0,
+            "saturated_rows": 0,
+            "table_growths": 565,
+            "rehashed_rows": 22873570,
+            "deferred_calls": 192,
+            "contiguous_materializations": 192
+          },
+          "memory": {
+            "peak_backing_bytes": 777821807,
+            "peak_committed_bytes": 1902541856,
+            "maximum_stage_bytes": 1392307800,
+            "peak_feature_samples": 8306688,
+            "peak_feature_bytes": 166150272
+          },
+          "histogram_fitting": {
+            "schema": 3,
+            "enabled": false
+          }
+        }
+      },
+      {
+        "input": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+        "label": "candidate",
+        "attempt": 0,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-unique/candidate-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-unique/photo-large-1029-candidate-diagnostic-0",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "metal-unique",
+          "rows-on"
+        ],
+        "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+        "result": {
+          "schema": 5,
+          "route": "auto",
+          "device": "Metal: Apple M4 Pro",
+          "buffering": "auto",
+          "predictors": "best",
+          "width": 4000,
+          "height": 3000,
+          "channels": 3,
+          "bits": 8,
+          "bytes": 10507251,
+          "exact_decode": true,
+          "total": {
+            "wall": 4.0252765,
+            "cpu": 34.075302
+          },
+          "profile_wall": [
+            0.015301917,
+            0.4103115,
+            3.1006519999999997,
+            0.08457516600000001,
+            0,
+            1.375e-06,
+            0.0018855,
+            0,
+            0.385877
+          ],
+          "profile_cpu": [
+            0.015302,
+            4.428001,
+            24.901365000000006,
+            0.028384,
+            0,
+            0,
+            0.001886,
+            0,
+            4.673733
+          ],
+          "work": {
+            "local_trees": true,
+            "selection_calls": 192,
+            "learning_calls": 193,
+            "fits": 192,
+            "empty_learning_calls": 1,
+            "scanned_pixels": 36000000,
+            "selected_samples": 23460354,
+            "distinct_samples": 23460354,
+            "tree_nodes": 240143
+          },
+          "routing": {
+            "feature_batches": 5,
+            "feature_samples": 36000000,
+            "gpu_feature_batches": 4,
+            "gpu_feature_samples": 33079296,
+            "cpu_feature_batches": 1,
+            "token_batches": 5,
+            "token_samples": 36000000,
+            "cpu_feature_peak_participants": 4,
+            "learning_reused_features": 36000000,
+            "learning_computed_features": 0
+          },
+          "learning": {
+            "requested_participants": 14,
+            "cpu_ceiling": 14,
+            "peak_participants": 14,
+            "waves": 18,
+            "memory_limited_waves": 0
+          },
+          "entropy": {
+            "requested_participants": 14,
+            "admitted_participants": 14,
+            "memory_reductions": 0,
+            "peak_stream_participants": 14,
+            "stream_jobs": 192,
+            "parallel_calls": 1,
+            "model_work_seconds": 4.058293044,
+            "emission_work_seconds": 1.180451147
+          },
+          "selection": {
+            "requested_participants": 14,
+            "peak_participants": 14,
+            "waves": 14,
+            "memory_limited_waves": 0,
+            "wall_seconds": 0.410311084,
+            "work_seconds": 4.561844327999999
+          },
+          "tokenization": {
+            "requested_participants": 14,
+            "admitted_participants": 1,
+            "memory_reductions": 0,
+            "peak_participants": 1,
+            "stream_jobs": 0,
+            "parallel_calls": 0,
+            "generated_tokens": 0,
+            "borrowed_tokens": 36000000
+          },
+          "detail_work": {
+            "sample_preparation": 0.6062471129999997,
+            "fitting": 25.43314949299999
+          },
+          "detail_wall": {
+            "learning": 3.018472959,
+            "features": 0.082174082,
+            "gpu_tokens": 0.075082624
+          },
+          "sample_rows": {
+            "requested": "metal-unique",
+            "gpu_calls": 192,
+            "gpu_rows": 23460354,
+            "gather_work": 0.531752296,
+            "selection_work": 0.08858957799999997,
+            "generation_work": 0.3711745840000001,
+            "replay_work": 0.07007712799999999,
+            "allocation_copy_work": 0.015095287000000006,
+            "submit_wait_work": 0.3533066220000001,
+            "output_bytes": 609969204,
+            "dispatch_bytes": 97957888,
+            "diagnostics": true,
+            "diagnostic_calls": 192,
+            "table_growth_work": 0,
+            "materialization_work": 0.06851779599999998,
+            "replay_rows": 23460354,
+            "retained_rows": 23460354,
+            "lookup_probes": 0,
+            "occupied_probes": 0,
+            "duplicate_hits": 0,
+            "saturated_rows": 0,
+            "table_growths": 0,
+            "rehashed_rows": 0,
+            "deferred_calls": 192,
+            "contiguous_materializations": 192,
+            "unique_proof": true,
+            "uniqueness_work": 6.1251e-05,
+            "uniqueness_checks": 192,
+            "unique_calls": 192,
+            "unique_rows": 23460354
+          },
+          "memory": {
+            "peak_backing_bytes": 777366780,
+            "peak_committed_bytes": 1902548160,
+            "maximum_stage_bytes": 1392307800,
+            "peak_feature_samples": 8306688,
+            "peak_feature_bytes": 166150272
+          },
+          "histogram_fitting": {
+            "schema": 3,
+            "enabled": false
+          }
+        }
+      },
+      {
+        "input": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-inputs/alpha16-local.pam",
+        "label": "baseline",
+        "attempt": 0,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-unique/baseline-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-inputs/alpha16-local.pam",
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-unique/alpha16-local-baseline-diagnostic-0",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "metal-deferred",
+          "rows-on"
+        ],
+        "output_sha256": "2f358569a8f68155121cf26bed66595d216b862af53a50c9eaf11172c7edab98",
+        "result": {
+          "schema": 5,
+          "route": "auto",
+          "device": "Metal: Apple M4 Pro",
+          "buffering": "auto",
+          "predictors": "best",
+          "width": 769,
+          "height": 513,
+          "channels": 4,
+          "bits": 16,
+          "bytes": 469451,
+          "exact_decode": true,
+          "total": {
+            "wall": 0.232515875,
+            "cpu": 1.259541
+          },
+          "profile_wall": [
+            0.000728291,
+            0.029400333,
+            0.174252958,
+            0.004395625,
+            0,
+            1.0840000000000001e-06,
+            2.1833e-05,
+            0,
+            0.02260225
+          ],
+          "profile_cpu": [
+            0.000729,
+            0.175042,
+            0.957697,
+            0.001738,
+            0,
+            1e-06,
+            2.1e-05,
+            0,
+            0.123202
+          ],
+          "work": {
+            "local_trees": true,
+            "selection_calls": 12,
+            "learning_calls": 13,
+            "fits": 12,
+            "empty_learning_calls": 1,
+            "scanned_pixels": 1578012,
+            "selected_samples": 1030284,
+            "distinct_samples": 1030283,
+            "tree_nodes": 7253
+          },
+          "routing": {
+            "feature_batches": 1,
+            "feature_samples": 1578012,
+            "gpu_feature_batches": 0,
+            "gpu_feature_samples": 0,
+            "cpu_feature_batches": 1,
+            "token_batches": 1,
+            "token_samples": 1578012,
+            "cpu_feature_peak_participants": 4,
+            "learning_reused_features": 1578012,
+            "learning_computed_features": 0
+          },
+          "learning": {
+            "requested_participants": 14,
+            "cpu_ceiling": 14,
+            "peak_participants": 14,
+            "waves": 1,
+            "memory_limited_waves": 0
+          },
+          "entropy": {
+            "requested_participants": 14,
+            "admitted_participants": 14,
+            "memory_reductions": 0,
+            "peak_stream_participants": 12,
+            "stream_jobs": 12,
+            "parallel_calls": 1,
+            "model_work_seconds": 0.105649044,
+            "emission_work_seconds": 0.021231295
+          },
+          "selection": {
+            "requested_participants": 14,
+            "peak_participants": 12,
+            "waves": 1,
+            "memory_limited_waves": 0,
+            "wall_seconds": 0.029399916,
+            "work_seconds": 0.17556470799999999
+          },
+          "tokenization": {
+            "requested_participants": 14,
+            "admitted_participants": 1,
+            "memory_reductions": 0,
+            "peak_participants": 1,
+            "stream_jobs": 0,
+            "parallel_calls": 0,
+            "generated_tokens": 0,
+            "borrowed_tokens": 1578012
+          },
+          "detail_work": {
+            "sample_preparation": 0.127303251,
+            "fitting": 0.8452720850000002
+          },
+          "detail_wall": {
+            "learning": 0.166897542,
+            "features": 0.007354458,
+            "gpu_tokens": 0.004032875
+          },
+          "sample_rows": {
+            "requested": "metal-deferred",
+            "gpu_calls": 12,
+            "gpu_rows": 1030284,
+            "gather_work": 0.123099874,
+            "selection_work": 0.003936126,
+            "generation_work": 0.048246708,
+            "replay_work": 0.07080683199999999,
+            "allocation_copy_work": 0.0009175829999999999,
+            "submit_wait_work": 0.047179042000000004,
+            "output_bytes": 26787384,
+            "dispatch_bytes": 4378368,
+            "diagnostics": true,
+            "diagnostic_calls": 12,
+            "table_growth_work": 0.023306457000000003,
+            "materialization_work": 0.0021970410000000003,
+            "replay_rows": 1030284,
+            "retained_rows": 1030283,
+            "lookup_probes": 2060567,
+            "occupied_probes": 1148824,
+            "duplicate_hits": 1,
+            "saturated_rows": 0,
+            "table_growths": 37,
+            "rehashed_rows": 772764,
+            "deferred_calls": 12,
+            "contiguous_materializations": 11
+          },
+          "memory": {
+            "peak_backing_bytes": 116665596,
+            "peak_committed_bytes": 661235755,
+            "maximum_stage_bytes": 638945107,
+            "peak_feature_samples": 1578012,
+            "peak_feature_bytes": 31566768
+          },
+          "histogram_fitting": {
+            "schema": 3,
+            "enabled": false
+          }
+        }
+      },
+      {
+        "input": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-inputs/alpha16-local.pam",
+        "label": "candidate",
+        "attempt": 0,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-unique/candidate-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-inputs/alpha16-local.pam",
+          "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-unique/alpha16-local-candidate-diagnostic-0",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "metal-unique",
+          "rows-on"
+        ],
+        "output_sha256": "2f358569a8f68155121cf26bed66595d216b862af53a50c9eaf11172c7edab98",
+        "result": {
+          "schema": 5,
+          "route": "auto",
+          "device": "Metal: Apple M4 Pro",
+          "buffering": "auto",
+          "predictors": "best",
+          "width": 769,
+          "height": 513,
+          "channels": 4,
+          "bits": 16,
+          "bytes": 469451,
+          "exact_decode": true,
+          "total": {
+            "wall": 0.219265125,
+            "cpu": 1.186187
+          },
+          "profile_wall": [
+            0.000714916,
+            0.028938875,
+            0.161755042,
+            0.004229168,
+            0,
+            1.6250000000000001e-06,
+            2.2208e-05,
+            0,
+            0.022534959
+          ],
+          "profile_cpu": [
+            0.000715,
+            0.174089,
+            0.886848,
+            0.001546,
+            0,
+            1e-06,
+            2.2e-05,
+            0,
+            0.121899
+          ],
+          "work": {
+            "local_trees": true,
+            "selection_calls": 12,
+            "learning_calls": 13,
+            "fits": 12,
+            "empty_learning_calls": 1,
+            "scanned_pixels": 1578012,
+            "selected_samples": 1030284,
+            "distinct_samples": 1030283,
+            "tree_nodes": 7253
+          },
+          "routing": {
+            "feature_batches": 1,
+            "feature_samples": 1578012,
+            "gpu_feature_batches": 0,
+            "gpu_feature_samples": 0,
+            "cpu_feature_batches": 1,
+            "token_batches": 1,
+            "token_samples": 1578012,
+            "cpu_feature_peak_participants": 4,
+            "learning_reused_features": 1578012,
+            "learning_computed_features": 0
+          },
+          "learning": {
+            "requested_participants": 14,
+            "cpu_ceiling": 14,
+            "peak_participants": 14,
+            "waves": 1,
+            "memory_limited_waves": 0
+          },
+          "entropy": {
+            "requested_participants": 14,
+            "admitted_participants": 14,
+            "memory_reductions": 0,
+            "peak_stream_participants": 12,
+            "stream_jobs": 12,
+            "parallel_calls": 1,
+            "model_work_seconds": 0.10557495700000001,
+            "emission_work_seconds": 0.019463125
+          },
+          "selection": {
+            "requested_participants": 14,
+            "peak_participants": 12,
+            "waves": 1,
+            "memory_limited_waves": 0,
+            "wall_seconds": 0.0289385,
+            "work_seconds": 0.174371374
+          },
+          "tokenization": {
+            "requested_participants": 14,
+            "admitted_participants": 1,
+            "memory_reductions": 0,
+            "peak_participants": 1,
+            "stream_jobs": 0,
+            "parallel_calls": 0,
+            "generated_tokens": 0,
+            "borrowed_tokens": 1578012
+          },
+          "detail_work": {
+            "sample_preparation": 0.057406292,
+            "fitting": 0.8418982070000001
+          },
+          "detail_wall": {
+            "learning": 0.154587416,
+            "features": 0.00716675,
+            "gpu_tokens": 0.003866292
+          },
+          "sample_rows": {
+            "requested": "metal-unique",
+            "gpu_calls": 12,
+            "gpu_rows": 1030284,
+            "gather_work": 0.053731208,
+            "selection_work": 0.003998668,
+            "generation_work": 0.04532908199999999,
+            "replay_work": 0.004313165000000001,
+            "allocation_copy_work": 0.001102582,
+            "submit_wait_work": 0.044122042,
+            "output_bytes": 26787384,
+            "dispatch_bytes": 4378368,
+            "diagnostics": true,
+            "diagnostic_calls": 12,
+            "table_growth_work": 4.2871e-05,
+            "materialization_work": 0.004027543999999999,
+            "replay_rows": 1030284,
+            "retained_rows": 1030283,
+            "lookup_probes": 4135,
+            "occupied_probes": 1980,
+            "duplicate_hits": 1,
+            "saturated_rows": 0,
+            "table_growths": 9,
+            "rehashed_rows": 1584,
+            "deferred_calls": 12,
+            "contiguous_materializations": 11,
+            "unique_proof": true,
+            "uniqueness_work": 3.959e-06,
+            "uniqueness_checks": 12,
+            "unique_calls": 9,
+            "unique_rows": 1028216
+          },
+          "memory": {
+            "peak_backing_bytes": 110727808,
+            "peak_committed_bytes": 661236203,
+            "maximum_stage_bytes": 638945107,
+            "peak_feature_samples": 1578012,
+            "peak_feature_bytes": 31566768
+          },
+          "histogram_fitting": {
+            "schema": 3,
+            "enabled": false
+          }
+        }
+      }
+    ],
+    "excluded_attempts": 0
+  },
+  "accepted_paired_encodes": 132,
+  "excluded_paired_attempts": 2
+}

@@ -699,7 +699,7 @@ MetalBackend::MetalBackend(
   AcStrategyPipelines ac_strategy_pipelines,
   PrimitivePipelines primitive_pipelines,
   NS::SharedPtr<MTL::ComputePipelineState> modular_input_pipeline,
-  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 6> modular_token_pipelines,
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 7> modular_token_pipelines,
   NS::SharedPtr<MTL::ComputePipelineState> ans_token_cost_pipeline,
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> tree_statistics_pipelines,
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 5> histogram_fitting_pipelines,
@@ -1792,7 +1792,7 @@ Status CreateMetalBackendImpl(
       maximum_threads.width < 8 || maximum_threads.height < 8)
     return Status::Unavailable("Metal cannot launch Modular input threadgroups");
 
-  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 6> modular_token_pipelines;
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 7> modular_token_pipelines;
   const char* token_kernels[] = {"gjxl_modular_tokens_gradient", "gjxl_modular_tokens_tree",
                                  "gjxl_modular_tokens_diagnostic", "gjxl_modular_adaptive_tokens",
                                  "gjxl_modular_adaptive_diagnostic"};
@@ -1802,6 +1802,12 @@ Status CreateMetalBackendImpl(
     if (modular_token_pipelines[i]->maxTotalThreadsPerThreadgroup() < 64 || maximum_threads.width < 64)
       return Status::Unavailable("Metal cannot launch Modular token threadgroups");
   }
+
+  status = CreatePipeline(device.get(), library.get(), "gjxl_histogram_sample_rows",
+                          &modular_token_pipelines[6]);
+  if (!status.ok()) return status;
+  if (modular_token_pipelines[6]->maxTotalThreadsPerThreadgroup() < 64)
+    return Status::Unavailable("Metal cannot launch histogram row threadgroups");
 
   // Feature preparation is an optional capability; smaller devices retain the
   // bounded CPU producer selected before dispatch.

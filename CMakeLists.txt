@@ -1131,6 +1131,7 @@ add_custom_command(OUTPUT "${GJXL_MODULAR_ADAPTIVE_METAL_IR}"
     ${GJXL_METAL_PROFILING_FLAGS} -c "${GJXL_MODULAR_ADAPTIVE_METAL_SOURCE}" -o "${GJXL_MODULAR_ADAPTIVE_METAL_IR}"
   DEPENDS "${GJXL_MODULAR_ADAPTIVE_METAL_SOURCE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/modular_adaptive_params.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/histogram_sample_rows_params.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/codec/modular/weighted_feature_math.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/modular_token_params.h"
   COMMENT "Compiling adaptive Metal Modular token generation" VERBATIM)
@@ -3902,6 +3903,11 @@ if(GJXL_BUILD_TESTS)
   target_link_libraries(gjxl_metal_modular_histogram_workflow_test PRIVATE gjxl_codestream gjxl_metal)
   add_test(NAME metal_modular_histogram_workflow COMMAND gjxl_metal_modular_histogram_workflow_test)
   set_tests_properties(metal_modular_histogram_workflow PROPERTIES TIMEOUT 180)
+
+  add_executable(gjxl_metal_histogram_sample_rows_test tests/metal_histogram_sample_rows_test.cpp)
+  target_link_libraries(gjxl_metal_histogram_sample_rows_test PRIVATE gjxl_codestream gjxl_metal)
+  add_test(NAME metal_histogram_sample_rows COMMAND gjxl_metal_histogram_sample_rows_test)
+  set_tests_properties(metal_histogram_sample_rows PROPERTIES TIMEOUT 180)
 
   add_executable(gjxl_metal_modular_adaptive_test tests/metal_modular_adaptive_test.cpp)
   add_executable(gjxl_metal_modular_reference_workflow_test tests/metal_modular_reference_workflow_test.cpp)

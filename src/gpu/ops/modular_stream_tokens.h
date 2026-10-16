@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 #pragma once
+#include "codec/modular/histogram_sample_rows.h"
 #include "gpu/ops/modular_adaptive_tokens.h"
 
 namespace gjxl::modular_gpu_internal {
@@ -50,7 +51,8 @@ struct ModularStreamTokenStoragePlan {
     size_t samples, size_t slices, std::span<const ModularStreamTokenTree> trees,
     ModularStreamTokenStoragePlan *out, const ModularTokenDeviceLimits *limits = nullptr);
 
-class PreparedGpuModularStreamFeatures {
+class PreparedGpuModularStreamFeatures
+    : public modular_internal::HistogramRowSource {
 public:
   virtual ~PreparedGpuModularStreamFeatures() = default;
   [[nodiscard]] virtual BackendId backend_id() const noexcept = 0;

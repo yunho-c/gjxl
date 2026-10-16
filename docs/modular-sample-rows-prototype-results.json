@@ -1,0 +1,367 @@
+{
+  "schema": 1,
+  "base_revision": "9d8a011e803476cce13e012b0ffeac07ad0645ec",
+  "branch": "feat/modular-sample-rows",
+  "status": "private opt-in prototype; no public default change; includes received ANS and row-hash reuse",
+  "performance": [
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+      "variants": {
+        "raster": {
+          "wall_seconds": [
+            4.403972375,
+            4.44570625,
+            4.320283709
+          ],
+          "median_wall": 4.403972375,
+          "median_preparation_work": 4.665767080000001,
+          "median_learning_wall": 3.333679041,
+          "median_row_gather_work": 4.568302836999999,
+          "peak_backing_bytes": 779044539,
+          "gpu_rows": 0,
+          "gpu_calls": 0,
+          "wall_reduction_percent": 0.0
+        },
+        "selected": {
+          "wall_seconds": [
+            4.4433875,
+            4.448563417,
+            4.319044333
+          ],
+          "median_wall": 4.4433875,
+          "median_preparation_work": 4.751929713000001,
+          "median_learning_wall": 3.408788375,
+          "median_row_gather_work": 4.654667164000003,
+          "peak_backing_bytes": 780787551,
+          "gpu_rows": 0,
+          "gpu_calls": 0,
+          "wall_reduction_percent": -0.8949902870360127
+        },
+        "metal": {
+          "wall_seconds": [
+            4.367261583,
+            4.400412125,
+            4.381732875
+          ],
+          "median_wall": 4.381732875,
+          "median_preparation_work": 5.0421690739999985,
+          "median_learning_wall": 3.334505542,
+          "median_row_gather_work": 4.965359832999997,
+          "peak_backing_bytes": 778731470,
+          "gpu_rows": 23460354,
+          "gpu_calls": 192,
+          "wall_reduction_percent": 0.5049872729957938
+        }
+      }
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1039.pam",
+      "variants": {
+        "raster": {
+          "wall_seconds": [
+            3.830561958,
+            3.813835625,
+            3.808281
+          ],
+          "median_wall": 3.813835625,
+          "median_preparation_work": 3.881926254000001,
+          "median_learning_wall": 2.869751496,
+          "median_row_gather_work": 3.7995778739999975,
+          "peak_backing_bytes": 699024972,
+          "gpu_rows": 0,
+          "gpu_calls": 0,
+          "wall_reduction_percent": 0.0
+        },
+        "selected": {
+          "wall_seconds": [
+            3.753593375,
+            3.776133375,
+            3.81737825
+          ],
+          "median_wall": 3.776133375,
+          "median_preparation_work": 3.857491836000001,
+          "median_learning_wall": 2.818406297,
+          "median_row_gather_work": 3.7893860900000016,
+          "peak_backing_bytes": 698114419,
+          "gpu_rows": 0,
+          "gpu_calls": 0,
+          "wall_reduction_percent": 0.9885651534863871
+        },
+        "metal": {
+          "wall_seconds": [
+            3.873740458,
+            3.850970667,
+            3.813477292
+          ],
+          "median_wall": 3.850970667,
+          "median_preparation_work": 4.3063412539999995,
+          "median_learning_wall": 2.9209194190000005,
+          "median_row_gather_work": 4.236964168999997,
+          "peak_backing_bytes": 698806291,
+          "gpu_rows": 20432794,
+          "gpu_calls": 192,
+          "wall_reduction_percent": -0.9736927768091652
+        }
+      }
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1049.pam",
+      "variants": {
+        "raster": {
+          "wall_seconds": [
+            3.165942417,
+            3.1561565,
+            3.123420041
+          ],
+          "median_wall": 3.1561565,
+          "median_preparation_work": 3.7315795440000015,
+          "median_learning_wall": 2.259051834,
+          "median_row_gather_work": 3.6258403720000016,
+          "peak_backing_bytes": 671754152,
+          "gpu_rows": 0,
+          "gpu_calls": 0,
+          "wall_reduction_percent": 0.0
+        },
+        "selected": {
+          "wall_seconds": [
+            3.196937166,
+            3.159677458,
+            3.128088792
+          ],
+          "median_wall": 3.159677458,
+          "median_preparation_work": 3.686756455,
+          "median_learning_wall": 2.282087916,
+          "median_row_gather_work": 3.6031532449999983,
+          "peak_backing_bytes": 670956158,
+          "gpu_rows": 0,
+          "gpu_calls": 0,
+          "wall_reduction_percent": -0.11155840973031683
+        },
+        "metal": {
+          "wall_seconds": [
+            3.261388375,
+            3.154356416,
+            3.231562958
+          ],
+          "median_wall": 3.231562958,
+          "median_preparation_work": 4.2782072389999986,
+          "median_learning_wall": 2.361548167,
+          "median_row_gather_work": 4.204548503000001,
+          "peak_backing_bytes": 679884580,
+          "gpu_rows": 19470891,
+          "gpu_calls": 192,
+          "wall_reduction_percent": -2.389186277676658
+        }
+      }
+    }
+  ],
+  "metal_phase_work": [
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+      "selection_work": 0.09008675000000003,
+      "generation_work": 0.3991807479999999,
+      "replay_work": 4.503706798,
+      "allocation_copy_work": 0.015066322999999998,
+      "submit_wait_work": 0.382192091,
+      "output_bytes": 609969204,
+      "dispatch_bytes": 97957888,
+      "median_replay_share": 0.9030129619165531
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1039.pam",
+      "selection_work": 0.08126425200000005,
+      "generation_work": 0.41681245599999994,
+      "replay_work": 3.735271377000001,
+      "allocation_copy_work": 0.014104077000000001,
+      "submit_wait_work": 0.3993299620000002,
+      "output_bytes": 531252644,
+      "dispatch_bytes": 85844480,
+      "median_replay_share": 0.8815914480300161
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1049.pam",
+      "selection_work": 0.07668778400000002,
+      "generation_work": 0.367866135,
+      "replay_work": 3.7560674550000015,
+      "allocation_copy_work": 0.013845796999999995,
+      "submit_wait_work": 0.3513864249999999,
+      "output_bytes": 506243166,
+      "dispatch_bytes": 81997312,
+      "median_replay_share": 0.8933343145690906
+    }
+  ],
+  "sum_of_per_input_median_wall": {
+    "raster": 11.3739645,
+    "selected": 11.379198333,
+    "metal": 11.4642665
+  },
+  "sum_of_per_input_median_preparation_work": {
+    "raster": 12.279272878000004,
+    "selected": 12.296178004000001,
+    "metal": 13.626717566999996
+  },
+  "measurement_limits": [
+    "Three fresh-process repetitions on each of three photographic inputs; rotated variant order.",
+    "All routes use the same existing weighted-feature producer and GPU tokenization.",
+    "Native complete-call encoding excludes backend creation, file I/O and independent decoding.",
+    "Runner waited for ThreadSanitizer checks and discarded one overlapping attempt before retrying. No detected overlap in retained measurements.",
+    "Background Spotlight indexing was active in this session; not isolated peak throughput.",
+    "GPU row workflow is local-learning only; shared/global scopes use selected CPU rows."
+  ],
+  "qualification": [
+    {
+      "artifact_root": "build/sample-rows-9d8a011-qualification",
+      "attempts": 28,
+      "accepted_calls": 27,
+      "all_exact_decode": true,
+      "discarded_overlap_attempts": 1,
+      "provenance": {
+        "revision": "9d8a011e803476cce13e012b0ffeac07ad0645ec",
+        "binary": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/release/gjxl_modular_hybrid_profile",
+        "binary_sha256": "81576dd724a5bdd06fdfcb76589d15a623ff41e57721fff5805e86d5839dad71",
+        "inputs": [
+          {
+            "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+            "sha256": "a1c487b0160d8f3e8cb86753131b919ac3de28e908fde757050ebccdb4407b6d"
+          },
+          {
+            "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1039.pam",
+            "sha256": "22f487129343ed6d403346653ef99900e2552728ba2e4f5c63c90d058132f302"
+          },
+          {
+            "path": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1049.pam",
+            "sha256": "0b3feae4d3bf1a13f89d5f4c3d976c8ea1e93e49a65548919cb5474c3cd1d62d"
+          }
+        ],
+        "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=35782755)\t88%; AC attached; not charging present: true\n",
+        "device": "Apple M4 Pro",
+        "participants": 14,
+        "repeats": 3,
+        "predictors": "best",
+        "timing": "EncodeReferenceModularImage caller wall; excludes input I/O, backend creation, output I/O and independent decode",
+        "features": "same auto Metal weighted-feature route and GPU tokenization for all row variants"
+      }
+    },
+    {
+      "artifact_root": "build/sample-rows-9d8a011-coverage",
+      "attempts": 15,
+      "accepted_calls": 15,
+      "all_exact_decode": true,
+      "discarded_overlap_attempts": 0,
+      "provenance": {
+        "revision": "9d8a011e803476cce13e012b0ffeac07ad0645ec",
+        "binary": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/release/gjxl_modular_hybrid_profile",
+        "binary_sha256": "81576dd724a5bdd06fdfcb76589d15a623ff41e57721fff5805e86d5839dad71",
+        "inputs": [
+          {
+            "path": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/photo-macan.pam",
+            "sha256": "00f553eeed5f5706240e027011628cb4c96a8c1879775480e20f50e2679f2e6e"
+          },
+          {
+            "path": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/alpha-ria.pam",
+            "sha256": "e9167882740846d65e4a88cb513912d39996351c8527583a3bf825fc197220a9"
+          },
+          {
+            "path": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/palette-358.pam",
+            "sha256": "bf34ee41d73e578df86a4d3b88017b48e72adc16fb1df2e22e30a483c17d0214"
+          },
+          {
+            "path": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/alpha16-ramp.pam",
+            "sha256": "dc0197fd31ce47cdb6db6b3f08d1da38b735f125bbd24d44b4ade3cd397eb0ae"
+          },
+          {
+            "path": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-inputs/alpha16-local.pam",
+            "sha256": "82db67d7b6747b9b1d2810d9cbd967962818b8990a7746f1e2ef31d1ff3f166d"
+          }
+        ],
+        "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=35782755)\t88%; AC attached; not charging present: true\n",
+        "device": "Apple M4 Pro",
+        "participants": 14,
+        "repeats": 1,
+        "predictors": "best",
+        "timing": "EncodeReferenceModularImage caller wall; excludes input I/O, backend creation, output I/O and independent decode",
+        "features": "same auto Metal weighted-feature route and GPU tokenization for all row variants"
+      }
+    },
+    {
+      "artifact_root": "build/sample-rows-9d8a011-all-predictors",
+      "attempts": 3,
+      "accepted_calls": 3,
+      "all_exact_decode": true,
+      "discarded_overlap_attempts": 0,
+      "provenance": {
+        "revision": "9d8a011e803476cce13e012b0ffeac07ad0645ec",
+        "binary": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/release/gjxl_modular_hybrid_profile",
+        "binary_sha256": "81576dd724a5bdd06fdfcb76589d15a623ff41e57721fff5805e86d5839dad71",
+        "inputs": [
+          {
+            "path": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-inputs/alpha16-local.pam",
+            "sha256": "82db67d7b6747b9b1d2810d9cbd967962818b8990a7746f1e2ef31d1ff3f166d"
+          }
+        ],
+        "power": "Now drawing from 'AC Power'\n -InternalBattery-0 (id=35782755)\t88%; AC attached; not charging present: true\n",
+        "device": "Apple M4 Pro",
+        "participants": 14,
+        "repeats": 1,
+        "predictors": "all",
+        "timing": "EncodeReferenceModularImage caller wall; excludes input I/O, backend creation, output I/O and independent decode",
+        "features": "same auto Metal weighted-feature route and GPU tokenization for all row variants"
+      }
+    }
+  ],
+  "matches_pre_receive_outputs": true,
+  "byte_identity_groups": [
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1029.pam",
+      "predictors": "best",
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1039.pam",
+      "predictors": "best",
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a"
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/modular-token-performance-20261010/inputs/photo-large-1049.pam",
+      "predictors": "best",
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c"
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/photo-macan.pam",
+      "predictors": "best",
+      "output_sha256": "f481f6499e30c1ea81874a1fd3e42cb3d42ecc3116d09d90516141a844290f73"
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/alpha-ria.pam",
+      "predictors": "best",
+      "output_sha256": "2a34abb6966cc6631a621473d09bd628b41509ba74c51e34e9ea5f42c07c4908"
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/palette-358.pam",
+      "predictors": "best",
+      "output_sha256": "21594dc56ecb681fc085998da5bce09fe929091d3181b8f09cdc1812c3157a27"
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/parallel-modular-integration-20261015/cpu-14/inputs/alpha16-ramp.pam",
+      "predictors": "best",
+      "output_sha256": "aa070fa2eed327d0af1bc47ff114314dfb3ae19eaf4704caae51a8d84a59fc81"
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-inputs/alpha16-local.pam",
+      "predictors": "best",
+      "output_sha256": "2f358569a8f68155121cf26bed66595d216b862af53a50c9eaf11172c7edab98"
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular-sample-rows/build/sample-rows-inputs/alpha16-local.pam",
+      "predictors": "all",
+      "output_sha256": "b062ec5e3a56cb672fe96540cdd1cf658801d90b6dde83475c9b4e5762c69b07"
+    }
+  ],
+  "tests": {
+    "passed": 6,
+    "failed": 0,
+    "row_cases": 16,
+    "log": "build/sample-rows-9d8a011-tests.log"
+  },
+  "raw_runs": "build/sample-rows-9d8a011-qualification (source.patch, new_sources, provenance.json, build-config.json, runs.json and encoded outputs)"
+}

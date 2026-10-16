@@ -15,6 +15,14 @@ using namespace modular_gpu_internal;
 Status Invalid() { return Status::InvalidArgument("Invalid reference learning workflow"); }
 HistogramSamplingOptions SamplingOptions(const ReferenceWorkflowOptions &options) {
   HistogramSamplingOptions sampling;
+  sampling.row_backend = options.sample_rows;
+  sampling.use_unique_row_proof = options.use_unique_row_proof;
+  sampling.defer_gpu_row_materialization = options.defer_gpu_row_materialization;
+  sampling.gpu_row_diagnostics = options.gpu_row_diagnostics;
+  sampling.row_generator = options.row_generator;
+  sampling.row_source = options.row_source;
+  if (sampling.row_backend == HistogramRowBackend::kGpu && !sampling.row_source)
+    sampling.row_backend = HistogramRowBackend::kSelectedCpu;
   sampling.maximum_samples = options.maximum_samples;
   sampling.maximum_channel_size = kGroupDimension;
   if (options.predictors == ReferencePredictors::kAll) {
@@ -54,6 +62,7 @@ Status Learn(std::span<const HistogramTrainingImage> images, size_t maximum_leav
   Seconds fitting(stats->fitting_seconds);
   record->learning = {0, images.size(), prepared.stats(), prepared.samples().weights.size(), 1};
   ++stats->learning_calls;
+  MergeHistogramRowProfile(stats->rows, prepared.stats().rows);
   stats->scanned_pixels += prepared.stats().scanned_pixels;
   stats->selected_samples += prepared.stats().selected_samples;
   stats->distinct_samples += prepared.samples().weights.size();
@@ -113,7 +122,20 @@ Status Learn(std::span<const HistogramTrainingImage> images, size_t maximum_leav
   return Status::Ok();
 }
 
-using ChannelFeatures = std::array<WeightedFeatureView, kReferenceStreamChannels>;
+struct ChannelFeatures {
+  std::array<WeightedFeatureView, kReferenceStreamChannels> views;
+  // Borrowed from the owning feature batch through joined fitting/tokenization.
+  const HistogramRowSource *row_source = nullptr;
+};
+ReferenceWorkflowOptions LocalOptions(const ReferenceWorkflowOptions &options,
+                                      const ChannelFeatures *features) {
+  auto local = options;
+  if (features && options.sample_rows == HistogramRowBackend::kGpu) {
+    local.row_source = features->row_source;
+    local.row_generator = dynamic_cast<HistogramRowGenerator *>(options.gpu);
+  }
+  return local;
+}
 size_t LocalTreeLeaves(const PreparedModularStreamView &stream) {
   size_t coded_samples = 0;
   for (auto v : stream.channels)
@@ -192,6 +214,7 @@ void MergeLearningStats(ReferenceWorkflowStats &to, const ReferenceWorkflowStats
   to.maximum_stage_bytes = std::max(to.maximum_stage_bytes, from.maximum_stage_bytes);
   to.sample_preparation_seconds += from.sample_preparation_seconds;
   to.fitting_seconds += from.fitting_seconds;
+  MergeHistogramRowProfile(to.rows, from.rows);
 }
 Status LearnLocalScopes(std::span<ReferenceModularStream> records,
                         std::span<const PreparedModularStreamView> streams,
@@ -211,13 +234,19 @@ Status LearnLocalScopes(std::span<ReferenceModularStream> records,
         images[count] = {record.learning_extent, record.training_channels(),
             record.metadata_channels, streams[stop].weighted,
             features.empty() ? std::span<const WeightedFeatureView>{}
-                             : std::span(features[stop]).first(record.channel_count)};
-        requests[count] = {{&images[count], 1}, &record, LocalTreeLeaves(streams[stop])};
+                             : std::span(features[stop].views).first(record.channel_count)};
+        requests[count] = {{&images[count], 1}, &record, LocalTreeLeaves(streams[stop]),
+                           features.empty() ? nullptr : features[stop].row_source};
         ++count;
       }
       if (count) {
         bool handled = false;
-        if (auto s = TryLearnHistogramBatch(std::span(requests).first(count), SamplingOptions(options),
+        auto sampling = SamplingOptions(options);
+        if (options.sample_rows == HistogramRowBackend::kGpu) {
+          sampling.row_backend = HistogramRowBackend::kGpu;
+          sampling.row_generator = dynamic_cast<HistogramRowGenerator *>(options.gpu);
+        }
+        if (auto s = TryLearnHistogramBatch(std::span(requests).first(count), sampling,
                 LearningParticipants(options, count), options, budget, stats, &handled); !s.ok()) return s;
         if (!handled) break;
       }
@@ -232,7 +261,10 @@ Status LearnLocalScopes(std::span<ReferenceModularStream> records,
   Seconds wall(stats->learning_seconds);
   const auto feature = [&](size_t i) -> std::span<const WeightedFeatureView> {
     return features.empty() ? std::span<const WeightedFeatureView>{}
-                            : std::span(features[i]).first(records[i].channel_count);
+                            : std::span(features[i].views).first(records[i].channel_count);
+  };
+  const auto local_options = [&](size_t i) {
+    return LocalOptions(options, features.empty() ? nullptr : &features[i]);
   };
   const auto serial = [&](size_t first, size_t stop) {
     LearningWaveProbe trace;
@@ -241,7 +273,7 @@ Status LearnLocalScopes(std::span<ReferenceModularStream> records,
     stats->learning_peak_participants = std::max(size_t{1}, stats->learning_peak_participants);
     for (size_t i = first; i < stop; ++i) {
       LearningWaveProbe::Job job(trace, i - first, records[i].id, 0, *stats);
-      if (auto s = LearnLocal(records[i], streams[i], options, budget, stats, feature(i)); !s.ok())
+      if (auto s = LearnLocal(records[i], streams[i], local_options(i), budget, stats, feature(i)); !s.ok())
         return s;
     }
     trace.Joined();
@@ -275,7 +307,7 @@ Status LearnLocalScopes(std::span<ReferenceModularStream> records,
   LearningStorage<LocalLearningJob> jobs(records.size());
   LearningStorage<HistogramFittingProfile> profiles(parent_fit_profile ? desired : 0);
   for (size_t i = 0; i < records.size(); ++i)
-    if (auto s = LocalLearningBound(records[i], streams[i], options, feature(i), &jobs[i].bytes);
+    if (auto s = LocalLearningBound(records[i], streams[i], local_options(i), feature(i), &jobs[i].bytes);
         !s.ok())
       return s;
   constexpr ParallelWorkErrors errors{
@@ -339,7 +371,7 @@ Status LearnLocalScopes(std::span<ReferenceModularStream> records,
             fit_profile->records_written = 0;
           }
           HistogramFittingProfileSession fitting_session(fit_profile);
-          status = LearnLocal(records[i], streams[i], options, budget, &job.stats,
+          status = LearnLocal(records[i], streams[i], local_options(i), budget, &job.stats,
                               feature(i), true);
           job.computed_features = worker_profile.training_work.weighted_prediction_samples;
           job.reused_features = worker_profile.training_work.reused_prediction_samples;
@@ -432,7 +464,7 @@ Status LearnGlobal(std::span<ReferenceModularStream> records,
       images[record.id] = {record.learning_extent, record.training_channels(),
                            record.metadata_channels, streams[i].weighted,
                            features.empty() ? std::span<const WeightedFeatureView>{}
-                                            : std::span(features[i]).first(record.channel_count)};
+                                            : std::span(features[i].views).first(record.channel_count)};
   }
   if (options.fitting_backend != ReferenceFittingBackend::kCpu) {
     const HistogramFitRequest request{images, &records[0], MaximumGlobalTreeLeaves(population)};
@@ -470,6 +502,9 @@ struct HybridLearning {
   size_t live_samples = 0, live_bytes = 0, token_owners = 0;
 
   Status Initialize() {
+    if (options.sample_rows == HistogramRowBackend::kGpu &&
+        !dynamic_cast<HistogramRowGenerator *>(options.gpu))
+      return Status::Unsupported("Backend has no histogram row generator");
     if (records.size() > SIZE_MAX / kReferenceStreamChannels)
       return Invalid();
     const size_t job_capacity =
@@ -595,6 +630,8 @@ struct HybridLearning {
         result.owner->sample_count() != result.samples ||
         result.owner->weighted_views().size() != jobs.size())
       return Status::Internal("Histogram feature producer returned an invalid owner");
+    for (size_t i = first; i < stop; ++i)
+      features[i].row_source = result.owner.get();
     const auto views = result.owner->weighted_views();
     size_t next = 0;
     for (size_t i = first; i < stop; ++i)
@@ -607,7 +644,7 @@ struct HybridLearning {
         if (auto s = ValidateWeightedFeatureView(views[next], channel, streams[i].weighted);
             !s.ok())
           return s;
-        features[i][c] = views[next++];
+        features[i].views[c] = views[next++];
       }
     result.retained_bytes = plan.retained.retained_bytes;
     if (result.samples > SIZE_MAX - live_samples || result.retained_bytes > SIZE_MAX - live_bytes)

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
-#include "gpu/metal/metal_backend_internal.h"
-#include "gpu/ops/modular_adaptive_layout.h"
 #include "codec/modular/profile.h"
 #include "codec/modular/weighted_feature_math.h"
+#include "gpu/metal/kernels/histogram_sample_rows_params.h"
+#include "gpu/metal/metal_backend_internal.h"
+#include "gpu/ops/modular_adaptive_layout.h"
 #include <cstring>
 
 namespace gjxl::metal_internal {
@@ -117,6 +118,69 @@ struct Pending {
     return s;
   }
 };
+struct RowTimer {
+  double *seconds;
+  std::chrono::steady_clock::time_point start =
+      std::chrono::steady_clock::now();
+  ~RowTimer() {
+    if (seconds)
+      *seconds += std::chrono::duration<double>(
+                      std::chrono::steady_clock::now() - start)
+                      .count();
+  }
+};
+struct RowPlan {
+  size_t output_bytes, slices_offset, positions_offset, status_offset,
+      dispatch_bytes;
+};
+Status PlanRows(size_t rows, size_t slices, size_t statics, size_t properties,
+                size_t predictors, size_t maximum_buffer, RowPlan *out) {
+  if (rows > kHistogramMaximumSamples ||
+      slices > kMaximumModularFeatureBatchSlices || statics > 2 ||
+      statics > properties || !properties || properties > 16 || !predictors ||
+      predictors > 14 || (rows && !slices))
+    return Status::InvalidArgument("Invalid histogram row storage request");
+  const auto align = [](size_t bytes) { return (bytes + 255) & ~size_t{255}; };
+  RowPlan p{};
+  p.output_bytes = rows * (4 * statics + properties - statics + 2 * predictors);
+  p.slices_offset = align(sizeof(gjxl_histogram_rows::Mapping));
+  p.positions_offset =
+      align(p.slices_offset + slices * sizeof(gjxl_histogram_rows::Slice));
+  p.status_offset = align(p.positions_offset + rows * sizeof(uint32_t));
+  p.dispatch_bytes = p.status_offset + 256;
+  if (p.output_bytes > maximum_buffer || p.dispatch_bytes > maximum_buffer)
+    return Status::Unsupported("Histogram row buffers exceed device admission");
+  *out = p;
+  return Status::Ok();
+}
+class CompletedRows final : public PreparedHistogramRows {
+public:
+  std::unique_ptr<DeviceBuffer> buffer;
+  std::span<const std::byte> host;
+  std::span<const std::byte> bytes() const override { return host; }
+};
+struct RowContext {
+  MTL::Buffer *planes, *weighted, *output, *dispatch;
+  MTL::ComputePipelineState *pipeline;
+  gjxl_histogram_rows::Params params;
+  size_t maximum_rows;
+};
+void EncodeRows(MetalBackend &, MTL::ComputeCommandEncoder *encoder,
+                const void *opaque) {
+  const auto &c = *static_cast<const RowContext *>(opaque);
+  encoder->setComputePipelineState(c.pipeline);
+  RecordMetalComputePipelineState(c.pipeline);
+  encoder->setBuffer(c.planes, 0, 0);
+  encoder->setBuffer(c.weighted, 0, 1);
+  encoder->setBuffer(c.output, 0, 2);
+  encoder->setBuffer(c.dispatch, 0, 3);
+  encoder->setBytes(&c.params, sizeof(c.params), 4);
+  DispatchMetalThreads(encoder, MTL::Size(c.maximum_rows, c.params.slices, 1),
+                       MTL::Size(64, 1, 1));
+}
+static_assert(sizeof(gjxl_histogram_rows::Slice) == 64);
+static_assert(sizeof(gjxl_histogram_rows::Params) == 48);
+static_assert(sizeof(gjxl_histogram_rows::Mapping) == 20580);
 struct EncodeContext {
   MTL::Buffer *planes, *weighted, *output, *dispatch, *diagnostics = nullptr;
   MTL::ComputePipelineState *pipeline;
@@ -169,6 +233,164 @@ ModularTokenDeviceLimits MetalBackend::modular_stream_limits() const noexcept {
   limits.maximum_slices = kMaximumModularFeatureBatchSlices;
   return limits;
 }
+Status MetalBackend::HistogramRowStorageBound(size_t rows, size_t slices,
+                                              size_t statics, size_t properties,
+                                              size_t predictors,
+                                              HostStorageBound *out) const {
+  if (!out)
+    return Status::InvalidArgument("Null histogram row storage bound");
+  RowPlan plan;
+  if (auto s = PlanRows(rows, slices, statics, properties, predictors,
+                        modular_stream_limits().maximum_buffer_bytes, &plan);
+      !s.ok())
+    return s;
+  HostStorageBound bound;
+  if (rows && !bound.Add({plan.output_bytes + plan.dispatch_bytes,
+                          plan.output_bytes + plan.dispatch_bytes}))
+    return Status::InvalidArgument("Histogram row storage overflow");
+  *out = bound;
+  return Status::Ok();
+}
+Status
+MetalBackend::GenerateHistogramRows(const HistogramRowRequest &request,
+                                    std::unique_ptr<PreparedHistogramRows> *out,
+                                    HistogramRowProfile *profile) try {
+  const auto *source =
+      dynamic_cast<const CompletedStreamFeatures *>(request.source);
+  if (!out || !source || source->owner != this || request.positions.empty() ||
+      request.mapping.size() + request.static_mapping.size() !=
+          request.properties.size())
+    return Status::InvalidArgument("Invalid completed histogram row source");
+  RowPlan plan;
+  if (auto s = PlanRows(request.positions.size(), request.slices.size(),
+                        request.static_mapping.size(),
+                        request.properties.size(), request.predictors.size(),
+                        modular_stream_limits().maximum_buffer_bytes, &plan);
+      !s.ok())
+    return s;
+  for (size_t p = 0; p < request.properties.size(); ++p)
+    if (request.properties[p] >= 16 ||
+        (p < request.static_mapping.size() && request.properties[p] != p))
+      return Status::InvalidArgument("Invalid histogram row properties");
+  for (const auto predictor : request.predictors)
+    if (static_cast<size_t>(predictor) >= 14)
+      return Status::InvalidArgument("Invalid histogram row predictor");
+  ManagedHostScope allocation_scope(ResourceClass::kPreparation);
+  auto candidate = std::make_unique<CompletedRows>();
+  std::unique_ptr<DeviceBuffer> dispatch;
+  size_t maximum_rows = 0;
+  {
+    RowTimer timer{profile ? &profile->allocation_copy_seconds : nullptr};
+    if (auto s = Allocate(plan.output_bytes, &candidate->buffer); !s.ok())
+      return s;
+    if (auto s = Allocate(plan.dispatch_bytes, &dispatch); !s.ok())
+      return s;
+    auto *bytes =
+        static_cast<std::byte *>(AsMetalBuffer(*dispatch)->contents());
+    auto *mapping = reinterpret_cast<gjxl_histogram_rows::Mapping *>(bytes);
+    for (size_t p = 0; p < request.properties.size(); ++p)
+      mapping->properties[p] = request.properties[p];
+    for (size_t p = 0; p < request.predictors.size(); ++p)
+      mapping->predictors[p] = static_cast<uint32_t>(request.predictors[p]);
+    for (size_t p = 0; p < request.static_mapping.size(); ++p)
+      std::memcpy(mapping->statics[p], request.static_mapping[p].data(),
+                  sizeof(mapping->statics[p]));
+    for (size_t p = 0; p < request.mapping.size(); ++p)
+      std::memcpy(mapping->dynamics[p], request.mapping[p].data(),
+                  sizeof(mapping->dynamics[p]));
+    auto *slices = reinterpret_cast<gjxl_histogram_rows::Slice *>(
+        bytes + plan.slices_offset);
+    size_t next = 0;
+    for (size_t i = 0; i < request.slices.size(); ++i) {
+      const auto &slice = request.slices[i];
+      if (slice.first_row != next ||
+          slice.row_count > request.positions.size() - next)
+        return Status::InvalidArgument(
+            "Histogram row slices do not partition selected positions");
+      size_t found = source->views.size();
+      for (size_t j = 0; j < source->views.size(); ++j)
+        if (source->views[j].values.data() == slice.features.values.data()) {
+          found = j;
+          break;
+        }
+      if (found == source->views.size())
+        return Status::InvalidArgument(
+            "Histogram row feature map is not owned by this source");
+      if (auto s = ValidateWeightedFeatureView(slice.features,
+                                               source->views[found].source,
+                                               source->views[found].parameters);
+          !s.ok())
+        return s;
+      std::memcpy(&slices[i].source, &source->slices[found], sizeof(Slice));
+      slices[i].first_row = static_cast<uint32_t>(next);
+      slices[i].row_count = static_cast<uint32_t>(slice.row_count);
+      slices[i].channel = slice.channel;
+      slices[i].group = slice.group;
+      next += slice.row_count;
+      maximum_rows = std::max(maximum_rows, slice.row_count);
+    }
+    if (next != request.positions.size())
+      return Status::InvalidArgument(
+          "Histogram row slices do not cover selected positions");
+    std::memcpy(bytes + plan.positions_offset, request.positions.data(),
+                request.positions.size_bytes());
+    std::memset(bytes + plan.status_offset, 0, sizeof(uint32_t));
+  }
+  RowContext context{AsMetalBuffer(*source->planes)->handle(),
+                     AsMetalBuffer(*source->weighted)->handle(),
+                     AsMetalBuffer(*candidate->buffer)->handle(),
+                     AsMetalBuffer(*dispatch)->handle(),
+                     modular_token_pipelines_[6].get(),
+                     {plan.slices_offset, plan.positions_offset,
+                      plan.status_offset,
+                      static_cast<uint32_t>(request.positions.size()),
+                      static_cast<uint32_t>(request.slices.size()),
+                      static_cast<uint32_t>(request.static_mapping.size()),
+                      static_cast<uint32_t>(request.mapping.size()),
+                      static_cast<uint32_t>(request.predictors.size()), 0},
+                     maximum_rows};
+  {
+    RowTimer timer{profile ? &profile->submit_wait_seconds : nullptr};
+    Pending pending;
+    if (auto s = SubmitCompute("modular.histogram_rows", EncodeRows, &context,
+                               &pending.submission);
+        !s.ok())
+      return s;
+    if (!pending.submission)
+      return Status::Internal(
+          "Histogram row generation returned no submission");
+    if (auto s = pending.Wait(); !s.ok())
+      return s;
+  }
+  uint32_t status;
+  std::memcpy(&status,
+              static_cast<std::byte *>(AsMetalBuffer(*dispatch)->contents()) +
+                  plan.status_offset,
+              sizeof(status));
+  if (status & 2)
+    return Status::InvalidArgument(
+        "Histogram row position outside its channel");
+  if (status)
+    return Status::Unsupported(
+        "Histogram training residual exceeds supported range");
+  if (auto s = BorrowCompletedReadOnly(*candidate->buffer, plan.output_bytes, 0,
+                                       &candidate->host);
+      !s.ok())
+    return s;
+  if (profile) {
+    ++profile->gpu_calls;
+    profile->gpu_rows += request.positions.size();
+    profile->output_bytes += plan.output_bytes;
+    profile->dispatch_bytes += plan.dispatch_bytes;
+  }
+  *out = std::move(candidate);
+  return Status::Ok();
+} catch (const ManagedAllocationFailure &e) {
+  return e.status();
+} catch (const std::bad_alloc &) {
+  return Status::OutOfMemory("Histogram row allocation failed");
+}
+
 Status
 MetalBackend::PrepareModularStreamFeatures(std::span<const ModularStreamFeatureSlice> slices,
                                            std::unique_ptr<PreparedGpuModularStreamFeatures> *out,

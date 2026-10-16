@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 #pragma once
+#include "codec/modular/histogram_sample_rows.h"
 #include "codec/modular/histogram_tree_learning.h"
 #include "codec/modular/weighted_features.h"
 
@@ -40,10 +41,21 @@ struct HistogramSamplingOptions {
   // Previous-channel properties are outside this profile. Multiplier boxes
   // are copied into the prepared result.
   std::span<const HistogramMultiplierRange> multipliers;
+  HistogramRowBackend row_backend = HistogramRowBackend::kRasterCpu;
+  // Private experiment: bypass native dedup only after the active property
+  // mappings prove that every included pixel has a distinct row key.
+  bool use_unique_row_proof = false;
+  // Private GPU replay experiment and diagnostic counters. CPU rows ignore
+  // these flags. Deferred replay reuses the completed selection-index storage.
+  bool defer_gpu_row_materialization = false;
+  bool gpu_row_diagnostics = false;
+  HistogramRowGenerator *row_generator = nullptr;
+  const HistogramRowSource *row_source = nullptr;
 };
 struct HistogramPreparationStats {
   size_t scanned_pixels = 0, population = 0, selected_samples = 0;
   size_t quantization_samples = 0, channels = 0;
+  HistogramRowProfile rows;
 };
 
 // Finalized rows are immutable to callers. Fitting may reorder them internally.

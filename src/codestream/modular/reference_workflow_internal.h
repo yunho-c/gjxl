@@ -38,6 +38,7 @@ struct HistogramFitRequest {
   std::span<const HistogramTrainingImage> images;
   ReferenceModularStream *record = nullptr;
   size_t maximum_leaves = 0;
+  const HistogramRowSource *row_source = nullptr;
 };
 // Returns handled=false only before preparation/partitioning begins, allowing
 // the original CPU scheduler to use tighter stage admission. Once work starts,

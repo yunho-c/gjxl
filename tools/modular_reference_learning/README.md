@@ -633,3 +633,42 @@ policy. Selection, planning, independent verification and file I/O are outside
 that operation timer. The runner freezes the executable, source, source patch,
 inputs and per-call environment; the analyzer also reads historical schema 1
 captures without changing their statistics or reports.
+
+## Selected sample-row prototype
+
+`hybrid_profile` accepts an optional `raster|selected|metal|metal-deferred`
+argument after the tokenization participant count. It compares the existing
+native row path, selected-only CPU rows and Metal rows while reusing the same completed weighted
+features. Metal includes native bin lookup and compact-row generation; ordered
+deduplication stays on CPU. The workflow prototype uses GPU rows for local
+learning scopes and selected CPU rows for shared/global scopes.
+
+`run_sample_rows_qualification.py` rotates all three variants, checks exact
+independent decoding and byte identity, and waits for competing codec work.
+See [implementation and measured results](../../docs/modular-sample-rows-prototype.md)
+for the timing boundary, qualification and current opt-in status.
+
+The follow-up `run_sample_materialization_qualification.py` compares frozen
+before/after binaries in alternating order, with warmups, process/power
+snapshots, exact decode and byte checks, and overlap exclusion/retry. It measures
+the native CPU materialization and ordered deduplication improvement shared by
+all row modes. See the [CPU follow-up report](../../docs/modular-sample-materialization.md).
+
+The additional `metal-deferred` mode keeps native ordered deduplication, stores
+retained source-row indices, then copies or compacts complete learner columns.
+An optional final `rows-on` argument enables replay counters and table-growth
+timing; omit it or use `rows-off` for speed comparisons. The paired runner's
+`--candidate-metal-mode metal-deferred` compares immediate baseline replay with
+deferred candidate replay. Passing the same executable as both binaries isolates
+the two replay modes within one build. See the
+[deferred materialization report](../../docs/modular-deferred-sample-materialization.md)
+and `analyze_sample_preparation_samply.py` for sampled CPU attribution.
+
+`raster-unique`, `selected-unique`, and `metal-unique` enable the optional
+geometry/bin uniqueness proof. Proven scopes omit ordered deduplication; every
+unproved scope retains native lookup and weight behavior. `metal-unique` uses
+deferred replay for its fallback. The profile reports proof time, attempted and
+proven scopes, and the number of rows covered. Use the paired runner's
+`--baseline-metal-mode metal-deferred --candidate-unique-rows` to compare this
+experiment with the committed deferred mode on both CPU and Metal rows. See
+[the uniqueness experiment](../../docs/modular-unique-sample-rows.md).

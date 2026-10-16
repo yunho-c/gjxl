@@ -57,6 +57,14 @@ int main(int argc, char **argv) try {
             (public_api || fitter_flag == "fitter-cpu" || fitter_flag == "fitter-resumable" ||
              fitter_flag == "fitter-gpu" || fitter_flag == "fitter-auto"), "Unknown fitting route flag");
   const bool fitter_diagnostics = argc >= 13 && !public_api;
+  const std::string row_mode = "raster";
+  const bool gpu_rows = row_mode == "metal" || row_mode == "metal-deferred" || row_mode == "metal-unique";
+  Check(row_mode == "raster" || row_mode == "selected" ||
+            row_mode == "raster-unique" || row_mode == "selected-unique" || gpu_rows,
+        "Invalid sample row mode");
+  const std::string row_diagnostics = "rows-off";
+  Check(row_diagnostics == "rows-off" || row_diagnostics == "rows-on",
+        "Invalid sample row diagnostics mode");
   const bool tokenization_diagnostics = argc >= 12;
   const size_t tokenization_participants = tokenization_diagnostics ? std::stoull(argv[11]) : 1;
   Check(tokenization_participants <= 256, "Invalid tokenization participant limit");
@@ -122,6 +130,15 @@ int main(int argc, char **argv) try {
   if (argc >= 15) options.fitting_batch_fits = std::stoull(argv[14]);
   if (argc >= 17) options.fitting_execution.histogram_shards = std::stoull(argv[16]);
   if (argc >= 18) options.fitting_execution.maximum_active_properties = std::stoull(argv[17]);
+  options.sample_rows = gpu_rows ? HistogramRowBackend::kGpu
+                        : row_mode == "selected" || row_mode == "selected-unique"
+                            ? HistogramRowBackend::kSelectedCpu
+                            : HistogramRowBackend::kRasterCpu;
+  options.use_unique_row_proof = row_mode.ends_with("-unique");
+  options.defer_gpu_row_materialization = row_mode == "metal-deferred" || row_mode == "metal-unique";
+  options.gpu_row_diagnostics = row_diagnostics == "rows-on";
+  Check(!gpu_rows || route != "cpu",
+        "Metal sample rows require a hybrid feature owner");
   options.selection_cpu_participants = selection_participants;
   options.learning_cpu_participants = learning_participants;
   options.buffering =
@@ -229,6 +246,23 @@ int main(int argc, char **argv) try {
               profile.training_work.reused_prediction_samples == stats.scanned_pixels &&
               profile.training_work.weighted_prediction_samples == 0,
           "Hybrid route repeated or omitted prediction features");
+  if (gpu_rows && stats.local_trees)
+    Check(stats.rows.gpu_rows == stats.selected_samples &&
+              stats.rows.gpu_calls != 0,
+          "Metal row experiment did not cover every selected local sample");
+  if (gpu_rows && stats.local_trees && options.gpu_row_diagnostics)
+    Check(stats.rows.replay_rows == stats.selected_samples &&
+              stats.rows.retained_rows == stats.distinct_samples &&
+              stats.rows.duplicate_hits == stats.selected_samples - stats.distinct_samples &&
+              stats.rows.diagnostic_calls == stats.rows.gpu_calls,
+          "GPU row diagnostic population mismatch");
+  if (stats.rows.gpu_calls && options.defer_gpu_row_materialization)
+    Check(stats.rows.deferred_calls == stats.rows.gpu_calls,
+          "GPU deferred materialization coverage mismatch");
+  Check(stats.rows.unique_calls <= stats.rows.uniqueness_checks &&
+            stats.rows.unique_rows <= stats.distinct_samples &&
+            (options.use_unique_row_proof || !stats.rows.uniqueness_checks),
+        "Unique-row proof population mismatch");
   const size_t bytes = bytes_view.size();
   std::filesystem::create_directories(directory);
   std::ofstream output(directory / "output.jxl", std::ios::binary);
@@ -310,6 +344,36 @@ int main(int argc, char **argv) try {
   if (!parallel_diagnostics)
     out << ",\"sample_preparation\":" << stats.sample_preparation_seconds
         << ",\"fitting\":" << stats.fitting_seconds;
+  out << "},\"sample_rows\":{\"requested\":" << std::quoted(row_mode)
+      << ",\"gpu_calls\":" << stats.rows.gpu_calls
+      << ",\"gpu_rows\":" << stats.rows.gpu_rows
+      << ",\"gather_work\":" << stats.rows.gather_seconds
+      << ",\"selection_work\":" << stats.rows.selection_seconds
+      << ",\"generation_work\":" << stats.rows.generation_seconds
+      << ",\"replay_work\":" << stats.rows.replay_seconds
+      << ",\"allocation_copy_work\":" << stats.rows.allocation_copy_seconds
+      << ",\"submit_wait_work\":" << stats.rows.submit_wait_seconds
+      << ",\"output_bytes\":" << stats.rows.output_bytes
+      << ",\"dispatch_bytes\":" << stats.rows.dispatch_bytes;
+  out << ",\"diagnostics\":" << (options.gpu_row_diagnostics ? "true" : "false")
+      << ",\"diagnostic_calls\":" << stats.rows.diagnostic_calls
+      << ",\"table_growth_work\":" << stats.rows.table_growth_seconds
+      << ",\"materialization_work\":" << stats.rows.materialization_seconds
+      << ",\"replay_rows\":" << stats.rows.replay_rows
+      << ",\"retained_rows\":" << stats.rows.retained_rows
+      << ",\"lookup_probes\":" << stats.rows.lookup_probes
+      << ",\"occupied_probes\":" << stats.rows.occupied_probes
+      << ",\"duplicate_hits\":" << stats.rows.duplicate_hits
+      << ",\"saturated_rows\":" << stats.rows.saturated_rows
+      << ",\"table_growths\":" << stats.rows.table_growths
+      << ",\"rehashed_rows\":" << stats.rows.rehashed_rows
+      << ",\"deferred_calls\":" << stats.rows.deferred_calls
+      << ",\"contiguous_materializations\":" << stats.rows.contiguous_materializations
+      << ",\"unique_proof\":" << (options.use_unique_row_proof ? "true" : "false")
+      << ",\"uniqueness_work\":" << stats.rows.uniqueness_seconds
+      << ",\"uniqueness_checks\":" << stats.rows.uniqueness_checks
+      << ",\"unique_calls\":" << stats.rows.unique_calls
+      << ",\"unique_rows\":" << stats.rows.unique_rows;
   out << "},\"memory\":{\"peak_backing_bytes\":" << memory.peak_backing_bytes
       << ",\"peak_committed_bytes\":" << memory.peak_committed_bytes
       << ",\"maximum_stage_bytes\":" << stats.maximum_stage_bytes

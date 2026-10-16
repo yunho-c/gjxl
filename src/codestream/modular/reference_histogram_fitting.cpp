@@ -30,11 +30,18 @@ bool AdmissionFailure(const Status &s) {
   return s.code() == StatusCode::kUnavailable ||
          s.code() == StatusCode::kOutOfMemory;
 }
+HistogramSamplingOptions RequestSampling(const HistogramFitRequest &request,
+                                         HistogramSamplingOptions sampling) {
+  if (request.row_source) sampling.row_source = request.row_source;
+  if (sampling.row_backend == HistogramRowBackend::kGpu && !sampling.row_source)
+    sampling.row_backend = HistogramRowBackend::kSelectedCpu;
+  return sampling;
+}
 Status JobBound(const HistogramFitRequest &request,
                 HistogramSamplingOptions sampling, size_t *bytes) {
   HostStorageBound preparation, fitting, extra;
   if (auto s = ComputeHistogramSamplePreparationStorageBound(
-          request.images, sampling, &preparation);
+          request.images, RequestSampling(request, sampling), &preparation);
       !s.ok())
     return s;
   size_t rows = 0;
@@ -194,7 +201,7 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
         {
           Seconds preparation(job.stats.sample_preparation_seconds);
           if (auto s = PrepareHistogramSamples(requests[i].images, &job.samples,
-                                               sampling);
+                                               RequestSampling(requests[i], sampling));
               !s.ok())
             return s;
         }
@@ -203,6 +210,7 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
         const auto &prepared = job.samples.stats();
         record.learning = {0, requests[i].images.size(), prepared,
                            job.samples.samples().weights.size(), 1};
+        job.stats.rows = prepared.rows;
         job.stats.learning_calls = 1;
         job.stats.scanned_pixels = prepared.scanned_pixels;
         job.stats.selected_samples = prepared.selected_samples;
@@ -482,6 +490,7 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
       stats->*member += job.stats.*member;
     stats->maximum_stage_bytes =
         std::max(stats->maximum_stage_bytes, job.stats.maximum_stage_bytes);
+    MergeHistogramRowProfile(stats->rows, job.stats.rows);
     stats->sample_preparation_seconds += job.stats.sample_preparation_seconds;
     stats->fitting_seconds += job.stats.fitting_seconds;
     if (parent_profile) {

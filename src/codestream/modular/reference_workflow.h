@@ -41,6 +41,16 @@ struct ReferenceWorkflowOptions {
   histogram_gpu_internal::HistogramFittingExecutionOptions fitting_execution;
   // Caller-owned, coordinator-only sink; disabled for ordinary encoding.
   histogram_gpu_internal::HistogramFittingProfile *fitting_gpu_profile = nullptr;
+
+  // Private sample-row experiment. GPU batching is initially local-scope only;
+  // global scopes use selected CPU rows. No public policy/default changes.
+  HistogramRowBackend sample_rows = HistogramRowBackend::kRasterCpu;
+  bool use_unique_row_proof = false;
+  bool defer_gpu_row_materialization = false;
+  bool gpu_row_diagnostics = false;
+  HistogramRowGenerator *row_generator = nullptr;
+  const HistogramRowSource *row_source =
+      nullptr; // Borrowed for a joined local batch.
 };
 struct ReferenceLearningStats {
   size_t first_group = 0, stop_group = 0;
@@ -77,6 +87,7 @@ struct ReferenceWorkflowStats {
   // Sums of per-job wall time (overlap when local jobs run concurrently).
   // Preparation includes sample planning; fitting includes compaction.
   double sample_preparation_seconds = 0, fitting_seconds = 0;
+  HistogramRowProfile rows;
   // Caller-wall intervals. Learning includes admission, preparation, fitting,
   // joins and diagnostic reduction. Features and GPU tokens are separate.
   double learning_seconds = 0, feature_seconds = 0, token_seconds = 0;
