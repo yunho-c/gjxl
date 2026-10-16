@@ -53,6 +53,10 @@ The isolated 1029 pilot tried 1,024 / 4,096 / 16,384 / 65,536-row cutoffs. The s
 
 The implementation already uses bounded threadgroup-local integer histogram tiles and lets CPU tails progress during GPU evaluation. The next useful investigation is dispatch-level GPU attribution: separate validation, histogram collection, prefixing, exact floating-point scoring and ordered selection; then measure batch occupancy and allocation/encoding overhead. Use that evidence to tune shard/slot counts or reduce dispatch boundaries. Preserve exact costs and complete bytes. Moving additional tree-control/partition work to GPU should follow a demonstrated bottleneck, rather than being assumed to fix this result.
 
+The subsequent [phase-attribution study](gpu-histogram-fitting-profile.md) implements
+that investigation and qualifies a SIMD prefix-scan optimization. The numbers
+above remain the original integration measurements.
+
 ## Correctness and failure qualification
 
 - Eight focused Release tests pass, covering the CPU contract/reference/queue, parallel learning, Metal operator/integration, complete workflow and resource budget. Final routing tests additionally cover the private automatic eligibility rules.

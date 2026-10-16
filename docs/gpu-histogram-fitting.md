@@ -287,8 +287,11 @@ tiles with 3,072 count cells and 256 occupancy/extra-bit bins, using 14 KiB of
 threadgroup memory. This also fits with shader-validation instrumentation.
 Tiles scan the selected membership/property column and load residuals only
 for matching bins. Every shard writes its complete output, including zeros;
-scratch reuse no longer needs a separate clear dispatch. The prefix and
-floating-point scoring order remain unchanged.
+scratch reuse no longer needs a separate clear dispatch. Prefix sums now use
+one SIMD group per integer histogram, extra-bit or occupancy column, carrying
+totals across bin tiles. The floating-point scoring order remains unchanged.
+See [phase attribution and qualification](gpu-histogram-fitting-profile.md)
+for the measured motivation and the opt-in wall/stage profiling contract.
 
 Only this Metal source is compiled with `-fno-fast-math -ffp-contract=off`.
 Its explicit FMA polynomial, four-lane accumulation and pairwise sum match
