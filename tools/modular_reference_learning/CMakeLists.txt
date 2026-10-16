@@ -51,6 +51,19 @@ target_link_libraries(reference_learning PRIVATE
   ${REFERENCE_BUILD}/third_party/brotli/libbrotlidec.dylib
   ${REFERENCE_BUILD}/third_party/brotli/libbrotlicommon.dylib)
 
+# The bridge can consume either CPU-only or Metal-enabled production archives.
+# The latter's workflow object also references Metal admission/backend helpers.
+file(STRINGS "${GJXL_BUILD}/CMakeCache.txt" gjxl_metal_enabled
+  REGEX "^GJXL_ENABLE_METAL:BOOL=ON$")
+if(gjxl_metal_enabled)
+  foreach(framework Metal Foundation CoreGraphics)
+    find_library(gjxl_${framework}_framework ${framework} REQUIRED)
+    target_link_libraries(reference_learning PRIVATE "${gjxl_${framework}_framework}")
+  endforeach()
+  target_link_libraries(reference_learning PRIVATE
+    ${GJXL_BUILD}/libgjxl_metal.a ${GJXL_BUILD}/libgjxl_gpu_butteraugli.a)
+endif()
+
 # A native-only target also runs in this small research build. It intentionally
 # has no reference headers/libraries and uses the normal compiler math settings.
 add_executable(native_fit_test
