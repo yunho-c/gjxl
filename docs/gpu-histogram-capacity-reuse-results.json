@@ -1,0 +1,3024 @@
+{
+  "schema": 1,
+  "revision": "5053b4549dffd9ba487f17cbfc43b9c2e6fb9d50",
+  "power": "battery",
+  "modes": [
+    "fresh",
+    "reuse",
+    "capacity"
+  ],
+  "artifact_directory": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016",
+  "artifacts": {
+    "qualification": {
+      "path": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/results.json",
+      "sha256": "ab0827df53c7078659ca806088aa86908d512b61b6931d31273ac7bec7880c4a"
+    },
+    "attribution": {
+      "path": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/results.json",
+      "sha256": "fec32e5a005bf16ee052b197080ced97386726cf5e37eea6178da60bb741d48b"
+    },
+    "confirmation": {
+      "path": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/results.json",
+      "sha256": "d069829c5cb7b402e33e18d7a21131eeffb746b2ad64a3cade37867a67000052"
+    },
+    "probe": {
+      "path": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/variable-batches/manifest.json",
+      "sha256": "323cc8f98ef6e98859c9105c609c8c92ab84074ca20eb6ea642712fdffe3b492"
+    }
+  },
+  "phases": {
+    "qualification": {
+      "rejected": 0,
+      "encodes": 63,
+      "cases": {
+        "photo-large-1029": {
+          "fresh": {
+            "wall_seconds": {
+              "n": 6,
+              "median": 6.221309333500001,
+              "minimum": 5.454560166,
+              "maximum": 6.545651625,
+              "mean": 6.181708479166667
+            },
+            "cpu_seconds": {
+              "n": 6,
+              "median": 49.449107,
+              "minimum": 44.348989,
+              "maximum": 50.241895,
+              "mean": 48.359297166666664
+            },
+            "learning_seconds": {
+              "n": 6,
+              "median": 4.489014770500001,
+              "minimum": 3.987559333,
+              "maximum": 4.920154043,
+              "mean": 4.513028222333333
+            },
+            "gpu_evaluation_seconds": {
+              "n": 6,
+              "median": 2.9330217645000003,
+              "minimum": 2.5634971579999997,
+              "maximum": 3.1042184899999996,
+              "mean": 2.908077617833334
+            },
+            "gpu_batches": {
+              "n": 6,
+              "median": 392.0,
+              "minimum": 343,
+              "maximum": 424,
+              "mean": 389
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 6,
+                "median": 1000457252.0,
+                "minimum": 998395428,
+                "maximum": 1001811236,
+                "mean": 1000393124
+              },
+              "peak_committed_bytes": {
+                "n": 6,
+                "median": 1902548160.0,
+                "minimum": 1902548160,
+                "maximum": 1902548160,
+                "mean": 1902548160
+              },
+              "maximum_stage_bytes": {
+                "n": 6,
+                "median": 1392307800.0,
+                "minimum": 1392307800,
+                "maximum": 1392307800,
+                "mean": 1392307800
+              },
+              "idle_bytes_after_encode": {
+                "n": 6,
+                "median": 0.0,
+                "minimum": 0,
+                "maximum": 0,
+                "mean": 0
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 5.454560166,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1029-fresh-r1-a0",
+                "result_sha256": "1dbf628016ce5531dad46cb95539e8e34e4b3d4a535db1c87b516f9e06d37bd5"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 6.200904792,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1029-fresh-r2-a0",
+                "result_sha256": "596efbfa4671c7a600f72cc5da1738ffe028615d4b3431d8efe52786c9430cac"
+              },
+              {
+                "repetition": 3,
+                "wall_seconds": 6.545651625,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1029-fresh-r3-a0",
+                "result_sha256": "24d8f8ca23ce49fbfa5e9c6e12d649850b8da76cecf70a342d924d4f0dea2ab7"
+              },
+              {
+                "repetition": 4,
+                "wall_seconds": 6.182639167,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1029-fresh-r4-a0",
+                "result_sha256": "785c2a1c9cdb93d65c6735d1333afb2d65c7dc6b7b074096f03153d180c99947"
+              },
+              {
+                "repetition": 5,
+                "wall_seconds": 6.46478125,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1029-fresh-r5-a0",
+                "result_sha256": "13b54e6d21adacd3b19160a7b3e5c0296800fdb9ac765c4aa95146160d363c97"
+              },
+              {
+                "repetition": 6,
+                "wall_seconds": 6.241713875,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1029-fresh-r6-a0",
+                "result_sha256": "5577baf68283be35f0cb4576ebc3c932599db4455ad2bc0a5ec8bfea822190c5"
+              }
+            ]
+          },
+          "reuse": {
+            "wall_seconds": {
+              "n": 6,
+              "median": 5.78917,
+              "minimum": 5.140870458,
+              "maximum": 6.336144458,
+              "mean": 5.733944451166667
+            },
+            "cpu_seconds": {
+              "n": 6,
+              "median": 44.847989999999996,
+              "minimum": 43.570176,
+              "maximum": 49.909957,
+              "mean": 46.08586916666667
+            },
+            "learning_seconds": {
+              "n": 6,
+              "median": 4.193716001,
+              "minimum": 3.7021183740000003,
+              "maximum": 4.50411025,
+              "mean": 4.1362635975
+            },
+            "gpu_evaluation_seconds": {
+              "n": 6,
+              "median": 2.583451179499998,
+              "minimum": 2.3938397740000004,
+              "maximum": 2.872261310000002,
+              "mean": 2.5926027814999997
+            },
+            "gpu_batches": {
+              "n": 6,
+              "median": 403.5,
+              "minimum": 375,
+              "maximum": 483,
+              "mean": 415
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 6,
+                "median": 999942180.0,
+                "minimum": 996525860,
+                "maximum": 1000780580,
+                "mean": 999290745.3333334
+              },
+              "peak_committed_bytes": {
+                "n": 6,
+                "median": 1910440516.0,
+                "minimum": 1909288132,
+                "maximum": 1918324420,
+                "mean": 1912684441.3333333
+              },
+              "maximum_stage_bytes": {
+                "n": 6,
+                "median": 1392307800.0,
+                "minimum": 1392307800,
+                "maximum": 1392307800,
+                "mean": 1392307800
+              },
+              "idle_bytes_after_encode": {
+                "n": 6,
+                "median": 7892356.0,
+                "minimum": 6739972,
+                "maximum": 15776260,
+                "mean": 10136281.333333334
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 6.336144458,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1029-reuse-r1-a0",
+                "result_sha256": "c8f6de7a1aa01378146a2c5a8c1185b42c45babe0d9156d1fe4ee97150c4db4a"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 5.2366835,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1029-reuse-r2-a0",
+                "result_sha256": "7a58677f1d59a0d1f39b4fe2bbf2543e01699168d0a4f92a313c49f9e8a935a0"
+              },
+              {
+                "repetition": 3,
+                "wall_seconds": 5.140870458,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1029-reuse-r3-a0",
+                "result_sha256": "591f5d648d45b487b76165387ee7d4cebdcf196073e5475585957546b6750427"
+              },
+              {
+                "repetition": 4,
+                "wall_seconds": 6.111628291,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1029-reuse-r4-a0",
+                "result_sha256": "a6162ef19a88e9ac2179bd86a18017f47cf51ec762152ec38115bd75ac24717c"
+              },
+              {
+                "repetition": 5,
+                "wall_seconds": 5.920768,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1029-reuse-r5-a0",
+                "result_sha256": "e77543489b2eacd5fecd55041d8ee214aec4fa5cd5df4251e6e8510f715247ae"
+              },
+              {
+                "repetition": 6,
+                "wall_seconds": 5.657572,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1029-reuse-r6-a0",
+                "result_sha256": "87be2792beddd45aab2d9829ed070fe95fa139bd8d6cea4f81f17875e40e9784"
+              }
+            ],
+            "paired_savings_seconds": {
+              "n": 6,
+              "median": 0.5640775625000001,
+              "minimum": -0.8815842919999994,
+              "maximum": 1.4047811669999994,
+              "mean": 0.4477640280000001
+            },
+            "paired_faster_count": 5
+          },
+          "capacity": {
+            "wall_seconds": {
+              "n": 6,
+              "median": 5.247145958,
+              "minimum": 5.096502834,
+              "maximum": 6.024211959,
+              "mean": 5.355536472333333
+            },
+            "cpu_seconds": {
+              "n": 6,
+              "median": 44.1735495,
+              "minimum": 43.652832,
+              "maximum": 48.902467,
+              "mean": 44.869874333333335
+            },
+            "learning_seconds": {
+              "n": 6,
+              "median": 3.7806254585000003,
+              "minimum": 3.620092956,
+              "maximum": 4.289908249,
+              "mean": 3.8457906731666665
+            },
+            "gpu_evaluation_seconds": {
+              "n": 6,
+              "median": 2.125330523999999,
+              "minimum": 1.959358875999998,
+              "maximum": 2.5484069149999984,
+              "mean": 2.183363343666666
+            },
+            "gpu_batches": {
+              "n": 6,
+              "median": 526.0,
+              "minimum": 473,
+              "maximum": 581,
+              "mean": 528.1666666666666
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 6,
+                "median": 1001908516.0,
+                "minimum": 1001488164,
+                "maximum": 1002843172,
+                "mean": 1002026190.6666666
+              },
+              "peak_committed_bytes": {
+                "n": 6,
+                "median": 1956902596.0,
+                "minimum": 1956482244,
+                "maximum": 1957837252,
+                "mean": 1957020270.6666667
+              },
+              "maximum_stage_bytes": {
+                "n": 6,
+                "median": 1392307800.0,
+                "minimum": 1392307800,
+                "maximum": 1392307800,
+                "mean": 1392307800
+              },
+              "idle_bytes_after_encode": {
+                "n": 6,
+                "median": 54354436.0,
+                "minimum": 53934084,
+                "maximum": 55289092,
+                "mean": 54472110.666666664
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 5.413243917,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1029-capacity-r1-a0",
+                "result_sha256": "146d6f9b15d6fe5e6cd3fc3e14879262f119108d910d6928f148f829db921fc5"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 5.104968208,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1029-capacity-r2-a0",
+                "result_sha256": "8e17b8e2ae25bcac315793ad51f0c1a3a3ecd48255f03c1c70408910242c98c8"
+              },
+              {
+                "repetition": 3,
+                "wall_seconds": 5.096502834,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1029-capacity-r3-a0",
+                "result_sha256": "f04655ed8bec2600f6bd977da033eeb4e0b019e2572c1f2ca372f6ab3761cbe9"
+              },
+              {
+                "repetition": 4,
+                "wall_seconds": 6.024211959,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1029-capacity-r4-a0",
+                "result_sha256": "fa921091ffd871c109bf76ffff8a37cd24ac0af8273bd932128caf0d07e571b0"
+              },
+              {
+                "repetition": 5,
+                "wall_seconds": 5.20986875,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1029-capacity-r5-a0",
+                "result_sha256": "7daa029acf96d1a8921c4ed654a45c92238a81ccba8fd0114adc35566bc21daf"
+              },
+              {
+                "repetition": 6,
+                "wall_seconds": 5.284423166,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1029-capacity-r6-a0",
+                "result_sha256": "b76303d39853d2d6059d55d6d65f288e7e79dcf1547dab7f76ced733bbbc8ba3"
+              }
+            ],
+            "paired_savings_seconds": {
+              "n": 6,
+              "median": 1.0266136465000004,
+              "minimum": 0.041316249000000305,
+              "maximum": 1.4491487909999998,
+              "mean": 0.8261720068333335
+            },
+            "paired_faster_count": 6
+          }
+        },
+        "photo-large-1039": {
+          "fresh": {
+            "wall_seconds": {
+              "n": 6,
+              "median": 3.972043021,
+              "minimum": 3.581161542,
+              "maximum": 5.18537025,
+              "mean": 4.086719007
+            },
+            "cpu_seconds": {
+              "n": 6,
+              "median": 28.4389725,
+              "minimum": 27.265038,
+              "maximum": 30.263421,
+              "mean": 28.4524475
+            },
+            "learning_seconds": {
+              "n": 6,
+              "median": 2.588396499,
+              "minimum": 2.239344043,
+              "maximum": 3.744383459,
+              "mean": 2.6914891735
+            },
+            "gpu_evaluation_seconds": {
+              "n": 6,
+              "median": 2.0626777075000007,
+              "minimum": 1.805809709000001,
+              "maximum": 2.906396113,
+              "mean": 2.134986199166667
+            },
+            "gpu_batches": {
+              "n": 6,
+              "median": 309.0,
+              "minimum": 287,
+              "maximum": 421,
+              "mean": 327
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 6,
+                "median": 953281996.0,
+                "minimum": 945293388,
+                "maximum": 953863244,
+                "mean": 952015521.3333334
+              },
+              "peak_committed_bytes": {
+                "n": 6,
+                "median": 1672463968.0,
+                "minimum": 1672463968,
+                "maximum": 1672463968,
+                "mean": 1672463968
+              },
+              "maximum_stage_bytes": {
+                "n": 6,
+                "median": 1211651832.0,
+                "minimum": 1211651832,
+                "maximum": 1211651832,
+                "mean": 1211651832
+              },
+              "idle_bytes_after_encode": {
+                "n": 6,
+                "median": 0.0,
+                "minimum": 0,
+                "maximum": 0,
+                "mean": 0
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 3.581161542,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1039-fresh-r1-a0",
+                "result_sha256": "2ab44c784f9181d9ec91db65fe840487f882b96f961b9ed42134c1ad5dd9de77"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 4.13299725,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1039-fresh-r2-a0",
+                "result_sha256": "f2c3e3c0b0084f05e04fb496875711594d0a0232efc1bb9c7ee23c288a83d78f"
+              },
+              {
+                "repetition": 3,
+                "wall_seconds": 5.18537025,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1039-fresh-r3-a0",
+                "result_sha256": "d77c23f9591b616263735c06281b59a7497071cd7042df71f3e9ac9147b0ddc6"
+              },
+              {
+                "repetition": 4,
+                "wall_seconds": 3.932963,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1039-fresh-r4-a0",
+                "result_sha256": "5d1d4d40a471aad68eac5d33c18820a5f20a85423c33f01ec54c3f2b83938b71"
+              },
+              {
+                "repetition": 5,
+                "wall_seconds": 4.011123042,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1039-fresh-r5-a0",
+                "result_sha256": "e19ee1b3aeeadbe7628a0628c405e0d3fb1091f4ac9166608b6361c6b26554f1"
+              },
+              {
+                "repetition": 6,
+                "wall_seconds": 3.676698958,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1039-fresh-r6-a0",
+                "result_sha256": "2490bc0ef443e5a910c33c8bf05617d09381f7bfc304b6b2226833339ce56400"
+              }
+            ]
+          },
+          "reuse": {
+            "wall_seconds": {
+              "n": 6,
+              "median": 3.6328950835000002,
+              "minimum": 3.493121125,
+              "maximum": 4.117898459,
+              "mean": 3.717182153
+            },
+            "cpu_seconds": {
+              "n": 6,
+              "median": 27.438705499999998,
+              "minimum": 26.278965,
+              "maximum": 28.470902,
+              "mean": 27.5054865
+            },
+            "learning_seconds": {
+              "n": 6,
+              "median": 2.2936990625,
+              "minimum": 2.126336583,
+              "maximum": 2.74521675,
+              "mean": 2.3416089375
+            },
+            "gpu_evaluation_seconds": {
+              "n": 6,
+              "median": 1.8323808500000003,
+              "minimum": 1.6395422470000018,
+              "maximum": 2.0444147869999973,
+              "mean": 1.832167125166667
+            },
+            "gpu_batches": {
+              "n": 6,
+              "median": 312.0,
+              "minimum": 309,
+              "maximum": 356,
+              "mean": 319.8333333333333
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 6,
+                "median": 950752716.0,
+                "minimum": 950456652,
+                "maximum": 953718604,
+                "mean": 951619233.3333334
+              },
+              "peak_committed_bytes": {
+                "n": 6,
+                "median": 1678640740.0,
+                "minimum": 1678640740,
+                "maximum": 1684817252,
+                "mean": 1679670158.6666667
+              },
+              "maximum_stage_bytes": {
+                "n": 6,
+                "median": 1211651832.0,
+                "minimum": 1211651832,
+                "maximum": 1211651832,
+                "mean": 1211651832
+              },
+              "idle_bytes_after_encode": {
+                "n": 6,
+                "median": 6176772.0,
+                "minimum": 6176772,
+                "maximum": 12353284,
+                "mean": 7206190.666666667
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 3.624283667,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1039-reuse-r1-a0",
+                "result_sha256": "aa2efb544a39169ca2f7d3d3a289a36c04b67a104219f1e6c15f137cfd0423dd"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 4.117898459,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1039-reuse-r2-a0",
+                "result_sha256": "7b11f009071e9f3afe9c1216e54bc3a04eec1152f9e576ede3e03a7d376ecef8"
+              },
+              {
+                "repetition": 3,
+                "wall_seconds": 3.812636042,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1039-reuse-r3-a0",
+                "result_sha256": "7ee7c084f9d29f6f6e40f2717bb68a73aec381e0e984aa7ee8b0bd880424ea70"
+              },
+              {
+                "repetition": 4,
+                "wall_seconds": 3.6415065,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1039-reuse-r4-a0",
+                "result_sha256": "ebb02d646d994cc2aa0fc6db7ac02e08408a79ab6be5c7754290123318d4cd5a"
+              },
+              {
+                "repetition": 5,
+                "wall_seconds": 3.493121125,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1039-reuse-r5-a0",
+                "result_sha256": "f8fc600f9c961160382ae036379d90e835efead552daeebbf964786f9d776332"
+              },
+              {
+                "repetition": 6,
+                "wall_seconds": 3.613647125,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1039-reuse-r6-a0",
+                "result_sha256": "afd99f2a945a7f98654a1eb5c9600483fcd0ea808e8421694749fac301e2b890"
+              }
+            ],
+            "paired_savings_seconds": {
+              "n": 6,
+              "median": 0.1772541664999998,
+              "minimum": -0.04312212500000001,
+              "maximum": 1.3727342080000002,
+              "mean": 0.36953685399999997
+            },
+            "paired_faster_count": 5
+          },
+          "capacity": {
+            "wall_seconds": {
+              "n": 6,
+              "median": 3.5893969165,
+              "minimum": 3.330743083,
+              "maximum": 3.954218667,
+              "mean": 3.6162526528333334
+            },
+            "cpu_seconds": {
+              "n": 6,
+              "median": 28.2004005,
+              "minimum": 27.168272,
+              "maximum": 28.767039,
+              "mean": 28.046938333333333
+            },
+            "learning_seconds": {
+              "n": 6,
+              "median": 2.1968377915,
+              "minimum": 1.986595334,
+              "maximum": 2.548168918,
+              "mean": 2.2371399795
+            },
+            "gpu_evaluation_seconds": {
+              "n": 6,
+              "median": 1.5570472449999992,
+              "minimum": 1.4738143379999997,
+              "maximum": 1.8219015450000007,
+              "mean": 1.6141230494999996
+            },
+            "gpu_batches": {
+              "n": 6,
+              "median": 425.0,
+              "minimum": 387,
+              "maximum": 455,
+              "mean": 422.5
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 6,
+                "median": 956035660.0,
+                "minimum": 953517132,
+                "maximum": 957732172,
+                "mean": 955772876
+              },
+              "peak_committed_bytes": {
+                "n": 6,
+                "median": 1737063012.0,
+                "minimum": 1734544484,
+                "maximum": 1738759524,
+                "mean": 1736800228
+              },
+              "maximum_stage_bytes": {
+                "n": 6,
+                "median": 1211651832.0,
+                "minimum": 1211651832,
+                "maximum": 1211651832,
+                "mean": 1211651832
+              },
+              "idle_bytes_after_encode": {
+                "n": 6,
+                "median": 64599044.0,
+                "minimum": 62080516,
+                "maximum": 66295556,
+                "mean": 64336260
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 3.330743083,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1039-capacity-r1-a0",
+                "result_sha256": "886a3656ff94a04c848bb348f21e684e5651216ed0e41d1994ad000917fc5579"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 3.745731542,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1039-capacity-r2-a0",
+                "result_sha256": "d3a1241fc0fbbe9ff4d931536c1c9bf1373323f2cb1c6e05266372d9e1b8dd88"
+              },
+              {
+                "repetition": 3,
+                "wall_seconds": 3.52502525,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1039-capacity-r3-a0",
+                "result_sha256": "f3f975bf3524f9e545d31ccc16687ecf7435226ee6546017fcde747cac116207"
+              },
+              {
+                "repetition": 4,
+                "wall_seconds": 3.653768583,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1039-capacity-r4-a0",
+                "result_sha256": "b912e39ac7807bd842ffa168f542421492d0889c4d67205e7c3272a61e60cd30"
+              },
+              {
+                "repetition": 5,
+                "wall_seconds": 3.954218667,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1039-capacity-r5-a0",
+                "result_sha256": "ff0be5e1870cb5a44041db2911758536de25574a7a21a85ebfc0bb3e558e3eae"
+              },
+              {
+                "repetition": 6,
+                "wall_seconds": 3.488028792,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1039-capacity-r6-a0",
+                "result_sha256": "aefda9308ecdda1a9e81c790e68d8fff6e7cb1726926effe1c191cb61d5a06ec"
+              }
+            ],
+            "paired_savings_seconds": {
+              "n": 6,
+              "median": 0.2648064379999997,
+              "minimum": 0.05690437500000023,
+              "maximum": 1.660345,
+              "mean": 0.4704663541666665
+            },
+            "paired_faster_count": 6
+          }
+        },
+        "photo-large-1049": {
+          "fresh": {
+            "wall_seconds": {
+              "n": 6,
+              "median": 12.249636625,
+              "minimum": 4.526096083,
+              "maximum": 14.312075167,
+              "mean": 10.397053833333333
+            },
+            "cpu_seconds": {
+              "n": 6,
+              "median": 90.398668,
+              "minimum": 30.926505,
+              "maximum": 93.559341,
+              "mean": 71.3528795
+            },
+            "learning_seconds": {
+              "n": 6,
+              "median": 7.3576679165000005,
+              "minimum": 2.916670668,
+              "maximum": 8.927249041,
+              "mean": 6.391956736333333
+            },
+            "gpu_evaluation_seconds": {
+              "n": 6,
+              "median": 4.655170788000003,
+              "minimum": 2.198345163,
+              "maximum": 5.301224119,
+              "mean": 4.030327739333334
+            },
+            "gpu_batches": {
+              "n": 6,
+              "median": 608.0,
+              "minimum": 320,
+              "maximum": 774,
+              "mean": 561.8333333333334
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 6,
+                "median": 922925596.0,
+                "minimum": 922410268,
+                "maximum": 924472604,
+                "mean": 923183430.6666666
+              },
+              "peak_committed_bytes": {
+                "n": 6,
+                "median": 1603050103.0,
+                "minimum": 1603050103,
+                "maximum": 1603050103,
+                "mean": 1603050103
+              },
+              "maximum_stage_bytes": {
+                "n": 6,
+                "median": 1157322135.0,
+                "minimum": 1157322135,
+                "maximum": 1157322135,
+                "mean": 1157322135
+              },
+              "idle_bytes_after_encode": {
+                "n": 6,
+                "median": 0.0,
+                "minimum": 0,
+                "maximum": 0,
+                "mean": 0
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 14.12815075,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1049-fresh-r1-a0",
+                "result_sha256": "60af775d73f72b38b45c97de0ab357e2c5915789e16a17de2dbe5ced71d7daef"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 12.40788925,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1049-fresh-r2-a0",
+                "result_sha256": "381c2988cffddea35a5a4a3a48eb522c4e1003d613c7278cfc64c3b2933ef03e"
+              },
+              {
+                "repetition": 3,
+                "wall_seconds": 12.091384,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1049-fresh-r3-a0",
+                "result_sha256": "766c7395ce0f07d2e9c69bd03e76a8da536399e9ca527f3f063b2cae8cb97d56"
+              },
+              {
+                "repetition": 4,
+                "wall_seconds": 4.91672775,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1049-fresh-r4-a0",
+                "result_sha256": "06432cab5554c379c624b2a84bceec2877c31ed1668ef7d2120304961053930f"
+              },
+              {
+                "repetition": 5,
+                "wall_seconds": 4.526096083,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1049-fresh-r5-a0",
+                "result_sha256": "cabb4747ef3b9299d5949410b0962204b5d2377c7dec2aa96262cef1d128b8b2"
+              },
+              {
+                "repetition": 6,
+                "wall_seconds": 14.312075167,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1049-fresh-r6-a0",
+                "result_sha256": "b360ec16a83ec24b532d1e714f1fc128b2a4bdef2b76557d61883ea06524423d"
+              }
+            ]
+          },
+          "reuse": {
+            "wall_seconds": {
+              "n": 6,
+              "median": 12.647433187499999,
+              "minimum": 4.932069375,
+              "maximum": 14.645750333,
+              "mean": 11.88933425
+            },
+            "cpu_seconds": {
+              "n": 6,
+              "median": 90.3835635,
+              "minimum": 30.834733,
+              "maximum": 92.15797,
+              "mean": 80.8578375
+            },
+            "learning_seconds": {
+              "n": 6,
+              "median": 7.8794437495,
+              "minimum": 3.1535736659999998,
+              "maximum": 9.310978333,
+              "mean": 7.361429999666667
+            },
+            "gpu_evaluation_seconds": {
+              "n": 6,
+              "median": 4.8857025705,
+              "minimum": 2.15599124,
+              "maximum": 5.373213489999998,
+              "mean": 4.519718161833333
+            },
+            "gpu_batches": {
+              "n": 6,
+              "median": 673.0,
+              "minimum": 404,
+              "maximum": 763,
+              "mean": 643.8333333333334
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 6,
+                "median": 923441052.0,
+                "minimum": 918994972,
+                "maximum": 923957276,
+                "mean": 922786076
+              },
+              "peak_committed_bytes": {
+                "n": 6,
+                "median": 1608367611.0,
+                "minimum": 1608075643,
+                "maximum": 1609800059,
+                "mean": 1608651515
+              },
+              "maximum_stage_bytes": {
+                "n": 6,
+                "median": 1157322135.0,
+                "minimum": 1157322135,
+                "maximum": 1157322135,
+                "mean": 1157322135
+              },
+              "idle_bytes_after_encode": {
+                "n": 6,
+                "median": 5317508.0,
+                "minimum": 5025540,
+                "maximum": 6749956,
+                "mean": 5601412
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 12.082125125,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1049-reuse-r1-a0",
+                "result_sha256": "2fdab2d154a9389be830d346df1bd38abc6a7650ec235215218f225e66bb3763"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 13.21274125,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1049-reuse-r2-a0",
+                "result_sha256": "72e1f79de5fa97819322622ab4beeeedf69c5e5c5327f01dd400ed98e1edae83"
+              },
+              {
+                "repetition": 3,
+                "wall_seconds": 11.897994458,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1049-reuse-r3-a0",
+                "result_sha256": "27667192ac01eb2b595fb6fc8609b29a4cc36c01f3d279422b60d57f201fb093"
+              },
+              {
+                "repetition": 4,
+                "wall_seconds": 4.932069375,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1049-reuse-r4-a0",
+                "result_sha256": "425e5ed2fe6c996c43cc31a9051fa03c1d3734b128e7829c7ebb4883a246e021"
+              },
+              {
+                "repetition": 5,
+                "wall_seconds": 14.565324959,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1049-reuse-r5-a0",
+                "result_sha256": "0702d17893718c595a7fc2ef84b248fe1fbb4001517870f11ca233ceb4027ce9"
+              },
+              {
+                "repetition": 6,
+                "wall_seconds": 14.645750333,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1049-reuse-r6-a0",
+                "result_sha256": "1f48d611fa3646839cfc1e6299b516290af420e09cb6e225cfcd17e888c20dfc"
+              }
+            ],
+            "paired_savings_seconds": {
+              "n": 6,
+              "median": -0.17450839550000063,
+              "minimum": -10.039228876,
+              "maximum": 2.0460256250000004,
+              "mean": -1.4922804166666668
+            },
+            "paired_faster_count": 2
+          },
+          "capacity": {
+            "wall_seconds": {
+              "n": 6,
+              "median": 12.152851125,
+              "minimum": 6.597542292,
+              "maximum": 13.722007292,
+              "mean": 10.719099132
+            },
+            "cpu_seconds": {
+              "n": 6,
+              "median": 90.508707,
+              "minimum": 28.872042,
+              "maximum": 91.098271,
+              "mean": 70.45647916666667
+            },
+            "learning_seconds": {
+              "n": 6,
+              "median": 7.208447896500001,
+              "minimum": 4.9507414999999995,
+              "maximum": 7.990210168000001,
+              "mean": 6.7251367365000005
+            },
+            "gpu_evaluation_seconds": {
+              "n": 6,
+              "median": 3.876323580499998,
+              "minimum": 2.6602556310000023,
+              "maximum": 4.252074348000005,
+              "mean": 3.667891631833335
+            },
+            "gpu_batches": {
+              "n": 6,
+              "median": 803.5,
+              "minimum": 604,
+              "maximum": 891,
+              "mean": 768.3333333333334
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 6,
+                "median": 934891036.0,
+                "minimum": 932406812,
+                "maximum": 937070620,
+                "mean": 935012124
+              },
+              "peak_committed_bytes": {
+                "n": 6,
+                "median": 1666326395.0,
+                "minimum": 1663842171,
+                "maximum": 1668505979,
+                "mean": 1666447483
+              },
+              "maximum_stage_bytes": {
+                "n": 6,
+                "median": 1157322135.0,
+                "minimum": 1157322135,
+                "maximum": 1157322135,
+                "mean": 1157322135
+              },
+              "idle_bytes_after_encode": {
+                "n": 6,
+                "median": 63276292.0,
+                "minimum": 60792068,
+                "maximum": 65455876,
+                "mean": 63397380
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 12.457932083,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1049-capacity-r1-a0",
+                "result_sha256": "ec39e9dee8b1c9b2e4defd5efe874f84d2ed8cff8fc9da9dac98b470b46b14fb"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 12.828814125,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1049-capacity-r2-a0",
+                "result_sha256": "269a799ce708f94904ab3c8c82abafdc2490e5e992471986b6e21be175486f69"
+              },
+              {
+                "repetition": 3,
+                "wall_seconds": 11.847770167,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1049-capacity-r3-a0",
+                "result_sha256": "97bbacba6b6f5312c8c066c8f89b5f1c2e54b95f84f9ef977174162e0c75401c"
+              },
+              {
+                "repetition": 4,
+                "wall_seconds": 6.597542292,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1049-capacity-r4-a0",
+                "result_sha256": "1378fa235a27a9b898f2c7548a530175d3d865af115503d3c9f50f1c549f3105"
+              },
+              {
+                "repetition": 5,
+                "wall_seconds": 6.860528833,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1049-capacity-r5-a0",
+                "result_sha256": "3681110ee6a8ea9d5106385936d4ec1b908bded47e5694c117ab574dbef987ae"
+              },
+              {
+                "repetition": 6,
+                "wall_seconds": 13.722007292,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/qualification/photo-large-1049-capacity-r6-a0",
+                "result_sha256": "cd60a0ae0d9ccfe3366c5da9b1cd00df04bc0dee37583378597e402f7de7e6ca"
+              }
+            ],
+            "paired_savings_seconds": {
+              "n": 6,
+              "median": -0.08865552099999974,
+              "minimum": -2.3344327500000004,
+              "maximum": 1.6702186670000003,
+              "mean": -0.3220452986666668
+            },
+            "paired_faster_count": 3
+          }
+        }
+      },
+      "sum_of_image_medians_seconds": {
+        "fresh": 22.4429889795,
+        "reuse": 22.069498271,
+        "capacity": 20.9893939995
+      }
+    },
+    "attribution": {
+      "rejected": 2,
+      "encodes": 27,
+      "cases": {
+        "photo-large-1029": {
+          "fresh": {
+            "wall_seconds": {
+              "n": 2,
+              "median": 20.9093899165,
+              "minimum": 20.754436958,
+              "maximum": 21.064342875,
+              "mean": 20.9093899165
+            },
+            "cpu_seconds": {
+              "n": 2,
+              "median": 156.75187599999998,
+              "minimum": 155.984298,
+              "maximum": 157.519454,
+              "mean": 156.75187599999998
+            },
+            "learning_seconds": {
+              "n": 2,
+              "median": 14.337609020999999,
+              "minimum": 14.110843334,
+              "maximum": 14.564374707999999,
+              "mean": 14.337609020999999
+            },
+            "gpu_evaluation_seconds": {
+              "n": 2,
+              "median": 6.557657854000001,
+              "minimum": 6.443649866000002,
+              "maximum": 6.671665842,
+              "mean": 6.557657854000001
+            },
+            "gpu_batches": {
+              "n": 2,
+              "median": 760.5,
+              "minimum": 751,
+              "maximum": 770,
+              "mean": 760.5
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 2,
+                "median": 1002261924.0,
+                "minimum": 1000973092,
+                "maximum": 1003550756,
+                "mean": 1002261924
+              },
+              "peak_committed_bytes": {
+                "n": 2,
+                "median": 1902548160.0,
+                "minimum": 1902548160,
+                "maximum": 1902548160,
+                "mean": 1902548160
+              },
+              "maximum_stage_bytes": {
+                "n": 2,
+                "median": 1392307800.0,
+                "minimum": 1392307800,
+                "maximum": 1392307800,
+                "mean": 1392307800
+              },
+              "idle_bytes_after_encode": {
+                "n": 2,
+                "median": 0.0,
+                "minimum": 0,
+                "maximum": 0,
+                "mean": 0
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 20.754436958,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/photo-large-1029-fresh-r1-a0",
+                "result_sha256": "d4fc8dd368da88f2967884d5f5d4ce5ebfae83500b4dfdd614d2a9c977267a03"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 21.064342875,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/photo-large-1029-fresh-r2-a0",
+                "result_sha256": "1483d81cc6f386a1593f973304e2865f7e7e0d82d69fc984b752cf6adfb55bf9"
+              }
+            ],
+            "batch_count": 1521,
+            "reuse": {
+              "output": {
+                "hits": 0,
+                "requests": 1521,
+                "fraction": 0.0,
+                "requested_bytes": 13934592,
+                "capacity_bytes": 13934592,
+                "allocated_bytes": 13934592
+              },
+              "dispatch": {
+                "hits": 0,
+                "requests": 1521,
+                "fraction": 0.0,
+                "requested_bytes": 1120018884,
+                "capacity_bytes": 1120018884,
+                "allocated_bytes": 1120018884
+              },
+              "scratch": {
+                "hits": 0,
+                "requests": 1521,
+                "fraction": 0.0,
+                "requested_bytes": 25083438080,
+                "capacity_bytes": 25083438080,
+                "allocated_bytes": 25083438080
+              }
+            },
+            "trace_seconds": {
+              "commit_to_gpu": 4.205238593000001,
+              "commit_call": 0.05300560800000001,
+              "pre_gpu_wait": 4.143415344,
+              "gpu_in_wait": 6.3856352030000005,
+              "post_gpu_wait": 1.261910913,
+              "suspend": 0.0023369880000000003,
+              "cpu_resume": 0.0038281840000000005,
+              "blocking": 11.790961460000002,
+              "next": 11.394741044,
+              "oldest_ready": 9.134655559,
+              "publish": 0.04418934100000001,
+              "between_commands": 18.007618579000003,
+              "commit_to_kernel": 0.7588677100000001,
+              "kernel_scheduling": 3.3668805330000002,
+              "kernel_to_gpu": 0.07949035000000002
+            },
+            "phase_seconds": {
+              "validate_plan": 0.051280282,
+              "allocate": 0.302628971,
+              "pack": 0.590100321,
+              "record_submit": 0.22538517200000002,
+              "wait": 11.801752866000001,
+              "readback": 0.004806296,
+              "resolve_profile": 0.001102113,
+              "release": 0.13434967
+            },
+            "exclusive_startup_seconds": {
+              "before_driver": 0.7588677100000004,
+              "driver_before_gpu": 3.283788994000002,
+              "after_driver": 0.16258188900000006
+            }
+          },
+          "reuse": {
+            "wall_seconds": {
+              "n": 2,
+              "median": 16.399950708,
+              "minimum": 14.835500083,
+              "maximum": 17.964401333,
+              "mean": 16.399950708
+            },
+            "cpu_seconds": {
+              "n": 2,
+              "median": 102.7011485,
+              "minimum": 55.757077,
+              "maximum": 149.64522,
+              "mean": 102.7011485
+            },
+            "learning_seconds": {
+              "n": 2,
+              "median": 12.109137229000002,
+              "minimum": 12.021047708,
+              "maximum": 12.197226750000002,
+              "mean": 12.109137229000002
+            },
+            "gpu_evaluation_seconds": {
+              "n": 2,
+              "median": 6.1446922144999965,
+              "minimum": 6.112011790999993,
+              "maximum": 6.177372638,
+              "mean": 6.1446922144999965
+            },
+            "gpu_batches": {
+              "n": 2,
+              "median": 719.0,
+              "minimum": 650,
+              "maximum": 788,
+              "mean": 719
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 2,
+                "median": 1001746340.0,
+                "minimum": 997364772,
+                "maximum": 1006127908,
+                "mean": 1001746340
+              },
+              "peak_committed_bytes": {
+                "n": 2,
+                "median": 1910150468.0,
+                "minimum": 1909862084,
+                "maximum": 1910438852,
+                "mean": 1910150468
+              },
+              "maximum_stage_bytes": {
+                "n": 2,
+                "median": 1392307800.0,
+                "minimum": 1392307800,
+                "maximum": 1392307800,
+                "mean": 1392307800
+              },
+              "idle_bytes_after_encode": {
+                "n": 2,
+                "median": 7602308.0,
+                "minimum": 7313924,
+                "maximum": 7890692,
+                "mean": 7602308
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 17.964401333,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/photo-large-1029-reuse-r1-a0",
+                "result_sha256": "83e9889e6d9f56392f83806caa4847b7efbcd97073950f9ad5f8e78c9a94401d"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 14.835500083,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/photo-large-1029-reuse-r2-a1",
+                "result_sha256": "301638bc82ce17080897383809044124185f84471755d0b509ef9837005f6f1a"
+              }
+            ],
+            "batch_count": 1438,
+            "reuse": {
+              "output": {
+                "hits": 524,
+                "requests": 1438,
+                "fraction": 0.36439499304589706,
+                "requested_bytes": 13934592,
+                "capacity_bytes": 13934592,
+                "allocated_bytes": 12100608
+              },
+              "dispatch": {
+                "hits": 20,
+                "requests": 1438,
+                "fraction": 0.013908205841446454,
+                "requested_bytes": 1119928440,
+                "capacity_bytes": 1119928440,
+                "allocated_bytes": 1116870952
+              },
+              "scratch": {
+                "hits": 265,
+                "requests": 1438,
+                "fraction": 0.18428372739916551,
+                "requested_bytes": 24030126080,
+                "capacity_bytes": 24030126080,
+                "allocated_bytes": 18558008320
+              }
+            },
+            "trace_seconds": {
+              "commit_to_gpu": 4.101034708,
+              "commit_call": 0.044391270000000004,
+              "pre_gpu_wait": 4.052201370000001,
+              "gpu_in_wait": 5.154084192000001,
+              "post_gpu_wait": 1.928670072,
+              "suspend": 0.001150418,
+              "cpu_resume": 0.004138201,
+              "blocking": 11.134955634,
+              "next": 9.108404774,
+              "oldest_ready": 8.901242364000002,
+              "publish": 0.065133961,
+              "between_commands": 15.204757515,
+              "commit_to_kernel": 1.388741903,
+              "kernel_scheduling": 2.5874204260000004,
+              "kernel_to_gpu": 0.124872379
+            },
+            "phase_seconds": {
+              "validate_plan": 0.035475878,
+              "allocate": 0.341766519,
+              "pack": 0.524673497,
+              "record_submit": 0.192011667,
+              "wait": 11.143572992000001,
+              "readback": 0.004012746,
+              "resolve_profile": 0.0007072580000000001,
+              "release": 0.044463764
+            },
+            "exclusive_startup_seconds": {
+              "before_driver": 1.388741902999999,
+              "driver_before_gpu": 2.483474843999998,
+              "after_driver": 0.22881796099999963
+            }
+          },
+          "capacity": {
+            "wall_seconds": {
+              "n": 2,
+              "median": 18.231006999999998,
+              "minimum": 17.195873875,
+              "maximum": 19.266140125,
+              "mean": 18.231006999999998
+            },
+            "cpu_seconds": {
+              "n": 2,
+              "median": 150.6467505,
+              "minimum": 147.870413,
+              "maximum": 153.423088,
+              "mean": 150.6467505
+            },
+            "learning_seconds": {
+              "n": 2,
+              "median": 12.508038333,
+              "minimum": 11.779522707,
+              "maximum": 13.236553959,
+              "mean": 12.508038333
+            },
+            "gpu_evaluation_seconds": {
+              "n": 2,
+              "median": 5.486689902999998,
+              "minimum": 5.28266452,
+              "maximum": 5.690715285999995,
+              "mean": 5.486689902999998
+            },
+            "gpu_batches": {
+              "n": 2,
+              "median": 993.5,
+              "minimum": 947,
+              "maximum": 1040,
+              "mean": 993.5
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 2,
+                "median": 1003196580.0,
+                "minimum": 1002327588,
+                "maximum": 1004065572,
+                "mean": 1003196580
+              },
+              "peak_committed_bytes": {
+                "n": 2,
+                "median": 1958190660.0,
+                "minimum": 1957321668,
+                "maximum": 1959059652,
+                "mean": 1958190660
+              },
+              "maximum_stage_bytes": {
+                "n": 2,
+                "median": 1392307800.0,
+                "minimum": 1392307800,
+                "maximum": 1392307800,
+                "mean": 1392307800
+              },
+              "idle_bytes_after_encode": {
+                "n": 2,
+                "median": 55642500.0,
+                "minimum": 54773508,
+                "maximum": 56511492,
+                "mean": 55642500
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 19.266140125,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/photo-large-1029-capacity-r1-a0",
+                "result_sha256": "858103610b7cabfedbb5abfd11a2b8bd8c007380e74b1a8166b95c7be895017a"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 17.195873875,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/photo-large-1029-capacity-r2-a0",
+                "result_sha256": "7b82334ea44856d4da15e882bf74a0667b2e38edefc3dec02611fa3f26f190f7"
+              }
+            ],
+            "batch_count": 1987,
+            "reuse": {
+              "output": {
+                "hits": 1978,
+                "requests": 1987,
+                "fraction": 0.9954705586311021,
+                "requested_bytes": 13934592,
+                "capacity_bytes": 147018240,
+                "allocated_bytes": 576000
+              },
+              "dispatch": {
+                "hits": 1979,
+                "requests": 1987,
+                "fraction": 0.995973829894313,
+                "requested_bytes": 1120504844,
+                "capacity_bytes": 31815152140,
+                "allocated_bytes": 113996576
+              },
+              "scratch": {
+                "hits": 1985,
+                "requests": 1987,
+                "fraction": 0.9989934574735783,
+                "requested_bytes": 27896320000,
+                "capacity_bytes": 76178718720,
+                "allocated_bytes": 76677120
+              }
+            },
+            "trace_seconds": {
+              "commit_to_gpu": 1.5731778150000002,
+              "commit_call": 0.057720532000000005,
+              "pre_gpu_wait": 1.506314227,
+              "gpu_in_wait": 6.960860455000001,
+              "post_gpu_wait": 1.832231186,
+              "suspend": 0.001649916,
+              "cpu_resume": 0.004848412,
+              "blocking": 10.299405868000001,
+              "next": 9.889368817000001,
+              "oldest_ready": 7.455766885000001,
+              "publish": 0.026082024000000002,
+              "between_commands": 16.094270272000003,
+              "commit_to_kernel": 0.9755697210000001,
+              "kernel_scheduling": 0.43071759400000004,
+              "kernel_to_gpu": 0.1668905
+            },
+            "phase_seconds": {
+              "validate_plan": 0.068685179,
+              "allocate": 0.040304961,
+              "pack": 0.23458984900000002,
+              "record_submit": 0.23842496200000002,
+              "wait": 10.311246916000002,
+              "readback": 0.005666847000000001,
+              "resolve_profile": 0.0012990760000000001,
+              "release": 0.068895726
+            },
+            "exclusive_startup_seconds": {
+              "before_driver": 0.9755697209999991,
+              "driver_before_gpu": 0.34517118199999963,
+              "after_driver": 0.2524369119999999
+            }
+          }
+        },
+        "photo-large-1039": {
+          "fresh": {
+            "wall_seconds": {
+              "n": 2,
+              "median": 3.3327406245000004,
+              "minimum": 3.316472833,
+              "maximum": 3.349008416,
+              "mean": 3.3327406245000004
+            },
+            "cpu_seconds": {
+              "n": 2,
+              "median": 26.841145,
+              "minimum": 26.135964,
+              "maximum": 27.546326,
+              "mean": 26.841145
+            },
+            "learning_seconds": {
+              "n": 2,
+              "median": 2.0016225215,
+              "minimum": 2.000494584,
+              "maximum": 2.002750459,
+              "mean": 2.0016225215
+            },
+            "gpu_evaluation_seconds": {
+              "n": 2,
+              "median": 1.630464274,
+              "minimum": 1.5783521289999998,
+              "maximum": 1.6825764190000003,
+              "mean": 1.630464274
+            },
+            "gpu_batches": {
+              "n": 2,
+              "median": 299.5,
+              "minimum": 277,
+              "maximum": 322,
+              "mean": 299.5
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 2,
+                "median": 949062348.0,
+                "minimum": 944777804,
+                "maximum": 953346892,
+                "mean": 949062348
+              },
+              "peak_committed_bytes": {
+                "n": 2,
+                "median": 1672463968.0,
+                "minimum": 1672463968,
+                "maximum": 1672463968,
+                "mean": 1672463968
+              },
+              "maximum_stage_bytes": {
+                "n": 2,
+                "median": 1211651832.0,
+                "minimum": 1211651832,
+                "maximum": 1211651832,
+                "mean": 1211651832
+              },
+              "idle_bytes_after_encode": {
+                "n": 2,
+                "median": 0.0,
+                "minimum": 0,
+                "maximum": 0,
+                "mean": 0
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 3.316472833,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/photo-large-1039-fresh-r1-a0",
+                "result_sha256": "8f3f9873bc84bf58ef1e41a966a4cc7f821e013a87dab6bae9875345048e7005"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 3.349008416,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/photo-large-1039-fresh-r2-a0",
+                "result_sha256": "a7e93685e4c2d3723b1bbe7cca1fb8a66183fac0ec8345490c462c7d0f4f3375"
+              }
+            ],
+            "batch_count": 599,
+            "reuse": {
+              "output": {
+                "hits": 0,
+                "requests": 599,
+                "fraction": 0.0,
+                "requested_bytes": 12266496,
+                "capacity_bytes": 12266496,
+                "allocated_bytes": 12266496
+              },
+              "dispatch": {
+                "hits": 0,
+                "requests": 599,
+                "fraction": 0.0,
+                "requested_bytes": 949043804,
+                "capacity_bytes": 949043804,
+                "allocated_bytes": 949043804
+              },
+              "scratch": {
+                "hits": 0,
+                "requests": 599,
+                "fraction": 0.0,
+                "requested_bytes": 15188428800,
+                "capacity_bytes": 15188428800,
+                "allocated_bytes": 15188428800
+              }
+            },
+            "trace_seconds": {
+              "commit_to_gpu": 0.9740626920000002,
+              "commit_call": 0.005233218,
+              "pre_gpu_wait": 0.968066935,
+              "gpu_in_wait": 1.846512117,
+              "post_gpu_wait": 0.263377988,
+              "suspend": 0.000289784,
+              "cpu_resume": 0.0005347080000000001,
+              "blocking": 3.0779570400000003,
+              "next": 0.19692382600000002,
+              "oldest_ready": 2.8288547410000002,
+              "publish": 0.009763003000000001,
+              "between_commands": 1.504890899,
+              "commit_to_kernel": 0.277726446,
+              "kernel_scheduling": 0.6719288360000001,
+              "kernel_to_gpu": 0.02440741
+            },
+            "phase_seconds": {
+              "validate_plan": 0.004788263000000001,
+              "allocate": 0.031965078,
+              "pack": 0.10704403200000001,
+              "record_submit": 0.023284803,
+              "wait": 3.0792839080000003,
+              "readback": 0.0006287150000000001,
+              "resolve_profile": 0.00015442,
+              "release": 0.013363280000000002
+            },
+            "exclusive_startup_seconds": {
+              "before_driver": 0.2777264460000004,
+              "driver_before_gpu": 0.6618772519999997,
+              "after_driver": 0.03445899399999996
+            }
+          },
+          "reuse": {
+            "wall_seconds": {
+              "n": 2,
+              "median": 8.446089708,
+              "minimum": 7.689928541,
+              "maximum": 9.202250875,
+              "mean": 8.446089708
+            },
+            "cpu_seconds": {
+              "n": 2,
+              "median": 34.132323,
+              "minimum": 32.971952,
+              "maximum": 35.292694,
+              "mean": 34.132323
+            },
+            "learning_seconds": {
+              "n": 2,
+              "median": 6.3496148745,
+              "minimum": 5.7827153749999995,
+              "maximum": 6.916514374,
+              "mean": 6.3496148745
+            },
+            "gpu_evaluation_seconds": {
+              "n": 2,
+              "median": 4.232410303499999,
+              "minimum": 3.527345637999999,
+              "maximum": 4.937474968999999,
+              "mean": 4.232410303499999
+            },
+            "gpu_batches": {
+              "n": 2,
+              "median": 459.0,
+              "minimum": 436,
+              "maximum": 482,
+              "mean": 459
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 2,
+                "median": 955844300.0,
+                "minimum": 955537996,
+                "maximum": 956150604,
+                "mean": 955844300
+              },
+              "peak_committed_bytes": {
+                "n": 2,
+                "median": 1678640740.0,
+                "minimum": 1678640740,
+                "maximum": 1678640740,
+                "mean": 1678640740
+              },
+              "maximum_stage_bytes": {
+                "n": 2,
+                "median": 1211651832.0,
+                "minimum": 1211651832,
+                "maximum": 1211651832,
+                "mean": 1211651832
+              },
+              "idle_bytes_after_encode": {
+                "n": 2,
+                "median": 6176772.0,
+                "minimum": 6176772,
+                "maximum": 6176772,
+                "mean": 6176772
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 9.202250875,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/photo-large-1039-reuse-r1-a0",
+                "result_sha256": "c659e70795ff306d300d00dd8fbb07f10c5f3d7c631d87393ac1e671bc3c8841"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 7.689928541,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/photo-large-1039-reuse-r2-a0",
+                "result_sha256": "b119b74e0507e2b73cacbbc3a2f24daa991134ceb7773d5fe9a4115e19b33d2c"
+              }
+            ],
+            "batch_count": 918,
+            "reuse": {
+              "output": {
+                "hits": 271,
+                "requests": 918,
+                "fraction": 0.29520697167755994,
+                "requested_bytes": 12266496,
+                "capacity_bytes": 12266496,
+                "allocated_bytes": 11132928
+              },
+              "dispatch": {
+                "hits": 4,
+                "requests": 918,
+                "fraction": 0.004357298474945534,
+                "requested_bytes": 949394776,
+                "capacity_bytes": 949394776,
+                "allocated_bytes": 948704584
+              },
+              "scratch": {
+                "hits": 135,
+                "requests": 918,
+                "fraction": 0.14705882352941177,
+                "requested_bytes": 17098880000,
+                "capacity_bytes": 17098880000,
+                "allocated_bytes": 13789890560
+              }
+            },
+            "trace_seconds": {
+              "commit_to_gpu": 3.4304056880000005,
+              "commit_call": 0.016149097,
+              "pre_gpu_wait": 3.410099411,
+              "gpu_in_wait": 2.989367478,
+              "post_gpu_wait": 1.360439038,
+              "suspend": 0.0006709600000000001,
+              "cpu_resume": 0.0012980040000000002,
+              "blocking": 7.759905927,
+              "next": 3.11151427,
+              "oldest_ready": 6.847458206000001,
+              "publish": 0.013599326000000002,
+              "between_commands": 6.931683918000001,
+              "commit_to_kernel": 1.576287516,
+              "kernel_scheduling": 1.7150191090000002,
+              "kernel_to_gpu": 0.139099063
+            },
+            "phase_seconds": {
+              "validate_plan": 0.015137997,
+              "allocate": 0.17650836600000003,
+              "pack": 0.392935821,
+              "record_submit": 0.09346608,
+              "wait": 7.763081266,
+              "readback": 0.001659752,
+              "resolve_profile": 0.00024437700000000005,
+              "release": 0.020485951000000002
+            },
+            "exclusive_startup_seconds": {
+              "before_driver": 1.5762875160000025,
+              "driver_before_gpu": 1.627450986000001,
+              "after_driver": 0.22666718600000016
+            }
+          },
+          "capacity": {
+            "wall_seconds": {
+              "n": 2,
+              "median": 3.7400785625,
+              "minimum": 3.301493125,
+              "maximum": 4.178664,
+              "mean": 3.7400785625
+            },
+            "cpu_seconds": {
+              "n": 2,
+              "median": 29.345195,
+              "minimum": 26.951034,
+              "maximum": 31.739356,
+              "mean": 29.345195
+            },
+            "learning_seconds": {
+              "n": 2,
+              "median": 2.2575265630000003,
+              "minimum": 1.9484221680000002,
+              "maximum": 2.566630958,
+              "mean": 2.2575265630000003
+            },
+            "gpu_evaluation_seconds": {
+              "n": 2,
+              "median": 1.601587768,
+              "minimum": 1.3733083260000005,
+              "maximum": 1.829867209999999,
+              "mean": 1.601587768
+            },
+            "gpu_batches": {
+              "n": 2,
+              "median": 415.0,
+              "minimum": 397,
+              "maximum": 433,
+              "mean": 415
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 2,
+                "median": 955880268.0,
+                "minimum": 955364940,
+                "maximum": 956395596,
+                "mean": 955880268
+              },
+              "peak_committed_bytes": {
+                "n": 2,
+                "median": 1736907620.0,
+                "minimum": 1736392292,
+                "maximum": 1737422948,
+                "mean": 1736907620
+              },
+              "maximum_stage_bytes": {
+                "n": 2,
+                "median": 1211651832.0,
+                "minimum": 1211651832,
+                "maximum": 1211651832,
+                "mean": 1211651832
+              },
+              "idle_bytes_after_encode": {
+                "n": 2,
+                "median": 64443652.0,
+                "minimum": 63928324,
+                "maximum": 64958980,
+                "mean": 64443652
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 4.178664,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/photo-large-1039-capacity-r1-a1",
+                "result_sha256": "8be3638f3ec892350b0564dbb40b817bbc5b089f4f4163ba5fde44da19011901"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 3.301493125,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/photo-large-1039-capacity-r2-a0",
+                "result_sha256": "6179839b6a4a0d1e4bec06be3cfaf43be3a36660f328d5b3a183312c37388351"
+              }
+            ],
+            "batch_count": 830,
+            "reuse": {
+              "output": {
+                "hits": 826,
+                "requests": 830,
+                "fraction": 0.9951807228915662,
+                "requested_bytes": 12266496,
+                "capacity_bytes": 80271360,
+                "allocated_bytes": 258048
+              },
+              "dispatch": {
+                "hits": 824,
+                "requests": 830,
+                "fraction": 0.9927710843373494,
+                "requested_bytes": 949290232,
+                "capacity_bytes": 12754852344,
+                "allocated_bytes": 67101720
+              },
+              "scratch": {
+                "hits": 824,
+                "requests": 830,
+                "fraction": 0.9927710843373494,
+                "requested_bytes": 17164584960,
+                "capacity_bytes": 40212234240,
+                "allocated_bytes": 271974400
+              }
+            },
+            "trace_seconds": {
+              "commit_to_gpu": 0.6613434760000001,
+              "commit_call": 0.013458639000000001,
+              "pre_gpu_wait": 0.651864002,
+              "gpu_in_wait": 1.8873627010000003,
+              "post_gpu_wait": 0.5361917890000001,
+              "suspend": 0.00022737900000000002,
+              "cpu_resume": 0.000728786,
+              "blocking": 3.075418492,
+              "next": 0.6831019229999999,
+              "oldest_ready": 2.752589735,
+              "publish": 0.030212575000000002,
+              "between_commands": 2.306208657,
+              "commit_to_kernel": 0.45510656800000004,
+              "kernel_scheduling": 0.080010949,
+              "kernel_to_gpu": 0.126225959
+            },
+            "phase_seconds": {
+              "validate_plan": 0.014004794000000001,
+              "allocate": 0.008936610000000001,
+              "pack": 0.050517171,
+              "record_submit": 0.040913474000000005,
+              "wait": 3.0770909480000004,
+              "readback": 0.0009332890000000001,
+              "resolve_profile": 0.00014370800000000001,
+              "release": 0.010059753000000001
+            },
+            "exclusive_startup_seconds": {
+              "before_driver": 0.4551065679999998,
+              "driver_before_gpu": 0.07536382400000001,
+              "after_driver": 0.13087308400000003
+            }
+          }
+        },
+        "photo-large-1049": {
+          "fresh": {
+            "wall_seconds": {
+              "n": 2,
+              "median": 13.067259937500001,
+              "minimum": 9.674227084,
+              "maximum": 16.460292791,
+              "mean": 13.067259937500001
+            },
+            "cpu_seconds": {
+              "n": 2,
+              "median": 34.977665,
+              "minimum": 33.870768,
+              "maximum": 36.084562,
+              "mean": 34.977665
+            },
+            "learning_seconds": {
+              "n": 2,
+              "median": 8.7472440835,
+              "minimum": 7.049831918,
+              "maximum": 10.444656249000001,
+              "mean": 8.7472440835
+            },
+            "gpu_evaluation_seconds": {
+              "n": 2,
+              "median": 5.311790493999997,
+              "minimum": 4.900879825999995,
+              "maximum": 5.722701161999999,
+              "mean": 5.311790493999997
+            },
+            "gpu_batches": {
+              "n": 2,
+              "median": 589.5,
+              "minimum": 436,
+              "maximum": 743,
+              "mean": 589.5
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 2,
+                "median": 926533916.0,
+                "minimum": 925503004,
+                "maximum": 927564828,
+                "mean": 926533916
+              },
+              "peak_committed_bytes": {
+                "n": 2,
+                "median": 1603050103.0,
+                "minimum": 1603050103,
+                "maximum": 1603050103,
+                "mean": 1603050103
+              },
+              "maximum_stage_bytes": {
+                "n": 2,
+                "median": 1157322135.0,
+                "minimum": 1157322135,
+                "maximum": 1157322135,
+                "mean": 1157322135
+              },
+              "idle_bytes_after_encode": {
+                "n": 2,
+                "median": 0.0,
+                "minimum": 0,
+                "maximum": 0,
+                "mean": 0
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 16.460292791,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/photo-large-1049-fresh-r1-a0",
+                "result_sha256": "512814fb05ce9107e3c7f9b80bd2851bc282e8eb64e15037ede2ffce31a5e621"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 9.674227084,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/photo-large-1049-fresh-r2-a0",
+                "result_sha256": "ec5b91dfc4fab59f0d53d19b512a4ba5a57b429ae1ea12dae5a7b20d57a5d2f9"
+              }
+            ],
+            "batch_count": 1179,
+            "reuse": {
+              "output": {
+                "hits": 0,
+                "requests": 1179,
+                "fraction": 0.0,
+                "requested_bytes": 10939392,
+                "capacity_bytes": 10939392,
+                "allocated_bytes": 10939392
+              },
+              "dispatch": {
+                "hits": 0,
+                "requests": 1179,
+                "fraction": 0.0,
+                "requested_bytes": 803037548,
+                "capacity_bytes": 803037548,
+                "allocated_bytes": 803037548
+              },
+              "scratch": {
+                "hits": 0,
+                "requests": 1179,
+                "fraction": 0.0,
+                "requested_bytes": 16863759360,
+                "capacity_bytes": 16863759360,
+                "allocated_bytes": 16863759360
+              }
+            },
+            "trace_seconds": {
+              "commit_to_gpu": 4.2085408740000005,
+              "commit_call": 0.074017204,
+              "pre_gpu_wait": 4.127739336,
+              "gpu_in_wait": 3.692594897,
+              "post_gpu_wait": 1.6117033150000002,
+              "suspend": 0.0009301790000000002,
+              "cpu_resume": 0.002539942,
+              "blocking": 9.432037548,
+              "next": 5.037728447,
+              "oldest_ready": 7.363833019,
+              "publish": 0.12812372,
+              "between_commands": 9.339580021,
+              "commit_to_kernel": 1.124255077,
+              "kernel_scheduling": 2.838311383,
+              "kernel_to_gpu": 0.24597441400000003
+            },
+            "phase_seconds": {
+              "validate_plan": 0.024717078000000003,
+              "allocate": 0.272233958,
+              "pack": 0.557940885,
+              "record_submit": 0.24348482700000001,
+              "wait": 9.437839591,
+              "readback": 0.004096783,
+              "resolve_profile": 0.001048562,
+              "release": 0.07942853200000001
+            },
+            "exclusive_startup_seconds": {
+              "before_driver": 1.1242550769999997,
+              "driver_before_gpu": 2.7736665429999965,
+              "after_driver": 0.31061925399999946
+            }
+          },
+          "reuse": {
+            "wall_seconds": {
+              "n": 2,
+              "median": 9.3868615205,
+              "minimum": 9.167470625,
+              "maximum": 9.606252416,
+              "mean": 9.3868615205
+            },
+            "cpu_seconds": {
+              "n": 2,
+              "median": 33.19835500000001,
+              "minimum": 32.861732,
+              "maximum": 33.534978,
+              "mean": 33.19835500000001
+            },
+            "learning_seconds": {
+              "n": 2,
+              "median": 7.327057105,
+              "minimum": 7.168917917,
+              "maximum": 7.4851962930000004,
+              "mean": 7.327057105
+            },
+            "gpu_evaluation_seconds": {
+              "n": 2,
+              "median": 4.975463545500003,
+              "minimum": 4.891814461000004,
+              "maximum": 5.059112630000002,
+              "mean": 4.975463545500003
+            },
+            "gpu_batches": {
+              "n": 2,
+              "median": 480.5,
+              "minimum": 457,
+              "maximum": 504,
+              "mean": 480.5
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 2,
+                "median": 926018972.0,
+                "minimum": 923957276,
+                "maximum": 928080668,
+                "mean": 926018972
+              },
+              "peak_committed_bytes": {
+                "n": 2,
+                "median": 1608945403.0,
+                "minimum": 1608075643,
+                "maximum": 1609815163,
+                "mean": 1608945403
+              },
+              "maximum_stage_bytes": {
+                "n": 2,
+                "median": 1157322135.0,
+                "minimum": 1157322135,
+                "maximum": 1157322135,
+                "mean": 1157322135
+              },
+              "idle_bytes_after_encode": {
+                "n": 2,
+                "median": 5895300.0,
+                "minimum": 5025540,
+                "maximum": 6765060,
+                "mean": 5895300
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 9.167470625,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/photo-large-1049-reuse-r1-a0",
+                "result_sha256": "22f835dd6680edaf831b98814a46ff60ba3b8c7709f13970351ebcd1310a829a"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 9.606252416,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/photo-large-1049-reuse-r2-a0",
+                "result_sha256": "708766f74bac95e5b5fe71b2900198736381b6d347bc8271a0ed6ad7947cca95"
+              }
+            ],
+            "batch_count": 961,
+            "reuse": {
+              "output": {
+                "hits": 300,
+                "requests": 961,
+                "fraction": 0.31217481789802287,
+                "requested_bytes": 10939392,
+                "capacity_bytes": 10939392,
+                "allocated_bytes": 9840384
+              },
+              "dispatch": {
+                "hits": 5,
+                "requests": 961,
+                "fraction": 0.005202913631633715,
+                "requested_bytes": 802798340,
+                "capacity_bytes": 802798340,
+                "allocated_bytes": 801935600
+              },
+              "scratch": {
+                "hits": 93,
+                "requests": 961,
+                "fraction": 0.0967741935483871,
+                "requested_bytes": 15490478080,
+                "capacity_bytes": 15490478080,
+                "allocated_bytes": 13151744000
+              }
+            },
+            "trace_seconds": {
+              "commit_to_gpu": 4.135448800000001,
+              "commit_call": 0.05312094,
+              "pre_gpu_wait": 4.106498665,
+              "gpu_in_wait": 3.006178381,
+              "post_gpu_wait": 1.968517276,
+              "suspend": 0.00057478,
+              "cpu_resume": 0.0017776100000000002,
+              "blocking": 9.081194322000002,
+              "next": 2.7633689990000003,
+              "oldest_ready": 7.651295877000001,
+              "publish": 0.029386711000000003,
+              "between_commands": 7.768222860000001,
+              "commit_to_kernel": 1.882539458,
+              "kernel_scheduling": 2.06346643,
+              "kernel_to_gpu": 0.18944291200000002
+            },
+            "phase_seconds": {
+              "validate_plan": 0.01739371,
+              "allocate": 0.223131143,
+              "pack": 0.402743228,
+              "record_submit": 0.177134175,
+              "wait": 9.085143631000001,
+              "readback": 0.002129703,
+              "resolve_profile": 0.00030941400000000004,
+              "release": 0.034741167
+            },
+            "exclusive_startup_seconds": {
+              "before_driver": 1.8825394579999981,
+              "driver_before_gpu": 2.005664975000003,
+              "after_driver": 0.24724436700000005
+            }
+          },
+          "capacity": {
+            "wall_seconds": {
+              "n": 2,
+              "median": 11.130619875,
+              "minimum": 10.525487375,
+              "maximum": 11.735752375,
+              "mean": 11.130619875
+            },
+            "cpu_seconds": {
+              "n": 2,
+              "median": 33.1977245,
+              "minimum": 33.160061,
+              "maximum": 33.235388,
+              "mean": 33.1977245
+            },
+            "learning_seconds": {
+              "n": 2,
+              "median": 8.1543624785,
+              "minimum": 7.411589458,
+              "maximum": 8.897135499,
+              "mean": 8.1543624785
+            },
+            "gpu_evaluation_seconds": {
+              "n": 2,
+              "median": 4.280019207000003,
+              "minimum": 4.050754544000002,
+              "maximum": 4.509283870000004,
+              "mean": 4.280019207000003
+            },
+            "gpu_batches": {
+              "n": 2,
+              "median": 751.0,
+              "minimum": 749,
+              "maximum": 753,
+              "mean": 751
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 2,
+                "median": 936560284.0,
+                "minimum": 935534364,
+                "maximum": 937586204,
+                "mean": 936560284
+              },
+              "peak_committed_bytes": {
+                "n": 2,
+                "median": 1667995643.0,
+                "minimum": 1666969723,
+                "maximum": 1669021563,
+                "mean": 1667995643
+              },
+              "maximum_stage_bytes": {
+                "n": 2,
+                "median": 1157322135.0,
+                "minimum": 1157322135,
+                "maximum": 1157322135,
+                "mean": 1157322135
+              },
+              "idle_bytes_after_encode": {
+                "n": 2,
+                "median": 64945540.0,
+                "minimum": 63919620,
+                "maximum": 65971460,
+                "mean": 64945540
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 11.735752375,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/photo-large-1049-capacity-r1-a0",
+                "result_sha256": "631e65f42bdba431db9128eb7096e85254aa0a640a7eff0f1eafa4cd441eced0"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 10.525487375,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/attribution/photo-large-1049-capacity-r2-a0",
+                "result_sha256": "18751a3e40c548ef481205f59f6640573d32237680f065a98fb6d77f85cada0f"
+              }
+            ],
+            "batch_count": 1502,
+            "reuse": {
+              "output": {
+                "hits": 1499,
+                "requests": 1502,
+                "fraction": 0.9980026631158455,
+                "requested_bytes": 10939392,
+                "capacity_bytes": 211094784,
+                "allocated_bytes": 419328
+              },
+              "dispatch": {
+                "hits": 1497,
+                "requests": 1502,
+                "fraction": 0.9966711051930759,
+                "requested_bytes": 803376248,
+                "capacity_bytes": 25990640760,
+                "allocated_bytes": 83632660
+              },
+              "scratch": {
+                "hits": 1500,
+                "requests": 1502,
+                "fraction": 0.9986684420772304,
+                "requested_bytes": 18406041600,
+                "capacity_bytes": 69396725760,
+                "allocated_bytes": 92405760
+              }
+            },
+            "trace_seconds": {
+              "commit_to_gpu": 1.9984735310000001,
+              "commit_call": 0.077068758,
+              "pre_gpu_wait": 1.9576806110000002,
+              "gpu_in_wait": 3.4903896110000003,
+              "post_gpu_wait": 2.5485519500000002,
+              "suspend": 0.000560657,
+              "cpu_resume": 0.002549497,
+              "blocking": 7.996622172,
+              "next": 5.585761295000001,
+              "oldest_ready": 6.472232429,
+              "publish": 0.17654491,
+              "between_commands": 10.637448107,
+              "commit_to_kernel": 1.322043869,
+              "kernel_scheduling": 0.31558943700000003,
+              "kernel_to_gpu": 0.360840225
+            },
+            "phase_seconds": {
+              "validate_plan": 0.03457734,
+              "allocate": 0.033514779,
+              "pack": 0.16807338,
+              "record_submit": 0.23954317300000003,
+              "wait": 8.010614683,
+              "readback": 0.002735627,
+              "resolve_profile": 0.0008045000000000001,
+              "release": 0.06809917800000001
+            },
+            "exclusive_startup_seconds": {
+              "before_driver": 1.3220438690000023,
+              "driver_before_gpu": 0.25974018899999934,
+              "after_driver": 0.41668947300000053
+            }
+          }
+        }
+      },
+      "sum_of_image_medians_seconds": {
+        "fresh": 37.3093904785,
+        "reuse": 34.2329019365,
+        "capacity": 33.1017054375
+      }
+    },
+    "confirmation": {
+      "rejected": 0,
+      "encodes": 21,
+      "cases": {
+        "photo-large-1049": {
+          "fresh": {
+            "wall_seconds": {
+              "n": 6,
+              "median": 9.9658913125,
+              "minimum": 9.071937333,
+              "maximum": 12.732261291,
+              "mean": 10.255572444166667
+            },
+            "cpu_seconds": {
+              "n": 6,
+              "median": 33.490961999999996,
+              "minimum": 32.981997,
+              "maximum": 33.771109,
+              "mean": 33.455159
+            },
+            "learning_seconds": {
+              "n": 6,
+              "median": 7.865439188,
+              "minimum": 7.137308125,
+              "maximum": 10.714044374999999,
+              "mean": 8.191933347333332
+            },
+            "gpu_evaluation_seconds": {
+              "n": 6,
+              "median": 5.063103383000003,
+              "minimum": 4.687666206000001,
+              "maximum": 8.571285739,
+              "mean": 5.599606540500002
+            },
+            "gpu_batches": {
+              "n": 6,
+              "median": 489.5,
+              "minimum": 459,
+              "maximum": 569,
+              "mean": 499.1666666666667
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 6,
+                "median": 926018844.0,
+                "minimum": 923078172,
+                "maximum": 926534172,
+                "mean": 925614534.6666666
+              },
+              "peak_committed_bytes": {
+                "n": 6,
+                "median": 1603050103.0,
+                "minimum": 1603050103,
+                "maximum": 1603050103,
+                "mean": 1603050103
+              },
+              "maximum_stage_bytes": {
+                "n": 6,
+                "median": 1157322135.0,
+                "minimum": 1157322135,
+                "maximum": 1157322135,
+                "mean": 1157322135
+              },
+              "idle_bytes_after_encode": {
+                "n": 6,
+                "median": 0.0,
+                "minimum": 0,
+                "maximum": 0,
+                "mean": 0
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 10.261457167,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/photo-large-1049-fresh-r1-a0",
+                "result_sha256": "e62449696427a4e9abf19cf86a0a3c8cd8f16b2b36a0bcfa14f27fd605f25400"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 12.732261291,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/photo-large-1049-fresh-r2-a0",
+                "result_sha256": "2e1621b8b39d746038cb2e3cb7e76ad46cb4b7cafba512c77db853e2ed4e45f2"
+              },
+              {
+                "repetition": 3,
+                "wall_seconds": 10.439965208,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/photo-large-1049-fresh-r3-a0",
+                "result_sha256": "7f525a1292ad86e50deed529d90f376b3c491f556d83f9716ee01c4e280988a6"
+              },
+              {
+                "repetition": 4,
+                "wall_seconds": 9.357488208,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/photo-large-1049-fresh-r4-a0",
+                "result_sha256": "e490a8d9ef0ecba63b9e36a84228e7a1b9db240de9a4cf72f8f2eca51c9a5f3e"
+              },
+              {
+                "repetition": 5,
+                "wall_seconds": 9.670325458,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/photo-large-1049-fresh-r5-a0",
+                "result_sha256": "e07c8e5b6c72a1d2dd70ad0a24d54f809476456cb69d37905594f5d6cdf04472"
+              },
+              {
+                "repetition": 6,
+                "wall_seconds": 9.071937333,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/photo-large-1049-fresh-r6-a0",
+                "result_sha256": "ec20e65a1dce9e6079ac0e431bebce4c1b995160037ea3299b64027e7d0f6dfe"
+              }
+            ]
+          },
+          "reuse": {
+            "wall_seconds": {
+              "n": 6,
+              "median": 9.553958646,
+              "minimum": 9.135392833,
+              "maximum": 12.210654625,
+              "mean": 10.2404620695
+            },
+            "cpu_seconds": {
+              "n": 6,
+              "median": 33.7096995,
+              "minimum": 33.300532,
+              "maximum": 34.159757,
+              "mean": 33.732905
+            },
+            "learning_seconds": {
+              "n": 6,
+              "median": 7.467079145000001,
+              "minimum": 7.153065709,
+              "maximum": 9.792555041,
+              "mean": 8.045309381666666
+            },
+            "gpu_evaluation_seconds": {
+              "n": 6,
+              "median": 4.957278537499998,
+              "minimum": 4.587175580000007,
+              "maximum": 5.997150080000001,
+              "mean": 5.208558314166668
+            },
+            "gpu_batches": {
+              "n": 6,
+              "median": 532.0,
+              "minimum": 490,
+              "maximum": 613,
+              "mean": 541
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 6,
+                "median": 926018844.0,
+                "minimum": 921056540,
+                "maximum": 927564828,
+                "mean": 925363526.6666666
+              },
+              "peak_committed_bytes": {
+                "n": 6,
+                "median": 1609511291.0,
+                "minimum": 1608659579,
+                "maximum": 1609815163,
+                "mean": 1609328677.6666667
+              },
+              "maximum_stage_bytes": {
+                "n": 6,
+                "median": 1157322135.0,
+                "minimum": 1157322135,
+                "maximum": 1157322135,
+                "mean": 1157322135
+              },
+              "idle_bytes_after_encode": {
+                "n": 6,
+                "median": 6461188.0,
+                "minimum": 5609476,
+                "maximum": 6765060,
+                "mean": 6278574.666666667
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 11.7428975,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/photo-large-1049-reuse-r1-a0",
+                "result_sha256": "427b6561c16ba9b576003308d245d604c79a861d4c2abba17a0503ea1b16c58c"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 9.851764584,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/photo-large-1049-reuse-r2-a0",
+                "result_sha256": "f4177ed1527cb3cc50b873a8f721c608857e2f68b7ef8b624e4fc33841b2d6b1"
+              },
+              {
+                "repetition": 3,
+                "wall_seconds": 9.245910167,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/photo-large-1049-reuse-r3-a0",
+                "result_sha256": "3c8c76e4edc22bf65c2e11f769ac338fdc3a5012b2cedca683081ccb34838dc0"
+              },
+              {
+                "repetition": 4,
+                "wall_seconds": 12.210654625,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/photo-large-1049-reuse-r4-a0",
+                "result_sha256": "d8e9c33ee039f80ddc3146f9bfc5df86e80e5aebfc3b2ba6b4c3a96a3ed6d065"
+              },
+              {
+                "repetition": 5,
+                "wall_seconds": 9.256152708,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/photo-large-1049-reuse-r5-a0",
+                "result_sha256": "0c2d89bb387cc880c905c21c3a0db7b45c96b6c5b16c99ab69b5ac85eee58f5e"
+              },
+              {
+                "repetition": 6,
+                "wall_seconds": 9.135392833,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/photo-large-1049-reuse-r6-a0",
+                "result_sha256": "2d8d2693963ed083d037b8ce28429157d4469cc47940b353be309739f4b98714"
+              }
+            ],
+            "paired_savings_seconds": {
+              "n": 6,
+              "median": 0.17535862500000032,
+              "minimum": -2.8531664170000006,
+              "maximum": 2.8804967070000007,
+              "mean": 0.015110374666666834
+            },
+            "paired_faster_count": 3
+          },
+          "capacity": {
+            "wall_seconds": {
+              "n": 6,
+              "median": 9.5741986665,
+              "minimum": 8.803320375,
+              "maximum": 10.095357,
+              "mean": 9.5376148195
+            },
+            "cpu_seconds": {
+              "n": 6,
+              "median": 33.0108305,
+              "minimum": 32.758718,
+              "maximum": 33.671273,
+              "mean": 33.09359466666667
+            },
+            "learning_seconds": {
+              "n": 6,
+              "median": 7.4132326045,
+              "minimum": 6.833444211,
+              "maximum": 7.727708875,
+              "mean": 7.376176507333334
+            },
+            "gpu_evaluation_seconds": {
+              "n": 6,
+              "median": 4.137184919000001,
+              "minimum": 3.6382222179999952,
+              "maximum": 4.462380553000004,
+              "mean": 4.1320589588333325
+            },
+            "gpu_batches": {
+              "n": 6,
+              "median": 645.0,
+              "minimum": 568,
+              "maximum": 802,
+              "mean": 676.5
+            },
+            "capacity_retries": 0,
+            "memory": {
+              "peak_backing_bytes": {
+                "n": 6,
+                "median": 937552412.0,
+                "minimum": 937059868,
+                "maximum": 938610204,
+                "mean": 937648028
+              },
+              "peak_committed_bytes": {
+                "n": 6,
+                "median": 1668987771.0,
+                "minimum": 1668495227,
+                "maximum": 1670045563,
+                "mean": 1669083387
+              },
+              "maximum_stage_bytes": {
+                "n": 6,
+                "median": 1157322135.0,
+                "minimum": 1157322135,
+                "maximum": 1157322135,
+                "mean": 1157322135
+              },
+              "idle_bytes_after_encode": {
+                "n": 6,
+                "median": 65937668.0,
+                "minimum": 65445124,
+                "maximum": 66995460,
+                "mean": 66033284
+              }
+            },
+            "observations": [
+              {
+                "repetition": 1,
+                "wall_seconds": 9.996329334,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/photo-large-1049-capacity-r1-a0",
+                "result_sha256": "004077a95316ab4c8579572a6bcff32637a8c40ee985fa8c5b756d0caadb3420"
+              },
+              {
+                "repetition": 2,
+                "wall_seconds": 9.737277291,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/photo-large-1049-capacity-r2-a0",
+                "result_sha256": "aa64c81298ea7160deea750026e4e6eba2145a865256515c7c513c524d3ef0f9"
+              },
+              {
+                "repetition": 3,
+                "wall_seconds": 9.182284875,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/photo-large-1049-capacity-r3-a0",
+                "result_sha256": "b5034baf839dac18f394e52cacd9378805bdd7d10017956333804116ccafdf69"
+              },
+              {
+                "repetition": 4,
+                "wall_seconds": 10.095357,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/photo-large-1049-capacity-r4-a0",
+                "result_sha256": "7bd53e65387ff08f1ab462019d199256834b0970d24b252026affee7873b8f04"
+              },
+              {
+                "repetition": 5,
+                "wall_seconds": 8.803320375,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/photo-large-1049-capacity-r5-a0",
+                "result_sha256": "1b36b0bbd26f1794501435dc26f7c67ac607bce2d309bcf9c76f0023bbbf2822"
+              },
+              {
+                "repetition": 6,
+                "wall_seconds": 9.411120042,
+                "artifact": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/confirmation/photo-large-1049-capacity-r6-a0",
+                "result_sha256": "4efc4c15ac9833e021c87cf395234ebdbd5d825ed6f0a5768f1c33e74ef3b168"
+              }
+            ],
+            "paired_savings_seconds": {
+              "n": 6,
+              "median": 0.5660664579999999,
+              "minimum": -0.7378687920000004,
+              "maximum": 2.9949840000000005,
+              "mean": 0.7179576246666665
+            },
+            "paired_faster_count": 4
+          }
+        }
+      },
+      "sum_of_image_medians_seconds": {
+        "fresh": 9.9658913125,
+        "reuse": 9.553958646,
+        "capacity": 9.5741986665
+      }
+    }
+  },
+  "probe": {
+    "evaluations": 315,
+    "rejected_attempts": 0,
+    "fresh": {
+      "call_milliseconds": {
+        "n": 18,
+        "median": 96.2887705,
+        "minimum": 91.76175099999999,
+        "maximum": 108.115375,
+        "mean": 97.23232427777778
+      },
+      "output_release_milliseconds": {
+        "n": 18,
+        "median": 0.014938,
+        "minimum": 0.012041999999999999,
+        "maximum": 0.022666,
+        "mean": 0.016182833333333334
+      },
+      "driver_milliseconds": {
+        "n": 18,
+        "median": 5.558833999999999,
+        "minimum": 5.223790999999999,
+        "maximum": 6.749707,
+        "mean": 5.595972555555555
+      },
+      "gpu_milliseconds": {
+        "n": 18,
+        "median": 86.28468849999999,
+        "minimum": 82.168959,
+        "maximum": 96.322666,
+        "mean": 87.27501444444444
+      },
+      "startup_milliseconds": {
+        "n": 18,
+        "median": 5.7773129999999995,
+        "minimum": 5.446791999999999,
+        "maximum": 7.028669,
+        "mean": 5.837014
+      },
+      "masks": {
+        "0": 90,
+        "1": 0,
+        "2": 0,
+        "3": 0,
+        "4": 0,
+        "5": 0,
+        "6": 0,
+        "7": 0
+      },
+      "peak_idle_bytes": 0,
+      "steps": {
+        "0": {
+          "n": 18,
+          "median": 44.2384165,
+          "minimum": 42.005125,
+          "maximum": 50.374542,
+          "mean": 44.60927538888889
+        },
+        "1": {
+          "n": 18,
+          "median": 1.4385835,
+          "minimum": 1.282333,
+          "maximum": 1.8002079999999998,
+          "mean": 1.4537269444444443
+        },
+        "2": {
+          "n": 18,
+          "median": 5.8314165,
+          "minimum": 5.410875,
+          "maximum": 6.555541,
+          "mean": 5.831352055555556
+        },
+        "3": {
+          "n": 18,
+          "median": 1.2215835,
+          "minimum": 1.076333,
+          "maximum": 1.5661669999999999,
+          "mean": 1.2451040555555555
+        },
+        "4": {
+          "n": 18,
+          "median": 43.588457999999996,
+          "minimum": 41.119042,
+          "maximum": 49.497,
+          "mean": 44.092865833333335
+        }
+      }
+    },
+    "reuse": {
+      "call_milliseconds": {
+        "n": 18,
+        "median": 94.747125,
+        "minimum": 92.96941699999999,
+        "maximum": 116.79575,
+        "mean": 97.95079383333334
+      },
+      "output_release_milliseconds": {
+        "n": 18,
+        "median": 0.011146,
+        "minimum": 0.009585,
+        "maximum": 0.01975,
+        "mean": 0.012206
+      },
+      "driver_milliseconds": {
+        "n": 18,
+        "median": 5.6462705,
+        "minimum": 5.456541,
+        "maximum": 7.395956999999999,
+        "mean": 5.787326166666666
+      },
+      "gpu_milliseconds": {
+        "n": 18,
+        "median": 84.740709,
+        "minimum": 83.117834,
+        "maximum": 103.48937699999999,
+        "mean": 87.80066016666666
+      },
+      "startup_milliseconds": {
+        "n": 18,
+        "median": 5.888978999999999,
+        "minimum": 5.673291,
+        "maximum": 7.681583,
+        "mean": 6.030766833333333
+      },
+      "masks": {
+        "0": 90,
+        "1": 0,
+        "2": 0,
+        "3": 0,
+        "4": 0,
+        "5": 0,
+        "6": 0,
+        "7": 0
+      },
+      "peak_idle_bytes": 60454916,
+      "steps": {
+        "0": {
+          "n": 18,
+          "median": 44.02514599999999,
+          "minimum": 41.628375,
+          "maximum": 52.086583,
+          "mean": 44.758395888888884
+        },
+        "1": {
+          "n": 18,
+          "median": 1.4257294999999999,
+          "minimum": 1.241666,
+          "maximum": 1.857791,
+          "mean": 1.431266222222222
+        },
+        "2": {
+          "n": 18,
+          "median": 5.896979,
+          "minimum": 5.597541,
+          "maximum": 7.043374999999999,
+          "mean": 5.994951333333333
+        },
+        "3": {
+          "n": 18,
+          "median": 1.2224795,
+          "minimum": 1.1575,
+          "maximum": 1.523625,
+          "mean": 1.2466804444444444
+        },
+        "4": {
+          "n": 18,
+          "median": 43.0060625,
+          "minimum": 41.55925,
+          "maximum": 54.489959,
+          "mean": 44.51949994444444
+        }
+      }
+    },
+    "capacity": {
+      "call_milliseconds": {
+        "n": 18,
+        "median": 90.08056249999998,
+        "minimum": 87.531375,
+        "maximum": 114.559709,
+        "mean": 92.34239394444444
+      },
+      "output_release_milliseconds": {
+        "n": 18,
+        "median": 0.008374999999999999,
+        "minimum": 0.007248999999999999,
+        "maximum": 0.013542,
+        "mean": 0.00874061111111111
+      },
+      "driver_milliseconds": {
+        "n": 18,
+        "median": 1.9133535,
+        "minimum": 1.660293,
+        "maximum": 2.2196659999999997,
+        "mean": 1.9188057777777776
+      },
+      "gpu_milliseconds": {
+        "n": 18,
+        "median": 85.30545699999999,
+        "minimum": 82.434709,
+        "maximum": 108.819791,
+        "mean": 87.37744183333334
+      },
+      "startup_milliseconds": {
+        "n": 18,
+        "median": 2.1667085,
+        "minimum": 1.879251,
+        "maximum": 2.486501,
+        "mean": 2.156084111111111
+      },
+      "masks": {
+        "0": 18,
+        "1": 0,
+        "2": 0,
+        "3": 0,
+        "4": 0,
+        "5": 0,
+        "6": 0,
+        "7": 72
+      },
+      "peak_idle_bytes": 60454916,
+      "steps": {
+        "0": {
+          "n": 18,
+          "median": 43.942667,
+          "minimum": 42.25825,
+          "maximum": 57.121916,
+          "mean": 44.849516277777774
+        },
+        "1": {
+          "n": 18,
+          "median": 0.7830834999999999,
+          "minimum": 0.7102499999999999,
+          "maximum": 0.9106249999999999,
+          "mean": 0.7849167777777777
+        },
+        "2": {
+          "n": 18,
+          "median": 4.2216875,
+          "minimum": 4.088334,
+          "maximum": 5.462708,
+          "mean": 4.437233888888889
+        },
+        "3": {
+          "n": 18,
+          "median": 0.735833,
+          "minimum": 0.643125,
+          "maximum": 0.968167,
+          "mean": 0.7465625555555555
+        },
+        "4": {
+          "n": 18,
+          "median": 40.695229499999996,
+          "minimum": 39.356792,
+          "maximum": 50.235625,
+          "mean": 41.524164444444445
+        }
+      }
+    }
+  },
+  "provenance_sha256": "3cf9192514cd486690da3cf056f0b0f4c01dea294141bb41376f3ac82c2480ed",
+  "source_snapshot_sha256": "68033c98e896ecabffa426f637429d815924fc4eec6d001ab247052f956c634f",
+  "environment": {
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "load_average": [
+      6.95703125,
+      6.80322265625,
+      6.326171875
+    ],
+    "power": "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=35782755)\t90%; discharging; 10:32 remaining present: true",
+    "cpu": "Apple M4 Pro",
+    "physical_memory_bytes": 51539607552,
+    "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded",
+    "top_processes": [
+      "25696  28.1 /Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)",
+      "21462  26.8 /opt/homebrew/Cellar/python@3.14/3.14.8/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python",
+      "  698  11.8 /usr/libexec/syspolicyd",
+      " 1688   8.9 /Applications/Orca.app/Contents/Frameworks/Orca Helper (Renderer).app/Contents/MacOS/Orca Helper (Renderer)",
+      "97505   8.9 /Applications/Firefox-School.app/Contents/MacOS/plugin-container.app/Contents/MacOS/plugin-container",
+      "  655   6.2 /usr/libexec/trustd",
+      "79804   6.2 codex",
+      "  602   4.0 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer",
+      "  657   3.6 /usr/libexec/lsd",
+      " 1560   2.1 /Applications/Orca.app/Contents/Frameworks/Orca Helper.app/Contents/MacOS/Orca Helper",
+      " 1316   2.0 /Applications/Orca.app/Contents/MacOS/Orca",
+      "25669   2.0 /Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper"
+    ]
+  },
+  "binaries": {
+    "candidate": {
+      "sha256": "9636e6c86136330d58033e3cb4293d385face811e32ee8d8d83dc6fb434c7445",
+      "linked_libraries": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/candidate:\n\t/System/Library/Frameworks/Metal.framework/Versions/A/Metal (compatibility version 1.0.0, current version 382.5.3)\n\t/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation (compatibility version 300.0.0, current version 5027.0.69, weak)\n\t/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics (compatibility version 64.0.0, current version 2050.0.0)\n\t@rpath/libjxl.0.13.dylib (compatibility version 0.13.0, current version 0.13.0)\n\t@rpath/libjxl_cms.0.13.dylib (compatibility version 0.13.0, current version 0.13.0)\n\t@rpath/libbrotlienc.1.dylib (compatibility version 1.0.0, current version 1.2.0)\n\t@rpath/libbrotlidec.1.dylib (compatibility version 1.0.0, current version 1.2.0)\n\t@rpath/libbrotlicommon.1.dylib (compatibility version 1.0.0, current version 1.2.0)\n\t/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 2200.27.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)\n\t/usr/lib/libobjc.A.dylib (compatibility version 1.0.0, current version 228.0.0)",
+      "dependencies": {
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/lib/libjxl.0.13.0.dylib": "4f8ddedf97c285896288feea92c628558814b111803e62a8e626b0af396e5a0f",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/lib/libjxl_cms.0.13.0.dylib": "d7f96ab701f3af7a140d25ec33254818a571fb986d67132916df0a92afdd3d23",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlienc.1.2.0.dylib": "ec5708da20bc6d10ab99a4f7f9ba028bd9638bddf08891737913ca4c921e5ea6",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlidec.1.2.0.dylib": "21f9823cccddc7adb566b4f48c022864d55aa7afec8a28a5d53323511177c8f7",
+        "/Users/yunhocho/GitHub/gjxl/build/pinned-libjxl/third_party/brotli/libbrotlicommon.1.2.0.dylib": "9e372bbe8af0af943059714d086ceae105c8aea94018858666a97647c729711a"
+      }
+    },
+    "probe": {
+      "sha256": "8aa318fdfb684f8a2a43a0ab94ba7a30433f10571940bb0e09cb2eb66983bc9f",
+      "linked_libraries": "/Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-capacity-reuse-20261016/probe:\n\t/System/Library/Frameworks/Metal.framework/Versions/A/Metal (compatibility version 1.0.0, current version 382.5.3)\n\t/System/Library/Frameworks/Foundation.framework/Versions/C/Foundation (compatibility version 300.0.0, current version 5027.0.69, weak)\n\t/System/Library/Frameworks/CoreGraphics.framework/Versions/A/CoreGraphics (compatibility version 64.0.0, current version 2050.0.0)\n\t/usr/lib/libc++.1.dylib (compatibility version 1.0.0, current version 2200.27.0)\n\t/usr/lib/libSystem.B.dylib (compatibility version 1.0.0, current version 1359.0.0)\n\t/usr/lib/libobjc.A.dylib (compatibility version 1.0.0, current version 228.0.0)",
+      "dependencies": {}
+    }
+  },
+  "inputs": [
+    {
+      "name": "photo-large-1029",
+      "path": "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1029.pam",
+      "sha256": "a1c487b0160d8f3e8cb86753131b919ac3de28e908fde757050ebccdb4407b6d",
+      "width": 4000,
+      "height": 3000,
+      "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+      "output_bytes": 10507251
+    },
+    {
+      "name": "photo-large-1039",
+      "path": "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1039.pam",
+      "sha256": "22f487129343ed6d403346653ef99900e2552728ba2e4f5c63c90d058132f302",
+      "width": 4000,
+      "height": 3000,
+      "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a",
+      "output_bytes": 7138537
+    },
+    {
+      "name": "photo-large-1049",
+      "path": "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1049.pam",
+      "sha256": "0b3feae4d3bf1a13f89d5f4c3d976c8ea1e93e49a65548919cb5474c3cd1d62d",
+      "width": 4000,
+      "height": 3000,
+      "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c",
+      "output_bytes": 7015756
+    }
+  ],
+  "validation": {
+    "focused_suites": 6,
+    "exact_variable_evaluations": 315,
+    "exact_image_encodes": 111,
+    "output_bytes_identical_to_prior_study": true,
+    "zero_gpu_admission_fallbacks": true
+  }
+}
