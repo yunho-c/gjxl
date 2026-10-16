@@ -1,6 +1,7 @@
 # Batched GPU histogram fitting
 
-Status: the operation/storage contract is implemented and tested. CPU
+Status: the operation/storage contract and resumable CPU reference are
+implemented and tested. CPU
 consolidation is committed as `3aca01c`; its paired performance qualification
 is recorded in [the baseline report](gpu-histogram-fitting-baseline.md).
 The Metal evaluator and its connection to the public learner are subsequent
@@ -201,9 +202,62 @@ required.
 The new test passes in Release and a CPU-only C++23 AddressSanitizer/UBSan
 build (`ASAN_OPTIONS=detect_leaks=0`, because macOS LeakSanitizer is unsupported).
 Contract validation records and source/binary hashes are archived with the
-baseline's focused integration checks. No backend implements this capability
-yet; no encoder route queries it. Exact candidate evaluation, actual Metal
-allocation/error paths and complete-tree parity remain later gates.
+baseline's focused integration checks. No encoder route queries the capability
+yet. Actual Metal allocation/error paths and GPU candidate/tree parity remain
+later gates.
+
+## Resumable CPU reference
+
+`HistogramTreeFitter` in `histogram_tree_fitter.h` owns one depth-first tree,
+preallocated CPU scratch and an original-row permutation. `Advance` performs
+native node setup and forced splits until the next independent evaluation;
+`EvaluateCpu` exports the four category winners; `Apply` validates all results
+before native selection/partitioning; `Publish` validates and moves a complete
+tree. Ordinary and resumable fitting share the same setup, property evaluation
+and split-application functions. The private GPU bridge exports/imports the
+fixed-width results without allocating.
+
+Initialization allocates every tree, workspace and row-order backing before
+partitioning starts. Failed replacement initialization preserves the old fit;
+malformed evaluation results preserve the ready state. An execution/capacity
+failure prevents publication. Prepared samples and multiplier views must stay
+at stable addresses until the fit is published or destroyed. CPU evaluation
+uses one participant, leaving independent-fit parallelism to its caller.
+
+The resumable storage bound includes the row-order vector. A workflow composing
+it with the GPU operation must not charge that same vector again. Each active
+fit needs a separate diagnostic profile; fit/node envelopes include time spent
+paused, whereas the named CPU phases record work inside those phases. They
+must not be presented as exclusive subdivisions of batch elapsed time.
+
+Step 2 validation on 2026-10-16 passed five focused Release tests and the two
+new contract/fitter tests under ASan/UBSan. The pinned-libjxl harness passed
+257 generated differential cases through both ordinary and resumable fitting.
+Additional coverage includes exact candidate cost bits, complete trees and
+partition order, original-row associations, interleaved fits, empty/forced
+nodes, inherited constants, wide static properties, the 2^24 population
+ceiling, allocation-failure positions and failure-atomic publication. No
+managed allocations occur after successful initialization.
+
+The CPU-overhead replay used seven genuine captured fits: Macan Best/All,
+alpha16-ramp All, gray-patches Best, flower reference local fits 0/48, and
+noise16 All. With one warmup per mode and five alternating measured pairs on
+M4 Pro/AC, the sum of per-fit medians changes by **-0.11%**; individual changes
+range from **-1.60% to +0.56%**. All trees match the captured reference, and
+measured managed peaks match the resumable bounds exactly. This compares
+ordinary and resumable fitting in the same refactored CPU-only Release binary;
+it does not measure the refactor's end-to-end effect against the frozen encoder
+baseline. Timings include validation, initialization, evaluation, partitioning
+and publication, and exclude native sample conversion and reference-tree
+comparison. The first timing pass overlapped another qualification and was
+discarded; the replacement monitored competing encoder/compiler processes
+throughout each measured invocation.
+
+Raw timings, fixture/source/binary hashes and test evidence are in
+[`gpu-histogram-fitting-cpu-reference-results.json`](gpu-histogram-fitting-cpu-reference-results.json).
+Local build/log archives are under
+`build/gpu-histogram-fitting-implementation-20261016/`; the research harness's
+`resumable-paired-replay FIXTURE REPEATS` mode reproduces the comparison.
 
 ## Implementation sequence and gates
 

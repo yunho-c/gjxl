@@ -2588,6 +2588,11 @@ if(GJXL_BUILD_TESTS)
   add_test(NAME modular_histogram_fitting_plan COMMAND gjxl_modular_histogram_fitting_plan_test)
   set_tests_properties(modular_histogram_fitting_plan PROPERTIES TIMEOUT 30)
 
+  add_executable(gjxl_modular_histogram_fitter_test tests/modular_histogram_fitter_test.cpp)
+  target_link_libraries(gjxl_modular_histogram_fitter_test PRIVATE gjxl_gpu_ops)
+  add_test(NAME modular_histogram_fitter COMMAND gjxl_modular_histogram_fitter_test)
+  set_tests_properties(modular_histogram_fitter PROPERTIES TIMEOUT 120)
+
   add_executable(gjxl_modular_gpu_token_handoff_test tests/modular_gpu_token_handoff_test.cpp)
   target_link_libraries(gjxl_modular_gpu_token_handoff_test PRIVATE gjxl_codestream)
   add_test(NAME modular_gpu_token_handoff COMMAND gjxl_modular_gpu_token_handoff_test)

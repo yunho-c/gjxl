@@ -31,6 +31,7 @@ void FitBoth(const Fixture &fixture) {
               fixture.fast_decode_multiplier, &qualified.expected)),
           "Synthetic reference fit failed");
   (void)FitNative(qualified);
+  (void)FitNative(qualified, true, true);
 }
 } // namespace
 

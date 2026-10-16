@@ -455,4 +455,76 @@ Status CheckHistogramFittingDeviceStatus(uint32_t status) {
     return Status::Internal("GPU histogram arithmetic invariant failed");
   return Status::Ok();
 }
+
+HistogramFittingNodeInput
+HistogramFittingNodeView(size_t fit, const HistogramNodeEvaluation &node) {
+  return {{fit, node.end - node.begin, node.symbols, node.node_id,
+           node.inherited_constants, node.parent_predictor,
+           node.change_predictor_penalty},
+          node.original_rows,
+          node.parent_counts,
+          node.parent_extra_bits};
+}
+Status EvaluateHistogramNodeOnCpu(HistogramTreeFitter &fitter,
+                                  uint32_t source_id,
+                                  std::span<HistogramPropertyResult> out) {
+  if (out.empty() || out.size() > kPropertyCount)
+    return Invalid();
+  std::array<HistogramPropertyEvaluation, kPropertyCount> results;
+  if (auto s = fitter.EvaluateCpu(std::span(results).first(out.size()));
+      !s.ok())
+    return s;
+  const uint32_t node = fitter.node().node_id;
+  for (size_t prop = 0; prop < out.size(); ++prop) {
+    auto &to = out[prop];
+    to = {source_id,
+          node,
+          static_cast<uint32_t>(prop),
+          results[prop].constant,
+          {}};
+    for (size_t category = 0; category < 4; ++category) {
+      const auto &c = results[prop].winners[category];
+      to.winners[category] = {c.bin,
+                              static_cast<uint32_t>(c.low_rows),
+                              static_cast<uint32_t>(c.low_predictor),
+                              static_cast<uint32_t>(c.high_predictor),
+                              c.low_cost,
+                              c.high_cost,
+                              c.valid,
+                              0};
+    }
+  }
+  return Status::Ok();
+}
+Status
+ApplyHistogramNodeEvaluation(HistogramTreeFitter &fitter, uint32_t source_id,
+                             std::span<const HistogramPropertyResult> results) {
+  if (!fitter.ready() || results.empty() || results.size() > kPropertyCount)
+    return Invalid();
+  const auto node = fitter.node();
+  std::array<HistogramPropertyEvaluation, kPropertyCount> native;
+  for (size_t prop = 0; prop < results.size(); ++prop) {
+    const auto &r = results[prop];
+    if (r.source_id != source_id || r.node_id != node.node_id ||
+        r.property_index != prop || r.constant > 1)
+      return Invalid();
+    native[prop].constant = r.constant != 0;
+    for (size_t category = 0; category < 4; ++category) {
+      const auto &c = r.winners[category];
+      if (c.valid > 1 || c.reserved ||
+          c.left_predictor >= kHistogramPredictors ||
+          c.right_predictor >= kHistogramPredictors)
+        return Invalid();
+      native[prop].winners[category] = {
+          c.bin,
+          c.low_rows,
+          static_cast<Predictor>(c.left_predictor),
+          static_cast<Predictor>(c.right_predictor),
+          c.left_cost,
+          c.right_cost,
+          c.valid != 0};
+    }
+  }
+  return fitter.Apply(std::span(native).first(results.size()));
+}
 } // namespace gjxl::histogram_gpu_internal

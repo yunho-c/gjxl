@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 #include "native_fit.h"
+#include "codec/modular/histogram_tree_fitter.h"
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -52,7 +53,7 @@ NativeSamples(const jxl::TreeSamples &reference) {
   return samples;
 }
 
-NativeFitResult FitNative(const Fixture &fixture, bool track_storage) {
+NativeFitResult FitNative(const Fixture &fixture, bool track_storage, bool resumable) {
   auto samples = NativeSamples(fixture.samples);
   std::vector<native::HistogramMultiplierRange> multipliers;
   for (const auto &m : fixture.multipliers)
@@ -65,8 +66,9 @@ NativeFitResult FitNative(const Fixture &fixture, bool track_storage) {
   // Explicit research admission, without changing the existing workflow limit.
   options.maximum_samples = native::kHistogramMaximumSamples;
   gjxl::resource_budget_internal::HostStorageBound bound;
-  auto status = native::ComputeHistogramTreeLearningStorageBound(
-      samples, options, &bound);
+  auto status = resumable
+      ? native::ComputeHistogramTreeFitterStorageBound(samples, options, &bound)
+      : native::ComputeHistogramTreeLearningStorageBound(samples, options, &bound);
   if (!status.ok())
     throw std::runtime_error(std::string(status.message()));
   NativeFitResult result;
@@ -96,7 +98,22 @@ NativeFitResult FitNative(const Fixture &fixture, bool track_storage) {
   }
   const ResourceContextScope scope(context);
   const Timer timer;
-  status = native::LearnHistogramTree(samples, &result.tree, options);
+  if (resumable) {
+    native::HistogramTreeFitter fit;
+    std::array<native::HistogramPropertyEvaluation, native::kPropertyCount> output;
+    const auto view = std::span(output).first(samples.property_count);
+    status = fit.Initialize(samples, options);
+    while (status.ok() && !fit.complete()) {
+      status = fit.Advance();
+      if (status.ok() && fit.ready()) {
+        status = fit.EvaluateCpu(view);
+        if (status.ok()) status = fit.Apply(view);
+      }
+    }
+    if (status.ok()) status = fit.Publish(&result.tree);
+  } else {
+    status = native::LearnHistogramTree(samples, &result.tree, options);
+  }
   result.time = timer.Elapsed();
   result.scratch_bound_bytes = bound.peak_bytes;
   if (budget)

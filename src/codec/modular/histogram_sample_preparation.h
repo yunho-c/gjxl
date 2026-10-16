@@ -5,6 +5,8 @@
 #include "codec/modular/weighted_features.h"
 
 namespace gjxl::modular_internal {
+class HistogramTreeFitter;
+struct HistogramFittingProfile;
 
 inline constexpr size_t kHistogramMaximumPopulation = size_t{1} << 28;
 // One reference learning image, normally a canonical Modular stream. Empty
@@ -79,6 +81,9 @@ private:
   friend Status LearnPreparedHistogramTree(PreparedHistogramSamples &,
                                            DecisionTree *, size_t, size_t, size_t,
                                            HistogramTreeLearningStats *);
+  friend Status InitializePreparedHistogramTreeFitter(
+      PreparedHistogramSamples &, HistogramTreeFitter *, size_t, size_t,
+      HistogramFittingProfile *);
   HistogramTrainingSamples samples_;
   resource_budget_internal::ManagedVector<HistogramMultiplierRange>
       multipliers_;
@@ -87,6 +92,14 @@ private:
   float threshold_ = 0, fast_decode_ = 1;
   size_t maximum_samples_ = 0;
 };
+
+// Borrows prepared columns/options until the fit is published or destroyed.
+// Do not move or reuse the prepared owner during that lifetime.
+[[nodiscard]] Status InitializePreparedHistogramTreeFitter(
+    PreparedHistogramSamples &samples, HistogramTreeFitter *fitter,
+    size_t maximum_leaves = kMaximumTreeLeaves,
+    size_t maximum_depth = kMaximumTreeDepth,
+    HistogramFittingProfile *profile = nullptr);
 
 // Allocation-free and pixel-read-free; replays the geometry-dependent RNG to
 // count admission exactly. Does not truncate samples to meet an admission cap.

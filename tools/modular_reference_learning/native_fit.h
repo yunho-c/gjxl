@@ -16,7 +16,8 @@ struct NativeFitResult {
 };
 // Conversion/cloning precedes the timer, as in Replay's reference sample copy.
 // Native admission/row validation and all fitting allocations are timed.
-NativeFitResult FitNative(const Fixture &fixture, bool track_storage = false);
+NativeFitResult FitNative(const Fixture &fixture, bool track_storage = false,
+                         bool resumable = false);
 // Deterministic independent sample generation, fitted by both implementations.
 size_t RunNativeDifferentialTests();
 } // namespace reference_learning

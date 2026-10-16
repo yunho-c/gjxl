@@ -4,6 +4,7 @@
 // Adapted from pinned libjxl e8ff0976 enc_ma.cc and fast_math-inl.h.
 // Native storage, validation and SIMD operations; no libjxl/Highway dependency.
 #include "codec/modular/histogram_tree_learning.h"
+#include "codec/modular/histogram_tree_fitter.h"
 #include "codec/modular/histogram_tree_parallel.h"
 #include "codec/modular/histogram_tree_profile.h"
 
@@ -11,6 +12,8 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <numeric>
+#include <optional>
 
 #if defined(__aarch64__) || defined(_M_ARM64)
 #include <arm_neon.h>
@@ -102,6 +105,7 @@ float EstimateBits(const int32_t *counts, size_t symbols) {
 
 struct SamplesView {
   HistogramTrainingSamples &data;
+  std::span<uint32_t> original_rows;
   size_t NumDistinctSamples() const { return data.weights.size(); }
   size_t NumPredictors() const { return data.predictor_count; }
   size_t NumProperties() const { return data.property_count; }
@@ -138,7 +142,11 @@ struct SamplesView {
     const auto &cuts = data.thresholds[prop];
     return std::lower_bound(cuts.begin(), cuts.end(), clipped) - cuts.begin();
   }
-  void Swap(size_t a, size_t b) { data.Swap(a, b); }
+  void Swap(size_t a, size_t b) {
+    data.Swap(a, b);
+    if (!original_rows.empty())
+      std::swap(original_rows[a], original_rows[b]);
+  }
 };
 
 void MakeSplitNode(size_t pos, int property, int splitval, Predictor low,
@@ -567,247 +575,591 @@ void MergePropertyProfile(HistogramFittingProfile &to,
   }
 }
 
+struct PendingNode {
+  NodeInfo info{};
+  size_t symbols = 0;
+  float base_bits = 0;
+  SplitInfo forced;
+  bool forced_active = false;
+  bool needs_evaluation(float threshold) const {
+    return !forced_active && base_bits > threshold;
+  }
+};
+
+template <bool Profiled>
+Status PrepareNode(SamplesView &tree_samples, Workspace &w,
+                   HistogramTreeLearningOptions options, DecisionTree *tree,
+                   PendingNode &node, HistogramFittingProfile *profile,
+                   HistogramNodeBucket *bucket) {
+  const auto [pos, begin, end, static_prop_range, depth, constant_properties] =
+      node.info;
+  const size_t num_predictors = tree_samples.NumPredictors();
+  const float threshold = options.split_threshold;
+  const auto mul_info = options.multipliers;
+  // Compute the maximum token in the range.
+  Phase<Profiled> symbol_timer(profile, HistogramFitStage::kSymbolRange,
+                               bucket);
+  auto &max_symbols = node.symbols;
+  max_symbols = 0;
+  for (size_t pred = 0; pred < num_predictors; pred++) {
+    for (size_t i = begin; i < end; i++) {
+      uint32_t tok = tree_samples.Token(pred, i);
+      max_symbols = max_symbols > tok + 1 ? max_symbols : tok + 1;
+    }
+  }
+  max_symbols = Padded(max_symbols);
+  symbol_timer.Stop();
+  if constexpr (Profiled) {
+    ++profile->nodes_by_symbol_span[max_symbols];
+    bucket->work.symbol_row_visits += (end - begin) * num_predictors;
+    bucket->work.parent_histogram_row_visits += (end - begin) * num_predictors;
+  }
+  Phase<Profiled> parent_timer(profile, HistogramFitStage::kParentHistograms,
+                               bucket);
+  auto &counts = w.counts;
+  auto &tot_extra_bits = w.total_extra;
+  std::fill_n(counts.begin(), max_symbols * num_predictors, int32_t{0});
+  for (size_t pred = 0; pred < num_predictors; pred++) {
+    size_t extra_bits = 0;
+    const auto &rtokens = tree_samples.RTokens(pred);
+    for (size_t i = begin; i < end; i++) {
+      const HistogramResidualToken &rt = rtokens[i];
+      size_t count = tree_samples.Count(i);
+      size_t eb = rt.extra_bits * count;
+      counts[pred * max_symbols + rt.symbol] += count;
+      extra_bits += eb;
+    }
+    tot_extra_bits[pred] = extra_bits;
+  }
+
+  auto &base_bits = node.base_bits;
+  {
+    size_t pred = tree_samples.PredictorIndex(tree->nodes[pos].predictor);
+    base_bits = EstimateBits(counts.data() + pred * max_symbols, max_symbols) +
+                tot_extra_bits[pred];
+  }
+  parent_timer.Stop();
+
+  auto &forced_split = node.forced;
+  // The multiplier ranges cut halfway through the current ranges of static
+  // properties. We do this even if the current node is not a leaf, to
+  // minimize the number of nodes in the resulting tree.
+  for (const auto &mmi : mul_info) {
+    uint32_t axis;
+    uint32_t val;
+    IntersectionType t = BoxIntersects(static_prop_range, mmi.range, axis, val);
+    if (t == IntersectionType::kNone)
+      continue;
+    if (t == IntersectionType::kInside) {
+      tree->nodes[pos].multiplier = mmi.multiplier;
+      break;
+    }
+    if (t == IntersectionType::kPartial) {
+      if (axis >= tree_samples.NumStaticProps())
+        return Status::InvalidArgument(
+            "Multiplier split requires a static property");
+      forced_split.val = tree_samples.QuantizeStaticProperty(axis, val);
+      if (forced_split.val + 1 >= tree_samples.NumPropertyValues(axis) ||
+          tree_samples.UnquantizeProperty(axis, forced_split.val) !=
+              static_cast<int64_t>(val))
+        return Status::InvalidArgument(
+            "Multiplier boundary is absent from quantization cuts");
+      forced_split.prop = axis;
+      forced_split.lcost = forced_split.rcost = base_bits / 2 - threshold;
+      forced_split.lpred = forced_split.rpred = tree->nodes[pos].predictor;
+      node.forced_active = true;
+      auto *best = &forced_split;
+      if constexpr (Profiled)
+        ++bucket->work.forced_splits;
+      best->pos = begin;
+
+      if (best->prop < tree_samples.NumStaticProps()) {
+        for (size_t x = begin; x < end; x++) {
+          if (tree_samples.Property<true>(best->prop, x) <= best->val) {
+            best->pos++;
+          }
+        }
+      } else {
+        size_t prop = best->prop - tree_samples.NumStaticProps();
+        for (size_t x = begin; x < end; x++) {
+          if (tree_samples.Property<false>(prop, x) <= best->val) {
+            best->pos++;
+          }
+        }
+      }
+      break;
+    }
+  }
+
+  return Status::Ok();
+}
+
+template <bool Profiled>
+void EvaluateNode(SamplesView &tree_samples, Workspace &w,
+                  histogram_parallel_internal::PropertyTeam *team,
+                  HistogramTreeLearningStats &execution,
+                  HistogramTreeLearningOptions options, DecisionTree *tree,
+                  const PendingNode &node, HistogramFittingProfile *profile) {
+  const auto [pos, begin, end, static_prop_range, depth, constant_properties] =
+      node.info;
+  const size_t num_predictors = tree_samples.NumPredictors();
+  const size_t num_properties = tree_samples.NumProperties();
+  const size_t max_symbols = node.symbols;
+  const float change_pred_penalty = 800.0f / (100.0f + options.split_threshold);
+  const auto &counts = w.counts;
+  const auto &tot_extra_bits = w.total_extra;
+  size_t varying = 0;
+  for (size_t prop = 0; prop < num_properties; ++prop)
+    varying += !(constant_properties & (uint32_t{1} << prop)) &&
+               tree_samples.NumPropertyValues(prop) > 1;
+  const bool parallel =
+      team && team->participants() > 1 && varying > 1 &&
+      (end - begin) * num_predictors >= kMinimumParallelHistogramRows;
+  const auto evaluate = [&](size_t prop, size_t worker) noexcept {
+    auto &scratch = worker == 0 ? w.property : w.workers[worker - 1];
+    EvaluateProperty<Profiled>(tree_samples, scratch, counts, tot_extra_bits,
+                               begin, end, prop, max_symbols,
+                               tree->nodes[pos].predictor, change_pred_penalty,
+                               constant_properties, w.results[prop]);
+  };
+  if (parallel) {
+    team->Run(num_properties, evaluate);
+    ++execution.parallel_nodes;
+    if constexpr (Profiled)
+      ++profile->parallel_property_nodes;
+  } else {
+    for (size_t prop = 0; prop < num_properties; ++prop)
+      evaluate(prop, 0);
+  }
+}
+
+template <bool Profiled>
+Status FinishNode(SamplesView &tree_samples, Workspace &w,
+                  HistogramTreeLearningOptions options, DecisionTree *tree,
+                  PendingNode &node, HistogramFittingProfile *profile,
+                  HistogramNodeBucket *bucket) {
+  auto [pos, begin, end, static_prop_range, depth, constant_properties] =
+      node.info;
+  auto &nodes = w.nodes;
+  const size_t num_properties = tree_samples.NumProperties();
+  const float base_bits = node.base_bits, threshold = options.split_threshold;
+  const float fast_decode_multiplier = options.fast_decode_multiplier;
+  SplitInfo best_split_static_constant, best_split_static, best_split_nonstatic,
+      best_split_nowp;
+  auto &forced_split = node.forced;
+  SplitInfo *best = node.forced_active ? &forced_split : &best_split_nonstatic;
+  if (best != &forced_split) {
+    if (base_bits > threshold) {
+      for (size_t prop = 0; prop < num_properties; ++prop) {
+        const auto &r = w.results[prop];
+        constant_properties |= r.constant_properties;
+        for (auto pair :
+             {std::pair{&best_split_static_constant, &r.best_static_constant},
+              std::pair{&best_split_static, &r.best_static},
+              std::pair{&best_split_nonstatic, &r.best_nonstatic},
+              std::pair{&best_split_nowp, &r.best_nowp}})
+          if (pair.second->Cost() < pair.first->Cost())
+            *pair.first = *pair.second;
+        if constexpr (Profiled)
+          MergePropertyProfile(*profile, *bucket, r.profile);
+      }
+    }
+
+    // Try to avoid introducing WP.
+    if (best_split_nowp.Cost() + threshold < base_bits &&
+        best_split_nowp.Cost() <= fast_decode_multiplier * best->Cost()) {
+      best = &best_split_nowp;
+    }
+    // Split along static props if possible and not significantly more
+    // expensive.
+    if (best_split_static.Cost() + threshold < base_bits &&
+        best_split_static.Cost() <= fast_decode_multiplier * best->Cost()) {
+      best = &best_split_static;
+    }
+    // Split along static props to create constant nodes if possible.
+    if (best_split_static_constant.Cost() + threshold < base_bits) {
+      best = &best_split_static_constant;
+    }
+  }
+
+  if (best->Cost() + threshold < base_bits) {
+    uint32_t p = tree_samples.PropertyFromIndex(best->prop);
+    int32_t dequant = tree_samples.UnquantizeProperty(best->prop, best->val);
+    // Split node and try to split children.
+    if (tree->size + 2 > 2 * options.maximum_leaves - 1 ||
+        depth >= options.maximum_depth)
+      return Status::Unsupported(
+          "Histogram Modular fit exceeds tree capacity or depth");
+    MakeSplitNode(pos, p, dequant, best->lpred, best->rpred, tree);
+    if constexpr (Profiled) {
+      ++bucket->work.splits;
+      bucket->work.partition_rows += end - begin;
+    }
+    // "Sort" according to winning property
+    Phase<Profiled> partition_timer(profile, HistogramFitStage::kPartition,
+                                    bucket);
+    if (best->prop < tree_samples.NumStaticProps()) {
+      SplitTreeSamples<true, Profiled>(tree_samples, begin, best->pos, end,
+                                       best->prop, best->val, bucket);
+    } else {
+      SplitTreeSamples<false, Profiled>(
+          tree_samples, begin, best->pos, end,
+          best->prop - tree_samples.NumStaticProps(), best->val, bucket);
+    }
+    partition_timer.Stop();
+    auto new_sp_range = static_prop_range;
+    if (p < kHistogramStaticProperties) {
+      new_sp_range[p][1] = dequant + 1;
+    }
+    nodes.push_back(NodeInfo{tree->nodes[pos].right, begin, best->pos,
+                             new_sp_range, depth + 1, constant_properties});
+    new_sp_range = static_prop_range;
+    if (p < kHistogramStaticProperties) {
+      new_sp_range[p][0] = dequant + 1;
+    }
+    nodes.push_back(NodeInfo{tree->nodes[pos].left, best->pos, end,
+                             new_sp_range, depth + 1, constant_properties});
+  }
+
+  return Status::Ok();
+}
+
 template <bool Profiled>
 Status FindBestSplit(SamplesView &tree_samples, Workspace &w,
                      histogram_parallel_internal::PropertyTeam &team,
                      HistogramTreeLearningStats &execution,
-                     HistogramTreeLearningOptions options, float threshold,
-                     std::span<const HistogramMultiplierRange> mul_info,
-                     HistogramStaticRange initial_static_prop_range,
-                     float fast_decode_multiplier, DecisionTree *tree,
+                     HistogramTreeLearningOptions options, DecisionTree *tree,
                      HistogramFittingProfile *profile,
                      HistogramFitRecord *record) {
-  auto &nodes = w.nodes;
-  nodes.push_back(NodeInfo{0, 0, tree_samples.NumDistinctSamples(),
-                           initial_static_prop_range, 1});
-
-  size_t num_predictors = tree_samples.NumPredictors();
-  size_t num_properties = tree_samples.NumProperties();
-
-  while (!nodes.empty()) {
-    size_t pos = nodes.back().pos;
-    size_t begin = nodes.back().begin;
-    size_t end = nodes.back().end;
-
-    HistogramStaticRange static_prop_range = nodes.back().static_prop_range;
-    const size_t depth = nodes.back().depth;
-    uint32_t constant_properties = nodes.back().constant_properties;
-    nodes.pop_back();
-    if (begin == end)
+  w.nodes.push_back(NodeInfo{0, 0, tree_samples.NumDistinctSamples(),
+                             options.static_range, 1});
+  while (!w.nodes.empty()) {
+    PendingNode node;
+    node.info = w.nodes.back();
+    w.nodes.pop_back();
+    if (node.info.begin == node.info.end)
       continue;
-    histogram_profile_internal::Node<Profiled> node_profile(
-        profile, end - begin, depth, record);
-
-    SplitInfo best_split_static_constant;
-    SplitInfo best_split_static;
-    SplitInfo best_split_nonstatic;
-    SplitInfo best_split_nowp;
-
-    // Compute the maximum token in the range.
-    Phase<Profiled> symbol_timer(profile, HistogramFitStage::kSymbolRange,
-                                 node_profile.bucket);
-    size_t max_symbols = 0;
-    for (size_t pred = 0; pred < num_predictors; pred++) {
-      for (size_t i = begin; i < end; i++) {
-        uint32_t tok = tree_samples.Token(pred, i);
-        max_symbols = max_symbols > tok + 1 ? max_symbols : tok + 1;
-      }
-    }
-    max_symbols = Padded(max_symbols);
-    symbol_timer.Stop();
-    if constexpr (Profiled) {
-      ++profile->nodes_by_symbol_span[max_symbols];
-      node_profile.bucket->work.symbol_row_visits +=
-          (end - begin) * num_predictors;
-      node_profile.bucket->work.parent_histogram_row_visits +=
-          (end - begin) * num_predictors;
-    }
-    Phase<Profiled> parent_timer(profile, HistogramFitStage::kParentHistograms,
-                                 node_profile.bucket);
-    auto &counts = w.counts;
-    auto &tot_extra_bits = w.total_extra;
-    std::fill_n(counts.begin(), max_symbols * num_predictors, int32_t{0});
-    for (size_t pred = 0; pred < num_predictors; pred++) {
-      size_t extra_bits = 0;
-      const auto &rtokens = tree_samples.RTokens(pred);
-      for (size_t i = begin; i < end; i++) {
-        const HistogramResidualToken &rt = rtokens[i];
-        size_t count = tree_samples.Count(i);
-        size_t eb = rt.extra_bits * count;
-        counts[pred * max_symbols + rt.symbol] += count;
-        extra_bits += eb;
-      }
-      tot_extra_bits[pred] = extra_bits;
-    }
-
-    float base_bits;
-    {
-      size_t pred = tree_samples.PredictorIndex(tree->nodes[pos].predictor);
-      base_bits =
-          EstimateBits(counts.data() + pred * max_symbols, max_symbols) +
-          tot_extra_bits[pred];
-    }
-    parent_timer.Stop();
-
-    SplitInfo *best = &best_split_nonstatic;
-
-    SplitInfo forced_split;
-    // The multiplier ranges cut halfway through the current ranges of static
-    // properties. We do this even if the current node is not a leaf, to
-    // minimize the number of nodes in the resulting tree.
-    for (const auto &mmi : mul_info) {
-      uint32_t axis;
-      uint32_t val;
-      IntersectionType t =
-          BoxIntersects(static_prop_range, mmi.range, axis, val);
-      if (t == IntersectionType::kNone)
-        continue;
-      if (t == IntersectionType::kInside) {
-        tree->nodes[pos].multiplier = mmi.multiplier;
-        break;
-      }
-      if (t == IntersectionType::kPartial) {
-        if (axis >= tree_samples.NumStaticProps())
-          return Status::InvalidArgument(
-              "Multiplier split requires a static property");
-        forced_split.val = tree_samples.QuantizeStaticProperty(axis, val);
-        if (forced_split.val + 1 >= tree_samples.NumPropertyValues(axis) ||
-            tree_samples.UnquantizeProperty(axis, forced_split.val) !=
-                static_cast<int64_t>(val))
-          return Status::InvalidArgument(
-              "Multiplier boundary is absent from quantization cuts");
-        forced_split.prop = axis;
-        forced_split.lcost = forced_split.rcost = base_bits / 2 - threshold;
-        forced_split.lpred = forced_split.rpred = tree->nodes[pos].predictor;
-        best = &forced_split;
-        if constexpr (Profiled)
-          ++node_profile.bucket->work.forced_splits;
-        best->pos = begin;
-
-        if (best->prop < tree_samples.NumStaticProps()) {
-          for (size_t x = begin; x < end; x++) {
-            if (tree_samples.Property<true>(best->prop, x) <= best->val) {
-              best->pos++;
-            }
-          }
-        } else {
-          size_t prop = best->prop - tree_samples.NumStaticProps();
-          for (size_t x = begin; x < end; x++) {
-            if (tree_samples.Property<false>(prop, x) <= best->val) {
-              best->pos++;
-            }
-          }
-        }
-        break;
-      }
-    }
-
-    if (best != &forced_split) {
-      // Each property preserves predictor/bin arithmetic and tie order. Only
-      // independent properties run concurrently; reduce their category winners
-      // in the original property order before applying predictor preferences.
-      const float change_pred_penalty = 800.0f / (100.0f + threshold);
-      if (base_bits > threshold) {
-        size_t varying = 0;
-        for (size_t prop = 0; prop < num_properties; ++prop)
-          varying += !(constant_properties & (uint32_t{1} << prop)) &&
-                     tree_samples.NumPropertyValues(prop) > 1;
-        const bool parallel =
-            team.participants() > 1 && varying > 1 &&
-            (end - begin) * num_predictors >= kMinimumParallelHistogramRows;
-        const auto evaluate = [&](size_t prop, size_t worker) noexcept {
-          auto &scratch = worker == 0 ? w.property : w.workers[worker - 1];
-          EvaluateProperty<Profiled>(
-              tree_samples, scratch, counts, tot_extra_bits, begin, end, prop,
-              max_symbols, tree->nodes[pos].predictor, change_pred_penalty,
-              constant_properties, w.results[prop]);
-        };
-        if (parallel) {
-          team.Run(num_properties, evaluate);
-          ++execution.parallel_nodes;
-          if constexpr (Profiled)
-            ++profile->parallel_property_nodes;
-        } else {
-          for (size_t prop = 0; prop < num_properties; ++prop)
-            evaluate(prop, 0);
-        }
-        for (size_t prop = 0; prop < num_properties; ++prop) {
-          const auto &r = w.results[prop];
-          constant_properties |= r.constant_properties;
-          for (auto pair :
-               {std::pair{&best_split_static_constant, &r.best_static_constant},
-                std::pair{&best_split_static, &r.best_static},
-                std::pair{&best_split_nonstatic, &r.best_nonstatic},
-                std::pair{&best_split_nowp, &r.best_nowp}})
-            if (pair.second->Cost() < pair.first->Cost())
-              *pair.first = *pair.second;
-          if constexpr (Profiled)
-            MergePropertyProfile(*profile, *node_profile.bucket, r.profile);
-        }
-      }
-
-      // Try to avoid introducing WP.
-      if (best_split_nowp.Cost() + threshold < base_bits &&
-          best_split_nowp.Cost() <= fast_decode_multiplier * best->Cost()) {
-        best = &best_split_nowp;
-      }
-      // Split along static props if possible and not significantly more
-      // expensive.
-      if (best_split_static.Cost() + threshold < base_bits &&
-          best_split_static.Cost() <= fast_decode_multiplier * best->Cost()) {
-        best = &best_split_static;
-      }
-      // Split along static props to create constant nodes if possible.
-      if (best_split_static_constant.Cost() + threshold < base_bits) {
-        best = &best_split_static_constant;
-      }
-    }
-
-    if (best->Cost() + threshold < base_bits) {
-      uint32_t p = tree_samples.PropertyFromIndex(best->prop);
-      int32_t dequant = tree_samples.UnquantizeProperty(best->prop, best->val);
-      // Split node and try to split children.
-      if (tree->size + 2 > 2 * options.maximum_leaves - 1 ||
-          depth >= options.maximum_depth)
-        return Status::Unsupported(
-            "Histogram Modular fit exceeds tree capacity or depth");
-      MakeSplitNode(pos, p, dequant, best->lpred, best->rpred, tree);
-      if constexpr (Profiled) {
-        ++node_profile.bucket->work.splits;
-        node_profile.bucket->work.partition_rows += end - begin;
-      }
-      // "Sort" according to winning property
-      Phase<Profiled> partition_timer(profile, HistogramFitStage::kPartition,
-                                      node_profile.bucket);
-      if (best->prop < tree_samples.NumStaticProps()) {
-        SplitTreeSamples<true, Profiled>(tree_samples, begin, best->pos, end,
-                                         best->prop, best->val,
-                                         node_profile.bucket);
-      } else {
-        SplitTreeSamples<false, Profiled>(tree_samples, begin, best->pos, end,
-                                          best->prop -
-                                              tree_samples.NumStaticProps(),
-                                          best->val, node_profile.bucket);
-      }
-      partition_timer.Stop();
-      auto new_sp_range = static_prop_range;
-      if (p < kHistogramStaticProperties) {
-        new_sp_range[p][1] = dequant + 1;
-      }
-      nodes.push_back(NodeInfo{tree->nodes[pos].right, begin, best->pos,
-                               new_sp_range, depth + 1, constant_properties});
-      new_sp_range = static_prop_range;
-      if (p < kHistogramStaticProperties) {
-        new_sp_range[p][0] = dequant + 1;
-      }
-      nodes.push_back(NodeInfo{tree->nodes[pos].left, best->pos, end,
-                               new_sp_range, depth + 1, constant_properties});
-    }
+    histogram_profile_internal::Node<Profiled> probe(
+        profile, node.info.end - node.info.begin, node.info.depth, record);
+    if (auto s = PrepareNode<Profiled>(tree_samples, w, options, tree, node,
+                                       profile, probe.bucket);
+        !s.ok())
+      return s;
+    if (node.needs_evaluation(options.split_threshold))
+      EvaluateNode<Profiled>(tree_samples, w, &team, execution, options, tree,
+                             node, profile);
+    if (auto s = FinishNode<Profiled>(tree_samples, w, options, tree, node,
+                                      profile, probe.bucket);
+        !s.ok())
+      return s;
   }
   return Status::Ok();
 }
 
 } // namespace
+
+namespace histogram_fitting_internal {
+struct State {
+  // Destroy profiling last, after scratch, row-order storage and the tree.
+  histogram_profile_internal::Fit fit_profile;
+  Workspace workspace;
+  ManagedVector<uint32_t> order;
+  DecisionTree tree;
+  SamplesView samples;
+  HistogramTreeLearningOptions options;
+  HistogramFittingProfile *profile;
+  HistogramTreeLearningStats execution;
+  PendingNode pending;
+  std::optional<histogram_profile_internal::Node<true>> node_profile;
+  bool ready = false, failed = false, cpu_evaluated = false;
+  State(HistogramTrainingSamples &s, HistogramTreeLearningOptions o,
+        HistogramFittingProfile *p)
+      : fit_profile(p), samples{s, {}}, options(o), profile(p) {}
+  HistogramNodeBucket *bucket() {
+    return node_profile ? node_profile->bucket : nullptr;
+  }
+  Status Finish() {
+    const auto status =
+        profile ? FinishNode<true>(samples, workspace, options, &tree, pending,
+                                   profile, bucket())
+                : FinishNode<false>(samples, workspace, options, &tree, pending,
+                                    nullptr, nullptr);
+    node_profile.reset();
+    ready = false;
+    failed = !status.ok();
+    return status;
+  }
+};
+void DeleteState::operator()(State *p) const noexcept {
+  if (p) {
+    std::destroy_at(p);
+    resource_budget_internal::ManagedAllocator<State>{}.deallocate(p, 1);
+  }
+}
+} // namespace histogram_fitting_internal
+
+HistogramTreeFitter::~HistogramTreeFitter() = default;
+HistogramTreeFitter::HistogramTreeFitter(HistogramTreeFitter &&) noexcept =
+    default;
+HistogramTreeFitter &
+HistogramTreeFitter::operator=(HistogramTreeFitter &&) noexcept = default;
+
+Status ComputeHistogramTreeFitterStorageBound(
+    const HistogramTrainingSamples &samples,
+    HistogramTreeLearningOptions options,
+    resource_budget_internal::HostStorageBound *out) {
+  using namespace resource_budget_internal;
+  if (!out)
+    return Status::InvalidArgument("Null resumable histogram storage bound");
+  if (options.cpu_participants != 1)
+    return Status::Unsupported(
+        "Resumable histogram fits use outer CPU parallelism");
+  HostStorageBound bound;
+  if (auto s =
+          ComputeHistogramTreeLearningStorageBound(samples, options, &bound);
+      !s.ok())
+    return s;
+  // The existing bound already includes one Workspace. Its replacement is a
+  // larger managed State containing that workspace and the resumable controls.
+  constexpr size_t extra =
+      sizeof(histogram_fitting_internal::State) - sizeof(Workspace);
+  if (!bound.Add({extra, extra}) ||
+      !bound.AddVector<uint32_t>(samples.weights.size(),
+                                 VectorCapacityPolicy::kFreshExact))
+    return Status::InvalidArgument("Resumable histogram storage overflow");
+  *out = bound;
+  return Status::Ok();
+}
+
+Status HistogramTreeFitter::Initialize(HistogramTrainingSamples &samples,
+                                       HistogramTreeLearningOptions options,
+                                       HistogramFittingProfile *profile) try {
+  if (auto s = ValidateHistogramTrainingSamples(samples, options); !s.ok())
+    return s;
+  if (options.cpu_participants != 1)
+    return Status::Unsupported(
+        "Resumable histogram fits use outer CPU parallelism");
+  using State = histogram_fitting_internal::State;
+  resource_budget_internal::ManagedAllocator<State> allocator;
+  State *allocation = allocator.allocate(1);
+  try {
+    std::construct_at(allocation, samples, options, profile);
+  } catch (...) {
+    allocator.deallocate(allocation, 1);
+    throw;
+  }
+  decltype(state_) candidate(allocation);
+  auto &w = candidate->workspace;
+  Phase<true> setup(profile, HistogramFitStage::kSetup);
+  const size_t bins = MaximumBins(samples);
+  w.nodes.reserve(options.maximum_depth);
+  w.counts.resize(kSymbols * samples.predictor_count);
+  w.total_extra.resize(samples.predictor_count);
+  w.property.Initialize(bins);
+  candidate->order.resize(samples.weights.size());
+  std::iota(candidate->order.begin(), candidate->order.end(), uint32_t{0});
+  candidate->samples.original_rows = candidate->order;
+  candidate->tree.nodes.resize(2 * options.maximum_leaves - 1);
+  candidate->tree.nodes[0].predictor = samples.predictors[0];
+  w.nodes.push_back(
+      NodeInfo{0, 0, samples.weights.size(), options.static_range, 1});
+  if (auto *r = candidate->fit_profile.record) {
+    r->rows = samples.weights.size();
+    r->population = samples.total_samples;
+    r->predictors = samples.predictor_count;
+    r->properties = samples.property_count;
+  }
+  state_ = std::move(candidate);
+  return Status::Ok();
+} catch (const resource_budget_internal::ManagedAllocationFailure &e) {
+  return e.status();
+} catch (const std::bad_alloc &) {
+  return Status::OutOfMemory(
+      "Resumable histogram initialization allocation failed");
+} catch (const std::length_error &) {
+  return Status::InvalidArgument("Resumable histogram initialization overflow");
+}
+
+Status HistogramTreeFitter::Advance() {
+  if (!state_ || state_->failed || state_->ready)
+    return Status::InvalidArgument(
+        "Histogram fitter cannot advance in this state");
+  auto &s = *state_;
+  while (!s.workspace.nodes.empty()) {
+    s.pending = {};
+    s.pending.info = s.workspace.nodes.back();
+    s.workspace.nodes.pop_back();
+    const auto &n = s.pending.info;
+    if (n.begin == n.end)
+      continue;
+    if (s.profile)
+      s.node_profile.emplace(s.profile, n.end - n.begin, n.depth,
+                             s.fit_profile.record);
+    const auto status =
+        s.profile ? PrepareNode<true>(s.samples, s.workspace, s.options,
+                                      &s.tree, s.pending, s.profile, s.bucket())
+                  : PrepareNode<false>(s.samples, s.workspace, s.options,
+                                       &s.tree, s.pending, nullptr, nullptr);
+    if (!status.ok()) {
+      s.failed = true;
+      s.node_profile.reset();
+      return status;
+    }
+    if (s.pending.needs_evaluation(s.options.split_threshold)) {
+      s.ready = true;
+      s.cpu_evaluated = false;
+      return Status::Ok();
+    }
+    if (auto status = s.Finish(); !status.ok())
+      return status;
+  }
+  return Status::Ok();
+}
+bool HistogramTreeFitter::ready() const noexcept {
+  return state_ && !state_->failed && state_->ready;
+}
+bool HistogramTreeFitter::complete() const noexcept {
+  return state_ && !state_->failed && !state_->ready &&
+         state_->workspace.nodes.empty();
+}
+std::span<const uint32_t> HistogramTreeFitter::row_order() const noexcept {
+  return state_ ? std::span<const uint32_t>(state_->order)
+                : std::span<const uint32_t>{};
+}
+HistogramNodeEvaluation HistogramTreeFitter::node() const noexcept {
+  if (!ready())
+    return {};
+  const auto &s = *state_;
+  const auto &n = s.pending.info;
+  return {static_cast<uint32_t>(n.pos),
+          n.constant_properties,
+          n.begin,
+          n.end,
+          s.pending.symbols,
+          s.tree.nodes[n.pos].predictor,
+          800.0f / (100.0f + s.options.split_threshold),
+          std::span(s.order).subspan(n.begin, n.end - n.begin),
+          std::span(s.workspace.counts)
+              .first(s.pending.symbols * s.samples.NumPredictors()),
+          s.workspace.total_extra};
+}
+
+Status
+HistogramTreeFitter::EvaluateCpu(std::span<HistogramPropertyEvaluation> out) {
+  if (!ready() || out.size() != state_->samples.NumProperties())
+    return Status::InvalidArgument(
+        "Invalid histogram CPU evaluation output/state");
+  auto &s = *state_;
+  if (s.profile)
+    EvaluateNode<true>(s.samples, s.workspace, nullptr, s.execution, s.options,
+                       &s.tree, s.pending, s.profile);
+  else
+    EvaluateNode<false>(s.samples, s.workspace, nullptr, s.execution, s.options,
+                        &s.tree, s.pending, nullptr);
+  for (size_t prop = 0; prop < out.size(); ++prop) {
+    const auto &r = s.workspace.results[prop];
+    auto &to = out[prop];
+    to = {};
+    to.constant = (r.constant_properties & (uint32_t{1} << prop)) != 0;
+    const SplitInfo *from[]{&r.best_static_constant, &r.best_static,
+                            &r.best_nonstatic, &r.best_nowp};
+    for (size_t category = 0; category < 4; ++category) {
+      const auto &c = *from[category];
+      if (c.lcost != std::numeric_limits<float>::max())
+        to.winners[category] = {c.val,   c.pos - s.pending.info.begin,
+                                c.lpred, c.rpred,
+                                c.lcost, c.rcost,
+                                true};
+    }
+  }
+  s.cpu_evaluated = true;
+  return Status::Ok();
+}
+Status HistogramTreeFitter::Apply(
+    std::span<const HistogramPropertyEvaluation> results) {
+  if (!ready() || results.size() != state_->samples.NumProperties())
+    return Status::InvalidArgument("Invalid histogram evaluation result/state");
+  auto &s = *state_;
+  const size_t rows = s.pending.info.end - s.pending.info.begin;
+  const auto present = [&](Predictor p) {
+    return s.samples.PredictorIndex(p) < s.samples.NumPredictors();
+  };
+  // Validate the entire batch before changing scratch, the tree, or row order.
+  for (size_t prop = 0; prop < results.size(); ++prop) {
+    const auto &r = results[prop];
+    const bool known_constant =
+        (s.pending.info.constant_properties & (uint32_t{1} << prop)) ||
+        s.samples.NumPropertyValues(prop) == 1;
+    if (known_constant && !r.constant)
+      return Status::InvalidArgument(
+          "Histogram result lost a constant property");
+    for (size_t category = 0; category < 4; ++category) {
+      const auto &c = r.winners[category];
+      if (!c.valid) {
+        if (c != HistogramSplitCandidate{})
+          return Status::InvalidArgument(
+              "Malformed invalid histogram candidate");
+        continue;
+      }
+      const bool uses_wp = s.samples.PropertyFromIndex(prop) == 15 ||
+                           c.low_predictor == Predictor::kWeighted ||
+                           c.high_predictor == Predictor::kWeighted;
+      const size_t expected =
+          prop < s.samples.NumStaticProps()
+              ? (c.low_cost == 0 || c.high_cost == 0 ? 0 : 1)
+              : (uses_wp ? 2 : 3);
+      if (r.constant || category != expected || !c.low_rows ||
+          c.low_rows >= rows ||
+          c.bin + uint64_t{1} >= s.samples.NumPropertyValues(prop) ||
+          !std::isfinite(c.low_cost) || !std::isfinite(c.high_cost) ||
+          c.low_cost < 0 || c.high_cost < 0 ||
+          c.low_cost == std::numeric_limits<float>::max() ||
+          c.high_cost == std::numeric_limits<float>::max() ||
+          !present(c.low_predictor) || !present(c.high_predictor))
+        return Status::InvalidArgument("Malformed histogram candidate");
+    }
+  }
+  for (size_t prop = 0; prop < results.size(); ++prop) {
+    const auto &r = results[prop];
+    auto &to = s.workspace.results[prop];
+    if (!s.cpu_evaluated)
+      to.profile = {};
+    to.constant_properties = r.constant ? uint32_t{1} << prop : 0;
+    SplitInfo *dest[]{&to.best_static_constant, &to.best_static,
+                      &to.best_nonstatic, &to.best_nowp};
+    for (size_t category = 0; category < 4; ++category) {
+      const auto &c = r.winners[category];
+      *dest[category] = c.valid ? SplitInfo{prop,
+                                            c.bin,
+                                            s.pending.info.begin + c.low_rows,
+                                            c.low_cost,
+                                            c.high_cost,
+                                            c.low_predictor,
+                                            c.high_predictor}
+                                : SplitInfo{};
+    }
+  }
+  return s.Finish();
+}
+Status HistogramTreeFitter::Publish(DecisionTree *out) {
+  if (!out || !complete())
+    return Status::InvalidArgument("Histogram fit is not ready to publish");
+  auto &s = *state_;
+  {
+    Phase<true> output(s.profile, HistogramFitStage::kOutput);
+    TreeLayout layout;
+    if (auto status = ValidateTree(s.tree, &layout); !status.ok())
+      return status;
+    if (s.tree.size <= kInlineTreeNodes)
+      s.tree.nodes.resize(s.tree.size);
+    *out = std::move(s.tree);
+    if (s.options.execution_stats)
+      *s.options.execution_stats = s.execution;
+    s.fit_profile.Success(out->size);
+  }
+  state_.reset();
+  return Status::Ok();
+}
 
 void HistogramTrainingSamples::Swap(size_t a, size_t b) {
   if (a == b)
@@ -1003,15 +1355,10 @@ Status LearnHistogramTree(HistogramTrainingSamples &s, DecisionTree *out,
     return status;
   setup_timer.Stop();
   const auto status =
-      profile ? FindBestSplit<true>(view, w, team, execution, options,
-                                    options.split_threshold,
-                                    options.multipliers, options.static_range,
-                                    options.fast_decode_multiplier, &result,
+      profile ? FindBestSplit<true>(view, w, team, execution, options, &result,
                                     profile, fit_profile.record)
-              : FindBestSplit<false>(
-                    view, w, team, execution, options, options.split_threshold,
-                    options.multipliers, options.static_range,
-                    options.fast_decode_multiplier, &result, nullptr, nullptr);
+              : FindBestSplit<false>(view, w, team, execution, options, &result,
+                                     nullptr, nullptr);
   if (!status.ok())
     return status;
   Phase<true> output_timer(profile, HistogramFitStage::kOutput);

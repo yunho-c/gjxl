@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 #pragma once
+#include "codec/modular/histogram_tree_fitter.h"
 #include "codec/modular/histogram_tree_learning.h"
 #include "core/host_storage_bound.h"
 #include "gpu/backend.h"
@@ -160,6 +161,22 @@ struct HistogramFittingInput {
     HistogramFittingEvaluationPlan *out,
     const HistogramFittingDeviceLimits *limits = nullptr);
 [[nodiscard]] Status CheckHistogramFittingDeviceStatus(uint32_t status);
+
+// Bridge the resumable native fitter and fixed-width operation results. Views
+// borrow the ready node until Apply; all helpers allocate nothing. The CPU
+// evaluator uses the same arithmetic as ordinary native fitting, exporting
+// exact costs and category winners for backend differential checks.
+[[nodiscard]] HistogramFittingNodeInput
+HistogramFittingNodeView(size_t fit,
+                         const modular_internal::HistogramNodeEvaluation &node);
+[[nodiscard]] Status
+EvaluateHistogramNodeOnCpu(modular_internal::HistogramTreeFitter &fitter,
+                           uint32_t source_id,
+                           std::span<HistogramPropertyResult> out);
+[[nodiscard]] Status
+ApplyHistogramNodeEvaluation(modular_internal::HistogramTreeFitter &fitter,
+                             uint32_t source_id,
+                             std::span<const HistogramPropertyResult> results);
 
 class PreparedGpuHistogramEvaluation {
 public:

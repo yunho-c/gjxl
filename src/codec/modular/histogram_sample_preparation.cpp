@@ -4,6 +4,7 @@
 // Sampling, quantization and deduplication adapted from pinned libjxl
 // e8ff0976 enc_ma.cc, enc_encoding.cc and base/random.h.
 #include "codec/modular/histogram_sample_preparation.h"
+#include "codec/modular/histogram_tree_fitter.h"
 #include "codec/modular/profile.h"
 
 #include <cmath>
@@ -644,5 +645,16 @@ Status LearnPreparedHistogramTree(PreparedHistogramSamples &samples,
   options.cpu_participants = cpu_participants;
   options.execution_stats = execution_stats;
   return LearnHistogramTree(samples.samples_, out, options);
+}
+Status InitializePreparedHistogramTreeFitter(
+    PreparedHistogramSamples &samples, HistogramTreeFitter *fitter,
+    size_t maximum_leaves, size_t maximum_depth,
+    HistogramFittingProfile *profile) {
+  if (!fitter)
+    return Status::InvalidArgument("Null prepared histogram fitter");
+  auto options = samples.tree_options();
+  options.maximum_leaves = maximum_leaves;
+  options.maximum_depth = maximum_depth;
+  return fitter->Initialize(samples.samples_, options, profile);
 }
 } // namespace gjxl::modular_internal

@@ -446,6 +446,40 @@ int main(int argc, char **argv) try {
               << ",\"tree_exact\":true}\n";
     return 0;
   }
+  if (mode == "resumable-paired-replay") {
+    Require(argc == 4, "resumable-paired-replay FIXTURE REPEATS");
+    const size_t repeats = std::stoul(argv[3]);
+    Require(repeats && repeats <= 100, "Invalid replay repetitions");
+    const auto fixture = capture::ReadFixture(argv[2]);
+    const auto ordinary_peak = capture::FitNative(fixture, true);
+    const auto resumable_peak = capture::FitNative(fixture, true, true);
+    for (size_t i = 0; i < repeats; ++i) {
+      capture::NativeFitResult ordinary, resumable;
+      if (i % 2 == 0) {
+        ordinary = capture::FitNative(fixture);
+        resumable = capture::FitNative(fixture, false, true);
+      } else {
+        resumable = capture::FitNative(fixture, false, true);
+        ordinary = capture::FitNative(fixture);
+      }
+      std::cout << "{\"iteration\":" << i
+                << ",\"tree_exact\":true,\"nodes\":" << ordinary.tree.size
+                << ",\"samples\":" << fixture.samples.NumSamples()
+                << ",\"distinct\":" << fixture.samples.NumDistinctSamples()
+                << ",\"predictors\":" << fixture.samples.NumPredictors()
+                << ",\"properties\":" << fixture.samples.NumProperties()
+                << ",\"ordinary_cpu\":" << ordinary.time.cpu
+                << ",\"ordinary_wall\":" << ordinary.time.wall
+                << ",\"resumable_cpu\":" << resumable.time.cpu
+                << ",\"resumable_wall\":" << resumable.time.wall
+                << ",\"ordinary_peak\":" << ordinary_peak.scratch_peak_bytes
+                << ",\"resumable_peak\":" << resumable_peak.scratch_peak_bytes
+                << ",\"resumable_bound\":" << resumable.scratch_bound_bytes
+                << ",\"ordinary_first\":" << (i % 2 == 0 ? "true" : "false")
+                << "}\n";
+    }
+    return 0;
+  }
   if (mode == "native-replay" || mode == "native-verify" ||
       mode == "paired-replay") {
     const bool verify = mode == "native-verify";
