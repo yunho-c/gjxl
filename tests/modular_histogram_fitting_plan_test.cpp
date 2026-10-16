@@ -109,9 +109,10 @@ void ExactLayoutAndLifetimes() {
   Check(e.nodes == 1 && e.rows == 64 && e.properties == 1 && e.tasks == 1 &&
             e.indices_offset == 256 && e.parent_counts_offset == 512 &&
             e.parent_extra_offset == 768 &&
-            e.predictor_penalties_offset == 1024 && e.status_offset == 1280 &&
-            e.dispatch_bytes == 1284 && e.output_bytes == 144 &&
-            e.scratch_bytes == 2048 && e.evaluation.peak_bytes == 4760,
+            e.predictor_penalties_offset == 1024 && e.tasks_offset == 1280 &&
+            e.status_offset == 1536 && e.dispatch_bytes == 1540 &&
+            e.output_bytes == 144 && e.scratch_bytes == 2048 &&
+            e.evaluation.peak_bytes == 5272,
         "Evaluation arena omitted live storage");
   Check(s.shard_histograms_offset == 0 && s.shard_extra_offset == 256 &&
             s.shard_occupancy_offset == 512 && s.histograms_offset == 768 &&
@@ -121,7 +122,7 @@ void ExactLayoutAndLifetimes() {
         "Histogram, prefix or ordered candidate scratch changed");
   Ok(ComputeHistogramFittingWorkingSetBound(p, e, &working));
   Check(working.retained_bytes == 1680 + sizeof(HistogramFittingShape) &&
-            working.peak_bytes == 6296 + sizeof(HistogramFittingShape),
+            working.peak_bytes == 6808 + sizeof(HistogramFittingShape),
         "Combined peak lost prepared columns, row order or output overlap");
   const auto old = working;
   auto wrong = e;

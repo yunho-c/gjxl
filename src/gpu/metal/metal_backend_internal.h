@@ -33,6 +33,7 @@
 #include "gpu/ops/ac_strategy.h"
 #include "gpu/ops/ans_token_cost.h"
 #include "gpu/ops/modular_tree_statistics.h"
+#include "gpu/ops/modular_histogram_fitting.h"
 #include "gpu/ops/modular_populations.h"
 #include "gpu/ops/ac_strategy_selection.h"
 #include "gpu/ops/aq_evaluation.h"
@@ -380,6 +381,7 @@ class MetalBackend final
     public modular_gpu_internal::GpuModularStreamProcessing,
     public ans_gpu_internal::GpuAnsTokenCost,
     public tree_gpu_internal::GpuModularTreeStatistics,
+    public histogram_gpu_internal::GpuModularHistogramFitting,
     public modular_gpu_internal::GpuModularPopulations,
     public DeviceButteraugliOperation {
 public:
@@ -395,6 +397,7 @@ public:
     std::array<NS::SharedPtr<MTL::ComputePipelineState>, 6> modular_token_pipelines,
     NS::SharedPtr<MTL::ComputePipelineState> ans_token_cost_pipeline,
     std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> tree_statistics_pipelines,
+    std::array<NS::SharedPtr<MTL::ComputePipelineState>, 6> histogram_fitting_pipelines,
     std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> modular_population_pipelines,
     AqPipelines aq_pipelines,
     ButteraugliPipelines butteraugli_pipelines,
@@ -558,6 +561,13 @@ public:
   Status MeasureTreeSplitCosts(
     const tree_gpu_internal::TreeStatisticsInput& input,
     std::unique_ptr<tree_gpu_internal::PreparedGpuTreeSplitCosts>* out) override;
+  histogram_gpu_internal::HistogramFittingDeviceLimits histogram_fitting_limits() const noexcept override;
+  Status PrepareHistogramRows(
+    std::span<const histogram_gpu_internal::HistogramFittingSource> sources,
+    std::unique_ptr<histogram_gpu_internal::PreparedGpuHistogramRows>* out) override;
+  Status EvaluateHistogramNodes(
+    const histogram_gpu_internal::HistogramFittingInput& input,
+    std::unique_ptr<histogram_gpu_internal::PreparedGpuHistogramEvaluation>* out) override;
   Status PrepareAdaptiveModularFeatures(
     const modular_internal::ModularEncoderFrame& frame,
     std::span<const modular_gpu_internal::AdaptiveModularTokenSlice> slices,
@@ -916,6 +926,7 @@ private:
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> modular_population_pipelines_;
   NS::SharedPtr<MTL::ComputePipelineState> ans_token_cost_pipeline_;
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> tree_statistics_pipelines_;
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 6> histogram_fitting_pipelines_;
   AqPipelines aq_pipelines_;
   ButteraugliPipelines butteraugli_pipelines_;
   bool test_fail_submission_ = false;

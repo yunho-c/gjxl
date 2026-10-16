@@ -103,7 +103,7 @@ inline bool SameResults(std::span<const HistogramPropertyResult> a,
   for (size_t p = 0; p < a.size(); ++p) {
     if (a[p].source_id != b[p].source_id || a[p].node_id != b[p].node_id ||
         a[p].property_index != b[p].property_index ||
-        a[p].constant != b[p].constant)
+        a[p].is_constant != b[p].is_constant)
       return false;
     for (size_t c = 0; c < 4; ++c) {
       const auto &x = a[p].winners[c], &y = b[p].winners[c];

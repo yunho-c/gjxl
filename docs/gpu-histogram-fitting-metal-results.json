@@ -1,0 +1,46 @@
+{
+  "status": "passed",
+  "date": "2026-10-16",
+  "base_revision": "9400ba8aa2092294d52112c0d8ea2bcdf8adc19e",
+  "device": "Apple M4 Pro",
+  "exact_batches": 140,
+  "exact_property_results": 3025,
+  "complete_trees": 7,
+  "failure_checks": 13,
+  "encoder_route_integrated": false,
+  "sources": {
+    "src/gpu/metal/metal_modular_histogram_fitting.cpp": "a98b2cfdcb1e6c3f2218bff5ba4bca744a95a94dd8ce04f51cfda68e45ce3628",
+    "src/gpu/metal/kernels/modular_histogram_fitting.metal": "2c618c2ad9b0d3db0eba3d31b30a9f5e1ba59e5121559bb2c00cd9660d6a29f2",
+    "src/gpu/metal/kernels/modular_histogram_fitting_params.h": "73246ed25615f39eaf897ec2d8eb1b8266585c195d0cacca9a34ed50f5f347fb",
+    "src/gpu/metal/metal_backend.cpp": "681a2d933b0c61d4778dacd63267f90bbdf278f6a45af57118c0fe006dca037c",
+    "src/gpu/metal/metal_backend_internal.h": "fb22e9fde8791df8ede364c3c68bae16bc3a2eeea0ab5574ad9cd55c8da0864e",
+    "src/gpu/ops/modular_histogram_fitting.cpp": "c49b91018e82ad57a31f8320f4fcbc84b29ed7e951425abeeeefd9c6c915070d",
+    "src/gpu/ops/modular_histogram_fitting.h": "72c9931794354a999eb961468215213edb8b47a106b0b255618e326d4b44f759",
+    "src/gpu/ops/modular_histogram_fitting_layout.h": "f912aef27584e3b09c9afb86c97b2fb36b30a774a3637cae9d6afa30db6965aa",
+    "tests/metal_modular_histogram_fitting_test.cpp": "9f83e31667cc9a3e81e5e370246e499da9742e60936960780db85538b10ec3a4",
+    "tests/modular_histogram_fitting_plan_test.cpp": "b6f48034f471a72b7a05f745d95c0cbb20371f9766edd5874eef3407d5b10bb3",
+    "CMakeLists.txt": "b7c39ca5d0f6613295a245c405ad04116d7ef821db64c67733674abda916b0ec"
+  },
+  "artifacts": {
+    "build/release/gjxl_metal_modular_histogram_fitting_test": "e5c07057169c23e5e7dc1d3f4736a36b5da77124b7d5a649fb205c21eff1b469",
+    "build/release/metal/gjxl.metallib": "375f0136a02376b0381fef0cddbcb154b3bc843220e381e5bc50446142a635c2"
+  },
+  "validation": {
+    "metal-qualification-build.log": {
+      "sha256": "a45b523a5624245ed93fa9b01288f2c6ec757f7e93a46ef86bac48602c1f4901",
+      "output": "[1/8] Building CXX object CMakeFiles/gjxl_metal_resource_budget_test.dir/tests/metal_resource_budget_test.cpp.o\n[2/8] Linking CXX executable gjxl_metal_resource_budget_test\n[3/8] Building CXX object CMakeFiles/gjxl_metal_modular_tree_statistics_test.dir/tests/metal_modular_tree_statistics_test.cpp.o\n[4/8] Building CXX object CMakeFiles/gjxl_metal_modular_histogram_fitting_test.dir/tests/metal_modular_histogram_fitting_test.cpp.o\n[5/8] Linking CXX executable gjxl_metal_modular_tree_statistics_test\n[6/8] Building CXX object CMakeFiles/gjxl_modular_histogram_fitter_test.dir/tests/modular_histogram_fitter_test.cpp.o\n[7/8] Linking CXX executable gjxl_metal_modular_histogram_fitting_test\n[8/8] Linking CXX executable gjxl_modular_histogram_fitter_test\n"
+    },
+    "metal-qualification-tests.log": {
+      "sha256": "064f6f5c22318cca4a78914957e645e066c9ad0112bda49b109cadbfdf626e2e",
+      "output": "Test project /Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/release\n    Start 140: modular_histogram_fitting_plan\n1/5 Test #140: modular_histogram_fitting_plan ....   Passed    0.00 sec\n    Start 141: modular_histogram_fitter\n2/5 Test #141: modular_histogram_fitter ..........   Passed    0.26 sec\n    Start 216: metal_modular_tree_statistics\n3/5 Test #216: metal_modular_tree_statistics .....   Passed    0.69 sec\n    Start 217: metal_modular_histogram_fitting\n4/5 Test #217: metal_modular_histogram_fitting ...   Passed    1.29 sec\n    Start 226: metal_resource_budget\n5/5 Test #226: metal_resource_budget .............   Passed    2.58 sec\n\n100% tests passed out of 5\n\nTotal Test time (real) =   4.84 sec\n"
+    },
+    "step3-asan-tests.log": {
+      "sha256": "99acb43aadaa3d662fc1291847e96e2e8666ff0c1dca5a7fbe453ede590fdbba",
+      "output": "Test project /Users/yunhocho/GitHub/gjxl-parallel-tree-fitting/build/gpu-histogram-fitting-contract-20261015/asan-cxx23\n    Start 125: modular_histogram_fitting_plan\n1/2 Test #125: modular_histogram_fitting_plan ...   Passed    0.09 sec\n    Start 126: modular_histogram_fitter\n2/2 Test #126: modular_histogram_fitter .........   Passed    0.95 sec\n\n100% tests passed out of 2\n\nTotal Test time (real) =   1.04 sec\n"
+    },
+    "metal-shader-validation-final.log": {
+      "sha256": "34df44d4bdb1b053ab30bfe8e74569d56b640b2d52f5f2119ed49caac4d7f7de",
+      "output": "2026-10-16 00:37:01.203 gjxl_metal_modular_histogram_fitting_test[41952:37873638] Metal GPU Validation Enabled\nHistogram fitting device: Metal: Apple M4 Pro\n140 exact batches, 3025 exact property results, 7 complete trees, 13 failure checks\n"
+    }
+  }
+}

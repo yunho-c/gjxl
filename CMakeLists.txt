@@ -844,6 +844,8 @@ set(GJXL_ANS_COST_METAL_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernel
 set(GJXL_ANS_COST_METAL_IR "${GJXL_METAL_DIR}/ans_token_cost.ir")
 set(GJXL_TREE_STATISTICS_METAL_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/modular_tree_statistics.metal")
 set(GJXL_TREE_STATISTICS_METAL_IR "${GJXL_METAL_DIR}/modular_tree_statistics.ir")
+set(GJXL_HISTOGRAM_FITTING_METAL_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/modular_histogram_fitting.metal")
+set(GJXL_HISTOGRAM_FITTING_METAL_IR "${GJXL_METAL_DIR}/modular_histogram_fitting.ir")
 set(GJXL_MODULAR_POPULATIONS_METAL_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/modular_populations.metal")
 set(GJXL_MODULAR_POPULATIONS_METAL_IR "${GJXL_METAL_DIR}/modular_populations.ir")
 
@@ -1148,6 +1150,16 @@ add_custom_command(OUTPUT "${GJXL_TREE_STATISTICS_METAL_IR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/modular_tree_statistics_params.h"
   COMMENT "Compiling exact Metal Modular learner statistics" VERBATIM)
 
+add_custom_command(OUTPUT "${GJXL_HISTOGRAM_FITTING_METAL_IR}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${GJXL_METAL_DIR}"
+  COMMAND "${XCRUN_EXECUTABLE}" -sdk macosx metal -std=metal3.1
+    -fno-fast-math -ffp-contract=off ${GJXL_METAL_PROFILING_FLAGS}
+    -c "${GJXL_HISTOGRAM_FITTING_METAL_SOURCE}" -o "${GJXL_HISTOGRAM_FITTING_METAL_IR}"
+  DEPENDS "${GJXL_HISTOGRAM_FITTING_METAL_SOURCE}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/modular_histogram_fitting_params.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/ops/modular_histogram_fitting_layout.h"
+  COMMENT "Compiling exact native Metal histogram fitting" VERBATIM)
+
 add_custom_command(OUTPUT "${GJXL_MODULAR_POPULATIONS_METAL_IR}"
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${GJXL_METAL_DIR}"
   COMMAND "${XCRUN_EXECUTABLE}" -sdk macosx metal -std=metal3.1
@@ -1191,6 +1203,7 @@ add_custom_command(
     "${GJXL_MODULAR_ADAPTIVE_METAL_IR}"
     "${GJXL_ANS_COST_METAL_IR}"
     "${GJXL_TREE_STATISTICS_METAL_IR}"
+    "${GJXL_HISTOGRAM_FITTING_METAL_IR}"
     "${GJXL_MODULAR_POPULATIONS_METAL_IR}"
     "${GJXL_PRIMITIVES_METAL_IR}"
     "${GJXL_AQ_REDUCTION_METAL_IR}"
@@ -1208,6 +1221,7 @@ add_custom_command(
     "${GJXL_MODULAR_ADAPTIVE_METAL_IR}"
     "${GJXL_ANS_COST_METAL_IR}"
     "${GJXL_TREE_STATISTICS_METAL_IR}"
+    "${GJXL_HISTOGRAM_FITTING_METAL_IR}"
     "${GJXL_MODULAR_POPULATIONS_METAL_IR}"
     "${GJXL_PRIMITIVES_METAL_IR}"
     "${GJXL_AQ_REDUCTION_METAL_IR}"
@@ -1320,6 +1334,7 @@ add_library(
   src/gpu/metal/metal_modular_adaptive_tokens.cpp
   src/gpu/metal/metal_ans_token_cost.cpp
   src/gpu/metal/metal_modular_tree_statistics.cpp
+  src/gpu/metal/metal_modular_histogram_fitting.cpp
   src/gpu/metal/metal_modular_populations.cpp
   src/gpu/metal/metal_submission.cpp
   src/gpu/metal/metal_submission_storage_plan.cpp
@@ -3871,6 +3886,12 @@ if(GJXL_BUILD_TESTS)
   target_compile_definitions(gjxl_metal_modular_tree_statistics_test PRIVATE GJXL_METALLIB_PATH="${GJXL_METALLIB}")
   add_test(NAME metal_modular_tree_statistics COMMAND gjxl_metal_modular_tree_statistics_test)
   set_tests_properties(metal_modular_tree_statistics PROPERTIES TIMEOUT 180)
+
+  add_executable(gjxl_metal_modular_histogram_fitting_test tests/metal_modular_histogram_fitting_test.cpp)
+  target_link_libraries(gjxl_metal_modular_histogram_fitting_test PRIVATE gjxl_codestream gjxl_metal)
+  target_compile_definitions(gjxl_metal_modular_histogram_fitting_test PRIVATE GJXL_METALLIB_PATH="${GJXL_METALLIB}")
+  add_test(NAME metal_modular_histogram_fitting COMMAND gjxl_metal_modular_histogram_fitting_test)
+  set_tests_properties(metal_modular_histogram_fitting PROPERTIES TIMEOUT 180)
 
   add_executable(gjxl_metal_modular_adaptive_test tests/metal_modular_adaptive_test.cpp)
   add_executable(gjxl_metal_modular_reference_workflow_test tests/metal_modular_reference_workflow_test.cpp)

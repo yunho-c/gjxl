@@ -152,7 +152,7 @@ void InvalidResultsAndStates() {
   rejects([](auto &r) { r.back().source_id++; });
   rejects([](auto &r) { r.back().node_id++; });
   rejects([](auto &r) { r.back().property_index = 0; });
-  rejects([](auto &r) { r.back().constant = 2; });
+  rejects([](auto &r) { r.back().is_constant = 2; });
   rejects([](auto &r) { r.back().winners[0].reserved = 1; });
   rejects([](auto &r) { r.back().winners[0].valid = 2; });
   rejects([](auto &r) { r.back().winners[0].left_predictor = 256; });

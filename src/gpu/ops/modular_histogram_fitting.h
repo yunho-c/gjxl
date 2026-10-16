@@ -82,7 +82,7 @@ struct HistogramFittingEvaluationPlan {
   size_t maximum_bins = 0, maximum_predictors = 0, maximum_symbols = 0;
   size_t descriptors_bytes = 0, indices_offset = 0, parent_counts_offset = 0;
   size_t parent_extra_offset = 0, predictor_penalties_offset = 0,
-         status_offset = 0, dispatch_bytes = 0;
+         tasks_offset = 0, status_offset = 0, dispatch_bytes = 0;
   size_t histogram_shards = 0, active_properties = 0, scratch_bytes = 0,
          output_bytes = 0;
   HistogramFittingScratchLayout scratch;
@@ -194,7 +194,7 @@ public:
 protected:
   PreparedGpuHistogramEvaluation() = default;
 };
-// Optional private capability. No backend implements it in the contract slice.
+// Optional private capability, implemented by Metal.
 // Preparation snapshots native rows; later CPU partitions must track original
 // indices separately. Exact native arithmetic and category winners are
 // required; tree preferences, unquantization, partitioning and publication stay

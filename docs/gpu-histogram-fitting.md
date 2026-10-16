@@ -1,11 +1,11 @@
 # Batched GPU histogram fitting
 
-Status: the operation/storage contract and resumable CPU reference are
-implemented and tested. CPU
+Status: the operation/storage contract, resumable CPU reference and Metal
+evaluator are implemented and tested. CPU
 consolidation is committed as `3aca01c`; its paired performance qualification
 is recorded in [the baseline report](gpu-histogram-fitting-baseline.md).
-The Metal evaluator and its connection to the public learner are subsequent
-steps. The public encoder continues to use the CPU histogram fitter.
+Connection to the learner and complete-call qualification are the next step.
+The public encoder continues to use the CPU histogram fitter.
 
 This effort targets the native quantized, weighted histogram learner. The older
 `GpuModularTreeStatistics` operation evaluates sorted rows using integer Q12
@@ -165,7 +165,8 @@ The implementation is private to the repository:
   request views and storage/eligibility helpers.
 - [`modular_histogram_fitting_layout.h`](../src/gpu/ops/modular_histogram_fitting_layout.h)
   defines fixed-width C++/Metal descriptors and results. A fit descriptor is
-  336 bytes, a node descriptor 48 bytes and a property result 144 bytes.
+  336 bytes, a node descriptor 48 bytes, a property task descriptor 8 bytes,
+  and a property result 144 bytes.
 - [`modular_histogram_fitting.cpp`](../src/gpu/ops/modular_histogram_fitting.cpp)
   validates native sources and parent summaries, computes exact predictor
   penalties, and plans all operation backing without allocating or accessing
@@ -188,9 +189,8 @@ allocating that arena.
 deliberately does not scan membership indices. The backend must verify its
 native owner type and allocation bounds, then check row indices, population
 and agreement with parent summaries on device before publishing a result.
-This is a requirement for the next implementation, not device validation
-already supplied by this slice. Inherited constant masks are trusted CPU-parent
-state after their bit ranges have been checked.
+The Metal implementation below performs those device checks. Inherited constant
+masks are trusted CPU-parent state after their bit ranges have been checked.
 
 `ComputeHistogramFittingWorkingSetBound` composes the prepared device/metadata
 owner, separate CPU row-order vector and evaluation output with the larger of
@@ -203,8 +203,7 @@ The new test passes in Release and a CPU-only C++23 AddressSanitizer/UBSan
 build (`ASAN_OPTIONS=detect_leaks=0`, because macOS LeakSanitizer is unsupported).
 Contract validation records and source/binary hashes are archived with the
 baseline's focused integration checks. No encoder route queries the capability
-yet. Actual Metal allocation/error paths and GPU candidate/tree parity remain
-later gates.
+yet; the operation-level Metal qualification is recorded below.
 
 ## Resumable CPU reference
 
@@ -258,6 +257,49 @@ Raw timings, fixture/source/binary hashes and test evidence are in
 Local build/log archives are under
 `build/gpu-histogram-fitting-implementation-20261016/`; the research harness's
 `resumable-paired-replay FIXTURE REPEATS` mode reproduces the comparison.
+
+## Metal evaluator
+
+`metal_modular_histogram_fitting.cpp` implements immutable prepared-row and
+completed-result owners. Preparation validates and copies native columns into
+shared Metal storage without submitting GPU work. An evaluation uploads the
+node membership and parent summaries once, and uses one command-buffer
+submission/wait for the complete batch, including every scratch wave.
+
+Six kernels perform membership/parent validation and output initialization,
+scratch clearing, integer histogram collection, shard reduction and prefixes,
+native candidate costs, and ordered predictor/category selection. Property
+tasks run in bounded reusable slots; scratch is independent between calls.
+Device barriers separate producers/consumers and slot reuse. Validation also
+runs for all-constant requests, which need no histogram scratch. A 64-bit
+population reduction catches malformed multisets whose weighted population
+would overflow a 32-bit histogram.
+
+Only this Metal source is compiled with `-fno-fast-math -ffp-contract=off`.
+Its explicit FMA polynomial, four-lane accumulation and pairwise sum match
+the CPU reference on the qualified Apple M4 Pro. Integer prefixes and ordered
+comparisons preserve sparse-bin and predictor ties. The wire constant flag is
+named `is_constant` because `constant` is a Metal address-space keyword. The
+dispatch plan now includes the canonical 8-byte task descriptors; its storage
+test accounts for this backing and upload allowance.
+
+Step 3 qualification passes **140 exact batches, 3,025 exact property results,
+7 complete trees and 13 failure checks**, through external and embedded
+libraries. It covers Best/All predictors, heterogeneous fits, one reusable
+slot, 1/4/32 shards, large random weights, exact cost bits, predictor penalties,
+65,536 static bins, the 2^24 population ceiling, constants, row permutations,
+and concurrent reuse of immutable prepared data. Capacity-boundary tests
+verify actual retained/transient backing and cleanup. Host/device allocation,
+submission/completion, foreign/impostor owners, malformed metadata, bad row
+indices, parent mismatch and overflowing weighted multisets preserve prior
+outputs and drain submitted work.
+
+The same device suite passes with Metal shader validation enabled. Five
+focused Release tests pass, including existing tree-statistics and Metal
+resource-budget tests; the updated CPU contract/fitter tests pass ASan/UBSan.
+This establishes operation correctness on the measured device, not an encoder
+speedup or a public routing decision. Evidence and source/artifact hashes are
+in [`gpu-histogram-fitting-metal-results.json`](gpu-histogram-fitting-metal-results.json).
 
 ## Implementation sequence and gates
 

@@ -37,6 +37,11 @@ struct NodeDescriptor {
   Word inherited_constants, parent_predictor, predictor_penalties_offset,
       reserved;
 };
+// Canonical nonconstant property work; reusable scratch slots are assigned by
+// the backend's bounded waves rather than retained in this descriptor.
+struct TaskDescriptor {
+  Word node, property;
+};
 // low_rows counts row entries, not their weights. Predictor fields are wire
 // IDs. Invalid candidates have valid=0, both costs=FLT_MAX, and all other
 // fields zero.
@@ -46,7 +51,7 @@ struct Candidate {
   Word valid, reserved;
 };
 struct PropertyResult {
-  Word source_id, node_id, property_index, constant;
+  Word source_id, node_id, property_index, is_constant;
   Candidate winners[kCategories];
 };
 struct CandidateCosts {

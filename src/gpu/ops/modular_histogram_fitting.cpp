@@ -15,7 +15,8 @@ static_assert(kHistogramPredictors == 14 && kPropertyCount == 16 &&
 static_assert(sizeof(HistogramResidualToken) == 2 &&
               offsetof(HistogramResidualToken, extra_bits) == 1);
 static_assert(sizeof(wire::FitDescriptor) == 336 &&
-              sizeof(wire::NodeDescriptor) == 48);
+              sizeof(wire::NodeDescriptor) == 48 &&
+              sizeof(wire::TaskDescriptor) == 8);
 static_assert(sizeof(wire::Candidate) == 32 &&
               sizeof(wire::PropertyResult) == 144);
 static_assert(sizeof(wire::CandidateCosts) == 8 &&
@@ -328,6 +329,7 @@ Status ComputeHistogramFittingEvaluationPlan(
       !a.Add(parent_counts, sizeof(int32_t), &p.parent_counts_offset) ||
       !a.Add(parent_extra, sizeof(uint32_t), &p.parent_extra_offset) ||
       !a.Add(parent_extra, sizeof(float), &p.predictor_penalties_offset) ||
+      !a.Add(p.tasks, sizeof(wire::TaskDescriptor), &p.tasks_offset) ||
       !a.Add(1, sizeof(uint32_t), &p.status_offset))
     return Overflow();
   p.dispatch_bytes = a.bytes;
@@ -506,9 +508,9 @@ ApplyHistogramNodeEvaluation(HistogramTreeFitter &fitter, uint32_t source_id,
   for (size_t prop = 0; prop < results.size(); ++prop) {
     const auto &r = results[prop];
     if (r.source_id != source_id || r.node_id != node.node_id ||
-        r.property_index != prop || r.constant > 1)
+        r.property_index != prop || r.is_constant > 1)
       return Invalid();
-    native[prop].constant = r.constant != 0;
+    native[prop].constant = r.is_constant != 0;
     for (size_t category = 0; category < 4; ++category) {
       const auto &c = r.winners[category];
       if (c.valid > 1 || c.reserved ||
