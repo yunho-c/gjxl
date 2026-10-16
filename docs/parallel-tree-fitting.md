@@ -21,7 +21,8 @@ zero uses the caller's allowance; one selects the serial control. The public
 learned policy now honors `ModularEncodingOptions::cpu_thread_count` for this
 work. The shared execution domain and per-image CPU budget both constrain
 worker grants. Private calls without CPU participation or within an explicit
-parallel scope stay serial. Global/buffered learning still performs one serial fit.
+parallel scope stay serial. Global/buffered learning performs one fit, whose property searches can now run
+concurrently; see [shared-tree fitting](parallel-shared-tree-fitting.md).
 
 One job prepares a stream's samples, fits its tree, releases its sample columns,
 and compacts the tree. Jobs run in bounded waves, with at most one admitted job

@@ -2510,6 +2510,17 @@ if(GJXL_BUILD_TESTS)
   set_tests_properties(modular_histogram_preparation PROPERTIES TIMEOUT 60)
 
   add_executable(gjxl_ans_selection_test tests/ans_selection_test.cpp)
+  add_executable(gjxl_ans_search_probe tools/modular_reference_learning/ans_search_probe.cpp)
+  target_include_directories(gjxl_ans_search_probe PRIVATE tests)
+  target_link_libraries(gjxl_ans_search_probe PRIVATE gjxl_codestream)
+  find_package(Python3 COMPONENTS Interpreter QUIET)
+  if(Python3_Interpreter_FOUND)
+    add_test(NAME ans_search_storage
+      COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/modular_reference_learning/test_ans_search_storage.py
+        --binary $<TARGET_FILE:gjxl_ans_search_probe>
+        --golden ${CMAKE_CURRENT_SOURCE_DIR}/tests/ans_search_golden.json)
+  endif()
   target_link_libraries(gjxl_ans_selection_test PRIVATE gjxl_codestream)
   add_test(NAME ans_selection COMMAND gjxl_ans_selection_test)
   add_test(NAME ans_selection_faults COMMAND gjxl_ans_selection_test --allocations)

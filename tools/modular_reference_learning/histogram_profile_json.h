@@ -54,12 +54,15 @@ void WriteHistogramDistribution(std::ostream &out, const Array &values,
 inline void WriteHistogramProfile(std::ostream &out,
                                   const HistogramFittingProfile &p,
                                   bool enabled) {
-  out << "{\"schema\":2,\"enabled\":" << (enabled ? "true" : "false");
+  out << "{\"schema\":3,\"enabled\":" << (enabled ? "true" : "false");
   if (!enabled) {
     out << '}';
     return;
   }
   out << ",\"timing\":\"sum_of_fit_wall_intervals\",\"calls\":" << p.calls
+      << ",\"stage_timing\":\"sum_of_task_wall_intervals\""
+      << ",\"peak_property_participants\":" << p.peak_property_participants
+      << ",\"parallel_property_nodes\":" << p.parallel_property_nodes
       << ",\"successes\":" << p.successes
       << ",\"fit_seconds\":" << p.fit_seconds << ",\"stages\":";
   WriteHistogramSeconds(out, p.seconds);

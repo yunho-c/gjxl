@@ -106,7 +106,8 @@ counter equality across CPU/Metal routes within each implementation.
 ## Parallel local learning
 
 Append explicit learning participants and a fixed CPU ceiling after the fitting
-profile mode to measure local CPU preparation/fitting concurrency:
+profile mode to measure local CPU preparation/fitting concurrency, or property
+evaluation within a shared-tree fit:
 
 ```sh
 build/release/gjxl_modular_hybrid_profile INPUT.pam OUT auto auto best fit-off 14 14
@@ -127,20 +128,28 @@ elapsed preparation/fitting time; `detail_work` contains overlapping per-job
 time sums. Cohort alignment can change feature batch boundaries and automatic
 producer routing across participant counts; the runner records those changes
 and requires stable routing within each repeated condition. Older invocations keep
-serial learning and schema 1. See the [implementation and results](../../docs/parallel-tree-fitting.md).
+serial learning and schema 1. See the [local fitting implementation](../../docs/parallel-tree-fitting.md)
+and [shared-tree property parallelism](../../docs/parallel-shared-tree-fitting.md).
 
 ## Histogram fitting attribution
 
 The same driver accepts an optional final `fit-off|fit-on` argument (default
 `fit-off`). The private histogram profile has allocation-free counters and
-exclusive wall phases inside `LearnHistogramTree`, plus inclusive node times
+task wall phases inside `LearnHistogramTree`, plus inclusive node times
 by distinct-row count/depth, bin/symbol-span distributions and per-fit records.
 It does not reuse the original sort-based learner's attribution. Candidate
 evaluation combines prefix histogram updates, entropy costs and predictor
 comparison; no clock runs per threshold. Diagnostic arrays are caller-owned,
 allocated outside the encoder timer, and excluded from codec admission.
 
-Histogram profile schema 2 includes fused first-predictor occupancy in
+Histogram profile schema 3 adds `peak_property_participants` and
+`parallel_property_nodes`. Fit/node durations remain elapsed spans, while
+property phase durations sum task wall intervals and can overlap within a fit.
+The exclusive phase attribution report requires serial property evaluation;
+it rejects parallel captures rather than subtracting overlapping work from
+elapsed time. Readers still accept schemas 1 and 2.
+
+Histogram profile schema 2 introduced fused first-predictor occupancy in
 `joint_histograms`. Physical property/histogram row passes are
 `property_row_visits + joint_histogram_row_visits - fused_property_row_visits`;
 `skipped_constant_properties` counts inherited/one-bin constants needing no row

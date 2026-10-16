@@ -1,0 +1,300 @@
+{
+  "revision": "ebfa2d508d6defbe6446b193716d345bffbf6410",
+  "description": "Frozen pre-reuse ANS search model plus ordered section payload bytes; raw syntax, not standalone images.",
+  "cases": [
+    {
+      "case": "0-0-0",
+      "bits": 108,
+      "configs": 8,
+      "histograms": 8,
+      "sha256": "2e0334b8a31537222826196ecf47f621cd52997a1e0e5931356ac1750020edae"
+    },
+    {
+      "case": "0-0-1",
+      "bits": 108,
+      "configs": 8,
+      "histograms": 8,
+      "sha256": "2e0334b8a31537222826196ecf47f621cd52997a1e0e5931356ac1750020edae"
+    },
+    {
+      "case": "0-1-0",
+      "bits": 113,
+      "configs": 1,
+      "histograms": 1,
+      "sha256": "10324f0b585e1100ec997dedc5c252a246c341c7062636c78fb7d8eb927e5e57"
+    },
+    {
+      "case": "0-2-0",
+      "bits": 108,
+      "configs": 28,
+      "histograms": 28,
+      "sha256": "6abd07ec4490463a6d86854e0ef4b1155ddbc30a41171e96b8dcc0114f147dfb"
+    },
+    {
+      "case": "0-3-0",
+      "bits": 108,
+      "configs": 28,
+      "histograms": 1,
+      "sha256": "6abd07ec4490463a6d86854e0ef4b1155ddbc30a41171e96b8dcc0114f147dfb"
+    },
+    {
+      "case": "0-3-1",
+      "bits": 108,
+      "configs": 28,
+      "histograms": 1,
+      "sha256": "6abd07ec4490463a6d86854e0ef4b1155ddbc30a41171e96b8dcc0114f147dfb"
+    },
+    {
+      "case": "1-0-0",
+      "bits": 108,
+      "configs": 8,
+      "histograms": 8,
+      "sha256": "2e0334b8a31537222826196ecf47f621cd52997a1e0e5931356ac1750020edae"
+    },
+    {
+      "case": "1-0-1",
+      "bits": 108,
+      "configs": 8,
+      "histograms": 8,
+      "sha256": "2e0334b8a31537222826196ecf47f621cd52997a1e0e5931356ac1750020edae"
+    },
+    {
+      "case": "1-1-0",
+      "bits": 113,
+      "configs": 1,
+      "histograms": 1,
+      "sha256": "10324f0b585e1100ec997dedc5c252a246c341c7062636c78fb7d8eb927e5e57"
+    },
+    {
+      "case": "1-2-0",
+      "bits": 108,
+      "configs": 28,
+      "histograms": 28,
+      "sha256": "6abd07ec4490463a6d86854e0ef4b1155ddbc30a41171e96b8dcc0114f147dfb"
+    },
+    {
+      "case": "1-3-0",
+      "bits": 108,
+      "configs": 28,
+      "histograms": 1,
+      "sha256": "6abd07ec4490463a6d86854e0ef4b1155ddbc30a41171e96b8dcc0114f147dfb"
+    },
+    {
+      "case": "1-3-1",
+      "bits": 108,
+      "configs": 28,
+      "histograms": 1,
+      "sha256": "6abd07ec4490463a6d86854e0ef4b1155ddbc30a41171e96b8dcc0114f147dfb"
+    },
+    {
+      "case": "2-0-0",
+      "bits": 129,
+      "configs": 16,
+      "histograms": 16,
+      "sha256": "3225e12540de30e745242d7d628d349a8692d7011c723532949da8846f524735"
+    },
+    {
+      "case": "2-0-1",
+      "bits": 129,
+      "configs": 16,
+      "histograms": 16,
+      "sha256": "3225e12540de30e745242d7d628d349a8692d7011c723532949da8846f524735"
+    },
+    {
+      "case": "2-1-0",
+      "bits": 139,
+      "configs": 2,
+      "histograms": 2,
+      "sha256": "f93b8514fbdf4d9062ea7550d834cc151d95596ec5c9d79330326c854e4cf1bf"
+    },
+    {
+      "case": "2-2-0",
+      "bits": 129,
+      "configs": 56,
+      "histograms": 56,
+      "sha256": "fd1ea5a90c7e9b0ca2377dc03dd5739b08142f3c347eb2b62d6d7c0c3ef983ce"
+    },
+    {
+      "case": "2-3-0",
+      "bits": 129,
+      "configs": 56,
+      "histograms": 2,
+      "sha256": "fd1ea5a90c7e9b0ca2377dc03dd5739b08142f3c347eb2b62d6d7c0c3ef983ce"
+    },
+    {
+      "case": "2-3-1",
+      "bits": 129,
+      "configs": 56,
+      "histograms": 2,
+      "sha256": "fd1ea5a90c7e9b0ca2377dc03dd5739b08142f3c347eb2b62d6d7c0c3ef983ce"
+    },
+    {
+      "case": "3-0-0",
+      "bits": 65685,
+      "configs": 8,
+      "histograms": 104,
+      "sha256": "413e5be99b5d9c5a7750a7a8b0f1ebcef050880761a026d9c71a99c58d0055d9"
+    },
+    {
+      "case": "3-0-1",
+      "bits": 65685,
+      "configs": 8,
+      "histograms": 104,
+      "sha256": "413e5be99b5d9c5a7750a7a8b0f1ebcef050880761a026d9c71a99c58d0055d9"
+    },
+    {
+      "case": "3-1-0",
+      "bits": 65722,
+      "configs": 1,
+      "histograms": 8,
+      "sha256": "bb1c59946078ee2b1144e2d555ff4daef4e86ed889f592f71ce7b1014b572470"
+    },
+    {
+      "case": "3-2-0",
+      "bits": 65685,
+      "configs": 28,
+      "histograms": 364,
+      "sha256": "413e5be99b5d9c5a7750a7a8b0f1ebcef050880761a026d9c71a99c58d0055d9"
+    },
+    {
+      "case": "3-3-0",
+      "bits": 65655,
+      "configs": 28,
+      "histograms": 273,
+      "sha256": "a3e272a8bb2da30e739f469c8aae751685fc94191eedba04c248e359a2f93936"
+    },
+    {
+      "case": "3-3-1",
+      "bits": 65655,
+      "configs": 28,
+      "histograms": 273,
+      "sha256": "a3e272a8bb2da30e739f469c8aae751685fc94191eedba04c248e359a2f93936"
+    },
+    {
+      "case": "4-0-0",
+      "bits": 131251,
+      "configs": 16,
+      "histograms": 208,
+      "sha256": "f6cbaa4300ea84a3a317f02fd2afa4bf44886413c665e75f2f43799b705be98b"
+    },
+    {
+      "case": "4-0-1",
+      "bits": 131251,
+      "configs": 16,
+      "histograms": 208,
+      "sha256": "f6cbaa4300ea84a3a317f02fd2afa4bf44886413c665e75f2f43799b705be98b"
+    },
+    {
+      "case": "4-1-0",
+      "bits": 131253,
+      "configs": 1,
+      "histograms": 8,
+      "sha256": "bd0555cc2a697f629cd0ebcb92cdc83a37246e3f0832cdd5192bde6f71523c6f"
+    },
+    {
+      "case": "4-2-0",
+      "bits": 131226,
+      "configs": 28,
+      "histograms": 247,
+      "sha256": "05e3b409406850cbfe246b0854a0e549db97e041deaa0b0e165af4db3c6a7296"
+    },
+    {
+      "case": "4-3-0",
+      "bits": 131226,
+      "configs": 28,
+      "histograms": 208,
+      "sha256": "05e3b409406850cbfe246b0854a0e549db97e041deaa0b0e165af4db3c6a7296"
+    },
+    {
+      "case": "4-3-1",
+      "bits": 131226,
+      "configs": 28,
+      "histograms": 208,
+      "sha256": "05e3b409406850cbfe246b0854a0e549db97e041deaa0b0e165af4db3c6a7296"
+    },
+    {
+      "case": "5-0-0",
+      "bits": 262341,
+      "configs": 8,
+      "histograms": 104,
+      "sha256": "7559b54e2ba3b6ff23b52d41939a8debc2124d2cbcfb2ff4ff91e0f0a98cd3f2"
+    },
+    {
+      "case": "5-0-1",
+      "bits": 262341,
+      "configs": 8,
+      "histograms": 104,
+      "sha256": "7559b54e2ba3b6ff23b52d41939a8debc2124d2cbcfb2ff4ff91e0f0a98cd3f2"
+    },
+    {
+      "case": "5-1-0",
+      "bits": 262487,
+      "configs": 1,
+      "histograms": 8,
+      "sha256": "d6c97d10d09eecb790ffa820c259df129d18a07ec7f014c21b2ffb9c00d8b4a5"
+    },
+    {
+      "case": "5-2-0",
+      "bits": 262341,
+      "configs": 28,
+      "histograms": 208,
+      "sha256": "7559b54e2ba3b6ff23b52d41939a8debc2124d2cbcfb2ff4ff91e0f0a98cd3f2"
+    },
+    {
+      "case": "5-3-0",
+      "bits": 262341,
+      "configs": 28,
+      "histograms": 182,
+      "sha256": "7559b54e2ba3b6ff23b52d41939a8debc2124d2cbcfb2ff4ff91e0f0a98cd3f2"
+    },
+    {
+      "case": "5-3-1",
+      "bits": 262341,
+      "configs": 28,
+      "histograms": 182,
+      "sha256": "7559b54e2ba3b6ff23b52d41939a8debc2124d2cbcfb2ff4ff91e0f0a98cd3f2"
+    },
+    {
+      "case": "6-0-0",
+      "bits": 26066,
+      "configs": 8,
+      "histograms": 104,
+      "sha256": "49d6310b6c85dc04a5a3cfd52d1be2e205b497793d69ccd99654f84f3000f798"
+    },
+    {
+      "case": "6-0-1",
+      "bits": 26066,
+      "configs": 8,
+      "histograms": 104,
+      "sha256": "49d6310b6c85dc04a5a3cfd52d1be2e205b497793d69ccd99654f84f3000f798"
+    },
+    {
+      "case": "6-1-0",
+      "bits": 26071,
+      "configs": 1,
+      "histograms": 8,
+      "sha256": "8daee55eab69e13e1bad0088face70da62d569f4bf21660c5e079ce2f821de66"
+    },
+    {
+      "case": "6-2-0",
+      "bits": 26066,
+      "configs": 28,
+      "histograms": 364,
+      "sha256": "49d6310b6c85dc04a5a3cfd52d1be2e205b497793d69ccd99654f84f3000f798"
+    },
+    {
+      "case": "6-3-0",
+      "bits": 26066,
+      "configs": 28,
+      "histograms": 13,
+      "sha256": "49d6310b6c85dc04a5a3cfd52d1be2e205b497793d69ccd99654f84f3000f798"
+    },
+    {
+      "case": "6-3-1",
+      "bits": 26066,
+      "configs": 28,
+      "histograms": 13,
+      "sha256": "49d6310b6c85dc04a5a3cfd52d1be2e205b497793d69ccd99654f84f3000f798"
+    }
+  ]
+}

@@ -146,9 +146,42 @@ struct ConfigWidthStats {
   double estimated_bits = 0.0;
 };
 
+// Search candidates need only the normalized population and its syntax, not
+// encoder tables. Keep the bounded population inline in the managed candidate
+// array: copying or discarding a trial must not allocate a separate backing.
+struct AnsHistogramView {
+  std::span<const uint16_t> frequencies;
+  uint8_t method;
+  uint16_t omit_position;
+
+  AnsHistogramView(std::span<const uint16_t> values, uint8_t method_value,
+                   uint16_t omit)
+      : frequencies(values), method(method_value), omit_position(omit) {}
+  AnsHistogramView(const AnsHistogram& histogram)
+      : AnsHistogramView(histogram.frequencies, histogram.method,
+                         histogram.omit_position) {}
+};
+
+struct SearchAnsHistogram {
+  std::array<uint16_t, kMaximumAnsAlphabetSize> storage{};
+  size_t size = 0;
+  uint8_t method = kAnsLogTableSize;
+  uint16_t omit_position = 0;
+
+  std::span<uint16_t> frequencies() { return {storage.data(), size}; }
+  operator AnsHistogramView() const {
+    return {{storage.data(), size}, method, omit_position};
+  }
+  void Store(AnsHistogram* histogram) const {
+    histogram->frequencies.assign(storage.begin(), storage.begin() + size);
+    histogram->method = method;
+    histogram->omit_position = omit_position;
+  }
+};
+
 struct ConfigCandidate {
   HybridUintConfig config;
-  AnsHistogram histogram;
+  SearchAnsHistogram histogram;
   size_t maximum_symbol = 0;
   uint64_t extra_bits = 0;
   uint64_t population_fingerprint = 0;
@@ -276,19 +309,15 @@ ScaledAnsRatio ScaleByAnsTable(uint64_t value, uint64_t denominator) {
 
 Status NormalizeHistogram(
   const std::array<uint64_t, kMaximumAnsAlphabetSize>& raw,
-  Storage<uint16_t>* frequencies) {
+  std::span<uint16_t> frequencies) {
 
-  if (frequencies == nullptr) {
-    return Status::InvalidArgument("ANS histogram output is null");
-  }
   size_t alphabet_size = raw.size();
   while (alphabet_size != 0 && raw[alphabet_size - 1] == 0) {
     --alphabet_size;
   }
-  if (alphabet_size == 0) {
-    frequencies->clear();
-    return Status::Ok();
-  }
+  if (frequencies.size() != alphabet_size)
+    return Status::InvalidArgument("ANS histogram output size differs");
+  if (alphabet_size == 0) return Status::Ok();
   uint64_t total = 0;
   size_t populated = 0;
   size_t only_symbol = 0;
@@ -302,9 +331,9 @@ Status NormalizeHistogram(
       ++populated;
     }
   }
-  frequencies->assign(alphabet_size, 0);
+  std::fill(frequencies.begin(), frequencies.end(), uint16_t{0});
   if (populated == 1) {
-    (*frequencies)[only_symbol] = kAnsTableSize;
+    frequencies[only_symbol] = kAnsTableSize;
     return Status::Ok();
   }
 
@@ -321,7 +350,7 @@ Status NormalizeHistogram(
     const uint64_t remainder = scaled.remainder;
     const uint16_t frequency = static_cast<uint16_t>(
       std::max<uint64_t>(quotient, 1));
-    (*frequencies)[symbol] = frequency;
+    frequencies[symbol] = frequency;
     normalized_total += frequency;
     remainders[remainder_count++] = {symbol, remainder};
   }
@@ -336,25 +365,25 @@ Status NormalizeHistogram(
       });
     size_t missing = kAnsTableSize - normalized_total;
     for (size_t index = 0; missing != 0; ++index, --missing) {
-      ++(*frequencies)[remainders[index % remainders.size()].symbol];
+      ++frequencies[remainders[index % remainders.size()].symbol];
     }
   } else if (normalized_total > kAnsTableSize) {
     size_t excess = normalized_total - kAnsTableSize;
     while (excess != 0) {
-      size_t selected = frequencies->size();
-      for (size_t symbol = 0; symbol < frequencies->size(); ++symbol) {
-        if ((*frequencies)[symbol] > 1 &&
-            (selected == frequencies->size() ||
-             (*frequencies)[symbol] > (*frequencies)[selected])) {
+      size_t selected = frequencies.size();
+      for (size_t symbol = 0; symbol < frequencies.size(); ++symbol) {
+        if (frequencies[symbol] > 1 &&
+            (selected == frequencies.size() ||
+             frequencies[symbol] > frequencies[selected])) {
           selected = symbol;
         }
       }
-      if (selected == frequencies->size()) {
+      if (selected == frequencies.size()) {
         return Status::Internal("ANS histogram cannot be normalized");
       }
       const size_t removable = std::min<size_t>(
-        excess, (*frequencies)[selected] - 1);
-      (*frequencies)[selected] -= static_cast<uint16_t>(removable);
+        excess, frequencies[selected] - 1);
+      frequencies[selected] -= static_cast<uint16_t>(removable);
       excess -= removable;
     }
   }
@@ -440,10 +469,10 @@ bool RebalanceHistogram(
   const std::array<uint64_t, kMaximumAnsAlphabetSize>& raw,
   size_t alphabet_size,
   uint32_t shift,
-  Storage<uint16_t>* frequencies,
+  std::span<uint16_t> frequencies,
   uint16_t* omit_position) {
 
-  if (frequencies == nullptr || omit_position == nullptr ||
+  if (frequencies.size() != alphabet_size || omit_position == nullptr ||
       alphabet_size == 0 || alphabet_size > raw.size() || shift >= kAnsLogTableSize) {
     return false;
   }
@@ -583,12 +612,11 @@ bool RebalanceHistogram(
   if (rest <= 0) {
     return false;
   }
-  frequencies->resize(alphabet_size);
   for (size_t symbol = 0; symbol < alphabet_size; ++symbol) {
     if (counts[symbol] < 0 || counts[symbol] > kAnsTableSize) {
       return false;
     }
-    (*frequencies)[symbol] = static_cast<uint16_t>(counts[symbol]);
+    frequencies[symbol] = static_cast<uint16_t>(counts[symbol]);
   }
   *omit_position = static_cast<uint16_t>(remainder_position);
   return true;
@@ -775,7 +803,7 @@ Status WriteAnsUintConfig(
 
 template <typename Writer>
 Status WriteAnsHistogramTo(
-  const AnsHistogram& histogram,
+  AnsHistogramView histogram,
   Writer* writer) {
 
   if (writer == nullptr) {
@@ -946,7 +974,7 @@ Status WriteAnsHistogram(
 
 Status EstimateAnsHistogramCost(
   const std::array<uint64_t, kMaximumAnsAlphabetSize>& raw,
-  const AnsHistogram& histogram,
+  AnsHistogramView histogram,
   double* cost) {
 
   if (cost == nullptr) {
@@ -975,7 +1003,7 @@ Status EstimateAnsHistogramCost(
 Status BuildBestAnsHistogram(
   const std::array<uint64_t, kMaximumAnsAlphabetSize>& raw,
   AnsHistogramSearch search,
-  AnsHistogram* histogram,
+  SearchAnsHistogram* histogram,
   size_t* candidate_count = nullptr) {
 
   if (histogram == nullptr) {
@@ -990,7 +1018,8 @@ Status BuildBestAnsHistogram(
     populated += raw[symbol] != 0 ? 1 : 0;
   }
   if (populated <= 2) {
-    if (Status status = NormalizeHistogram(raw, &histogram->frequencies);
+    histogram->size = alphabet_size;
+    if (Status status = NormalizeHistogram(raw, histogram->frequencies());
         !status.ok()) {
       return status;
     }
@@ -1003,7 +1032,8 @@ Status BuildBestAnsHistogram(
   }
 
   double best_cost = std::numeric_limits<double>::infinity();
-  AnsHistogram best, candidate;
+  SearchAnsHistogram candidate;
+  candidate.size = alphabet_size;
   auto consider = [&]() -> Status {
     if (candidate_count != nullptr) {
       ++*candidate_count;
@@ -1016,20 +1046,17 @@ Status BuildBestAnsHistogram(
     }
     if (candidate_cost < best_cost) {
       best_cost = candidate_cost;
-      // Recycle the previous incumbent's same-sized frequency backing for the
-      // next trial. Losing trials also retain their storage for reuse.
-      std::swap(best, candidate);
+      *histogram = candidate;
     }
     return Status::Ok();
   };
 
   candidate.method = 0;
   candidate.omit_position = 0;
-  candidate.frequencies.assign(
-    alphabet_size,
-    static_cast<uint16_t>(kAnsTableSize / alphabet_size));
+  std::fill_n(candidate.storage.begin(), alphabet_size,
+              static_cast<uint16_t>(kAnsTableSize / alphabet_size));
   for (size_t symbol = 0; symbol < kAnsTableSize % alphabet_size; ++symbol) {
-    ++candidate.frequencies[symbol];
+    ++candidate.storage[symbol];
   }
   if (Status status = consider(); !status.ok()) {
     return status;
@@ -1051,7 +1078,7 @@ Status BuildBestAnsHistogram(
     }
     candidate.method = static_cast<uint8_t>(shift + 1);
     if (!RebalanceHistogram(
-          raw, alphabet_size, shift, &candidate.frequencies,
+          raw, alphabet_size, shift, candidate.frequencies(),
           &candidate.omit_position)) {
       return Status::Internal("ANS histogram rebalancing failed");
     }
@@ -1059,7 +1086,6 @@ Status BuildBestAnsHistogram(
       return status;
     }
   }
-  *histogram = std::move(best);
   return Status::Ok();
 }
 
@@ -1352,7 +1378,7 @@ Status DirectAnsPopulationCost(
   if (cost == nullptr) {
     return Status::InvalidArgument("Direct ANS population cost is null");
   }
-  AnsHistogram normalized;
+  SearchAnsHistogram normalized;
   if (Status status = BuildBestAnsHistogram(
         histogram.counts, AnsHistogramSearch::kFast, &normalized);
       !status.ok()) {
@@ -1674,6 +1700,11 @@ Status PrepareDirectAnsPartition(
     } else {
       const ProfileClock::time_point value_begin = ProfileBegin(profile);
       Storage<Storage<uint32_t>> cluster_values(clustered.size());
+      for (size_t cluster = 0; cluster < clustered.size(); ++cluster) {
+        if (clustered[cluster].total_count > std::numeric_limits<size_t>::max())
+          return Status::OutOfMemory("ANS cluster population exceeds host storage");
+        cluster_values[cluster].reserve(static_cast<size_t>(clustered[cluster].total_count));
+      }
       for (const EntropyTokenStreamView section : section_tokens) {
         if (!section.valid())
           return Status::InvalidArgument("ANS token-stream view is invalid");
@@ -2268,9 +2299,11 @@ Status codestream_internal::WriteContextMapAns(
     maximum = std::max(maximum, size_t{token.symbol});
   }
   const size_t width = std::max(size_t{5}, static_cast<size_t>(std::bit_width(maximum)));
-  AnsHistogram histogram;
-  Status status = BuildBestAnsHistogram(counts, AnsHistogramSearch::kPrecise, &histogram);
+  SearchAnsHistogram searched;
+  Status status = BuildBestAnsHistogram(counts, AnsHistogramSearch::kPrecise, &searched);
   if (!status.ok()) return status;
+  AnsHistogram histogram;
+  searched.Store(&histogram);
   status = BuildAnsEncoderTables(histogram.frequencies, width,
                                  &histogram.reverse_map,
                                  &histogram.reverse_offsets,
@@ -2473,6 +2506,10 @@ Status OptimizeAnsEntropyCodeImpl(
     Storage<Storage<ConfigCandidate>> options(cluster_count);
     const auto optimize_cluster = [&](size_t cluster,
                                       EntropyWorkProfile* cluster_profile) -> Status {
+      // One managed backing retains all configurations for this cluster. Each
+      // worker owns a distinct cluster. Only owning selected models escape the
+      // search; no view of candidate storage survives its destruction.
+      options[cluster].reserve(policy.uint_configs.size());
       Storage<codestream_internal::WeightedValue> weighted_values;
       std::span<const codestream_internal::WeightedValue> cluster_values;
       if (prepared_fixed) {
@@ -2754,7 +2791,7 @@ Status OptimizeAnsEntropyCodeImpl(
         }
         minimum_token_bits += selected->extra_bits;
         candidate.uint_configs[cluster] = selected->config;
-        candidate.ans_histograms[cluster] = selected->histogram;
+        selected->histogram.Store(&candidate.ans_histograms[cluster]);
         if (Status status = BuildAnsEncoderTables(
               candidate.ans_histograms[cluster].frequencies,
               log_alpha_size,
@@ -3442,19 +3479,14 @@ Status codestream_internal::ComputeAnsOptimizationStoragePlan(
     return overflow();
 
   auto& work = plan.working;
-  // Candidate objects retain their nested frequency arrays across all configs;
-  // vector replacement moves the arrays, it does not clone their backing.
+  // Candidate histograms are inline in one reserved array per cluster. Trial
+  // histograms and bounded sorting/rebalancing scratch are local fixed arrays;
+  // only the selected model receives owning frequency storage and tables.
   if (!work.Add(model.owned, widths) ||
       !work.AddVector<PreparedAnsEntropyCandidate>(kAnsAlphabetWidthCount,
                                                  kFreshExact) ||
       !work.AddVector<Storage<ConfigCandidate>>(k, kFreshExact) ||
-      !work.AddVector<ConfigCandidate>(configs, kGrowing, k) ||
-      !work.AddVector<uint16_t>(kMaximumAnsAlphabetSize, kFreshExact,
-                               configs * k) ||
-      // Each simultaneous BuildBestAnsHistogram retains two same-sized frequency
-      // arrays. Bounded sorting/rebalancing scratch and bit counters are on the
-      // stack; full model writing remains serial.
-      !work.AddVector<uint16_t>(kMaximumAnsAlphabetSize, kFreshExact, 2 * cluster_workers) ||
+      !work.AddVector<ConfigCandidate>(configs, kFreshExact, k) ||
       // One reverse-map construction: alias table, distribution, cutoffs and
       // two push/pop stacks. Each active index occurs in at most one stack.
       !work.AddVector<AliasEntry>(kMaximumAnsAlphabetSize, kFreshExact) ||

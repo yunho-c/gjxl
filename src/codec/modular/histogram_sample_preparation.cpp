@@ -420,8 +420,7 @@ struct HistogramSampleBuilder {
       same &= s.values[p][a] == s.values[p][b];
     return same;
   }
-  void Insert(size_t row) {
-    const size_t first = Hash(row, false), second = Hash(row, true);
+  void Insert(size_t row, size_t first, size_t second) {
     if (dedup[first] == kUnused)
       dedup[first] = static_cast<uint32_t>(row);
     else if (dedup[second] == kUnused)
@@ -440,7 +439,7 @@ struct HistogramSampleBuilder {
     dedup.resize(size, kUnused);
     for (size_t row = 0; row < output->samples_.weights.size(); ++row)
       if (output->samples_.weights[row] != UINT16_MAX)
-        Insert(row);
+        Insert(row, Hash(row, false), Hash(row, true));
   }
   Status Add(const PredictionProperties &properties,
              const std::array<HistogramResidualToken, 14> &tokens) {
@@ -461,7 +460,10 @@ struct HistogramSampleBuilder {
     const size_t row = s.weights.size();
     s.weights.push_back(1);
     ++s.total_samples;
-    for (const size_t position : {Hash(row, false), Hash(row, true)}) {
+    // Neither the row nor the table size changes before insertion, so reuse
+    // the lookup positions instead of hashing every new row a second time.
+    const size_t first = Hash(row, false), second = Hash(row, true);
+    for (const size_t position : {first, second}) {
       const auto old = dedup[position];
       if (old == kUnused || !SameRow(row, old))
         continue;
@@ -479,7 +481,7 @@ struct HistogramSampleBuilder {
       s.weights.pop_back();
       return Status::Ok();
     }
-    Insert(row);
+    Insert(row, first, second);
     return Status::Ok();
   }
   Status Gather(std::span<const HistogramTrainingImage> images) {
@@ -634,10 +636,13 @@ Status PrepareHistogramSamples(std::span<const HistogramTrainingImage> images,
 }
 Status LearnPreparedHistogramTree(PreparedHistogramSamples &samples,
                                   DecisionTree *out, size_t maximum_leaves,
-                                  size_t maximum_depth) {
+                                  size_t maximum_depth, size_t cpu_participants,
+                                  HistogramTreeLearningStats *execution_stats) {
   auto options = samples.tree_options();
   options.maximum_leaves = maximum_leaves;
   options.maximum_depth = maximum_depth;
+  options.cpu_participants = cpu_participants;
+  options.execution_stats = execution_stats;
   return LearnHistogramTree(samples.samples_, out, options);
 }
 } // namespace gjxl::modular_internal

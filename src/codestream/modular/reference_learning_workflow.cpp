@@ -29,7 +29,7 @@ HistogramSamplingOptions SamplingOptions(const ReferenceWorkflowOptions &options
 Status Learn(std::span<const HistogramTrainingImage> images, size_t maximum_leaves,
              const ReferenceWorkflowOptions &options, const ResourceBudget &budget,
              ReferenceWorkflowStats *stats, ReferenceModularStream *record,
-             bool admitted = false) {
+             bool admitted = false, bool parallel_fit = false) {
   ProfileScope profile(ProfileStage::kTraining);
   // A parallel job has already reserved its entire preparation/fit/compaction
   // lifetime. Serial/global learning retains the tighter per-stage admission.
@@ -63,14 +63,33 @@ Status Learn(std::span<const HistogramTrainingImage> images, size_t maximum_leav
   } else {
     auto fitting = prepared.tree_options();
     fitting.maximum_leaves = maximum_leaves;
-    if (auto s = ComputeHistogramTreeLearningStorageBound(prepared.samples(), fitting, &bound);
-        !s.ok())
-      return s;
-    if (auto s = stage(
-            bound.peak_bytes,
-            [&] { return LearnPreparedHistogramTree(prepared, &record->tree, maximum_leaves); });
-        !s.ok())
-      return s;
+    fitting.cpu_participants = parallel_fit ? options.learning_cpu_participants : 1;
+    fitting.cpu_participants = HistogramTreeLearningParticipants(prepared.samples(), fitting);
+    HistogramTreeLearningStats execution;
+    for (;;) {
+      if (auto s = ComputeHistogramTreeLearningStorageBound(prepared.samples(), fitting, &bound);
+          !s.ok())
+        return s;
+      bool started = false;
+      auto status = stage(bound.peak_bytes, [&] {
+        started = true;
+        return LearnPreparedHistogramTree(prepared, &record->tree, maximum_leaves,
+                                          fitting.maximum_depth, fitting.cpu_participants, &execution);
+      });
+      if (status.ok())
+        break;
+      // Retry only failed admission, before any sample mutation or worker
+      // launch. Allocation/launch/fit failures keep their original status.
+      if (!started && fitting.cpu_participants > 1 &&
+          (status.code() == StatusCode::kOutOfMemory || status.code() == StatusCode::kUnavailable)) {
+        fitting.cpu_participants = std::max(size_t{1}, fitting.cpu_participants / 2);
+        ++stats->learning_memory_limited_waves;
+        continue;
+      }
+      return status;
+    }
+    stats->learning_peak_participants = std::max(stats->learning_peak_participants,
+                                                execution.participants);
     ++stats->fits;
     record->learning.tree_nodes = record->tree.size;
   }
@@ -388,7 +407,7 @@ Status LearnGlobal(std::span<ReferenceModularStream> records,
                            features.empty() ? std::span<const WeightedFeatureView>{}
                                             : std::span(features[i]).first(record.channel_count)};
   }
-  return Learn(images, MaximumGlobalTreeLeaves(population), options, budget, stats, &records[0]);
+  return Learn(images, MaximumGlobalTreeLeaves(population), options, budget, stats, &records[0], false, true);
 }
 
 // Batching is independent of compression decisions. Local fitting can share a

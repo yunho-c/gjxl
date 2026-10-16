@@ -4,6 +4,7 @@
 // Adapted from pinned libjxl e8ff0976 enc_ma.cc and fast_math-inl.h.
 // Native storage, validation and SIMD operations; no libjxl/Highway dependency.
 #include "codec/modular/histogram_tree_learning.h"
+#include "codec/modular/histogram_tree_parallel.h"
 #include "codec/modular/histogram_tree_profile.h"
 
 #include <bit>
@@ -17,8 +18,8 @@
 
 namespace gjxl::modular_internal {
 namespace {
-using resource_budget_internal::ManagedVector;
 using histogram_profile_internal::Phase;
+using resource_budget_internal::ManagedVector;
 constexpr size_t kSymbols = 256;
 // The last (unevaluated) property bin is cleared after all predictors, so its
 // histogram may temporarily hold every predictor's weighted population.
@@ -184,7 +185,8 @@ void SplitTreeSamples(SamplesView &samples, size_t begin, size_t pos,
       ++high;
     if (low < pos && high < end) {
       samples.Swap(low, high);
-      if constexpr (Profiled) ++profile->work.row_swaps;
+      if constexpr (Profiled)
+        ++profile->work.row_swaps;
     }
     ++low;
     ++high;
@@ -202,7 +204,8 @@ void CollectExtraBitsIncrease(
     const size_t count = samples.Count(i);
     const size_t bin = samples.Property<S>(prop, i);
     if constexpr (CollectPopulation)
-      ++used[bin]; // Partition positions count distinct rows, not their weights.
+      ++used[bin]; // Partition positions count distinct rows, not their
+                   // weights.
     increase[bin * symbols + token.symbol] += count;
     extra_increase[bin] += token.extra_bits * count;
   }
@@ -222,13 +225,50 @@ struct CostInfo {
   Predictor pred = Predictor::kZero;
   float Cost() const { return cost + extra_cost; }
 };
-struct Workspace {
-  ManagedVector<NodeInfo> nodes;
-  ManagedVector<int32_t> counts, above, below, used, increase;
-  ManagedVector<uint32_t> total_extra;
+struct SplitInfo {
+  size_t prop = 0;
+  uint32_t val = 0;
+  size_t pos = 0;
+  float lcost = std::numeric_limits<float>::max();
+  float rcost = std::numeric_limits<float>::max();
+  Predictor lpred = Predictor::kZero;
+  Predictor rpred = Predictor::kZero;
+  float Cost() const { return lcost + rcost; }
+};
+struct PropertyProfile {
+  HistogramFitSeconds seconds{};
+  HistogramNodeBucket bucket;
+  std::array<uint64_t, kHistogramBinBuckets> properties_by_active_bins{},
+      properties_by_bin_span{};
+};
+struct PropertyResult {
+  SplitInfo best_static_constant, best_static, best_nonstatic, best_nowp;
+  uint32_t constant_properties = 0;
+  PropertyProfile profile;
+};
+struct PropertyWorkspace {
+  ManagedVector<int32_t> above, below, used, increase;
   ManagedVector<size_t> extra_increase;
   ManagedVector<CostInfo> costs_l, costs_r;
+  void Initialize(size_t bins) {
+    above.resize(kSymbols);
+    below.resize(kSymbols);
+    used.resize(bins);
+    increase.resize(bins * kSymbols);
+    extra_increase.resize(bins);
+    costs_l.resize(bins);
+    costs_r.resize(bins);
+  }
 };
+struct Workspace {
+  ManagedVector<NodeInfo> nodes;
+  ManagedVector<int32_t> counts;
+  ManagedVector<uint32_t> total_extra;
+  PropertyWorkspace property;
+  ManagedVector<PropertyWorkspace> workers;
+  std::array<PropertyResult, kPropertyCount> results;
+};
+constexpr size_t kMinimumParallelHistogramRows = 8192; // rows times predictors
 
 Status ValidateShape(const HistogramTrainingSamples &s,
                      HistogramTreeLearningOptions o) {
@@ -237,7 +277,7 @@ Status ValidateShape(const HistogramTrainingSamples &s,
       o.fast_decode_multiplier < 1 || !o.maximum_samples ||
       o.maximum_samples > kHistogramMaximumSamples || !o.maximum_leaves ||
       o.maximum_leaves > kMaximumTreeLeaves || !o.maximum_depth ||
-      o.maximum_depth > kMaximumTreeDepth ||
+      o.maximum_depth > kMaximumTreeDepth || o.cpu_participants > 256 ||
       o.multipliers.size() > kHistogramMaximumStaticBins ||
       !s.predictor_count || s.predictor_count > kHistogramPredictors ||
       !s.property_count || s.property_count > kPropertyCount ||
@@ -289,12 +329,254 @@ size_t MaximumBins(const HistogramTrainingSamples &s) {
 }
 
 template <bool Profiled>
+void EvaluateProperty(const SamplesView &tree_samples, PropertyWorkspace &w,
+                      const ManagedVector<int32_t> &counts,
+                      const ManagedVector<uint32_t> &tot_extra_bits,
+                      size_t begin, size_t end, size_t prop, size_t max_symbols,
+                      Predictor parent_predictor, float change_pred_penalty,
+                      uint32_t inherited_constants,
+                      PropertyResult &result) noexcept {
+  auto &best_split_static_constant = result.best_static_constant;
+  auto &best_split_static = result.best_static;
+  auto &best_split_nonstatic = result.best_nonstatic;
+  auto &best_split_nowp = result.best_nowp;
+  best_split_static_constant = best_split_static = best_split_nonstatic =
+      best_split_nowp = {};
+  auto &constant_properties = result.constant_properties;
+  constant_properties = inherited_constants;
+  PropertyProfile *profile = nullptr;
+  HistogramNodeBucket *bucket = nullptr;
+  if constexpr (Profiled) {
+    result.profile = {};
+    profile = &result.profile;
+    bucket = &profile->bucket;
+  }
+  const size_t num_predictors = tree_samples.NumPredictors();
+  auto &prop_value_used_count = w.used;
+  auto &count_increase = w.increase;
+  auto &extra_bits_increase = w.extra_increase;
+  auto &costs_l = w.costs_l;
+  auto &costs_r = w.costs_r;
+  auto &counts_above = w.above;
+  auto &counts_below = w.below;
+  const uint32_t property_bit = uint32_t{1} << prop;
+  if constexpr (Profiled)
+    ++bucket->work.properties;
+  if ((constant_properties & property_bit) ||
+      tree_samples.NumPropertyValues(prop) == 1) {
+    constant_properties |= property_bit;
+    if constexpr (Profiled) {
+      auto &work = bucket->work;
+      ++work.constant_properties;
+      ++work.skipped_constant_properties;
+      ++work.active_bins;
+      ++work.bin_span;
+      ++profile->properties_by_active_bins[0];
+      ++profile->properties_by_bin_span[0];
+    }
+    return;
+  }
+  Phase<Profiled> property_timer(
+      profile, HistogramFitStage::kPropertyPopulation, bucket);
+  const size_t prop_size = tree_samples.NumPropertyValues(prop);
+  std::fill_n(prop_value_used_count.begin(), prop_size, int32_t{0});
+  property_timer.Stop();
+  // Collect occupancy in the first predictor's histogram pass. The
+  // occupied endpoints are found on the bin axis, not on every row.
+  Phase<Profiled> first_joint_timer(
+      profile, HistogramFitStage::kJointHistograms, bucket);
+  const auto &first_tokens = tree_samples.RTokens(0);
+  if (prop < tree_samples.NumStaticProps()) {
+    CollectExtraBitsIncrease<true, true>(
+        tree_samples, first_tokens, count_increase, extra_bits_increase, begin,
+        end, prop, max_symbols, prop_value_used_count.data());
+  } else {
+    CollectExtraBitsIncrease<false, true>(
+        tree_samples, first_tokens, count_increase, extra_bits_increase, begin,
+        end, prop - tree_samples.NumStaticProps(), max_symbols,
+        prop_value_used_count.data());
+  }
+  first_joint_timer.Stop();
+  Phase<Profiled> cost_setup_timer(
+      profile, HistogramFitStage::kPropertyPopulation, bucket);
+  size_t first_used = 0, last_used = prop_size - 1;
+  while (!prop_value_used_count[first_used])
+    ++first_used;
+  while (!prop_value_used_count[last_used])
+    --last_used;
+  std::fill_n(costs_l.begin(), last_used - first_used, CostInfo{});
+  std::fill_n(costs_r.begin(), last_used - first_used, CostInfo{});
+  cost_setup_timer.Stop();
+  if constexpr (Profiled) {
+    bucket->work.constant_properties += first_used == last_used;
+    bucket->work.property_row_visits += end - begin;
+    bucket->work.fused_property_row_visits += end - begin;
+    bucket->work.joint_histogram_row_visits += end - begin;
+    bucket->work.bin_span += last_used - first_used + 1;
+    ++profile->properties_by_bin_span[HistogramProfileBucket(
+        last_used - first_used + 1, kHistogramBinBuckets)];
+  }
+  if (first_used == last_used) {
+    constant_properties |= property_bit;
+    // This property has no candidate threshold. Only the first
+    // predictor was collected; discard its last-bin increments.
+    extra_bits_increase[last_used] = 0;
+    std::fill_n(count_increase.begin() + last_used * max_symbols, max_symbols,
+                int32_t{0});
+    if constexpr (Profiled) {
+      ++bucket->work.active_bins;
+      ++profile->properties_by_active_bins[0];
+    }
+    return;
+  }
+  // For all predictors, compute the right and left costs of each split.
+  for (size_t pred = 0; pred < num_predictors; pred++) {
+    if (pred != 0) {
+      Phase<Profiled> joint_timer(profile, HistogramFitStage::kJointHistograms,
+                                  bucket);
+      // Compute cost and histogram increments for each property value.
+      const auto &rtokens = tree_samples.RTokens(pred);
+      if (prop < tree_samples.NumStaticProps()) {
+        CollectExtraBitsIncrease<true>(tree_samples, rtokens, count_increase,
+                                       extra_bits_increase, begin, end, prop,
+                                       max_symbols);
+      } else {
+        CollectExtraBitsIncrease<false>(
+            tree_samples, rtokens, count_increase, extra_bits_increase, begin,
+            end, prop - tree_samples.NumStaticProps(), max_symbols);
+      }
+      joint_timer.Stop();
+      if constexpr (Profiled)
+        bucket->work.joint_histogram_row_visits += end - begin;
+    }
+    Phase<Profiled> candidate_timer(
+        profile, HistogramFitStage::kCandidateEvaluation, bucket);
+    memcpy(counts_above.data(), counts.data() + pred * max_symbols,
+           max_symbols * sizeof counts_above[0]);
+    memset(counts_below.data(), 0, max_symbols * sizeof counts_below[0]);
+    size_t extra_bits_below = 0;
+    // Exclude last used: this ensures neither counts_above nor
+    // counts_below is empty.
+    for (size_t i = first_used; i < last_used; i++) {
+      if (!prop_value_used_count[i])
+        continue;
+      extra_bits_below += extra_bits_increase[i];
+      // The increase for this property value has been used, and will not
+      // be used again: clear it. Also below.
+      extra_bits_increase[i] = 0;
+      for (size_t sym = 0; sym < max_symbols; sym++) {
+        counts_above[sym] -= count_increase[i * max_symbols + sym];
+        counts_below[sym] += count_increase[i * max_symbols + sym];
+        count_increase[i * max_symbols + sym] = 0;
+      }
+      float rcost = EstimateBits(counts_above.data(), max_symbols) +
+                    tot_extra_bits[pred] - extra_bits_below;
+      float lcost =
+          EstimateBits(counts_below.data(), max_symbols) + extra_bits_below;
+
+      float penalty = 0;
+      // Never discourage moving away from the Weighted predictor.
+      if (tree_samples.PredictorFromIndex(pred) != parent_predictor &&
+          parent_predictor != Predictor::kWeighted) {
+        penalty = change_pred_penalty;
+      }
+      // If everything else is equal, disfavour Weighted (slower) and
+      // favour Zero (faster if it's the only predictor used in a
+      // group+channel combination)
+      if (tree_samples.PredictorFromIndex(pred) == Predictor::kWeighted) {
+        penalty += 1e-8;
+      }
+      if (tree_samples.PredictorFromIndex(pred) == Predictor::kZero) {
+        penalty -= 1e-8;
+      }
+      if (rcost + penalty < costs_r[i - first_used].Cost()) {
+        costs_r[i - first_used].cost = rcost;
+        costs_r[i - first_used].extra_cost = penalty;
+        costs_r[i - first_used].pred = tree_samples.PredictorFromIndex(pred);
+      }
+      if (lcost + penalty < costs_l[i - first_used].Cost()) {
+        costs_l[i - first_used].cost = lcost;
+        costs_l[i - first_used].extra_cost = penalty;
+        costs_l[i - first_used].pred = tree_samples.PredictorFromIndex(pred);
+      }
+    }
+  }
+  // Iterate through the possible splits and find the one with minimum sum
+  // of costs of the two sides.
+  Phase<Profiled> selection_timer(profile, HistogramFitStage::kSplitSelection,
+                                  bucket);
+  size_t active_thresholds = 0;
+  size_t split = begin;
+  for (size_t i = first_used; i < last_used; i++) {
+    if (!prop_value_used_count[i])
+      continue;
+    if constexpr (Profiled)
+      ++active_thresholds;
+    split += prop_value_used_count[i];
+    float rcost = costs_r[i - first_used].cost;
+    float lcost = costs_l[i - first_used].cost;
+
+    bool uses_wp = tree_samples.PropertyFromIndex(prop) == 15 ||
+                   costs_l[i - first_used].pred == Predictor::kWeighted ||
+                   costs_r[i - first_used].pred == Predictor::kWeighted;
+    bool zero_entropy_side = rcost == 0 || lcost == 0;
+
+    SplitInfo &best_ref =
+        tree_samples.PropertyFromIndex(prop) < kHistogramStaticProperties
+            ? (zero_entropy_side ? best_split_static_constant
+                                 : best_split_static)
+            : (uses_wp ? best_split_nonstatic : best_split_nowp);
+    if (lcost + rcost < best_ref.Cost()) {
+      best_ref.prop = prop;
+      best_ref.val = i;
+      best_ref.pos = split;
+      best_ref.lcost = lcost;
+      best_ref.lpred = costs_l[i - first_used].pred;
+      best_ref.rcost = rcost;
+      best_ref.rpred = costs_r[i - first_used].pred;
+    }
+  }
+  selection_timer.Stop();
+  if constexpr (Profiled) {
+    auto &work = bucket->work;
+    work.active_bins += active_thresholds + 1;
+    work.candidate_thresholds += active_thresholds;
+    work.entropy_evaluations += 2 * active_thresholds * num_predictors;
+    work.symbol_terms += 2 * active_thresholds * num_predictors * max_symbols;
+    ++profile->properties_by_active_bins[HistogramProfileBucket(
+        active_thresholds + 1, kHistogramBinBuckets)];
+  }
+  // Clear extra_bits_increase and cost_increase for last_used.
+  extra_bits_increase[last_used] = 0;
+  for (size_t sym = 0; sym < max_symbols; sym++) {
+    count_increase[last_used * max_symbols + sym] = 0;
+  }
+}
+
+void MergePropertyProfile(HistogramFittingProfile &to,
+                          HistogramNodeBucket &bucket,
+                          const PropertyProfile &from) {
+  MergeHistogramNodeWork(bucket.work, from.bucket.work);
+  for (size_t i = 0; i < to.seconds.size(); ++i) {
+    to.seconds[i] += from.seconds[i];
+    bucket.seconds[i] += from.seconds[i];
+  }
+  for (size_t i = 0; i < kHistogramBinBuckets; ++i) {
+    to.properties_by_active_bins[i] += from.properties_by_active_bins[i];
+    to.properties_by_bin_span[i] += from.properties_by_bin_span[i];
+  }
+}
+
+template <bool Profiled>
 Status FindBestSplit(SamplesView &tree_samples, Workspace &w,
+                     histogram_parallel_internal::PropertyTeam &team,
+                     HistogramTreeLearningStats &execution,
                      HistogramTreeLearningOptions options, float threshold,
                      std::span<const HistogramMultiplierRange> mul_info,
                      HistogramStaticRange initial_static_prop_range,
                      float fast_decode_multiplier, DecisionTree *tree,
-                     HistogramFittingProfile *profile, HistogramFitRecord *record) {
+                     HistogramFittingProfile *profile,
+                     HistogramFitRecord *record) {
   auto &nodes = w.nodes;
   nodes.push_back(NodeInfo{0, 0, tree_samples.NumDistinctSamples(),
                            initial_static_prop_range, 1});
@@ -302,8 +584,6 @@ Status FindBestSplit(SamplesView &tree_samples, Workspace &w,
   size_t num_predictors = tree_samples.NumPredictors();
   size_t num_properties = tree_samples.NumProperties();
 
-  // TODO(veluca): consider parallelizing the search (processing multiple nodes
-  // at a time).
   while (!nodes.empty()) {
     size_t pos = nodes.back().pos;
     size_t begin = nodes.back().begin;
@@ -315,18 +595,8 @@ Status FindBestSplit(SamplesView &tree_samples, Workspace &w,
     nodes.pop_back();
     if (begin == end)
       continue;
-    histogram_profile_internal::Node<Profiled> node_profile(profile, end - begin, depth, record);
-
-    struct SplitInfo {
-      size_t prop = 0;
-      uint32_t val = 0;
-      size_t pos = 0;
-      float lcost = std::numeric_limits<float>::max();
-      float rcost = std::numeric_limits<float>::max();
-      Predictor lpred = Predictor::kZero;
-      Predictor rpred = Predictor::kZero;
-      float Cost() const { return lcost + rcost; }
-    };
+    histogram_profile_internal::Node<Profiled> node_profile(
+        profile, end - begin, depth, record);
 
     SplitInfo best_split_static_constant;
     SplitInfo best_split_static;
@@ -334,7 +604,8 @@ Status FindBestSplit(SamplesView &tree_samples, Workspace &w,
     SplitInfo best_split_nowp;
 
     // Compute the maximum token in the range.
-    Phase<Profiled> symbol_timer(profile, HistogramFitStage::kSymbolRange, node_profile.bucket);
+    Phase<Profiled> symbol_timer(profile, HistogramFitStage::kSymbolRange,
+                                 node_profile.bucket);
     size_t max_symbols = 0;
     for (size_t pred = 0; pred < num_predictors; pred++) {
       for (size_t i = begin; i < end; i++) {
@@ -346,10 +617,13 @@ Status FindBestSplit(SamplesView &tree_samples, Workspace &w,
     symbol_timer.Stop();
     if constexpr (Profiled) {
       ++profile->nodes_by_symbol_span[max_symbols];
-      node_profile.bucket->work.symbol_row_visits += (end - begin) * num_predictors;
-      node_profile.bucket->work.parent_histogram_row_visits += (end - begin) * num_predictors;
+      node_profile.bucket->work.symbol_row_visits +=
+          (end - begin) * num_predictors;
+      node_profile.bucket->work.parent_histogram_row_visits +=
+          (end - begin) * num_predictors;
     }
-    Phase<Profiled> parent_timer(profile, HistogramFitStage::kParentHistograms, node_profile.bucket);
+    Phase<Profiled> parent_timer(profile, HistogramFitStage::kParentHistograms,
+                                 node_profile.bucket);
     auto &counts = w.counts;
     auto &tot_extra_bits = w.total_extra;
     std::fill_n(counts.begin(), max_symbols * num_predictors, int32_t{0});
@@ -406,7 +680,8 @@ Status FindBestSplit(SamplesView &tree_samples, Workspace &w,
         forced_split.lcost = forced_split.rcost = base_bits / 2 - threshold;
         forced_split.lpred = forced_split.rpred = tree->nodes[pos].predictor;
         best = &forced_split;
-        if constexpr (Profiled) ++node_profile.bucket->work.forced_splits;
+        if constexpr (Profiled)
+          ++node_profile.bucket->work.forced_splits;
         best->pos = begin;
 
         if (best->prop < tree_samples.NumStaticProps()) {
@@ -428,205 +703,46 @@ Status FindBestSplit(SamplesView &tree_samples, Workspace &w,
     }
 
     if (best != &forced_split) {
-      auto &prop_value_used_count = w.used;
-      auto &count_increase = w.increase;
-      auto &extra_bits_increase = w.extra_increase;
-      // For each property, compute which of its values are used, and what
-      // tokens correspond to those usages. Then, iterate through the values,
-      // and compute the entropy of each side of the split (of the form `prop >
-      // threshold`). Finally, find the split that minimizes the cost.
-      auto &costs_l = w.costs_l;
-      auto &costs_r = w.costs_r;
-      auto &counts_above = w.above;
-      auto &counts_below = w.below;
-
-      // The lower the threshold, the higher the expected noisiness of the
-      // estimate. Thus, discourage changing predictors.
-      float change_pred_penalty = 800.0f / (100.0f + threshold);
-      for (size_t prop = 0; prop < num_properties && base_bits > threshold;
-           prop++) {
-        const uint32_t property_bit = uint32_t{1} << prop;
-        if constexpr (Profiled) ++node_profile.bucket->work.properties;
-        if ((constant_properties & property_bit) ||
-            tree_samples.NumPropertyValues(prop) == 1) {
-          constant_properties |= property_bit;
-          if constexpr (Profiled) {
-            auto &work = node_profile.bucket->work;
-            ++work.constant_properties;
-            ++work.skipped_constant_properties;
-            ++work.active_bins;
-            ++work.bin_span;
-            ++profile->properties_by_active_bins[0];
-            ++profile->properties_by_bin_span[0];
-          }
-          continue;
-        }
-        Phase<Profiled> property_timer(profile, HistogramFitStage::kPropertyPopulation, node_profile.bucket);
-        const size_t prop_size = tree_samples.NumPropertyValues(prop);
-        std::fill_n(prop_value_used_count.begin(), prop_size, int32_t{0});
-        property_timer.Stop();
-        // Collect occupancy in the first predictor's histogram pass. The
-        // occupied endpoints are found on the bin axis, not on every row.
-        Phase<Profiled> first_joint_timer(profile, HistogramFitStage::kJointHistograms, node_profile.bucket);
-        const auto &first_tokens = tree_samples.RTokens(0);
-        if (prop < tree_samples.NumStaticProps()) {
-          CollectExtraBitsIncrease<true, true>(
-              tree_samples, first_tokens, count_increase, extra_bits_increase,
-              begin, end, prop, max_symbols, prop_value_used_count.data());
+      // Each property preserves predictor/bin arithmetic and tie order. Only
+      // independent properties run concurrently; reduce their category winners
+      // in the original property order before applying predictor preferences.
+      const float change_pred_penalty = 800.0f / (100.0f + threshold);
+      if (base_bits > threshold) {
+        size_t varying = 0;
+        for (size_t prop = 0; prop < num_properties; ++prop)
+          varying += !(constant_properties & (uint32_t{1} << prop)) &&
+                     tree_samples.NumPropertyValues(prop) > 1;
+        const bool parallel =
+            team.participants() > 1 && varying > 1 &&
+            (end - begin) * num_predictors >= kMinimumParallelHistogramRows;
+        const auto evaluate = [&](size_t prop, size_t worker) noexcept {
+          auto &scratch = worker == 0 ? w.property : w.workers[worker - 1];
+          EvaluateProperty<Profiled>(
+              tree_samples, scratch, counts, tot_extra_bits, begin, end, prop,
+              max_symbols, tree->nodes[pos].predictor, change_pred_penalty,
+              constant_properties, w.results[prop]);
+        };
+        if (parallel) {
+          team.Run(num_properties, evaluate);
+          ++execution.parallel_nodes;
+          if constexpr (Profiled)
+            ++profile->parallel_property_nodes;
         } else {
-          CollectExtraBitsIncrease<false, true>(
-              tree_samples, first_tokens, count_increase, extra_bits_increase,
-              begin, end, prop - tree_samples.NumStaticProps(), max_symbols,
-              prop_value_used_count.data());
+          for (size_t prop = 0; prop < num_properties; ++prop)
+            evaluate(prop, 0);
         }
-        first_joint_timer.Stop();
-        Phase<Profiled> cost_setup_timer(profile, HistogramFitStage::kPropertyPopulation, node_profile.bucket);
-        size_t first_used = 0, last_used = prop_size - 1;
-        while (!prop_value_used_count[first_used]) ++first_used;
-        while (!prop_value_used_count[last_used]) --last_used;
-        std::fill_n(costs_l.begin(), last_used - first_used, CostInfo{});
-        std::fill_n(costs_r.begin(), last_used - first_used, CostInfo{});
-        cost_setup_timer.Stop();
-        if constexpr (Profiled) {
-          node_profile.bucket->work.constant_properties += first_used == last_used;
-          node_profile.bucket->work.property_row_visits += end - begin;
-          node_profile.bucket->work.fused_property_row_visits += end - begin;
-          node_profile.bucket->work.joint_histogram_row_visits += end - begin;
-          node_profile.bucket->work.bin_span += last_used - first_used + 1;
-          ++profile->properties_by_bin_span[HistogramProfileBucket(last_used - first_used + 1, kHistogramBinBuckets)];
-        }
-        if (first_used == last_used) {
-          constant_properties |= property_bit;
-          // This property has no candidate threshold. Only the first
-          // predictor was collected; discard its last-bin increments.
-          extra_bits_increase[last_used] = 0;
-          std::fill_n(count_increase.begin() + last_used * max_symbols,
-                      max_symbols, int32_t{0});
-          if constexpr (Profiled) {
-            ++node_profile.bucket->work.active_bins;
-            ++profile->properties_by_active_bins[0];
-          }
-          continue;
-        }
-        // For all predictors, compute the right and left costs of each split.
-        for (size_t pred = 0; pred < num_predictors; pred++) {
-          if (pred != 0) {
-            Phase<Profiled> joint_timer(profile, HistogramFitStage::kJointHistograms, node_profile.bucket);
-            // Compute cost and histogram increments for each property value.
-            const auto &rtokens = tree_samples.RTokens(pred);
-            if (prop < tree_samples.NumStaticProps()) {
-              CollectExtraBitsIncrease<true>(tree_samples, rtokens,
-                                            count_increase, extra_bits_increase,
-                                            begin, end, prop, max_symbols);
-            } else {
-              CollectExtraBitsIncrease<false>(
-                  tree_samples, rtokens, count_increase, extra_bits_increase,
-                  begin, end, prop - tree_samples.NumStaticProps(), max_symbols);
-            }
-            joint_timer.Stop();
-            if constexpr (Profiled)
-              node_profile.bucket->work.joint_histogram_row_visits += end - begin;
-          }
-          Phase<Profiled> candidate_timer(profile, HistogramFitStage::kCandidateEvaluation, node_profile.bucket);
-          memcpy(counts_above.data(), counts.data() + pred * max_symbols,
-                 max_symbols * sizeof counts_above[0]);
-          memset(counts_below.data(), 0, max_symbols * sizeof counts_below[0]);
-          size_t extra_bits_below = 0;
-          // Exclude last used: this ensures neither counts_above nor
-          // counts_below is empty.
-          for (size_t i = first_used; i < last_used; i++) {
-            if (!prop_value_used_count[i])
-              continue;
-            extra_bits_below += extra_bits_increase[i];
-            // The increase for this property value has been used, and will not
-            // be used again: clear it. Also below.
-            extra_bits_increase[i] = 0;
-            for (size_t sym = 0; sym < max_symbols; sym++) {
-              counts_above[sym] -= count_increase[i * max_symbols + sym];
-              counts_below[sym] += count_increase[i * max_symbols + sym];
-              count_increase[i * max_symbols + sym] = 0;
-            }
-            float rcost = EstimateBits(counts_above.data(), max_symbols) +
-                          tot_extra_bits[pred] - extra_bits_below;
-            float lcost = EstimateBits(counts_below.data(), max_symbols) +
-                          extra_bits_below;
-
-            float penalty = 0;
-            // Never discourage moving away from the Weighted predictor.
-            if (tree_samples.PredictorFromIndex(pred) !=
-                    tree->nodes[pos].predictor &&
-                tree->nodes[pos].predictor != Predictor::kWeighted) {
-              penalty = change_pred_penalty;
-            }
-            // If everything else is equal, disfavour Weighted (slower) and
-            // favour Zero (faster if it's the only predictor used in a
-            // group+channel combination)
-            if (tree_samples.PredictorFromIndex(pred) == Predictor::kWeighted) {
-              penalty += 1e-8;
-            }
-            if (tree_samples.PredictorFromIndex(pred) == Predictor::kZero) {
-              penalty -= 1e-8;
-            }
-            if (rcost + penalty < costs_r[i - first_used].Cost()) {
-              costs_r[i - first_used].cost = rcost;
-              costs_r[i - first_used].extra_cost = penalty;
-              costs_r[i - first_used].pred =
-                  tree_samples.PredictorFromIndex(pred);
-            }
-            if (lcost + penalty < costs_l[i - first_used].Cost()) {
-              costs_l[i - first_used].cost = lcost;
-              costs_l[i - first_used].extra_cost = penalty;
-              costs_l[i - first_used].pred =
-                  tree_samples.PredictorFromIndex(pred);
-            }
-          }
-        }
-        // Iterate through the possible splits and find the one with minimum sum
-        // of costs of the two sides.
-        Phase<Profiled> selection_timer(profile, HistogramFitStage::kSplitSelection, node_profile.bucket);
-        size_t active_thresholds = 0;
-        size_t split = begin;
-        for (size_t i = first_used; i < last_used; i++) {
-          if (!prop_value_used_count[i])
-            continue;
-          if constexpr (Profiled) ++active_thresholds;
-          split += prop_value_used_count[i];
-          float rcost = costs_r[i - first_used].cost;
-          float lcost = costs_l[i - first_used].cost;
-
-          bool uses_wp = tree_samples.PropertyFromIndex(prop) == 15 ||
-                         costs_l[i - first_used].pred == Predictor::kWeighted ||
-                         costs_r[i - first_used].pred == Predictor::kWeighted;
-          bool zero_entropy_side = rcost == 0 || lcost == 0;
-
-          SplitInfo &best_ref =
-              tree_samples.PropertyFromIndex(prop) < kHistogramStaticProperties
-                  ? (zero_entropy_side ? best_split_static_constant
-                                       : best_split_static)
-                  : (uses_wp ? best_split_nonstatic : best_split_nowp);
-          if (lcost + rcost < best_ref.Cost()) {
-            best_ref.prop = prop;
-            best_ref.val = i;
-            best_ref.pos = split;
-            best_ref.lcost = lcost;
-            best_ref.lpred = costs_l[i - first_used].pred;
-            best_ref.rcost = rcost;
-            best_ref.rpred = costs_r[i - first_used].pred;
-          }
-        }
-        selection_timer.Stop();
-        if constexpr (Profiled) {
-          auto &work = node_profile.bucket->work;
-          work.active_bins += active_thresholds + 1;
-          work.candidate_thresholds += active_thresholds;
-          work.entropy_evaluations += 2 * active_thresholds * num_predictors;
-          work.symbol_terms += 2 * active_thresholds * num_predictors * max_symbols;
-          ++profile->properties_by_active_bins[HistogramProfileBucket(active_thresholds + 1, kHistogramBinBuckets)];
-        }
-        // Clear extra_bits_increase and cost_increase for last_used.
-        extra_bits_increase[last_used] = 0;
-        for (size_t sym = 0; sym < max_symbols; sym++) {
-          count_increase[last_used * max_symbols + sym] = 0;
+        for (size_t prop = 0; prop < num_properties; ++prop) {
+          const auto &r = w.results[prop];
+          constant_properties |= r.constant_properties;
+          for (auto pair :
+               {std::pair{&best_split_static_constant, &r.best_static_constant},
+                std::pair{&best_split_static, &r.best_static},
+                std::pair{&best_split_nonstatic, &r.best_nonstatic},
+                std::pair{&best_split_nowp, &r.best_nowp}})
+            if (pair.second->Cost() < pair.first->Cost())
+              *pair.first = *pair.second;
+          if constexpr (Profiled)
+            MergePropertyProfile(*profile, *node_profile.bucket, r.profile);
         }
       }
 
@@ -661,14 +777,17 @@ Status FindBestSplit(SamplesView &tree_samples, Workspace &w,
         node_profile.bucket->work.partition_rows += end - begin;
       }
       // "Sort" according to winning property
-      Phase<Profiled> partition_timer(profile, HistogramFitStage::kPartition, node_profile.bucket);
+      Phase<Profiled> partition_timer(profile, HistogramFitStage::kPartition,
+                                      node_profile.bucket);
       if (best->prop < tree_samples.NumStaticProps()) {
-        SplitTreeSamples<true, Profiled>(tree_samples, begin, best->pos, end, best->prop,
-                                         best->val, node_profile.bucket);
+        SplitTreeSamples<true, Profiled>(tree_samples, begin, best->pos, end,
+                                         best->prop, best->val,
+                                         node_profile.bucket);
       } else {
         SplitTreeSamples<false, Profiled>(tree_samples, begin, best->pos, end,
-                                best->prop - tree_samples.NumStaticProps(),
-                                best->val, node_profile.bucket);
+                                          best->prop -
+                                              tree_samples.NumStaticProps(),
+                                          best->val, node_profile.bucket);
       }
       partition_timer.Stop();
       auto new_sp_range = static_prop_range;
@@ -750,6 +869,31 @@ Status ValidateHistogramTrainingSamples(const HistogramTrainingSamples &s,
   return Status::Ok();
 }
 
+size_t HistogramTreeLearningParticipants(const HistogramTrainingSamples &s,
+                                         HistogramTreeLearningOptions options) {
+  using namespace thread_budget_internal;
+  if (options.cpu_participants == 1 || !HasCpuParticipation() ||
+      InExplicitParallelScope() || !s.predictor_count ||
+      s.predictor_count > kHistogramPredictors ||
+      s.property_count > kPropertyCount ||
+      s.weights.size() <
+          (kMinimumParallelHistogramRows + s.predictor_count - 1) /
+              s.predictor_count)
+    return 1;
+  size_t varying = 0;
+  for (size_t prop = 0; prop < s.property_count; ++prop)
+    varying += !s.thresholds[prop].empty();
+  size_t desired =
+      options.cpu_participants
+          ? options.cpu_participants
+          : std::max(size_t{1}, size_t{std::thread::hardware_concurrency()});
+  if (CpuThreadCount())
+    desired = std::min(desired, CpuThreadCount());
+  return std::max(size_t{1},
+                  std::min({desired, varying, current_cpu_execution.job.limit(),
+                            current_cpu_execution.domain.limit()}));
+}
+
 Status ComputeHistogramTreeLearningStorageBound(
     const HistogramTrainingSamples &s, HistogramTreeLearningOptions options,
     resource_budget_internal::HostStorageBound *out) {
@@ -757,9 +901,30 @@ Status ComputeHistogramTreeLearningStorageBound(
     return Status::InvalidArgument("Null histogram learning storage output");
   if (auto status = ValidateShape(s, options); !status.ok())
     return status;
-  return ComputeHistogramTreeWorkspaceStorageBound(
-      s.predictor_count, MaximumBins(s), options.maximum_leaves,
-      options.maximum_depth, out);
+  using namespace resource_budget_internal;
+  const size_t bins = MaximumBins(s);
+  HostStorageBound bound;
+  if (auto status = ComputeHistogramTreeWorkspaceStorageBound(
+          s.predictor_count, bins, options.maximum_leaves,
+          options.maximum_depth, &bound);
+      !status.ok())
+    return status;
+  const size_t workers = HistogramTreeLearningParticipants(s, options) - 1;
+  HostStorageBound extra;
+  if (!extra.AddVector<PropertyWorkspace>(1,
+                                          VectorCapacityPolicy::kFreshExact) ||
+      !extra.AddVector<std::thread>(1, VectorCapacityPolicy::kFreshExact) ||
+      !extra.AddVector<int32_t>(kSymbols, VectorCapacityPolicy::kFreshExact,
+                                2) ||
+      !extra.AddVector<int32_t>(bins, VectorCapacityPolicy::kFreshExact) ||
+      !extra.AddVector<int32_t>(bins * kSymbols,
+                                VectorCapacityPolicy::kFreshExact) ||
+      !extra.AddVector<size_t>(bins, VectorCapacityPolicy::kFreshExact) ||
+      !extra.AddVector<CostInfo>(bins, VectorCapacityPolicy::kFreshExact, 2) ||
+      !bound.Add(extra, workers))
+    return Status::InvalidArgument("Histogram parallel storage overflow");
+  *out = bound;
+  return Status::Ok();
 }
 
 Status ComputeHistogramTreeWorkspaceStorageBound(
@@ -819,26 +984,34 @@ Status LearnHistogramTree(HistogramTrainingSamples &s, DecisionTree *out,
   const size_t bins = MaximumBins(s);
   w.nodes.reserve(options.maximum_depth);
   w.counts.resize(kSymbols * s.predictor_count);
-  w.above.resize(kSymbols);
-  w.below.resize(kSymbols);
   w.total_extra.resize(s.predictor_count);
-  w.used.resize(bins);
-  w.increase.resize(bins * kSymbols);
-  w.extra_increase.resize(bins);
-  w.costs_l.resize(bins);
-  w.costs_r.resize(bins);
+  w.property.Initialize(bins);
+  histogram_parallel_internal::PropertyTeam team(
+      HistogramTreeLearningParticipants(s, options));
+  HistogramTreeLearningStats execution{team.participants(), 0};
+  if (profile)
+    profile->peak_property_participants =
+        std::max(profile->peak_property_participants, team.participants());
+  w.workers.resize(team.participants() - 1);
+  for (auto &worker : w.workers)
+    worker.Initialize(bins);
   DecisionTree result;
   result.nodes.resize(2 * options.maximum_leaves - 1);
   result.nodes[0].predictor = s.predictors[0];
   SamplesView view{s};
+  if (auto status = team.Start(); !status.ok())
+    return status;
   setup_timer.Stop();
-  const auto status = profile
-      ? FindBestSplit<true>(view, w, options, options.split_threshold, options.multipliers,
-                            options.static_range, options.fast_decode_multiplier, &result,
-                            profile, fit_profile.record)
-      : FindBestSplit<false>(view, w, options, options.split_threshold, options.multipliers,
-                             options.static_range, options.fast_decode_multiplier, &result,
-                             nullptr, nullptr);
+  const auto status =
+      profile ? FindBestSplit<true>(view, w, team, execution, options,
+                                    options.split_threshold,
+                                    options.multipliers, options.static_range,
+                                    options.fast_decode_multiplier, &result,
+                                    profile, fit_profile.record)
+              : FindBestSplit<false>(
+                    view, w, team, execution, options, options.split_threshold,
+                    options.multipliers, options.static_range,
+                    options.fast_decode_multiplier, &result, nullptr, nullptr);
   if (!status.ok())
     return status;
   Phase<true> output_timer(profile, HistogramFitStage::kOutput);
@@ -848,6 +1021,8 @@ Status LearnHistogramTree(HistogramTrainingSamples &s, DecisionTree *out,
   if (result.size <= kInlineTreeNodes)
     result.nodes.resize(result.size); // Releases only; cannot allocate.
   *out = std::move(result);
+  if (options.execution_stats)
+    *options.execution_stats = execution;
   fit_profile.Success(out->size);
   return Status::Ok();
 } catch (const resource_budget_internal::ManagedAllocationFailure &e) {

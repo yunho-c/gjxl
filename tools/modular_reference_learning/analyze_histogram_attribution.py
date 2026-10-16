@@ -22,6 +22,8 @@ def summarize(rows):
         off_fit, on_fit = median(off, ("detail_wall", "fitting")), median(on, ("detail_wall", "fitting"))
         chosen = sorted(on, key=lambda r: r["result"]["histogram_fitting"]["fit_seconds"])[len(on) // 2]
         profile = chosen["result"]["histogram_fitting"]
+        require(not profile.get("parallel_property_nodes", 0),
+                "Exclusive phase attribution requires serial property evaluation")
         stages = dict(profile["stages"])
         stages["control_cleanup_and_probe_overhead"] = profile["fit_seconds"] - sum(stages.values())
         work = {key: sum(b["work"][key] for b in profile["by_rows"])

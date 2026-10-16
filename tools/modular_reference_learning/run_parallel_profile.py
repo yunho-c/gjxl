@@ -42,7 +42,8 @@ def validate(result):
     if p['enabled']:
         require(p['calls'] == p['successes'] == result['work']['fits'] == len(p['fits']) and
                 not p['records_dropped'], 'Fitter coverage differs')
-        require(sum(p['stages'].values()) <= p['fit_seconds']+1e-6, 'Fit phase overlap')
+        if not p.get('parallel_property_nodes', 0):
+            require(sum(p['stages'].values()) <= p['fit_seconds']+1e-6, 'Serial fit phase overlap')
         require(p['fit_seconds'] <= result['detail_work']['fitting']+1e-6, 'Fit work exceeds parent')
         require(sum(b['work']['nodes'] for b in p['by_rows']) == sum(f['nodes'] for f in p['fits']),
                 'Fitter node conservation differs')
