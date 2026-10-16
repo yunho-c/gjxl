@@ -50,6 +50,11 @@ struct ModularStreamTokenStoragePlan {
 [[nodiscard]] Status ComputeModularStreamTokenStoragePlan(
     size_t samples, size_t slices, std::span<const ModularStreamTokenTree> trees,
     ModularStreamTokenStoragePlan *out, const ModularTokenDeviceLimits *limits = nullptr);
+// Protect a future token generation before the local trees exist. Uses the
+// same layout arithmetic as the exact plan; maximum_nodes bounds all bindings.
+[[nodiscard]] Status ComputeModularStreamTokenStorageBound(
+    size_t samples, size_t slices, size_t maximum_nodes,
+    resource_budget_internal::HostStorageBound *out);
 
 class PreparedGpuModularStreamFeatures
     : public modular_internal::HistogramRowSource {

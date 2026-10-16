@@ -4,6 +4,7 @@
 #include "codec/modular/profile.h"
 #include "codec/modular/histogram_tree_profile.h"
 #include "codestream/modular/reference_learning_profile.h"
+#include "codestream/modular/local_learning_queue.h"
 #include "codestream/modular/reference_workflow_internal.h"
 #include "core/parallel_work_internal.h"
 #include <mutex>
@@ -480,11 +481,16 @@ Status LearnGlobal(std::span<ReferenceModularStream> records,
 
 // Batching is independent of compression decisions. Local fitting can share a
 // bounded cohort of feature owners, including both CPU and GPU producers.
-// Their aggregate sample population never exceeds the original batch ceiling.
+// Cohort mode retains the original aggregate sample ceiling. Pipeline mode
+// preserves batch shapes and admits owners under its separate live window.
 // Explicit buffered/global learning retains its entire scope until the one fit.
 constexpr size_t kFeatureBatchSamples = 8 * 1024 * 1024;
 struct FeatureBatch {
   size_t first = 0, stop = 0, slices = 0, samples = 0, retained_bytes = 0;
+  size_t remaining = 0;
+  bool released = false;
+  LearningBatchTiming *timing = nullptr;
+  ResourceReservation completion;
   std::unique_ptr<PreparedGpuModularStreamFeatures> owner;
 };
 struct HybridLearning {
@@ -559,10 +565,7 @@ struct HybridLearning {
     *out = stop;
     return Status::Ok();
   }
-  Status Prepare(size_t first, size_t limit, FeatureBatch *batch, bool *admission_limited) {
-    ProfileScope profile(ProfileStage::kTraining);
-    Seconds timer(stats->feature_seconds);
-    jobs.clear();
+  Status Describe(size_t first, size_t limit, FeatureBatch *batch) const {
     FeatureBatch result;
     result.first = first;
     bool wavefront = true;
@@ -584,24 +587,51 @@ struct HybridLearning {
         continue;
       if (samples > kFeatureBatchSamples || slices > kMaximumModularFeatureBatchSlices)
         return Status::Unsupported("Selected stream exceeds histogram feature batch admission");
-      if (!jobs.empty() &&
+      if (result.slices &&
           (samples > kFeatureBatchSamples - result.samples ||
-           slices > kMaximumModularFeatureBatchSlices - jobs.size() || supported != wavefront))
+           slices > kMaximumModularFeatureBatchSlices - result.slices || supported != wavefront))
         break;
       wavefront = supported;
-      for (size_t c = 0; c < stream.channels.size(); ++c) {
-        const auto &channel = stream.channels[c];
-        if (!channel.descriptor.extent.empty())
-          jobs.push_back({channel, stream.weighted, static_cast<uint32_t>(records[stop].id),
-                          static_cast<uint32_t>(c)});
-      }
+      result.slices += slices;
       result.samples += samples;
     }
     result.stop = stop;
-    result.slices = jobs.size();
+    result.remaining = stop - first;
+    *batch = std::move(result);
+    return Status::Ok();
+  }
+  Status Prepare(size_t first, size_t limit, FeatureBatch *batch, bool *admission_limited,
+                 bool protect_completion = false) {
+    ProfileScope profile(ProfileStage::kTraining);
+    Seconds timer(stats->feature_seconds);
+    jobs.clear();
+    FeatureBatch result;
+    if (auto s = Describe(first, limit, &result); !s.ok()) return s;
+    const size_t stop = result.stop;
+    for (size_t i = first; i < stop; ++i)
+      for (size_t c = 0; c < streams[i].channels.size(); ++c) {
+        const auto &channel = streams[i].channels[c];
+        if (!channel.descriptor.extent.empty())
+          jobs.push_back({channel, streams[i].weighted, static_cast<uint32_t>(records[i].id),
+                          static_cast<uint32_t>(c)});
+      }
+    auto *trace = active_learning_schedule_profile;
+    const double prepare_start = trace ? trace->Now() : 0;
     if (jobs.empty()) {
       *batch = std::move(result);
       return Status::Ok();
+    }
+    if (protect_completion) {
+      size_t maximum_nodes = 0;
+      for (size_t i = first; i < stop; ++i)
+        if (!streams[i].channels.empty()) maximum_nodes += 2 * LocalTreeLeaves(streams[i]) - 1;
+      HostStorageBound completion;
+      if (auto s = ComputeModularStreamTokenStorageBound(result.samples, result.slices,
+              maximum_nodes, &completion); !s.ok()) return s;
+      if (auto s = budget.TryReserve(completion.peak_bytes, &result.completion); !s.ok()) {
+        *admission_limited = s.code() == StatusCode::kUnavailable || s.code() == StatusCode::kOutOfMemory;
+        return s;
+      }
     }
     ModularStreamFeatureStoragePlan plan;
     const auto limits = op.modular_stream_limits();
@@ -664,13 +694,26 @@ struct HybridLearning {
       return Status::Internal("Histogram feature producer returned an invalid route");
     }
     *batch = std::move(result);
+    if (trace && !trace->batches.empty()) {
+      if (trace->batches_written == trace->batches.size()) ++trace->dropped;
+      else {
+        batch->timing = &trace->batches[trace->batches_written++];
+        *batch->timing = {records[first].id, records[stop - 1].id + 1, batch->samples,
+                          prepare_start, trace->Now(), 0, 0, 0};
+      }
+    }
     return Status::Ok();
   }
-  Status Tokenize(FeatureBatch &batch) {
+  Status Tokenize(FeatureBatch &batch, bool *admission_limited = nullptr) {
     if (!batch.owner)
       return Status::Ok();
     ProfileScope profile(ProfileStage::kTokens);
     Seconds timer(stats->token_seconds);
+    if (batch.timing) {
+      const double now = active_learning_schedule_profile->Now();
+      if (!batch.timing->fits_observed_done) batch.timing->fits_observed_done = now;
+      batch.timing->tokenize_start = now;
+    }
     trees.clear();
     if (stats->local_trees) {
       size_t next = 0;
@@ -693,10 +736,29 @@ struct HybridLearning {
         !s.ok())
       return s;
     std::unique_ptr<PreparedGpuModularTokens> owner;
-    if (auto s = Stage(budget, plan.generation.peak_bytes, stats,
-                       [&] { return op.GenerateModularStreamTokens(*batch.owner, trees, &owner); });
-        !s.ok())
+    bool started = false;
+    const auto generate = [&] {
+      if (batch.completion.valid()) {
+        // Protected before this batch's feature allocation: lookahead and fit
+        // reservations cannot consume the capacity needed to retire its owner.
+        if (auto s = batch.completion.ReduceCapacity(plan.generation.peak_bytes); !s.ok()) return s;
+        auto context = CurrentResourceContext();
+        context.reservation = &batch.completion;
+        ResourceContextScope scope(context);
+        stats->maximum_stage_bytes = std::max(stats->maximum_stage_bytes, plan.generation.peak_bytes);
+        started = true;
+        return op.GenerateModularStreamTokens(*batch.owner, trees, &owner);
+      }
+      return Stage(budget, plan.generation.peak_bytes, stats, [&] {
+          started = true;
+          return op.GenerateModularStreamTokens(*batch.owner, trees, &owner);
+        });
+    };
+    if (auto s = generate(); !s.ok()) {
+      if (admission_limited) *admission_limited = !started &&
+          (s.code() == StatusCode::kUnavailable || s.code() == StatusCode::kOutOfMemory);
       return s;
+    }
     if (!owner || owner->backend_id() != options.gpu->id() ||
         owner->token_count() != batch.samples || owner->context_count() != plan.maximum_contexts)
       return Status::Internal("Histogram token producer returned an invalid owner");
@@ -730,13 +792,214 @@ struct HybridLearning {
     live_samples -= batch.samples;
     live_bytes -= batch.retained_bytes;
     batch.owner.reset();
+    batch.completion.Reset();
+    if (batch.timing) batch.timing->released = active_learning_schedule_profile->Now();
+    return Status::Ok();
+  }
+  Status RunPipeline(bool *handled) {
+    *handled = false;
+    struct PipelineJob : LocalLearningJob {
+      Status status;
+      size_t batch = 0;
+      bool admitted = true;
+      double start = 0, finish = 0;
+    };
+    const size_t desired = LearningParticipants(options, records.size());
+    auto *const parent_profile = active_modular_profile;
+    auto *const parent_fit_profile = active_histogram_fitting_profile;
+    HostStorageBound metadata;
+    if (!metadata.AddVector<PipelineJob>(records.size(), VectorCapacityPolicy::kFreshExact) ||
+        !metadata.AddVector<std::thread>(desired - 1, VectorCapacityPolicy::kFreshExact) ||
+        (parent_fit_profile && !metadata.AddVector<HistogramFittingProfile>(
+            desired, VectorCapacityPolicy::kFreshExact))) return Invalid();
+    ResourceReservation reservation;
+    if (auto s = budget.TryReserve(metadata.peak_bytes, &reservation); !s.ok()) {
+      if (s.code() != StatusCode::kUnavailable && s.code() != StatusCode::kOutOfMemory) return s;
+      ++stats->pipeline_admission_stalls;
+      return Status::Ok();  // No feature/fit has started: retain the cohort route.
+    }
+    *handled = true;
+    ProfileScope training(ProfileStage::kTraining);
+    Seconds elapsed(stats->pipeline_seconds);
+    auto context = CurrentResourceContext();
+    context.reservation = &reservation;
+    context.resource_class = ResourceClass::kPreparation;
+    ResourceContextScope metadata_scope(context);
+    LearningStorage<PipelineJob> fit_jobs(records.size());
+    LearningStorage<HistogramFittingProfile> profiles(parent_fit_profile ? desired : 0);
+    LearningWaveProbe trace;
+    using Clock = std::chrono::steady_clock;
+    const auto epoch = Clock::now();
+    const auto now = [&] { return std::chrono::duration<double>(Clock::now() - epoch).count(); };
+    const auto work = [&](size_t i, size_t worker) noexcept {
+      auto &job = fit_jobs[i];
+      job.start = now();
+      try {
+        LearningWaveProbe::Job timing(trace, i, records[i].id, worker, job.stats);
+        auto resources = CurrentResourceContext();
+        resources.reservation = job.admitted ? &job.reservation : nullptr;
+        ResourceContextScope scope(resources);
+        ModularProfile worker_profile;
+        ProfileSession session(parent_profile ? &worker_profile : nullptr);
+        auto *fit_profile = parent_fit_profile ? &profiles[worker] : nullptr;
+        if (fit_profile) {
+          fit_profile->records = {&job.fit, 1};
+          fit_profile->records_written = 0;
+        }
+        HistogramFittingProfileSession fitting_session(fit_profile);
+        job.status = LearnLocal(records[i], streams[i], LocalOptions(options, &features[i]), budget, &job.stats,
+            std::span(features[i].views).first(records[i].channel_count), job.admitted);
+        job.computed_features = worker_profile.training_work.weighted_prediction_samples;
+        job.reused_features = worker_profile.training_work.reused_prediction_samples;
+      } catch (const ManagedAllocationFailure &e) {
+        job.status = e.status();
+      } catch (const std::bad_alloc &) {
+        job.status = Status::OutOfMemory("Pipelined local fit allocation failed");
+      } catch (const std::length_error &) {
+        job.status = Invalid();
+      } catch (...) {
+        job.status = Status::Internal("Pipelined local fit failed");
+      }
+      job.reservation.Reset();
+      job.finish = now();
+    };
+    // Declared last: error paths join before destroying callback/jobs/profiles
+    // or returning to HybridLearning's feature-owner destructor.
+    LocalLearningQueue queue(desired);
+    trace.Dispatch(records.size(), queue.participants());
+    if (auto s = queue.Start(work); !s.ok()) return s;
+    ++stats->learning_waves;
+    stats->learning_peak_participants = queue.participants();
+    stats->maximum_stage_bytes = std::max(stats->maximum_stage_bytes, metadata.peak_bytes);
+    const size_t slots = std::min(LocalLearningQueue::kCapacity, 2 * queue.participants());
+    size_t next = 0, next_fit = 0, complete = 0, active = 0, count = 0, live_batches = 0;
+    size_t cohort_stop = 0;
+    bool new_cohort = false;
+    const auto finished = [&](size_t i) -> Status {
+      auto &job = fit_jobs[i];
+      if (!job.status.ok()) return job.status;
+      auto &batch = batches[job.batch];
+      if (!--batch.remaining && batch.timing)
+        batch.timing->fits_observed_done = active_learning_schedule_profile->Now();
+      ++complete;
+      return Status::Ok();
+    };
+    while (complete != records.size() || live_batches) {
+      size_t i;
+      while (queue.Take(&i)) {
+        --active;
+        if (auto s = finished(i); !s.ok()) return s;
+      }
+      // Only a batch's own completed fits gate tokenization. Other batches may
+      // still be fitting; their disjoint records and feature borrows stay live.
+      for (size_t b = 0; b < count; ++b) {
+        auto &batch = batches[b];
+        if (batch.remaining || batch.released) continue;
+        bool limited = false;
+        if (auto s = Tokenize(batch, &limited); !s.ok()) {
+          if (!limited || !active) return s;
+          ++stats->pipeline_admission_stalls;
+          continue;
+        }
+        batch.released = true;
+        --live_batches;
+      }
+      while (next_fit < next && active < slots) {
+        auto &job = fit_jobs[next_fit];
+        if (!job.bytes)
+          if (auto s = LocalLearningBound(records[next_fit], streams[next_fit], LocalOptions(options, &features[next_fit]),
+              std::span(features[next_fit].views).first(records[next_fit].channel_count), &job.bytes);
+              !s.ok()) return s;
+        if (auto s = budget.TryReserve(job.bytes, &job.reservation); !s.ok()) {
+          if (s.code() != StatusCode::kUnavailable && s.code() != StatusCode::kOutOfMemory) return s;
+          ++stats->pipeline_admission_stalls;
+          if (active) break;
+          // With all admitted jobs drained, the original tighter stage bounds
+          // may still succeed. Never retry a job that actually started.
+          ++stats->pipeline_serial_fallbacks;
+          job.admitted = false;
+          work(next_fit, 0);
+          if (auto s = finished(next_fit++); !s.ok()) return s;
+          break;  // Release a completed owner before admitting more work.
+        }
+        job.stats.maximum_stage_bytes = job.bytes;
+        if (auto s = queue.Submit(next_fit++); !s.ok()) return s;
+        ++active;
+        stats->pipeline_peak_jobs = std::max(stats->pipeline_peak_jobs, active);
+      }
+      if (next < records.size()) {
+        if (next == cohort_stop) {
+          if (auto s = CohortStop(next, &cohort_stop); !s.ok()) return s;
+          new_cohort = true;
+        }
+        FeatureBatch plan;
+        if (auto s = Describe(next, cohort_stop, &plan); !s.ok()) return s;
+        if (plan.samples <= options.feature_window_samples - live_samples) {
+          bool limited = false;
+          if (auto s = Prepare(next, cohort_stop, &batches[count], &limited, true); !s.ok()) {
+            if (!limited) return s;
+            ++stats->pipeline_admission_stalls;
+            if (!active && !live_batches) {
+              if (next) return s;
+              // Protected completion may be too conservative for a tight
+              // domain. Nothing has started; discard the queue and use the
+              // original per-stage cohort admission without recomputing work.
+              queue.Stop();
+              trace.Joined(0);
+              --stats->learning_waves;
+              stats->learning_peak_participants = 0;
+              *handled = false;
+              return Status::Ok();
+            }
+          } else {
+            auto &batch = batches[count];
+            if (batch.stop <= next) return Status::Internal("Pipeline batch did not advance");
+            for (size_t j = next; j < batch.stop; ++j) fit_jobs[j].batch = count;
+            next = batch.stop;
+            ++count;
+            ++live_batches;
+            stats->pipeline_peak_batches = std::max(stats->pipeline_peak_batches, live_batches);
+            if (new_cohort) { ++stats->feature_cohorts; new_cohort = false; }
+            continue;  // Publish this batch's jobs before doing more device work.
+          }
+        }
+      }
+      if (active) queue.Progress();
+    }
+    queue.Stop();
+    trace.Joined();
+    double first_start = now(), last_finish = 0;
+    for (auto &job : fit_jobs) {
+      first_start = std::min(first_start, job.start);
+      last_finish = std::max(last_finish, job.finish);
+      MergeLearningStats(*stats, job.stats);
+      if (parent_profile) {
+        parent_profile->training_work.weighted_prediction_samples += job.computed_features;
+        parent_profile->training_work.reused_prediction_samples += job.reused_features;
+      }
+      if (parent_fit_profile && job.stats.fits) {
+        if (parent_fit_profile->records_written < parent_fit_profile->records.size())
+          parent_fit_profile->records[parent_fit_profile->records_written++] = job.fit;
+        else ++parent_fit_profile->records_dropped;
+      }
+    }
+    stats->learning_seconds += std::max(0.0, last_finish - first_start);
+    if (parent_fit_profile)
+      for (auto &profile : profiles) {
+        profile.records = {};
+        profile.records_written = 0;
+        MergeHistogramFittingProfile(*parent_fit_profile, profile);
+      }
     return Status::Ok();
   }
   Status Run(uint64_t population) {
     if (auto s = Initialize(); !s.ok())
       return s;
+    bool pipelined = false;
+    if (stats->local_trees && options.learning_schedule == ReferenceLearningSchedule::kPipeline)
+      if (auto s = RunPipeline(&pipelined); !s.ok()) return s;
     size_t next = 0, count = 0;
-    while (next < records.size()) {
+    while (!pipelined && next < records.size()) {
       const size_t first = next;
       size_t stop = records.size();
       if (stats->local_trees) {

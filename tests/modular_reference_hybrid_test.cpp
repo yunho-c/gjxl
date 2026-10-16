@@ -19,6 +19,8 @@ using test::modular_workflow_fixture::Fixture;
 using test::modular_workflow_fixture::Make;
 namespace reference = gjxl::test::modular_reference;
 size_t files = 0, samples = 0, gpu_batches = 0, faults = 0;
+bool pipeline = false;
+size_t pipeline_window = 16, participants = 4;
 void Check(bool value, const char *message) {
   if (!value)
     throw std::runtime_error(message);
@@ -46,7 +48,7 @@ void SameDecisions(const ReferenceModularFrame &cpu, const ReferenceModularFrame
             b.feature_batches == b.gpu_feature_batches + b.cpu_feature_batches,
         "Hybrid workflow repeated or omitted features/tokens");
   if (b.local_trees)
-    Check(b.peak_feature_samples <= 8 * 1024 * 1024,
+    Check(b.peak_feature_samples <= (pipeline ? pipeline_window : 8) * 1024 * 1024,
           "Local workflow exceeded the aggregate feature-cohort limit");
   Check(cpu.streams().size() == hybrid.streams().size(), "Stream count changed");
   for (size_t i = 0; i < cpu.streams().size(); ++i) {
@@ -79,14 +81,14 @@ void Case(GpuBackend &gpu, Fixture f, ReferenceWorkflowOptions options,
           WeightedFeatureBackend producer, bool multi_batch = false, bool wide_palette = false,
           bool mixed_cohort = false) {
   std::shared_ptr<const ExecutionDomain> domain;
-  Ok(ExecutionDomain::Create({size_t{2} << 30, 4}, &domain));
+  Ok(ExecutionDomain::Create({size_t{2} << 30, participants}, &domain));
   const auto &budget = codestream_internal::WorkflowAdmission::Budget(*domain);
   auto resources = CurrentResourceContext();
   resources.domain = domain.get();
   ResourceContextScope context(resources);
   thread_budget_internal::CpuExecutionScope execution;
-  Ok(execution.Start(domain, 4));
-  thread_budget_internal::EncodeScope participation(4);
+  Ok(execution.Start(domain, participants));
+  thread_budget_internal::EncodeScope participation(participants);
   ReferenceModularFrame cpu, hybrid;
   ModularProfile cpu_profile, gpu_profile;
   options.learning_cpu_participants = 1;
@@ -95,7 +97,11 @@ void Case(GpuBackend &gpu, Fixture f, ReferenceWorkflowOptions options,
     Ok(PrepareReferenceModularFrame(f.view(), options, budget, &cpu));
   }
   options.gpu = &gpu;
-  options.learning_cpu_participants = 4;
+  if (pipeline) {
+    options.learning_schedule = ReferenceLearningSchedule::kPipeline;
+    options.feature_window_samples = pipeline_window * 1024 * 1024;
+  }
+  options.learning_cpu_participants = participants;
   options.feature_producer = producer;
   {
     ProfileSession session(&gpu_profile);
@@ -103,8 +109,8 @@ void Case(GpuBackend &gpu, Fixture f, ReferenceWorkflowOptions options,
   }
   SameDecisions(cpu, hybrid);
   Check(hybrid.stats().learning_peak_participants >= 1 &&
-            hybrid.stats().learning_peak_participants <= 4 &&
-            (!hybrid.stats().local_trees || hybrid.stats().learning_peak_participants == 4),
+            hybrid.stats().learning_peak_participants <= participants &&
+            (!hybrid.stats().local_trees || hybrid.stats().learning_peak_participants == participants),
         "Hybrid learning exceeded its allowance or lost local concurrency");
   Check(cpu_profile.training_work.weighted_prediction_samples == cpu.stats().scanned_pixels &&
             cpu_profile.training_work.reused_prediction_samples == 0 &&
@@ -114,6 +120,9 @@ void Case(GpuBackend &gpu, Fixture f, ReferenceWorkflowOptions options,
   if (multi_batch)
     Check(hybrid.stats().token_batches > 1 && hybrid.stats().gpu_feature_batches > 0,
           "Large automatic workflow did not exercise bounded GPU batches");
+  if (pipeline && multi_batch && pipeline_window == 16)
+    Check(hybrid.stats().pipeline_peak_batches > 1 && hybrid.stats().learning_waves == 1,
+          "Pipeline did not retain independent owners across cohorts");
   if (wide_palette) {
     bool found = false;
     for (const auto &record : hybrid.streams())
@@ -201,6 +210,10 @@ void CohortMemoryAdmission(GpuBackend &gpu) {
   Ok(PrepareReferenceModularFrame(f.view(), options, control, &cpu));
   options.gpu = &gpu;
   options.feature_producer = WeightedFeatureBackend::kGpu;
+  if (pipeline) {
+    options.learning_schedule = ReferenceLearningSchedule::kPipeline;
+    options.feature_window_samples = 16 * 1024 * 1024;
+  }
   bool flushed = false;
   // Find the narrow range in which another producer owner cannot be admitted
   // but the already prepared cohort can still fit/tokenize. The exact cutoff
@@ -213,8 +226,9 @@ void CohortMemoryAdmission(GpuBackend &gpu) {
       SameDecisions(cpu, hybrid);
       Check(budget.snapshot().peak_committed_bytes <= (mib << 20),
             "Feature cohort exceeded its managed memory limit");
-      if (hybrid.stats().feature_memory_limited_cohorts) {
-        Check(hybrid.stats().feature_cohorts > 1, "Memory pressure did not split the cohort");
+      if (hybrid.stats().feature_memory_limited_cohorts || hybrid.stats().pipeline_admission_stalls) {
+        if (!pipeline)
+          Check(hybrid.stats().feature_cohorts > 1, "Memory pressure did not split the cohort");
         // The small budget tests preparation admission. Use the separate
         // control budget for entropy serialization of both completed frames.
         CodestreamBuffer a, b;
@@ -247,6 +261,7 @@ void Failures(GpuBackend &gpu) {
   const auto f = Make({7, 3}, 3, 8, 3);
   ReferenceWorkflowOptions options;
   options.gpu = &gpu;
+  if (pipeline) options.learning_schedule = ReferenceLearningSchedule::kPipeline;
   options.feature_producer = WeightedFeatureBackend::kGpu;
   ResourceBudget budget(size_t{1} << 30);
   ReferenceModularFrame frame;
@@ -327,9 +342,26 @@ void Failures(GpuBackend &gpu) {
 }
 } // namespace
 int main(int argc, char **argv) try {
+  const bool focused = argc == 2 && std::string_view(argv[1]) == "--pipeline-focused";
+  pipeline = focused || (argc == 2 && std::string_view(argv[1]) == "--pipeline");
   std::unique_ptr<GpuBackend> gpu;
   Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &gpu));
-  if (argc == 2 && std::string_view(argv[1]) == "--palette") {
+  if (focused) {
+    ReferenceWorkflowOptions all;
+    all.predictors = ReferencePredictors::kAll;
+    for (size_t p : {1, 2, 4}) {
+      participants = p;
+      for (size_t window : {8, 16}) {
+        pipeline_window = window;
+        Case(*gpu, Make({2049, 17}, 4, 16, 1), all, WeightedFeatureBackend::kGpu);
+      }
+    }
+    pipeline_window = 16;
+    Case(*gpu, Make({2049, 1537}, 3, 8, 3), {}, WeightedFeatureBackend::kAuto, true);
+    MixedCohort(*gpu);
+    CohortMemoryAdmission(*gpu);
+    Failures(*gpu);
+  } else if (argc == 2 && std::string_view(argv[1]) == "--palette") {
     WidePalette(*gpu);
     MixedCohort(*gpu);
     CohortMemoryAdmission(*gpu);
@@ -353,6 +385,10 @@ int main(int argc, char **argv) try {
     Case(*gpu, Make({257, 257}, 4, 8, 1), {}, WeightedFeatureBackend::kAuto);
     Case(*gpu, Make({2049, 1537}, 3, 8, 3), {}, WeightedFeatureBackend::kAuto, true);
     Failures(*gpu);
+    if (pipeline) {
+      MixedCohort(*gpu);
+      CohortMemoryAdmission(*gpu);
+    }
   }
   Check(gpu_batches != 0, "No GPU features qualified");
   std::cout << "{\"files\":" << files << ",\"decoded_samples\":" << samples

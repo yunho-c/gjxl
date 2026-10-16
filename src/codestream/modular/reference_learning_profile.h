@@ -17,12 +17,19 @@ struct LearningWaveTiming {
   size_t first_job = 0, jobs = 0, participants = 0;
   double start = 0, dispatch = 0, joined = 0, finish = 0;
 };
+struct LearningBatchTiming {
+  size_t first_stream = 0, stop_stream = 0, samples = 0;
+  double prepare_start = 0, ready = 0, fits_observed_done = 0,
+         tokenize_start = 0, released = 0;
+};
 struct LearningScheduleProfile {
   using Clock = std::chrono::steady_clock;
   Clock::time_point epoch = Clock::now();
   std::span<LearningJobTiming> jobs;
   std::span<LearningWaveTiming> waves;
+  std::span<LearningBatchTiming> batches;
   size_t jobs_written = 0, waves_written = 0, dropped = 0;
+  size_t batches_written = 0;
   double Now() const { return std::chrono::duration<double>(Clock::now() - epoch).count(); }
 };
 inline thread_local LearningScheduleProfile *active_learning_schedule_profile = nullptr;

@@ -45,26 +45,90 @@ template <typename T> void Array(std::ostream &out, const T &a) {
 }
 } // namespace
 int main(int argc, char **argv) try {
-  Check(argc >= 6 && argc <= 18, "hybrid_profile INPUT OUT cpu|shared-cpu|hybrid|auto auto|buffered "
-                                "best|all [fit-off|schedule|fit-on [learning-participants [cpu-ceiling [entropy-participants [selection-participants [tokenization-participants [public|fitter-cpu|fitter-resumable|fitter-gpu|fitter-auto [minimum-rows [batch-fits [gpu-off|gpu-wall|gpu-stage [shards [active-properties]]]]]]]]]]]]");
-  const std::string gpu_profile_mode = argc >= 16 ? argv[15] : "gpu-off";
+  // Named controls compose the independent experiments. Keep the three old
+  // positional tails accepted so archived qualification runners still work.
+  std::string row_mode = "raster", row_diagnostics = "rows-off";
+  std::string learning_schedule = "cohorts", feature_window = "8";
+  std::string gpu_profile_mode = "gpu-off", histogram_shards, active_properties;
+  bool private_flags = false;
+  int positional = 1;
+  std::vector<std::string_view> named;
+  for (int i = 1; i < argc; ++i) {
+    const std::string_view arg = argv[i];
+    if (!arg.starts_with("--")) {
+      argv[positional++] = argv[i];
+      continue;
+    }
+    const auto equal = arg.find('=');
+    Check(equal != std::string_view::npos, "Named profile controls require =VALUE");
+    const auto key = arg.substr(0, equal);
+    Check(std::find(named.begin(), named.end(), key) == named.end(), "Duplicate profile control");
+    named.push_back(key);
+    const auto value = arg.substr(equal + 1);
+    if (key == "--sample-rows") row_mode = value;
+    else if (key == "--row-diagnostics") row_diagnostics = value;
+    else if (key == "--learning-schedule") learning_schedule = value;
+    else if (key == "--feature-window") feature_window = value;
+    else if (key == "--gpu-profile") gpu_profile_mode = value;
+    else if (key == "--histogram-shards") histogram_shards = value;
+    else if (key == "--active-properties") active_properties = value;
+    else Check(false, "Unknown named profile control");
+    private_flags = true;
+  }
+  argc = positional;
+  const auto named_control = [&](std::string_view key) {
+    return std::find(named.begin(), named.end(), key) != named.end();
+  };
+  const auto is_row_mode = [](std::string_view value) {
+    return value == "raster" || value == "selected" || value == "metal" ||
+           value == "metal-deferred" || value == "raster-unique" ||
+           value == "selected-unique" || value == "metal-unique";
+  };
+  if (argc >= 13 && is_row_mode(argv[12])) {
+    Check(argc <= 14 && !named_control("--sample-rows") &&
+              (argc != 14 || !named_control("--row-diagnostics")), "Duplicate sample row controls");
+    row_mode = argv[12];
+    if (argc == 14) row_diagnostics = argv[13];
+    argc = 12;
+    private_flags = true;
+  }
+  if (argc >= 16 && (std::string_view(argv[15]) == "cohorts" ||
+                     std::string_view(argv[15]) == "pipeline")) {
+    Check(argc <= 17 && !named_control("--learning-schedule") &&
+              (argc != 17 || !named_control("--feature-window")), "Duplicate schedule controls");
+    learning_schedule = argv[15];
+    if (argc == 17) feature_window = argv[16];
+    argc = 15;
+  } else if (argc >= 16) {
+    Check(!named_control("--gpu-profile") &&
+              (argc < 17 || !named_control("--histogram-shards")) &&
+              (argc < 18 || !named_control("--active-properties")), "Duplicate GPU fitting controls");
+    gpu_profile_mode = argv[15];
+    if (argc >= 17) histogram_shards = argv[16];
+    if (argc >= 18) active_properties = argv[17];
+  }
+  Check(argc >= 6 && argc <= 18,
+        "hybrid_profile INPUT OUT cpu|shared-cpu|hybrid|auto auto|buffered best|all "
+        "[fit-off|schedule|fit-on [learning-participants [cpu-ceiling [entropy-participants "
+        "[selection-participants [tokenization-participants [public|fitter-cpu|fitter-resumable|"
+        "fitter-gpu|fitter-auto [minimum-rows [batch-fits]]]]]]]]] "
+        "[--sample-rows=MODE] [--row-diagnostics=rows-off|rows-on] "
+        "[--learning-schedule=cohorts|pipeline] [--feature-window=8|16] "
+        "[--gpu-profile=gpu-off|gpu-wall|gpu-stage] [--histogram-shards=N] [--active-properties=N]");
   Check(gpu_profile_mode == "gpu-off" || gpu_profile_mode == "gpu-wall" ||
             gpu_profile_mode == "gpu-stage", "Unknown histogram GPU profiling mode");
   const bool gpu_profile_enabled = gpu_profile_mode != "gpu-off";
   const std::string fitter_flag = argc >= 13 ? argv[12] : "fitter-cpu";
   const bool public_api = fitter_flag == "public";
-  Check((!public_api || argc == 13) &&
+  Check((!public_api || (argc == 13 && !private_flags)) &&
             (public_api || fitter_flag == "fitter-cpu" || fitter_flag == "fitter-resumable" ||
              fitter_flag == "fitter-gpu" || fitter_flag == "fitter-auto"), "Unknown fitting route flag");
   const bool fitter_diagnostics = argc >= 13 && !public_api;
-  const std::string row_mode = "raster";
+  Check(is_row_mode(row_mode), "Invalid sample row mode");
   const bool gpu_rows = row_mode == "metal" || row_mode == "metal-deferred" || row_mode == "metal-unique";
-  Check(row_mode == "raster" || row_mode == "selected" ||
-            row_mode == "raster-unique" || row_mode == "selected-unique" || gpu_rows,
-        "Invalid sample row mode");
-  const std::string row_diagnostics = "rows-off";
-  Check(row_diagnostics == "rows-off" || row_diagnostics == "rows-on",
-        "Invalid sample row diagnostics mode");
+  Check(row_diagnostics == "rows-off" || row_diagnostics == "rows-on", "Invalid sample row diagnostics mode");
+  Check(learning_schedule == "cohorts" || learning_schedule == "pipeline", "Invalid learning schedule");
+  Check(feature_window == "8" || feature_window == "16", "Feature window must be 8 or 16 Mi samples");
   const bool tokenization_diagnostics = argc >= 12;
   const size_t tokenization_participants = tokenization_diagnostics ? std::stoull(argv[11]) : 1;
   Check(tokenization_participants <= 256, "Invalid tokenization participant limit");
@@ -128,8 +192,11 @@ int main(int argc, char **argv) try {
                             : ReferenceFittingBackend::kCpu;
   if (argc >= 14) options.fitting_minimum_rows = std::stoull(argv[13]);
   if (argc >= 15) options.fitting_batch_fits = std::stoull(argv[14]);
-  if (argc >= 17) options.fitting_execution.histogram_shards = std::stoull(argv[16]);
-  if (argc >= 18) options.fitting_execution.maximum_active_properties = std::stoull(argv[17]);
+  if (!histogram_shards.empty()) options.fitting_execution.histogram_shards = std::stoull(histogram_shards);
+  if (!active_properties.empty()) options.fitting_execution.maximum_active_properties = std::stoull(active_properties);
+  options.learning_schedule = learning_schedule == "pipeline" ? ReferenceLearningSchedule::kPipeline
+                                                               : ReferenceLearningSchedule::kCohorts;
+  options.feature_window_samples = std::stoull(feature_window) * 1024 * 1024;
   options.sample_rows = gpu_rows ? HistogramRowBackend::kGpu
                         : row_mode == "selected" || row_mode == "selected-unique"
                             ? HistogramRowBackend::kSelectedCpu
@@ -196,9 +263,11 @@ int main(int argc, char **argv) try {
   // DC group count never exceeds image group count.
   std::vector<LearningJobTiming> job_records(schedule_enabled ? 2 * group_count : 0);
   std::vector<LearningWaveTiming> wave_records(schedule_enabled ? 2 * group_count : 0);
+  std::vector<LearningBatchTiming> batch_records(schedule_enabled ? 2 * group_count : 0);
   LearningScheduleProfile schedule;
   schedule.jobs = job_records;
   schedule.waves = wave_records;
+  schedule.batches = batch_records;
   if (fitting_profile_enabled) {
     fitting_records.resize(((view.extent.width + 255) / 256) * ((view.extent.height + 255) / 256) +
                            1);
@@ -315,6 +384,13 @@ int main(int argc, char **argv) try {
       << ",\"peak_participants\":" << stats.learning_peak_participants
       << ",\"waves\":" << stats.learning_waves
       << ",\"memory_limited_waves\":" << stats.learning_memory_limited_waves
+      << ",\"schedule\":" << std::quoted(learning_schedule)
+      << ",\"feature_window_samples\":" << options.feature_window_samples
+      << ",\"pipeline_seconds\":" << stats.pipeline_seconds
+      << ",\"pipeline_peak_jobs\":" << stats.pipeline_peak_jobs
+      << ",\"pipeline_peak_batches\":" << stats.pipeline_peak_batches
+      << ",\"pipeline_admission_stalls\":" << stats.pipeline_admission_stalls
+      << ",\"pipeline_serial_fallbacks\":" << stats.pipeline_serial_fallbacks
       << "},\"entropy\":{\"requested_participants\":" << entropy_participants
       << ",\"admitted_participants\":" << stats.entropy_cpu_participants
       << ",\"memory_reductions\":" << stats.entropy_memory_reductions
@@ -435,6 +511,15 @@ int main(int argc, char **argv) try {
         << ",\"start\":" << j.start << ",\"finish\":" << j.finish
         << ",\"preparation\":" << j.preparation << ",\"fitting\":" << j.fitting
         << ",\"calls\":" << j.calls << ",\"fits\":" << j.fits << '}';
+  }
+  out << "],\"batches\":[";
+  for (size_t i = 0; i < schedule.batches_written; ++i) {
+    const auto &b = batch_records[i];
+    out << (i ? "," : "") << "{\"first_stream\":" << b.first_stream
+        << ",\"stop_stream\":" << b.stop_stream << ",\"samples\":" << b.samples
+        << ",\"prepare_start\":" << b.prepare_start << ",\"ready\":" << b.ready
+        << ",\"fits_observed_done\":" << b.fits_observed_done
+        << ",\"tokenize_start\":" << b.tokenize_start << ",\"released\":" << b.released << '}';
   }
   out << "]}";
   out << "}\n";
