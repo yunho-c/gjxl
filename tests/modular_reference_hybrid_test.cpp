@@ -101,8 +101,10 @@ void Case(GpuBackend &gpu, Fixture f, ReferenceWorkflowOptions options,
     Ok(PrepareReferenceModularFrame(f.view(), options, budget, &hybrid));
   }
   SameDecisions(cpu, hybrid);
-  Check(hybrid.stats().learning_peak_participants == (hybrid.stats().local_trees ? 4 : 1),
-        "Hybrid learning did not use the expected local/global concurrency");
+  Check(hybrid.stats().learning_peak_participants >= 1 &&
+            hybrid.stats().learning_peak_participants <= 4 &&
+            (!hybrid.stats().local_trees || hybrid.stats().learning_peak_participants == 4),
+        "Hybrid learning exceeded its allowance or lost local concurrency");
   Check(cpu_profile.training_work.weighted_prediction_samples == cpu.stats().scanned_pixels &&
             cpu_profile.training_work.reused_prediction_samples == 0 &&
             gpu_profile.training_work.reused_prediction_samples == hybrid.stats().scanned_pixels &&
@@ -215,13 +217,14 @@ void Failures(GpuBackend &gpu) {
             output.view().data() == old_bytes,
         "Busy hybrid workflow waited or published");
   busy = {};
-  {
+  for (bool shared : {false, true}) {
     using namespace thread_budget_internal;
     CpuExecutionScope execution;
     Ok(execution.Start({}, 4));
     EncodeScope participation(4);
-    const auto local = Make({2049, 17}, 3, 8, 3);
-    WorkerLaunchFaultForTesting fault{WorkerLaunchSite::kModularTreeLearning, 1};
+    const auto local = Make(shared ? Extent2D{257, 129} : Extent2D{2049, 17}, 3, 8, 3);
+    WorkerLaunchFaultForTesting fault{shared ? WorkerLaunchSite::kModularHistogramProperties
+                                            : WorkerLaunchSite::kModularTreeLearning, 1};
     WorkerLaunchFaultScopeForTesting inject(&fault);
     ReferenceWorkflowStats stats;
     stats.fits = 777;

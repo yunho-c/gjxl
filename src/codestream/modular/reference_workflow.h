@@ -22,8 +22,8 @@ struct ReferenceWorkflowOptions {
   GpuBackend *gpu = nullptr;
   WeightedFeatureBackend feature_producer = WeightedFeatureBackend::kAuto;
   size_t feature_cpu_participants = 4;
-  // Local prepare-and-fit jobs only. Zero uses the caller's CPU allowance;
-  // one is the serial control. Global fitting stays serial. Additional workers
+  // Local prepare-and-fit jobs, or property evaluation within a shared fit.
+  // Zero uses the caller's CPU allowance; one is the serial control. Workers
   // require CPU participation and managed-memory admission before launch.
   size_t learning_cpu_participants = 0;
   // Independent local palette/RCT/WP selection jobs. Zero inherits the

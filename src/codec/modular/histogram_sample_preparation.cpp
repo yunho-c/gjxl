@@ -634,10 +634,13 @@ Status PrepareHistogramSamples(std::span<const HistogramTrainingImage> images,
 }
 Status LearnPreparedHistogramTree(PreparedHistogramSamples &samples,
                                   DecisionTree *out, size_t maximum_leaves,
-                                  size_t maximum_depth) {
+                                  size_t maximum_depth, size_t cpu_participants,
+                                  HistogramTreeLearningStats *execution_stats) {
   auto options = samples.tree_options();
   options.maximum_leaves = maximum_leaves;
   options.maximum_depth = maximum_depth;
+  options.cpu_participants = cpu_participants;
+  options.execution_stats = execution_stats;
   return LearnHistogramTree(samples.samples_, out, options);
 }
 } // namespace gjxl::modular_internal

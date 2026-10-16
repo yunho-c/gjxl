@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 #pragma once
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <chrono>
@@ -10,10 +11,11 @@
 
 namespace gjxl::modular_internal {
 // Private opt-in diagnostics for the native histogram fitter, independent of
-// the original learner's profile. All backing is caller-owned; fitting never
-// allocates for diagnostics. Each fit is serial. Times are sums of per-fit
-// wall intervals, overlapping when a workflow runs independent fits in
-// parallel; they are neither process CPU time nor additional encoder stages.
+// the original learner's profile. Output backing is caller-owned; property
+// counters live in admitted fitter scratch with no per-node allocations.
+// Property stage times sum task wall intervals,
+// overlapping within a parallel fit as well as across independent fits. Fit
+// and node times remain elapsed spans; stage sums are not elapsed encode time.
 enum class HistogramFitStage {
   kValidation,
   kSetup,
@@ -80,6 +82,7 @@ struct HistogramFittingProfile {
   HistogramFitSeconds seconds{};
   double fit_seconds = 0;
   uint64_t calls = 0, successes = 0;
+  size_t peak_property_participants = 1, parallel_property_nodes = 0;
   std::array<HistogramNodeBucket, kHistogramRowBuckets> by_rows{};
   // Depth is one-based. The final entry also records any larger depth.
   std::array<HistogramDepthBucket, 2048> by_depth{};
@@ -91,6 +94,25 @@ struct HistogramFittingProfile {
   std::span<HistogramFitRecord> records;
   size_t records_written = 0, records_dropped = 0;
 };
+inline void MergeHistogramNodeWork(HistogramNodeWork &to,
+                                   const HistogramNodeWork &from) {
+  for (auto member :
+       {&HistogramNodeWork::nodes, &HistogramNodeWork::splits,
+        &HistogramNodeWork::forced_splits, &HistogramNodeWork::rows,
+        &HistogramNodeWork::symbol_row_visits,
+        &HistogramNodeWork::parent_histogram_row_visits,
+        &HistogramNodeWork::property_row_visits,
+        &HistogramNodeWork::joint_histogram_row_visits,
+        &HistogramNodeWork::fused_property_row_visits,
+        &HistogramNodeWork::skipped_constant_properties,
+        &HistogramNodeWork::properties, &HistogramNodeWork::constant_properties,
+        &HistogramNodeWork::active_bins, &HistogramNodeWork::bin_span,
+        &HistogramNodeWork::candidate_thresholds,
+        &HistogramNodeWork::entropy_evaluations,
+        &HistogramNodeWork::symbol_terms, &HistogramNodeWork::partition_rows,
+        &HistogramNodeWork::row_swaps})
+    to.*member += from.*member;
+}
 // Reduce only after joining workers, in canonical stream order. Each source
 // owns its counters/records; no hot-loop atomic updates or shared sink writes.
 inline void MergeHistogramFittingProfile(HistogramFittingProfile &to,
@@ -98,6 +120,9 @@ inline void MergeHistogramFittingProfile(HistogramFittingProfile &to,
   to.fit_seconds += from.fit_seconds;
   to.calls += from.calls;
   to.successes += from.successes;
+  to.peak_property_participants =
+      std::max(to.peak_property_participants, from.peak_property_participants);
+  to.parallel_property_nodes += from.parallel_property_nodes;
   for (size_t i = 0; i < to.seconds.size(); ++i)
     to.seconds[i] += from.seconds[i];
   for (size_t i = 0; i < to.by_rows.size(); ++i) {
@@ -106,20 +131,7 @@ inline void MergeHistogramFittingProfile(HistogramFittingProfile &to,
     a.node_seconds += b.node_seconds;
     for (size_t j = 0; j < a.seconds.size(); ++j)
       a.seconds[j] += b.seconds[j];
-    for (auto member : {&HistogramNodeWork::nodes, &HistogramNodeWork::splits,
-                       &HistogramNodeWork::forced_splits, &HistogramNodeWork::rows,
-                       &HistogramNodeWork::symbol_row_visits,
-                       &HistogramNodeWork::parent_histogram_row_visits,
-                       &HistogramNodeWork::property_row_visits,
-                       &HistogramNodeWork::joint_histogram_row_visits,
-                       &HistogramNodeWork::fused_property_row_visits,
-                       &HistogramNodeWork::skipped_constant_properties,
-                       &HistogramNodeWork::properties, &HistogramNodeWork::constant_properties,
-                       &HistogramNodeWork::active_bins, &HistogramNodeWork::bin_span,
-                       &HistogramNodeWork::candidate_thresholds,
-                       &HistogramNodeWork::entropy_evaluations, &HistogramNodeWork::symbol_terms,
-                       &HistogramNodeWork::partition_rows, &HistogramNodeWork::row_swaps})
-      a.work.*member += b.work.*member;
+    MergeHistogramNodeWork(a.work, b.work);
   }
   for (size_t i = 0; i < to.by_depth.size(); ++i) {
     to.by_depth[i].nodes += from.by_depth[i].nodes;
@@ -168,31 +180,33 @@ inline double Elapsed(Clock::time_point start) {
 // Compile-time disabled probes remove clocks/counters from the hot loops.
 template <bool Enabled> class Phase {
 public:
-  Phase(HistogramFittingProfile *profile, HistogramFitStage stage,
+  template <class Profile>
+  Phase(Profile *profile, HistogramFitStage stage,
         HistogramNodeBucket *node = nullptr)
-      : profile_(profile), node_(node), stage_(stage) {
+      : seconds_(profile ? &profile->seconds : nullptr), node_(node),
+        stage_(stage) {
     if constexpr (Enabled) {
-      if (profile_)
+      if (seconds_)
         start_ = Clock::now();
     }
   }
   ~Phase() { Stop(); }
   void Stop() {
     if constexpr (Enabled) {
-      if (!profile_)
+      if (!seconds_)
         return;
       const double seconds = Elapsed(start_);
-      profile_->seconds[size_t(stage_)] += seconds;
+      (*seconds_)[size_t(stage_)] += seconds;
       if (node_)
         node_->seconds[size_t(stage_)] += seconds;
-      profile_ = nullptr;
+      seconds_ = nullptr;
     }
   }
   Phase(const Phase &) = delete;
   Phase &operator=(const Phase &) = delete;
 
 private:
-  HistogramFittingProfile *profile_;
+  HistogramFitSeconds *seconds_;
   HistogramNodeBucket *node_;
   HistogramFitStage stage_;
   Clock::time_point start_{};

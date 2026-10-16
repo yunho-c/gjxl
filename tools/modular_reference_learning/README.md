@@ -40,7 +40,7 @@ Buffering is `auto|buffered`; predictors are `best|all`. The repeated runner
 holds these at `auto best`, uses the same four-participant CPU ceiling and
 estimated direct ANS/64-cluster policy for every route, and rotates serial
 fresh-process route order. One warmup per route/input precedes measured calls.
-The ordinary CPU workflow remains serial. Use repeated `--input` arguments for
+The ordinary invocation retains serial learning. Use repeated `--input` arguments for
 multiple images. With no `--routes`, all four controls run; check the projected
 runtime before launching a large corpus.
 
@@ -63,7 +63,8 @@ records matched full-resolution and crossover results on Apple M4 Pro.
 ## Parallel local learning
 
 Append explicit learning participants and a fixed CPU ceiling after the fitting
-profile mode to measure local CPU preparation/fitting concurrency:
+profile mode to measure local CPU preparation/fitting concurrency, or property
+evaluation within a shared-tree fit:
 
 ```sh
 build/release/gjxl_modular_hybrid_profile INPUT.pam OUT auto auto best fit-off 14 14
@@ -82,20 +83,28 @@ configuration has one warmup and three measured repetitions by default.
 Explicit participant arguments select schema 2: `detail_wall.learning` is
 elapsed preparation/fitting time; `detail_work` contains overlapping per-job
 time sums. Feature and token routing remain fixed. Older invocations keep
-serial learning and schema 1. See the [implementation and results](../../docs/parallel-tree-fitting.md).
+serial learning and schema 1. See the [local fitting implementation](../../docs/parallel-tree-fitting.md)
+and [shared-tree property parallelism](../../docs/parallel-shared-tree-fitting.md).
 
 ## Histogram fitting attribution
 
 The same driver accepts an optional final `fit-off|fit-on` argument (default
 `fit-off`). The private histogram profile has allocation-free counters and
-exclusive wall phases inside `LearnHistogramTree`, plus inclusive node times
+task wall phases inside `LearnHistogramTree`, plus inclusive node times
 by distinct-row count/depth, bin/symbol-span distributions and per-fit records.
 It does not reuse the original sort-based learner's attribution. Candidate
 evaluation combines prefix histogram updates, entropy costs and predictor
 comparison; no clock runs per threshold. Diagnostic arrays are caller-owned,
 allocated outside the encoder timer, and excluded from codec admission.
 
-Histogram profile schema 2 includes fused first-predictor occupancy in
+Histogram profile schema 3 adds `peak_property_participants` and
+`parallel_property_nodes`. Fit/node durations remain elapsed spans, while
+property phase durations sum task wall intervals and can overlap within a fit.
+The exclusive phase attribution report requires serial property evaluation;
+it rejects parallel captures rather than subtracting overlapping work from
+elapsed time. Readers still accept schemas 1 and 2.
+
+Histogram profile schema 2 introduced fused first-predictor occupancy in
 `joint_histograms`. Physical property/histogram row passes are
 `property_row_visits + joint_histogram_row_visits - fused_property_row_visits`;
 `skipped_constant_properties` counts inherited/one-bin constants needing no row

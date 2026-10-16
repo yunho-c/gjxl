@@ -108,9 +108,10 @@ void Encode(const ReferenceModularFrame &frame, PreparedModularEntropyOptions en
   ResourceContextScope scope({&reservation, ResourceClass::kPreparation});
   Ok(EncodePreparedModularStreams(frame.view(), entropy, out));
 }
-void Parity(bool encode) {
+void Parity(bool encode, bool shared = false) {
   for (bool all : {false, true}) {
-    const auto f = Make({2049, 17}, all ? 4 : 3, all ? 16 : 8, all ? 1 : 3);
+    const auto f = Make(shared ? Extent2D{257, 129} : Extent2D{2049, 17},
+                        all ? 4 : 3, all ? 16 : 8, all ? 1 : 3);
     auto domain = Domain();
     ReferenceWorkflowOptions options;
     options.predictors = all ? ReferencePredictors::kAll : ReferencePredictors::kBest;
@@ -163,8 +164,8 @@ void Parity(bool encode) {
     Released(*domain);
   }
 }
-void Limits() {
-  const auto f = Make({2049, 17}, 1, 16, 3);
+void Limits(bool shared = false) {
+  const auto f = Make(shared ? Extent2D{257, 129} : Extent2D{2049, 17}, 1, 16, 3);
   ReferenceWorkflowOptions options;
   options.learning_cpu_participants = 8;
   for (size_t domain_cpus : {size_t{1}, size_t{2}, size_t{4}})
@@ -186,9 +187,9 @@ void Limits() {
   Check(frame.stats().learning_peak_participants == 1, "Nested learning fanned out");
   options.buffering = ReferenceBuffering::kBuffered;
   Ok(Prepare(f, options, domain, &frame));
-  Check(!frame.stats().local_trees && frame.stats().learning_peak_participants == 1 &&
+  Check(!frame.stats().local_trees && frame.stats().learning_peak_participants > 1 &&
             frame.stats().fits == 1,
-        "Global fit changed scope or fanned out");
+        "Global fit did not parallelize its property work");
   frame = {};
   Released(*domain);
 }
@@ -213,8 +214,8 @@ void MemoryAdmission(Extent2D extent) {
   Released(*constrained);
   Released(*control);
 }
-void Failures() {
-  const auto f = Make({2049, 17}, 3, 8, 3);
+void Failures(bool shared = false) {
+  const auto f = Make(shared ? Extent2D{257, 129} : Extent2D{2049, 17}, 3, 8, 3);
   auto domain = Domain();
   ReferenceModularFrame frame;
   ReferenceWorkflowOptions options;
@@ -223,7 +224,8 @@ void Failures() {
   const auto retained = Budget(*domain).snapshot().committed_bytes();
   for (auto kind : {WorkerLaunchFailureKind::kSystemError, WorkerLaunchFailureKind::kBadAlloc})
     for (size_t before : {size_t{0}, size_t{1}}) {
-      WorkerLaunchFaultForTesting fault{WorkerLaunchSite::kModularTreeLearning, before, kind};
+      WorkerLaunchFaultForTesting fault{shared ? WorkerLaunchSite::kModularHistogramProperties
+                                                : WorkerLaunchSite::kModularTreeLearning, before, kind};
       WorkerLaunchFaultScopeForTesting inject(&fault);
       const auto status = Prepare(f, options, domain, &frame);
       Check(!status.ok() && fault.triggered && fault.launched_in_group == before &&
@@ -243,8 +245,8 @@ void Failures() {
   frame = {};
   Released(*domain);
 }
-void SharedDomain() {
-  const auto f = Make({2049, 33}, 3, 8, 3);
+void SharedDomain(bool shared = false) {
+  const auto f = Make(shared ? Extent2D{257, 129} : Extent2D{2049, 33}, 3, 8, 3);
   auto domain = Domain(size_t{128} << 20, 3);
   std::array<ReferenceModularFrame, 2> frames;
   std::array<Status, 2> results;
@@ -270,12 +272,17 @@ int main(int argc, char **argv) try {
   const bool preparation_only = argc == 2 && std::string_view(argv[1]) == "--preparation-only";
   Check(argc == 1 || preparation_only, "Unknown test argument");
   Parity(!preparation_only);
+  Parity(!preparation_only, true);
   std::cout << "Tree/profile parity passed\n" << std::flush;
   Limits();
+  Limits(true);
   MemoryAdmission(preparation_only ? Extent2D{2049, 17} : Extent2D{513, 513});
   std::cout << "CPU and memory limits passed\n" << std::flush;
+  MemoryAdmission({257, 129});
   Failures();
+  Failures(true);
   SharedDomain();
+  SharedDomain(true);
   std::cout << "Parallel local learning: " << (preparation_only ? "preparation" : "exact bytes")
             << ", profiles, CPU/memory limits, "
                "partial launches and shared domains passed\n";

@@ -2,6 +2,7 @@
 // Copyright (c) 2026 Yunho Cho
 #include "codec/modular/histogram_tree_learning.h"
 #include "codec/modular/histogram_tree_profile.h"
+#include "core/thread_budget.h"
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -393,6 +394,119 @@ void ConstantColumnsAndSparseBins() {
     }
   }
 }
+// Duplicate properties exercise strict property-order ties. Other columns
+// become constant only below a split, with sparse bins and changing symbols.
+HistogramTrainingSamples ParallelSamples(size_t predictors) {
+  HistogramTrainingSamples s;
+  s.predictor_count = predictors;
+  s.property_count = 6;
+  s.static_property_count = 2;
+  s.properties = {0, 1, 4, 5, 9, 15};
+  for (size_t pred = 0; pred < predictors; ++pred)
+    s.predictors[pred] = static_cast<Predictor>(pred);
+  for (size_t prop = 0; prop < s.property_count; ++prop)
+    for (size_t bin = 0; bin < 255; ++bin)
+      s.thresholds[prop].push_back(static_cast<int32_t>(bin));
+  for (size_t i = 0; i < 32768; ++i) {
+    s.weights.push_back(1 + (i % 3 == 0));
+    s.total_samples += s.weights.back();
+    s.static_values[0].push_back(255);
+    s.static_values[1].push_back((i & 1) ? 255 : 0);
+    for (size_t prop = 0; prop < 4; ++prop)
+      s.values[prop].push_back(prop == 3 ? 255 : ((i >> (prop == 2 ? 2 : 1)) & 3) * 85);
+    for (size_t pred = 0; pred < predictors; ++pred)
+      s.residuals[pred].push_back({static_cast<uint8_t>((i & 15) + pred * (i % 7)),
+                                  static_cast<uint8_t>((i >> 4) % 3)});
+  }
+  return s;
+}
+void ParallelProperties() {
+  using namespace thread_budget_internal;
+  std::shared_ptr<const ExecutionDomain> domain;
+  Ok(ExecutionDomain::Create({size_t{64} << 20, 8}, &domain));
+  for (bool forced : {false, true})
+  for (size_t predictors : {size_t{1}, size_t{2}, size_t{14}}) {
+    const std::array<HistogramMultiplierRange, 2> multipliers{
+        {{{{{0, 128}, {0, 256}}}, 2}, {{{{128, 256}, {0, 256}}}, 4}}};
+    HistogramTreeLearningOptions control;
+    if (forced) {
+      control.static_range = {{{0, 256}, {0, 256}}};
+      control.multipliers = multipliers;
+    }
+    auto original = ParallelSamples(predictors);
+    auto serial = original;
+    DecisionTree expected;
+    HistogramFittingProfile serial_profile;
+    {
+      HistogramFittingProfileSession profile(&serial_profile);
+      Ok(LearnHistogramTree(serial, &expected, control));
+    }
+    for (size_t requested : {size_t{2}, size_t{4}, size_t{8}, size_t{0}}) {
+      CpuExecutionScope cpu;
+      Ok(cpu.Start(domain, 8));
+      EncodeScope threads(8);
+      auto actual = original;
+      DecisionTree tree;
+      HistogramTreeLearningStats execution;
+      auto options = control;
+      options.cpu_participants = requested;
+      options.execution_stats = &execution;
+      HostStorageBound bound;
+      Ok(ComputeHistogramTreeLearningStorageBound(actual, options, &bound));
+      ResourceBudget budget(bound.peak_bytes);
+      ResourceReservation reservation;
+      Ok(budget.TryReserve(bound.peak_bytes, &reservation));
+      HistogramFittingProfile parallel_profile;
+      {
+        ResourceContextScope resources({&reservation, ResourceClass::kPreparation});
+        HistogramFittingProfileSession profile(&parallel_profile);
+        Ok(LearnHistogramTree(actual, &tree, options));
+      }
+      Check(execution.participants > 1 && execution.parallel_nodes > 0,
+            "Property fixture did not dispatch parallel work");
+      Check(tree == expected && actual.weights == serial.weights &&
+                actual.residuals == serial.residuals && actual.static_values == serial.static_values &&
+                actual.values == serial.values,
+            "Parallel property decisions or partition order differ");
+      Check(parallel_profile.properties_by_active_bins == serial_profile.properties_by_active_bins &&
+                parallel_profile.properties_by_bin_span == serial_profile.properties_by_bin_span &&
+                parallel_profile.nodes_by_symbol_span == serial_profile.nodes_by_symbol_span,
+            "Parallel property profile distributions differ");
+      for (size_t i = 0; i < serial_profile.by_rows.size(); ++i)
+        Check(parallel_profile.by_rows[i].work == serial_profile.by_rows[i].work,
+              "Parallel property profile lost work");
+    }
+  }
+  Check(!domain->snapshot().active_cpu_participants && !domain->snapshot().reserved_cpu_workers &&
+            !domain->snapshot().suspended_cpu_workers && domain->snapshot().peak_cpu_participants <= 8,
+        "Property team leaked or exceeded CPU participation");
+  // Every admitted allocation occurs before row mutation or worker launch.
+  auto original = ParallelSamples(2);
+  bool succeeded = false;
+  for (size_t fail = 0; fail < 80 && !succeeded; ++fail) {
+    auto samples = original;
+    DecisionTree tree;
+    tree.nodes[0].predictor = Predictor::kTop;
+    const auto expected = tree;
+    CpuExecutionScope cpu;
+    Ok(cpu.Start(domain, 4));
+    EncodeScope threads(4);
+    HistogramTreeLearningOptions options;
+    options.cpu_participants = 4;
+    ArmManagedHostAllocationFailureAfterForTest(fail);
+    auto status = LearnHistogramTree(samples, &tree, options);
+    DisarmManagedHostAllocationFailureForTest();
+    if (status.ok()) {
+      succeeded = true;
+    } else {
+      Check(status.code() == StatusCode::kOutOfMemory && tree == expected &&
+                samples.weights == original.weights && samples.values == original.values &&
+                samples.residuals == original.residuals,
+            "Parallel allocation failure changed output or sample order");
+    }
+  }
+  Check(succeeded, "Parallel allocation sweep did not reach success");
+}
 } // namespace
 int main() try {
   DecisionsAndWeights();
@@ -407,6 +521,7 @@ int main() try {
   ValidationAndFailures();
   ProfiledParity();
   ConstantColumnsAndSparseBins();
+  ParallelProperties();
   std::cout << "Histogram learning decisions, weights, limits, storage and "
                "failure checks passed\n";
   return 0;

@@ -52,6 +52,9 @@ struct HistogramMultiplierRange {
   HistogramStaticRange range;
   uint32_t multiplier = 1;
 };
+struct HistogramTreeLearningStats {
+  size_t participants = 1, parallel_nodes = 0;
+};
 struct HistogramTreeLearningOptions {
   // Effective threshold, after the caller scales for its sampling fraction.
   float split_threshold = 89.0f;
@@ -61,7 +64,16 @@ struct HistogramTreeLearningOptions {
   size_t maximum_samples = kMaximumTrainingSamples;
   size_t maximum_leaves = kMaximumTreeLeaves;
   size_t maximum_depth = kMaximumTreeDepth;
+  // Opt-in property parallelism. Zero uses the current CPU allowance; private
+  // calls without participation and nested parallel scopes remain serial.
+  size_t cpu_participants = 1;
+  HistogramTreeLearningStats *execution_stats = nullptr;
 };
+
+// Shape/context-only upper limit; the actual CPU grant can be smaller. Small
+// sample sets and shapes with fewer than two varying properties stay serial.
+[[nodiscard]] size_t HistogramTreeLearningParticipants(
+    const HistogramTrainingSamples &samples, HistogramTreeLearningOptions options);
 
 // Allocation-free input/option validation. Rejects unsupported properties,
 // malformed bins/weights and arithmetic/resource overflows before any mutation.

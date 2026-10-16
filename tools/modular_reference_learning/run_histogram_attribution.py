@@ -34,14 +34,17 @@ def snapshot():
 
 def validate_profile(result):
     p = result["histogram_fitting"]
-    require(p["enabled"] and p["schema"] in (1, 2), "Missing fitting profile")
+    require(p["enabled"] and p["schema"] in (1, 2, 3), "Missing fitting profile")
     require(p["calls"] == p["successes"] == result["work"]["fits"] == len(p["fits"])
             and not p["records_dropped"], "Incomplete fit coverage")
     require(all(f["success"] for f in p["fits"]), "Failed fit included")
-    require(p["fit_seconds"] <= result["detail_wall"]["fitting"] + 1e-6,
+    fitting = result.get("detail_work", result["detail_wall"])["fitting"]
+    require(p["fit_seconds"] <= fitting + 1e-6,
             "Fitter envelope exceeds workflow fitting interval")
-    require(sum(p["stages"].values()) <= p["fit_seconds"] + 1e-6,
-            "Overlapping fitting phases")
+    parallel = p.get("parallel_property_nodes", 0) > 0
+    if not parallel:
+        require(sum(p["stages"].values()) <= p["fit_seconds"] + 1e-6,
+                "Overlapping serial fitting phases")
     require(all(math.isfinite(v) and v >= 0 for v in p["stages"].values()), "Invalid timing")
     nodes = sum(b["work"]["nodes"] for b in p["by_rows"])
     splits = sum(b["work"]["splits"] for b in p["by_rows"])
@@ -54,7 +57,8 @@ def validate_profile(result):
     require(sum(f["population"] for f in p["fits"]) == result["work"]["selected_samples"],
             "Fit records lost weighted population")
     for b in p["by_rows"]:
-        require(sum(b["stages"].values()) <= b["node_seconds"] + 1e-6, "Node phase overlap")
+        if not parallel:
+            require(sum(b["stages"].values()) <= b["node_seconds"] + 1e-6, "Node phase overlap")
         w = b["work"]
         require(w["active_bins"] == w["candidate_thresholds"] + w["properties"],
                 "Active bins and candidate thresholds disagree")

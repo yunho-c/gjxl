@@ -77,7 +77,8 @@ private:
                                         PreparedHistogramSamples *,
                                         HistogramSamplingOptions);
   friend Status LearnPreparedHistogramTree(PreparedHistogramSamples &,
-                                           DecisionTree *, size_t, size_t);
+                                           DecisionTree *, size_t, size_t, size_t,
+                                           HistogramTreeLearningStats *);
   HistogramTrainingSamples samples_;
   resource_budget_internal::ManagedVector<HistogramMultiplierRange>
       multipliers_;
@@ -105,5 +106,7 @@ PrepareHistogramSamples(std::span<const HistogramTrainingImage> images,
 [[nodiscard]] Status
 LearnPreparedHistogramTree(PreparedHistogramSamples &samples, DecisionTree *out,
                            size_t maximum_leaves = kMaximumTreeLeaves,
-                           size_t maximum_depth = kMaximumTreeDepth);
+                           size_t maximum_depth = kMaximumTreeDepth,
+                           size_t cpu_participants = 1,
+                           HistogramTreeLearningStats *execution_stats = nullptr);
 } // namespace gjxl::modular_internal
