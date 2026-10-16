@@ -7,6 +7,7 @@
 #include "codec/modular/profile.h"
 
 #include <cmath>
+#include <cstring>
 #include <numeric>
 #include <optional>
 
@@ -95,6 +96,14 @@ Status Preflight(std::span<const HistogramTrainingImage> images,
       options.predictor_count > 14 || !options.property_count ||
       options.property_count > 16 || options.multipliers.size() > 65536)
     return Status::InvalidArgument("Invalid histogram sampling options");
+  if (options.row_backend != HistogramRowBackend::kRasterCpu &&
+      options.row_backend != HistogramRowBackend::kSelectedCpu &&
+      options.row_backend != HistogramRowBackend::kGpu)
+    return Status::InvalidArgument("Unknown histogram row backend");
+  if (options.row_backend == HistogramRowBackend::kGpu &&
+      (!options.row_generator || !options.row_source))
+    return Status::InvalidArgument(
+        "GPU sample rows require a completed source and generator");
   const float quantization_fraction =
       std::min(options.sampling_fraction * 0.1, 0.99);
   const float inverse_log = 1.0 / std::log(1 - quantization_fraction);
@@ -174,6 +183,9 @@ Status Preflight(std::span<const HistogramTrainingImage> images,
       plan.stats.selected_samples += previous_selected;
     }
   }
+  if (options.row_backend == HistogramRowBackend::kGpu && plan.maximum_width)
+    return Status::Unsupported(
+        "GPU sample rows require completed weighted features");
   // LearnTree initializes this denominator with the first image's population,
   // then GatherTreeData adds every visited pixel, including that image again.
   plan.stats.population =
@@ -236,6 +248,17 @@ struct HistogramSampleBuilder {
   std::array<uint32_t, 513> absolute_pixels{};
   std::array<std::array<uint16_t, kMapSize>, 2> static_mapping{};
   std::array<std::array<uint8_t, kMapSize>, 16> mapping{};
+
+  struct Timer {
+    double &seconds;
+    std::chrono::steady_clock::time_point start =
+        std::chrono::steady_clock::now();
+    ~Timer() {
+      seconds += std::chrono::duration<double>(
+                     std::chrono::steady_clock::now() - start)
+                     .count();
+    }
+  };
 
   void Allocate() {
     auto &s = output->samples_;
@@ -457,6 +480,10 @@ struct HistogramSampleBuilder {
           mapping[p - s.static_property_count]
                  [std::clamp<int64_t>(properties[s.properties[p]], -511, 511) +
                   511]);
+    return DeduplicateLastRow();
+  }
+  Status DeduplicateLastRow() {
+    auto &s = output->samples_;
     const size_t row = s.weights.size();
     s.weights.push_back(1);
     ++s.total_samples;
@@ -484,7 +511,106 @@ struct HistogramSampleBuilder {
     Insert(row, first, second);
     return Status::Ok();
   }
+  Status GatherGpu(std::span<const HistogramTrainingImage> images) {
+    auto &profile = plan.stats.rows;
+    ManagedVector<uint32_t> positions;
+    ManagedVector<HistogramRowSlice> slices;
+    {
+      Timer timer{profile.selection_seconds};
+      positions.reserve(plan.stats.selected_samples);
+      slices.reserve(plan.stats.channels);
+      for (size_t i = 0; i < images.size(); ++i) {
+        const auto &image = images[i];
+        for (size_t c = 0;
+             c < image.channels.size() && Included(image, c, options); ++c) {
+          const auto [w, h] = image.channels[c].descriptor.extent;
+          if (!w || !h)
+            continue;
+          HistogramRowSlice slice{
+              image.weighted_features[c], static_cast<uint32_t>(c),
+              static_cast<uint32_t>(options.first_group + i), positions.size(),
+              0};
+          Random rng;
+          const auto threshold = SamplingThreshold(
+              PixelFraction(size_t{w} * h, options.sampling_fraction));
+          for (size_t pixel = 0; pixel < size_t{w} * h; ++pixel)
+            if ((rng.Next() >> 32) <= threshold)
+              positions.push_back(static_cast<uint32_t>(pixel));
+          slice.row_count = positions.size() - slice.first_row;
+          slices.push_back(slice);
+          if (active_modular_profile)
+            active_modular_profile->training_work.reused_prediction_samples +=
+                size_t{w} * h;
+        }
+      }
+    }
+    if (positions.size() != plan.stats.selected_samples)
+      return Status::Internal("GPU sample selection disagrees with preflight");
+    if (positions.empty())
+      return Status::Ok();
+    const auto &s = output->samples_;
+    const size_t statics = s.static_property_count,
+                 dynamics = s.property_count - statics;
+    HistogramRowRequest request{
+        options.row_source,
+        slices,
+        positions,
+        std::span(options.predictors).first(options.predictor_count),
+        std::span(options.properties).first(options.property_count),
+        std::span(static_mapping).first(statics),
+        std::span(mapping).first(dynamics)};
+    std::unique_ptr<PreparedHistogramRows> prepared;
+    {
+      Timer timer{profile.generation_seconds};
+      if (auto status = options.row_generator->GenerateHistogramRows(
+              request, &prepared, &profile);
+          !status.ok())
+        return status;
+    }
+    const size_t rows = positions.size();
+    if (!prepared ||
+        prepared->bytes().size() !=
+            rows * (4 * statics + dynamics + 2 * s.predictor_count))
+      return Status::Internal("Invalid completed histogram row layout");
+    Timer replay{profile.replay_seconds};
+    const auto *bytes = prepared->bytes().data();
+    auto &samples = output->samples_;
+    for (const auto &slice : slices) {
+      const auto [w, h] = slice.features.source.descriptor.extent;
+      BeginChannel(w, h);
+      for (size_t row = slice.first_row;
+           row < slice.first_row + slice.row_count; ++row) {
+        for (size_t p = 0; p < statics; ++p) {
+          uint32_t bin;
+          std::memcpy(&bin, bytes + 4 * (p * rows + row), sizeof(bin));
+          samples.static_values[p].push_back(bin);
+        }
+        for (size_t p = 0; p < dynamics; ++p)
+          samples.values[p].push_back(
+              std::to_integer<uint8_t>(bytes[(4 * statics + p) * rows + row]));
+        for (size_t p = 0; p < samples.predictor_count; ++p) {
+          const size_t offset =
+              (4 * statics + dynamics) * rows + 2 * (p * rows + row);
+          samples.residuals[p].push_back(
+              {std::to_integer<uint8_t>(bytes[offset]),
+               std::to_integer<uint8_t>(bytes[offset + 1])});
+        }
+        if (auto status = DeduplicateLastRow(); !status.ok())
+          return status;
+      }
+    }
+    return Status::Ok();
+  }
   Status Gather(std::span<const HistogramTrainingImage> images) {
+    Timer timer{plan.stats.rows.gather_seconds};
+    if (options.row_backend == HistogramRowBackend::kGpu)
+      return GatherGpu(images);
+    if (options.row_backend == HistogramRowBackend::kSelectedCpu)
+      return GatherCpu<true>(images);
+    return GatherCpu<false>(images);
+  }
+  template <bool SelectedOnly>
+  Status GatherCpu(std::span<const HistogramTrainingImage> images) {
     for (size_t i = 0; i < images.size(); ++i) {
       const auto &image = images[i];
       for (size_t c = 0;
@@ -511,6 +637,16 @@ struct HistogramSampleBuilder {
         for (size_t y = 0; y < h; ++y) {
           int64_t previous_gradient = 0;
           for (size_t x = 0; x < w; ++x) {
+            bool selected;
+            if constexpr (SelectedOnly) {
+              selected = (rng.Next() >> 32) <= threshold;
+              if (!wp && !selected)
+                continue;
+              if (!wp && x) {
+                const auto prior = Neighbors(view, x - 1, y);
+                previous_gradient = prior.left + prior.top - prior.top_left;
+              }
+            }
             const auto n = Neighbors(view, x, y);
             const auto weighted = wp ? wp->Predict(x, y, n.top, n.left, n.top_right,
                                                    n.top_left, n.top_top)
@@ -520,7 +656,9 @@ struct HistogramSampleBuilder {
                 Properties(n, c, options.first_group + i, x, y,
                            previous_gradient, weighted.second);
             previous_gradient = properties[9];
-            if ((rng.Next() >> 32) <= threshold) {
+            if constexpr (!SelectedOnly)
+              selected = (rng.Next() >> 32) <= threshold;
+            if (selected) {
               std::array<HistogramResidualToken, 14> tokens{};
               for (size_t p = 0; p < options.predictor_count; ++p) {
                 const int64_t residual =
@@ -587,6 +725,19 @@ Status ComputeHistogramSamplePreparationStorageBound(
     if (!bound.AddVector<int32_t>(CutCapacity(options, p),
                                   VectorCapacityPolicy::kFreshExact))
       return Status::InvalidArgument("Histogram property storage overflow");
+  if (options.row_backend == HistogramRowBackend::kGpu) {
+    HostStorageBound generated;
+    if (auto status = options.row_generator->HistogramRowStorageBound(
+            rows, plan.stats.channels, statics, options.property_count,
+            options.predictor_count, &generated);
+        !status.ok())
+      return status;
+    if (!bound.AddVector<uint32_t>(rows, VectorCapacityPolicy::kFreshExact) ||
+        !bound.AddVector<HistogramRowSlice>(
+            plan.stats.channels, VectorCapacityPolicy::kFreshExact) ||
+        !bound.Add(generated))
+      return Status::InvalidArgument("GPU histogram row storage overflow");
+  }
   *out = bound;
   return Status::Ok();
 }

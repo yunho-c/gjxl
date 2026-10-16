@@ -581,3 +581,17 @@ policy. Selection, planning, independent verification and file I/O are outside
 that operation timer. The runner freezes the executable, source, source patch,
 inputs and per-call environment; the analyzer also reads historical schema 1
 captures without changing their statistics or reports.
+
+## Selected sample-row prototype
+
+`hybrid_profile` accepts a final optional `raster|selected|metal` argument after
+the tokenization participant count. It compares the existing native row path,
+selected-only CPU rows and Metal rows while reusing the same completed weighted
+features. Metal includes native bin lookup and compact-row generation; ordered
+deduplication stays on CPU. The workflow prototype uses GPU rows for local
+learning scopes and selected CPU rows for shared/global scopes.
+
+`run_sample_rows_qualification.py` rotates all three variants, checks exact
+independent decoding and byte identity, and waits for competing codec work.
+See [implementation and measured results](../../docs/modular-sample-rows-prototype.md)
+for the timing boundary, qualification and current opt-in status.

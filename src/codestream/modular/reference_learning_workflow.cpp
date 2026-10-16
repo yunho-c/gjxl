@@ -13,6 +13,11 @@ using namespace modular_gpu_internal;
 Status Invalid() { return Status::InvalidArgument("Invalid reference learning workflow"); }
 HistogramSamplingOptions SamplingOptions(const ReferenceWorkflowOptions &options) {
   HistogramSamplingOptions sampling;
+  sampling.row_backend = options.sample_rows;
+  sampling.row_generator = options.row_generator;
+  sampling.row_source = options.row_source;
+  if (sampling.row_backend == HistogramRowBackend::kGpu && !sampling.row_source)
+    sampling.row_backend = HistogramRowBackend::kSelectedCpu;
   sampling.maximum_samples = options.maximum_samples;
   sampling.maximum_channel_size = kGroupDimension;
   if (options.predictors == ReferencePredictors::kAll) {
@@ -52,6 +57,7 @@ Status Learn(std::span<const HistogramTrainingImage> images, size_t maximum_leav
   Seconds fitting(stats->fitting_seconds);
   record->learning = {0, images.size(), prepared.stats(), prepared.samples().weights.size(), 1};
   ++stats->learning_calls;
+  MergeHistogramRowProfile(stats->rows, prepared.stats().rows);
   stats->scanned_pixels += prepared.stats().scanned_pixels;
   stats->selected_samples += prepared.stats().selected_samples;
   stats->distinct_samples += prepared.samples().weights.size();
@@ -177,6 +183,7 @@ void MergeLearningStats(ReferenceWorkflowStats &to, const ReferenceWorkflowStats
   to.maximum_stage_bytes = std::max(to.maximum_stage_bytes, from.maximum_stage_bytes);
   to.sample_preparation_seconds += from.sample_preparation_seconds;
   to.fitting_seconds += from.fitting_seconds;
+  MergeHistogramRowProfile(to.rows, from.rows);
 }
 Status LearnLocalScopes(std::span<ReferenceModularStream> records,
                         std::span<const PreparedModularStreamView> streams,
@@ -573,9 +580,20 @@ struct HybridLearning {
       ++count;
       if (stats->local_trees) {
         const size_t length = batch.stop - batch.first;
-        if (auto s = LearnLocalScopes(records.subspan(batch.first, length),
-                                      streams.subspan(batch.first, length), options, budget, stats,
-                                      std::span(features).subspan(batch.first, length)); !s.ok())
+        auto local_options = options;
+        if (options.sample_rows == HistogramRowBackend::kGpu) {
+          local_options.row_generator =
+              dynamic_cast<HistogramRowGenerator *>(options.gpu);
+          local_options.row_source = batch.owner.get();
+          if (!local_options.row_generator)
+            return Status::Unsupported(
+                "Backend has no histogram row generator");
+        }
+        if (auto s = LearnLocalScopes(
+                records.subspan(batch.first, length),
+                streams.subspan(batch.first, length), local_options, budget,
+                stats, std::span(features).subspan(batch.first, length));
+            !s.ok())
           return s;
         if (auto s = Tokenize(batch); !s.ok())
           return s;

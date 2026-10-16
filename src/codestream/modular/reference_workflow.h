@@ -30,6 +30,12 @@ struct ReferenceWorkflowOptions {
   // admitted CPU allowance; one retains serial selection. Global selection
   // still precedes stream placement and always runs as one job.
   size_t selection_cpu_participants = 0;
+  // Private sample-row experiment. GPU batching is initially local-scope only;
+  // global scopes use selected CPU rows. No public policy/default changes.
+  HistogramRowBackend sample_rows = HistogramRowBackend::kRasterCpu;
+  HistogramRowGenerator *row_generator = nullptr;
+  const HistogramRowSource *row_source =
+      nullptr; // Borrowed for a joined local batch.
 };
 struct ReferenceLearningStats {
   size_t first_group = 0, stop_group = 0;
@@ -60,6 +66,7 @@ struct ReferenceWorkflowStats {
   // Sums of per-job wall time (overlap when local jobs run concurrently).
   // Preparation includes sample planning; fitting includes compaction.
   double sample_preparation_seconds = 0, fitting_seconds = 0;
+  HistogramRowProfile rows;
   // Caller-wall intervals. Learning includes admission, preparation, fitting,
   // joins and diagnostic reduction. Features and GPU tokens are separate.
   double learning_seconds = 0, feature_seconds = 0, token_seconds = 0;

@@ -378,6 +378,7 @@ class MetalBackend final
     public modular_gpu_internal::GpuModularTokenGeneration,
     public modular_gpu_internal::GpuAdaptiveModularTokenGeneration,
     public modular_gpu_internal::GpuModularStreamProcessing,
+    public modular_internal::HistogramRowGenerator,
     public ans_gpu_internal::GpuAnsTokenCost,
     public tree_gpu_internal::GpuModularTreeStatistics,
     public modular_gpu_internal::GpuModularPopulations,
@@ -392,7 +393,7 @@ public:
     AcStrategyPipelines ac_strategy_pipelines,
     PrimitivePipelines primitive_pipelines,
     NS::SharedPtr<MTL::ComputePipelineState> modular_input_pipeline,
-    std::array<NS::SharedPtr<MTL::ComputePipelineState>, 6> modular_token_pipelines,
+    std::array<NS::SharedPtr<MTL::ComputePipelineState>, 7> modular_token_pipelines,
     NS::SharedPtr<MTL::ComputePipelineState> ans_token_cost_pipeline,
     std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> tree_statistics_pipelines,
     std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> modular_population_pipelines,
@@ -580,6 +581,13 @@ public:
     std::span<const modular_gpu_internal::ModularStreamFeatureSlice> slices,
     std::unique_ptr<modular_gpu_internal::PreparedGpuModularStreamFeatures>* out,
     size_t cpu_participants, modular_internal::WeightedFeatureBackend producer) override;
+  Status HistogramRowStorageBound(
+    size_t rows, size_t slices, size_t statics, size_t properties, size_t predictors,
+    resource_budget_internal::HostStorageBound *out) const override;
+  Status GenerateHistogramRows(
+    const modular_internal::HistogramRowRequest &,
+    std::unique_ptr<modular_internal::PreparedHistogramRows> *,
+    modular_internal::HistogramRowProfile *) override;
   Status GenerateModularStreamTokens(
     const modular_gpu_internal::PreparedGpuModularStreamFeatures& features,
     std::span<const modular_gpu_internal::ModularStreamTokenTree> trees,
@@ -912,7 +920,7 @@ private:
   AcStrategyPipelines ac_strategy_pipelines_;
   PrimitivePipelines primitive_pipelines_;
   NS::SharedPtr<MTL::ComputePipelineState> modular_input_pipeline_;
-  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 6> modular_token_pipelines_;
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 7> modular_token_pipelines_;
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> modular_population_pipelines_;
   NS::SharedPtr<MTL::ComputePipelineState> ans_token_cost_pipeline_;
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> tree_statistics_pipelines_;

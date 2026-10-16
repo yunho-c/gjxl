@@ -43,8 +43,14 @@ template <typename T> void Array(std::ostream &out, const T &a) {
 }
 } // namespace
 int main(int argc, char **argv) try {
-  Check(argc >= 6 && argc <= 12, "hybrid_profile INPUT OUT cpu|shared-cpu|hybrid|auto auto|buffered "
-                                "best|all [fit-off|fit-on [learning-participants [cpu-ceiling [entropy-participants [selection-participants [tokenization-participants]]]]]]");
+  Check(argc >= 6 && argc <= 13,
+        "hybrid_profile INPUT OUT cpu|shared-cpu|hybrid|auto auto|buffered "
+        "best|all [fit-off|fit-on [learning-participants [cpu-ceiling "
+        "[entropy-participants [selection-participants "
+        "[tokenization-participants [raster|selected|metal]]]]]]]");
+  const std::string row_mode = argc >= 13 ? argv[12] : "raster";
+  Check(row_mode == "raster" || row_mode == "selected" || row_mode == "metal",
+        "Invalid sample row mode");
   const bool tokenization_diagnostics = argc >= 12;
   const size_t tokenization_participants = tokenization_diagnostics ? std::stoull(argv[11]) : 1;
   Check(tokenization_participants <= 256, "Invalid tokenization participant limit");
@@ -92,6 +98,12 @@ int main(int argc, char **argv) try {
                                      : (uint16_t(view.bytes[pos]) << 8) | view.bytes[pos + 1]);
     }
   ReferenceWorkflowOptions options;
+  options.sample_rows = row_mode == "metal" ? HistogramRowBackend::kGpu
+                        : row_mode == "selected"
+                            ? HistogramRowBackend::kSelectedCpu
+                            : HistogramRowBackend::kRasterCpu;
+  Check(row_mode != "metal" || route != "cpu",
+        "Metal sample rows require a hybrid feature owner");
   options.selection_cpu_participants = selection_participants;
   options.learning_cpu_participants = learning_participants;
   options.buffering =
@@ -161,6 +173,10 @@ int main(int argc, char **argv) try {
               profile.training_work.reused_prediction_samples == stats.scanned_pixels &&
               profile.training_work.weighted_prediction_samples == 0,
           "Hybrid route repeated or omitted prediction features");
+  if (row_mode == "metal" && stats.local_trees)
+    Check(stats.rows.gpu_rows == stats.selected_samples &&
+              stats.rows.gpu_calls != 0,
+          "Metal row experiment did not cover every selected local sample");
   const size_t bytes = encoded.size();
   std::filesystem::create_directories(directory);
   std::ofstream output(directory / "output.jxl", std::ios::binary);
@@ -238,6 +254,17 @@ int main(int argc, char **argv) try {
   if (!parallel_diagnostics)
     out << ",\"sample_preparation\":" << stats.sample_preparation_seconds
         << ",\"fitting\":" << stats.fitting_seconds;
+  out << "},\"sample_rows\":{\"requested\":" << std::quoted(row_mode)
+      << ",\"gpu_calls\":" << stats.rows.gpu_calls
+      << ",\"gpu_rows\":" << stats.rows.gpu_rows
+      << ",\"gather_work\":" << stats.rows.gather_seconds
+      << ",\"selection_work\":" << stats.rows.selection_seconds
+      << ",\"generation_work\":" << stats.rows.generation_seconds
+      << ",\"replay_work\":" << stats.rows.replay_seconds
+      << ",\"allocation_copy_work\":" << stats.rows.allocation_copy_seconds
+      << ",\"submit_wait_work\":" << stats.rows.submit_wait_seconds
+      << ",\"output_bytes\":" << stats.rows.output_bytes
+      << ",\"dispatch_bytes\":" << stats.rows.dispatch_bytes;
   out << "},\"memory\":{\"peak_backing_bytes\":" << memory.peak_backing_bytes
       << ",\"peak_committed_bytes\":" << memory.peak_committed_bytes
       << ",\"maximum_stage_bytes\":" << stats.maximum_stage_bytes

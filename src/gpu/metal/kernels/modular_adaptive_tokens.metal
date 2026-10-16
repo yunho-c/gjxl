@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // General transformed-plane arithmetic follows the pinned scalar predictor.
 #include "modular_adaptive_params.h"
+#include "histogram_sample_rows_params.h"
 #include "../../../codec/modular/weighted_feature_math.h"
 #include <metal_stdlib>
 using namespace metal;
@@ -159,6 +160,63 @@ void tokenize(device const int *planes, device const WeightedFeature *features,
   }
 }
 } // namespace
+// One independent selected row per thread. Sampling/cuts are supplied by the
+// native preparer; the existing wide predictor/property arithmetic is shared
+// with tokenization, including the slice-local previous-gradient boundary.
+kernel void gjxl_histogram_sample_rows(
+    device const int *planes [[buffer(0)]],
+    device const WeightedFeature *features [[buffer(1)]],
+    device uchar *output [[buffer(2)]], device uchar *dispatch [[buffer(3)]],
+    constant gjxl_histogram_rows::Params &p [[buffer(4)]],
+    uint2 id [[thread_position_in_grid]]) {
+  if (id.y >= p.slices)
+    return;
+  const auto s = reinterpret_cast<device const gjxl_histogram_rows::Slice *>(
+      dispatch + p.slices_offset)[id.y];
+  if (id.x >= s.row_count)
+    return;
+  const ulong row = ulong(s.first_row) + id.x;
+  const uint pixel = reinterpret_cast<device const uint *>(dispatch + p.positions_offset)[row];
+  if (pixel >= ulong(s.source.width) * s.source.height) {
+    atomic_fetch_or_explicit(reinterpret_cast<device atomic_uint *>(dispatch + p.status_offset),
+                             2u, memory_order_relaxed);
+    return;
+  }
+  device const auto &m = *reinterpret_cast<device const gjxl_histogram_rows::Mapping *>(dispatch);
+  const uint x = pixel % s.source.width, y = pixel / s.source.width;
+  device const int *plane = planes + s.source.plane_offset_elements;
+  const auto n = neighbors(plane, s.source.plane_stride_elements, s.source.width, x, y);
+  const auto weighted = features[s.source.token_offset + pixel];
+  for (uint i = 0; i < p.statics + p.dynamics; ++i) {
+    const long value = property(m.properties[i], n, s.channel, s.group, x, y,
+                                plane, s.source.plane_stride_elements, s.source.width,
+                                weighted.property15);
+    const uint index = uint(clamp(value, -511L, 511L) + 511);
+    if (i < p.statics)
+      reinterpret_cast<device uint *>(output)[ulong(i) * p.rows + row] = m.statics[i][index];
+    else
+      output[ulong(4 * p.statics + i - p.statics) * p.rows + row] = m.dynamics[i - p.statics][index];
+  }
+  const long sample = plane[ulong(y) * s.source.plane_stride_elements + x];
+  for (uint i = 0; i < p.predictors; ++i) {
+    const long residual = sample - predict(m.predictors[i], n, weighted.prediction);
+    if (residual < -2147483648L || residual > 2147483647L) {
+      atomic_fetch_or_explicit(reinterpret_cast<device atomic_uint *>(dispatch + p.status_offset),
+                               1u, memory_order_relaxed);
+      return;
+    }
+    const uint value = (uint(residual) << 1) ^ uint(int(residual) >> 31);
+    uint symbol = value, extra = 0;
+    if (value >= 16) {
+      const uint nbits = 31 - clz(value), mantissa = value - (1u << nbits);
+      symbol = 16 + ((nbits - 4) << 3) + ((mantissa >> (nbits - 1)) << 2) + (mantissa & 3);
+      extra = nbits - 3;
+    }
+    const ulong offset = ulong(4 * p.statics + p.dynamics) * p.rows + 2 * (ulong(i) * p.rows + row);
+    output[offset] = uchar(symbol);
+    output[offset + 1] = uchar(extra);
+  }
+}
 kernel void gjxl_modular_adaptive_tokens(device const int *planes [[buffer(0)]],
                                          device const WeightedFeature *features [[buffer(1)]],
                                          device uchar *output [[buffer(2)]],
