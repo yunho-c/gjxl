@@ -103,6 +103,13 @@ as its control. `--diagnostic-mode fit-on` adds separate detailed captures and
 checks logical fitter-work parity across implementations, with complete work
 counter equality across CPU/Metal routes within each implementation.
 
+The [GPU histogram fitter contract](../../docs/gpu-histogram-fitting.md) starts
+from the consolidated CPU scheduler, shared-fit property parallelism, ANS
+allocation reuse and training-row hash reuse. Its
+[paired baseline](../../docs/gpu-histogram-fitting-baseline.md) uses the same
+runner and `fit-on` diagnostics. The contract adds planning and validation only;
+the public encoder still fits trees on CPU.
+
 ## Parallel local learning
 
 Append explicit learning participants and a fixed CPU ceiling after the fitting
