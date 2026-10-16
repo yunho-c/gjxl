@@ -85,4 +85,8 @@ private:
     const HistogramTrainingSamples &samples,
     HistogramTreeLearningOptions options,
     resource_budget_internal::HostStorageBound *out);
+// Additional state and original-row order above a serial native workspace.
+// Allows a caller to admit a cohort before finalized row counts are available.
+[[nodiscard]] Status ComputeHistogramTreeFitterExtraStorageBound(
+    size_t maximum_rows, resource_budget_internal::HostStorageBound *out);
 } // namespace gjxl::modular_internal

@@ -39,6 +39,12 @@ Status PrepareReferenceModularFrame(PackedModularImageView input,
       options.learning_cpu_participants > 256 ||
       options.selection_cpu_participants > 256 ||
       options.tokenization.cpu_participants > 256 ||
+      !options.fitting_batch_fits || options.fitting_batch_fits > 256 ||
+      options.fitting_minimum_rows > kHistogramMaximumSamples ||
+      (options.fitting_backend != ReferenceFittingBackend::kCpu &&
+       options.fitting_backend != ReferenceFittingBackend::kResumableCpu &&
+       options.fitting_backend != ReferenceFittingBackend::kGpu &&
+       options.fitting_backend != ReferenceFittingBackend::kAuto) ||
       (options.buffering != ReferenceBuffering::kAutomatic &&
        options.buffering != ReferenceBuffering::kBuffered) ||
       (options.predictors != ReferencePredictors::kBest &&
@@ -52,6 +58,17 @@ Status PrepareReferenceModularFrame(PackedModularImageView input,
     return Invalid();
   if (options.gpu && !modular_gpu_internal::QueryGpuModularStreamProcessing(*options.gpu))
     return Status::Unsupported("Backend does not support histogram workflow stream processing");
+  if (options.fitting_backend == ReferenceFittingBackend::kGpu &&
+      (!options.gpu || !histogram_gpu_internal::QueryGpuModularHistogramFitting(*options.gpu)))
+    return Status::Unsupported("Backend does not support native histogram fitting");
+  if ((options.fitting_backend == ReferenceFittingBackend::kGpu ||
+       options.fitting_backend == ReferenceFittingBackend::kAuto) &&
+      (!options.fitting_execution.histogram_shards ||
+       options.fitting_execution.histogram_shards >
+           histogram_gpu_internal::kMaximumHistogramFittingShards ||
+       !options.fitting_execution.maximum_active_properties ||
+       !options.fitting_execution.maximum_scratch_bytes))
+    return Invalid();
   if (auto s = ValidatePreparedModularEntropyOptions(options.entropy); !s.ok())
     return s;
   if (auto s = input.Validate(); !s.ok())

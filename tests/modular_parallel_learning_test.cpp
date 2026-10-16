@@ -322,10 +322,65 @@ void SharedDomain(bool shared = false) {
   frames = {};
   Released(*domain);
 }
+void Resumable(bool encode) {
+  for (bool shared : {false, true}) {
+    const auto f = Make(shared ? Extent2D{257, 33} : Extent2D{2049, 17}, 3, 8, 3);
+    auto domain = Domain();
+    ReferenceWorkflowOptions options;
+    options.learning_cpu_participants = 1;
+    ReferenceModularFrame control, actual;
+    HistogramFittingProfile reference_profile, actual_profile;
+    std::array<HistogramFitRecord, 16> reference_records, actual_records;
+    reference_profile.records = reference_records;
+    actual_profile.records = actual_records;
+    {
+      HistogramFittingProfileSession session(&reference_profile);
+      Ok(Prepare(f, options, domain, &control));
+    }
+    const size_t serial_peak = domain->snapshot().peak_committed_bytes;
+    options.fitting_backend = ReferenceFittingBackend::kResumableCpu;
+    options.fitting_batch_fits = 3;
+    options.learning_cpu_participants = 4;
+    {
+      HistogramFittingProfileSession session(&actual_profile);
+      Ok(Prepare(f, options, domain, &actual));
+    }
+    Same(control, actual);
+    SameProfile(reference_profile, actual_profile);
+    Check(actual.stats().histogram_cpu_nodes && !actual.stats().histogram_gpu_nodes &&
+              !actual_profile.parallel_property_nodes && actual.stats().learning_peak_participants <= 4,
+          "Resumable CPU control skipped evaluation or nested property teams");
+    if (encode) {
+      CodestreamBuffer a, b;
+      Encode(control, options.entropy, Budget(*domain), &a);
+      Encode(actual, options.entropy, Budget(*domain), &b);
+      Check(std::ranges::equal(a.view(), b.view()), "Resumable batching changed complete bytes");
+#ifdef GJXL_REFERENCE_WORKFLOW_ORACLE
+      Check(test::modular_reference::DecodeLossless(b.view()) == f.original,
+            "Resumable batching failed independent decode");
+#endif
+    }
+    auto constrained = Domain(serial_peak);
+    ReferenceModularFrame fallback;
+    Ok(Prepare(f, options, constrained, &fallback));
+    Same(control, fallback);
+    Check(fallback.stats().histogram_admission_fallbacks &&
+              constrained->snapshot().peak_committed_bytes <= serial_peak,
+          "Batched fitting did not retain the tight serial admission path");
+    fallback = {}; actual = {}; control = {};
+    Released(*constrained); Released(*domain);
+  }
+}
 } // namespace
 int main(int argc, char **argv) try {
   const bool preparation_only = argc == 2 && std::string_view(argv[1]) == "--preparation-only";
-  Check(argc == 1 || preparation_only, "Unknown test argument");
+  const bool resumable_only = argc == 2 && std::string_view(argv[1]) == "--resumable-only";
+  Check(argc == 1 || preparation_only || resumable_only, "Unknown test argument");
+  if (resumable_only) {
+    Resumable(false);
+    std::cout << "Resumable shared/local fitting, native profiles and constrained admission passed\n";
+    return 0;
+  }
   Parity(!preparation_only);
   Parity(!preparation_only, true);
   std::cout << "Tree/profile parity passed\n" << std::flush;
@@ -338,6 +393,7 @@ int main(int argc, char **argv) try {
   Failures(true);
   SharedDomain();
   SharedDomain(true);
+  Resumable(!preparation_only);
   std::cout << "Parallel local learning: " << (preparation_only ? "preparation" : "exact bytes")
             << ", profiles, CPU/memory limits, "
                "partial launches and shared domains passed\n";

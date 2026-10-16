@@ -3,6 +3,9 @@
 #pragma once
 #include "../../ops/modular_histogram_fitting_layout.h"
 namespace gjxl_histogram_fitting {
+// 14 KiB including occupancy and extra-bit bins leaves space for shader
+// validation instrumentation within a 32 KiB threadgroup-memory limit.
+enum : Word { kHistogramTileCells = 3072 };
 // Scratch offsets are relative to one reusable property slot. Tasks index the
 // request's node descriptors; a wave maps consecutive tasks to those slots.
 struct Params {

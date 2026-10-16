@@ -199,6 +199,35 @@ Status LearnLocalScopes(std::span<ReferenceModularStream> records,
                         ReferenceWorkflowStats *stats,
                         std::span<const ChannelFeatures> features = {}) {
   using namespace thread_budget_internal;
+  if (options.fitting_backend != ReferenceFittingBackend::kCpu) {
+    size_t first = 0;
+    while (first < records.size()) {
+      std::array<HistogramTrainingImage, histogram_gpu_internal::kMaximumHistogramFittingFits> images;
+      std::array<HistogramFitRequest, histogram_gpu_internal::kMaximumHistogramFittingFits> requests;
+      size_t stop = first, count = 0;
+      for (; stop < records.size() && count < options.fitting_batch_fits; ++stop) {
+        auto &record = records[stop];
+        if (!record.channel_count) continue;
+        images[count] = {record.learning_extent, record.training_channels(),
+            record.metadata_channels, streams[stop].weighted,
+            features.empty() ? std::span<const WeightedFeatureView>{}
+                             : std::span(features[stop]).first(record.channel_count)};
+        requests[count] = {{&images[count], 1}, &record, LocalTreeLeaves(streams[stop])};
+        ++count;
+      }
+      if (count) {
+        bool handled = false;
+        if (auto s = TryLearnHistogramBatch(std::span(requests).first(count), SamplingOptions(options),
+                LearningParticipants(options, count), options, budget, stats, &handled); !s.ok()) return s;
+        if (!handled) break;
+      }
+      first = stop;
+    }
+    if (first == records.size()) return Status::Ok();
+    records = records.subspan(first);
+    streams = streams.subspan(first);
+    if (!features.empty()) features = features.subspan(first);
+  }
   ProfileScope profile(ProfileStage::kTraining);
   Seconds wall(stats->learning_seconds);
   const auto feature = [&](size_t i) -> std::span<const WeightedFeatureView> {
@@ -380,8 +409,6 @@ Status LearnGlobal(std::span<ReferenceModularStream> records,
                    const ReferenceWorkflowOptions &options, const ResourceBudget &budget,
                    ReferenceWorkflowStats *stats, std::span<const ChannelFeatures> features = {}) {
   Seconds wall(stats->learning_seconds);
-  stats->learning_peak_participants = 1;
-  ++stats->learning_waves;
   // Preserve excluded global descriptors, canonical ID holes, and the first
   // image's population contribution, exactly as in the scalar workflow.
   size_t stop = 1;
@@ -407,6 +434,15 @@ Status LearnGlobal(std::span<ReferenceModularStream> records,
                            features.empty() ? std::span<const WeightedFeatureView>{}
                                             : std::span(features[i]).first(record.channel_count)};
   }
+  if (options.fitting_backend != ReferenceFittingBackend::kCpu) {
+    const HistogramFitRequest request{images, &records[0], MaximumGlobalTreeLeaves(population)};
+    bool handled = false;
+    if (auto s = TryLearnHistogramBatch({&request, 1}, SamplingOptions(options), 1,
+            options, budget, stats, &handled, false); !s.ok()) return s;
+    if (handled) return Status::Ok();
+  }
+  stats->learning_peak_participants = 1;
+  ++stats->learning_waves;
   return Learn(images, MaximumGlobalTreeLeaves(population), options, budget, stats, &records[0], false, true);
 }
 

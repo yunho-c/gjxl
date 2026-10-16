@@ -34,6 +34,20 @@ private:
 };
 using GpuTokenOwners = resource_budget_internal::ManagedVector<
     std::unique_ptr<modular_gpu_internal::PreparedGpuModularTokens>>;
+struct HistogramFitRequest {
+  std::span<const HistogramTrainingImage> images;
+  ReferenceModularStream *record = nullptr;
+  size_t maximum_leaves = 0;
+};
+// Returns handled=false only before preparation/partitioning begins, allowing
+// the original CPU scheduler to use tighter stage admission. Once work starts,
+// allocation/launch/device errors propagate and all workers/submissions drain.
+[[nodiscard]] Status TryLearnHistogramBatch(
+    std::span<const HistogramFitRequest> requests,
+    HistogramSamplingOptions sampling, size_t participants,
+    const ReferenceWorkflowOptions &options,
+    const resource_budget_internal::ResourceBudget &budget,
+    ReferenceWorkflowStats *stats, bool *handled, bool measure_learning = true);
 // Select independent unpublished records, retaining each record's original
 // candidate order. Input views stay alive until all jobs have joined. Records
 // may be partially updated on failure; the owning frame is published later.

@@ -366,6 +366,7 @@ add_library(
   src/codestream/modular/reference_workflow.cpp
   src/codestream/modular/reference_selection_workflow.cpp
   src/codestream/modular/reference_learning_workflow.cpp
+  src/codestream/modular/reference_histogram_fitting.cpp
   src/codestream/modular/candidate_cost.cpp
   src/codestream/modular/candidate_screen.cpp
   src/codestream/modular/public.cpp
@@ -2606,6 +2607,10 @@ if(GJXL_BUILD_TESTS)
   add_executable(gjxl_modular_histogram_fitter_test tests/modular_histogram_fitter_test.cpp)
   target_link_libraries(gjxl_modular_histogram_fitter_test PRIVATE gjxl_gpu_ops)
   add_test(NAME modular_histogram_fitter COMMAND gjxl_modular_histogram_fitter_test)
+  add_executable(gjxl_modular_histogram_fit_queue_test tests/modular_histogram_fit_queue_test.cpp)
+  target_link_libraries(gjxl_modular_histogram_fit_queue_test PRIVATE gjxl_gpu_ops)
+  add_test(NAME modular_histogram_fit_queue COMMAND gjxl_modular_histogram_fit_queue_test)
+  set_tests_properties(modular_histogram_fit_queue PROPERTIES TIMEOUT 60)
   set_tests_properties(modular_histogram_fitter PROPERTIES TIMEOUT 120)
 
   add_executable(gjxl_modular_gpu_token_handoff_test tests/modular_gpu_token_handoff_test.cpp)
@@ -3892,6 +3897,11 @@ if(GJXL_BUILD_TESTS)
   target_compile_definitions(gjxl_metal_modular_histogram_fitting_test PRIVATE GJXL_METALLIB_PATH="${GJXL_METALLIB}")
   add_test(NAME metal_modular_histogram_fitting COMMAND gjxl_metal_modular_histogram_fitting_test)
   set_tests_properties(metal_modular_histogram_fitting PROPERTIES TIMEOUT 180)
+
+  add_executable(gjxl_metal_modular_histogram_workflow_test tests/metal_modular_histogram_workflow_test.cpp)
+  target_link_libraries(gjxl_metal_modular_histogram_workflow_test PRIVATE gjxl_codestream gjxl_metal)
+  add_test(NAME metal_modular_histogram_workflow COMMAND gjxl_metal_modular_histogram_workflow_test)
+  set_tests_properties(metal_modular_histogram_workflow PROPERTIES TIMEOUT 180)
 
   add_executable(gjxl_metal_modular_adaptive_test tests/metal_modular_adaptive_test.cpp)
   add_executable(gjxl_metal_modular_reference_workflow_test tests/metal_modular_reference_workflow_test.cpp)

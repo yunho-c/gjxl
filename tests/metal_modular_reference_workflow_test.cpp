@@ -264,7 +264,9 @@ void WorkflowFailures(GpuBackend &gpu) {
 void Workflow(GpuBackend &gpu, const Fixture &f, ReferenceWorkflowOptions options = {}) {
   ResourceBudget budget(size_t{2} << 30);
   ReferenceModularFrame cpu, metal;
-  Ok(PrepareReferenceModularFrame(f.view(), options, budget, &cpu));
+  auto cpu_options = options;
+  cpu_options.fitting_backend = ReferenceFittingBackend::kCpu;
+  Ok(PrepareReferenceModularFrame(f.view(), cpu_options, budget, &cpu));
   options.gpu = &gpu;
   if (f.extent == Extent2D{257, 257})
     options.feature_producer = WeightedFeatureBackend::kGpu;
@@ -283,6 +285,10 @@ void Workflow(GpuBackend &gpu, const Fixture &f, ReferenceWorkflowOptions option
             profile.adaptive_gpu.feature_preparations == metal.stats().feature_batches &&
             profile.adaptive_gpu.feature_reuses == metal.stats().token_batches,
         "Learned Metal refitted or regenerated weighted features");
+  if (options.fitting_backend == ReferenceFittingBackend::kGpu &&
+      f.extent == Extent2D{769, 513})
+    Check(metal.stats().local_trees && metal.stats().histogram_gpu_nodes > 0,
+          "Local workflow did not exercise GPU histogram fitting");
   if (f.extent == Extent2D{257, 257})
     Check(profile.adaptive_gpu.feature_preparation.gpu_calls == 1 &&
               profile.adaptive_gpu.feature_preparation.gpu_samples > 0,
@@ -384,6 +390,23 @@ int main() try {
   Workflow(*gpu,
            Fixture(PackedModularFormat::kRgb8, {2049, 3}, false, SampleByteOrder::kLittleEndian),
            buffered);
+  ReferenceWorkflowOptions histogram;
+  histogram.fitting_backend = ReferenceFittingBackend::kGpu;
+  histogram.fitting_minimum_rows = 1;
+  histogram.fitting_batch_fits = 3;
+  for (auto format : {PackedModularFormat::kRgb8, PackedModularFormat::kRgba16})
+    for (bool palette : {false, true})
+      Workflow(*gpu, Fixture(format, {17, 19}, palette, SampleByteOrder::kBigEndian), histogram);
+  histogram.fitting_minimum_rows = 1024;
+  Workflow(*gpu, Fixture(PackedModularFormat::kRgb8, {769, 513}, false,
+                         SampleByteOrder::kLittleEndian), histogram);
+  histogram.fitting_minimum_rows = 1;
+  histogram.predictors = ReferencePredictors::kAll;
+  Workflow(*gpu, Fixture(PackedModularFormat::kRgba16, {2049, 3}, false,
+                         SampleByteOrder::kBigEndian), histogram);
+  histogram.buffering = ReferenceBuffering::kBuffered;
+  Workflow(*gpu, Fixture(PackedModularFormat::kRgb16, {257, 3}, false,
+                         SampleByteOrder::kLittleEndian), histogram);
   PublicC();
   std::cout << cases << " CPU/Metal codestream pairs and " << samples_checked
             << " learned tokens matched; mixed WP/tree batches and failure cleanup passed\n";

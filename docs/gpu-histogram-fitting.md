@@ -1,11 +1,11 @@
 # Batched GPU histogram fitting
 
-Status: the operation/storage contract, resumable CPU reference and Metal
-evaluator are implemented and tested. CPU
+Status: the operation/storage contract, resumable CPU reference, Metal
+evaluator and private learner integration are implemented. CPU
 consolidation is committed as `3aca01c`; its paired performance qualification
 is recorded in [the baseline report](gpu-histogram-fitting-baseline.md).
-Connection to the learner and complete-call qualification are the next step.
-The public encoder continues to use the CPU histogram fitter.
+Complete-call qualification determines whether GPU fitting should be preferred.
+The public encoder continues to use the ordinary CPU histogram fitter.
 
 This effort targets the native quantized, weighted histogram learner. The older
 `GpuModularTreeStatistics` operation evaluates sorted rows using integer Q12
@@ -202,8 +202,9 @@ required.
 The new test passes in Release and a CPU-only C++23 AddressSanitizer/UBSan
 build (`ASAN_OPTIONS=detect_leaks=0`, because macOS LeakSanitizer is unsupported).
 Contract validation records and source/binary hashes are archived with the
-baseline's focused integration checks. No encoder route queries the capability
-yet; the operation-level Metal qualification is recorded below.
+baseline's focused integration checks. The private reference workflow now
+queries the capability when explicitly requested; the operation-level Metal
+qualification is recorded below.
 
 ## Resumable CPU reference
 
@@ -266,14 +267,22 @@ shared Metal storage without submitting GPU work. An evaluation uploads the
 node membership and parent summaries once, and uses one command-buffer
 submission/wait for the complete batch, including every scratch wave.
 
-Six kernels perform membership/parent validation and output initialization,
-scratch clearing, integer histogram collection, shard reduction and prefixes,
+Five kernels perform membership/parent validation and output initialization,
+integer histogram collection, shard reduction and prefixes,
 native candidate costs, and ordered predictor/category selection. Property
 tasks run in bounded reusable slots; scratch is independent between calls.
 Device barriers separate producers/consumers and slot reuse. Validation also
 runs for all-constant requests, which need no histogram scratch. A 64-bit
 population reduction catches malformed multisets whose weighted population
 would overflow a 32-bit histogram.
+
+The integrated implementation collects integer histograms in threadgroup-local
+tiles with 3,072 count cells and 256 occupancy/extra-bit bins, using 14 KiB of
+threadgroup memory. This also fits with shader-validation instrumentation.
+Tiles scan the selected membership/property column and load residuals only
+for matching bins. Every shard writes its complete output, including zeros;
+scratch reuse no longer needs a separate clear dispatch. The prefix and
+floating-point scoring order remain unchanged.
 
 Only this Metal source is compiled with `-fno-fast-math -ffp-contract=off`.
 Its explicit FMA polynomial, four-lane accumulation and pairwise sum match
@@ -300,6 +309,60 @@ resource-budget tests; the updated CPU contract/fitter tests pass ASan/UBSan.
 This establishes operation correctness on the measured device, not an encoder
 speedup or a public routing decision. Evidence and source/artifact hashes are
 in [`gpu-histogram-fitting-metal-results.json`](gpu-histogram-fitting-metal-results.json).
+
+## Private learner integration
+
+`ReferenceFittingBackend` selects the ordinary CPU fitter, a resumable CPU
+control, explicit GPU fitting, or a private automatic experiment. The ordinary
+CPU route remains the default. The automatic experiment admits only local
+cohorts of at least four fits with a capable GPU; this is an eligibility rule,
+not evidence of a performance win. Shared fits and small cohorts retain the
+ordinary CPU scheduler in that mode. Explicit GPU mode can exercise shared
+fits, but their CPU remainder uses the serial resumable evaluator rather than
+the ordinary shared fit's property-parallel team.
+
+`reference_histogram_fitting.cpp` admits a bounded cohort before preparing or
+partitioning any sample rows. Its whole-fit reservations cover preparation,
+native CPU scratch/tree storage, the resumable state and original-row order,
+and tree compaction. Managed job/profile/thread metadata, immutable GPU columns,
+and each evaluation's transient/output backing are charged separately. The
+same row-order vector is never charged twice. Completed jobs release CPU
+samples and scratch while the cohort's immutable GPU owner remains live.
+
+If whole-cohort admission fails, the existing CPU scheduler handles the
+unstarted suffix using its tighter stage-by-stage bounds. After preparation,
+nodes below the requested distinct-row cutoff or outside GPU scratch limits
+use the CPU evaluator. GPU preparation/evaluation admission pressure may also
+select CPU work before the operation starts. Allocation, launch, device and
+completion errors after execution begins propagate; no failed GPU operation
+is silently retried on CPU. An outer frame is published only after every stage
+succeeds, so an error preserves the caller's previous frame/codestream.
+
+The preparation team completes before the fitting queue acquires CPU worker
+grants. `HistogramFitQueue` gives each fit exactly one owner: a CPU worker,
+the ready queue, or the GPU coordinator. Workers prepare/apply/partition nodes
+and finish small CPU tails while the coordinator evaluates ready nodes from
+other fits. Ready batches retain ascending fit order; they flush at 32 ready
+fits, CPU-idle completion, or 500 microseconds after the first ready node.
+Each fit still grows depth first, preserving node numbering and split ties.
+With one admitted participant the caller also executes the CPU tasks.
+
+Completed GPU results are copied into bounded, accounted per-job storage before
+the output arena is released and the fit is returned to a CPU worker. On any
+error, all CPU workers and submitted GPU work drain before their borrows expire.
+Each fit has a separate diagnostic sink, and the caller merges profiles/stats
+in canonical order after joining workers.
+
+The private profile executable accepts `fitter-cpu`, `fitter-resumable`,
+`fitter-gpu`, or `fitter-auto` after its five participant-limit arguments,
+followed optionally by minimum rows and cohort fit limit. Schema 7 adds GPU
+preparations/batches/nodes/indexed rows/property results, CPU nodes, admission
+fallbacks, copied/dispatch/scratch bytes, and synchronous operation wall times.
+Those operation times include host packing, allocation, submission and waiting;
+they are not kernel timestamps. Summed CPU fitting work excludes GPU operation
+wall time and can overlap it. Native fit/node diagnostic envelopes include
+paused time, so they are not CPU utilization or an additive stage breakdown.
+The ordinary worker-lane schedule trace is disabled for migrating fits.
 
 ## Implementation sequence and gates
 

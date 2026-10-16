@@ -11,12 +11,16 @@
 
 namespace gjxl::modular_internal::histogram_parallel_internal {
 
-// One team per fit. Property tasks allocate nothing and only read sample rows;
-// the caller waits for every task before selecting a split or moving any row.
+// Persistent histogram tasks. A fit uses read-only property tasks; the batched
+// workflow uses independent fits with per-job exception/resource boundaries.
+// The caller waits for every task before borrowing or moving shared rows.
 // Sleeping workers retain protected CPU capacity, but are not active CPU users.
 class PropertyTeam {
 public:
-  explicit PropertyTeam(size_t participants) : group_(participants) {}
+  explicit PropertyTeam(size_t participants,
+      thread_budget_internal::WorkerLaunchSite site =
+          thread_budget_internal::WorkerLaunchSite::kModularHistogramProperties)
+      : group_(participants), site_(site) {}
   ~PropertyTeam() { Stop(); }
   PropertyTeam(const PropertyTeam &) = delete;
   PropertyTeam &operator=(const PropertyTeam &) = delete;
@@ -34,8 +38,7 @@ public:
       for (size_t i = 0; i + 1 < participants(); ++i)
         thread_budget_internal::LaunchWorker(
             workers_,
-            thread_budget_internal::WorkerLaunchSite::
-                kModularHistogramProperties,
+            site_,
             i, [this, i, cpu_count, tracker, resources] {
               thread_budget_internal::ParallelScope scope(cpu_count, tracker,
                                                           resources, &group_);
@@ -111,6 +114,7 @@ private:
     workers_.clear();
   }
   thread_budget_internal::CpuWorkerGroup group_;
+  thread_budget_internal::WorkerLaunchSite site_;
   resource_budget_internal::ManagedVector<std::thread> workers_;
   std::mutex mutex_;
   std::condition_variable ready_, done_;

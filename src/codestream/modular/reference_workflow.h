@@ -5,10 +5,14 @@
 #include "codec/modular/reference_selection.h"
 #include "codestream/modular/prepared_streams.h"
 #include "gpu/ops/modular_stream_tokens.h"
+#include "gpu/ops/modular_histogram_fitting.h"
 
 namespace gjxl::modular_internal {
 enum class ReferenceBuffering : uint8_t { kAutomatic, kBuffered };
 enum class ReferencePredictors : uint8_t { kBest, kAll };
+// Private qualification controls. Public routing remains on the ordinary CPU
+// fitter until complete-call evidence supports an automatic GPU preference.
+enum class ReferenceFittingBackend : uint8_t { kCpu, kResumableCpu, kGpu, kAuto };
 struct ReferenceWorkflowOptions {
   ReferenceBuffering buffering = ReferenceBuffering::kAutomatic;
   ReferencePredictors predictors = ReferencePredictors::kBest;
@@ -30,6 +34,9 @@ struct ReferenceWorkflowOptions {
   // admitted CPU allowance; one retains serial selection. Global selection
   // still precedes stream placement and always runs as one job.
   size_t selection_cpu_participants = 0;
+  ReferenceFittingBackend fitting_backend = ReferenceFittingBackend::kCpu;
+  size_t fitting_minimum_rows = 1024, fitting_batch_fits = 64;
+  histogram_gpu_internal::HistogramFittingExecutionOptions fitting_execution;
 };
 struct ReferenceLearningStats {
   size_t first_group = 0, stop_group = 0;
@@ -69,6 +76,15 @@ struct ReferenceWorkflowStats {
   // Caller-wall intervals. Learning includes admission, preparation, fitting,
   // joins and diagnostic reduction. Features and GPU tokens are separate.
   double learning_seconds = 0, feature_seconds = 0, token_seconds = 0;
+  size_t histogram_gpu_preparations = 0, histogram_gpu_batches = 0,
+         histogram_gpu_nodes = 0, histogram_gpu_rows = 0,
+         histogram_gpu_properties = 0, histogram_cpu_nodes = 0,
+         histogram_admission_fallbacks = 0;
+  size_t histogram_prepared_bytes = 0, histogram_dispatch_bytes = 0,
+         histogram_peak_scratch_bytes = 0;
+  // Synchronous caller-wall operation times, including copies/allocations and
+  // waits. CPU fitting_seconds excludes these GPU operations in a batched fit.
+  double histogram_preparation_seconds = 0, histogram_evaluation_seconds = 0;
 };
 // A lossless source has at most four normal planes. One reference palette pass
 // adds at most four metadata planes; local passes start without global meta.

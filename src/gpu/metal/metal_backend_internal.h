@@ -397,7 +397,7 @@ public:
     std::array<NS::SharedPtr<MTL::ComputePipelineState>, 6> modular_token_pipelines,
     NS::SharedPtr<MTL::ComputePipelineState> ans_token_cost_pipeline,
     std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> tree_statistics_pipelines,
-    std::array<NS::SharedPtr<MTL::ComputePipelineState>, 6> histogram_fitting_pipelines,
+    std::array<NS::SharedPtr<MTL::ComputePipelineState>, 5> histogram_fitting_pipelines,
     std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> modular_population_pipelines,
     AqPipelines aq_pipelines,
     ButteraugliPipelines butteraugli_pipelines,
@@ -926,7 +926,7 @@ private:
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> modular_population_pipelines_;
   NS::SharedPtr<MTL::ComputePipelineState> ans_token_cost_pipeline_;
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> tree_statistics_pipelines_;
-  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 6> histogram_fitting_pipelines_;
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 5> histogram_fitting_pipelines_;
   AqPipelines aq_pipelines_;
   ButteraugliPipelines butteraugli_pipelines_;
   bool test_fail_submission_ = false;

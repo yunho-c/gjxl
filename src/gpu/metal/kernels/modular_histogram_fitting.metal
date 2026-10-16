@@ -145,13 +145,6 @@ kernel void gjxl_histogram_validate(device const uchar *prepared [[buffer(0)]],
   }
 }
 
-kernel void gjxl_histogram_clear(device uint *scratch [[buffer(3)]],
-                                 constant Params &p [[buffer(4)]],
-                                 uint i [[thread_position_in_grid]]) {
-  if (i < p.tasks * (p.slot_bytes / 4))
-    scratch[i] = 0;
-}
-
 // Independent integer shards have deterministic sums. Occupancy counts row
 // entries; histogram and extra-bit increments use the positive row weights.
 kernel void gjxl_histogram_collect(device const uchar *prepared [[buffer(0)]],
@@ -162,22 +155,30 @@ kernel void gjxl_histogram_collect(device const uchar *prepared [[buffer(0)]],
                                    uint lane [[thread_index_in_threadgroup]]) {
   if (Failed(dispatch, p))
     return;
-  const uint shard = group.x, pred = group.y, slot = group.z;
+  const uint shard = group.x % p.shards, tile = group.x / p.shards;
+  const uint pred = group.y, slot = group.z;
   const TaskDescriptor task = Task(dispatch, p, slot);
   const NodeDescriptor n =
       reinterpret_cast<device const NodeDescriptor *>(dispatch)[task.node];
   const FitDescriptor f =
       reinterpret_cast<device const FitDescriptor *>(prepared)[n.fit];
-  if (pred >= f.predictors)
-    return;
   const uint bins = f.bins[task.property];
-  device uchar *base = scratch + slot * p.slot_bytes;
-  device atomic_uint *hist =
-      reinterpret_cast<device atomic_uint *>(base + p.shard_histograms);
-  device atomic_uint *extra =
-      reinterpret_cast<device atomic_uint *>(base + p.shard_extra);
-  device atomic_uint *occupied =
-      reinterpret_cast<device atomic_uint *>(base + p.shard_occupancy);
+  const uint tile_bins = min(256u, kHistogramTileCells / n.symbols), first = tile * tile_bins;
+  if (pred >= f.predictors || first >= bins)
+    return;
+  const uint width = min(tile_bins, bins - first);
+  // Bounded local atomics avoid serializing every row increment through device
+  // memory. Tiles rescan only membership/property values; residual/weight reads
+  // are restricted to the tile. Each shard writes disjoint complete output,
+  // including zeros, so the arena needs no separate clear between waves.
+  threadgroup atomic_uint counts[kHistogramTileCells], bit_counts[256], occupancy[256];
+  for (uint i = lane; i < width * n.symbols; i += 128)
+    atomic_store_explicit(&counts[i], 0, memory_order_relaxed);
+  for (uint i = lane; i < width; i += 128) {
+    atomic_store_explicit(&bit_counts[i], 0, memory_order_relaxed);
+    atomic_store_explicit(&occupancy[i], 0, memory_order_relaxed);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
   device const uint *indices =
       reinterpret_cast<device const uint *>(dispatch + n.indices_offset);
   device const ushort *weights =
@@ -186,22 +187,37 @@ kernel void gjxl_histogram_collect(device const uchar *prepared [[buffer(0)]],
       prepared + f.residual_offsets[pred]);
   device const uchar *property = prepared + f.property_offsets[task.property];
   for (uint i = shard * 128 + lane; i < n.rows; i += p.shards * 128) {
-    const uint row = indices[i]; // Validated in the preceding kernel.
+    const uint row = indices[i];
     const uint bin = task.property < f.static_properties
                          ? reinterpret_cast<device const uint *>(property)[row]
                          : property[row];
-    const uint weight = weights[row];
+    if (bin < first || bin >= first + width)
+      continue;
+    const uint local = bin - first, weight = weights[row];
     const uchar2 code = tokens[row];
-    atomic_fetch_add_explicit(
-        &hist[((shard * f.predictors + pred) * bins + bin) * n.symbols +
-              code.x],
-        weight, memory_order_relaxed);
-    atomic_fetch_add_explicit(
-        &extra[(shard * f.predictors + pred) * bins + bin],
-        weight * uint(code.y), memory_order_relaxed);
+    atomic_fetch_add_explicit(&counts[local * n.symbols + code.x], weight,
+                              memory_order_relaxed);
+    atomic_fetch_add_explicit(&bit_counts[local], weight * uint(code.y),
+                              memory_order_relaxed);
     if (pred == 0)
-      atomic_fetch_add_explicit(&occupied[shard * bins + bin], 1,
-                                memory_order_relaxed);
+      atomic_fetch_add_explicit(&occupancy[local], 1, memory_order_relaxed);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  device uchar *base = scratch + slot * p.slot_bytes;
+  device uint *hist =
+      reinterpret_cast<device uint *>(base + p.shard_histograms);
+  device uint *extra = reinterpret_cast<device uint *>(base + p.shard_extra);
+  device uint *occupied =
+      reinterpret_cast<device uint *>(base + p.shard_occupancy);
+  for (uint i = lane; i < width * n.symbols; i += 128)
+    hist[((shard * f.predictors + pred) * bins + first) * n.symbols + i] =
+        atomic_load_explicit(&counts[i], memory_order_relaxed);
+  for (uint i = lane; i < width; i += 128) {
+    extra[(shard * f.predictors + pred) * bins + first + i] =
+        atomic_load_explicit(&bit_counts[i], memory_order_relaxed);
+    if (pred == 0)
+      occupied[shard * bins + first + i] =
+          atomic_load_explicit(&occupancy[i], memory_order_relaxed);
   }
 }
 

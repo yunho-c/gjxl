@@ -45,10 +45,14 @@ template <typename T> void Array(std::ostream &out, const T &a) {
 }
 } // namespace
 int main(int argc, char **argv) try {
-  Check(argc >= 6 && argc <= 13, "hybrid_profile INPUT OUT cpu|shared-cpu|hybrid|auto auto|buffered "
-                                "best|all [fit-off|schedule|fit-on [learning-participants [cpu-ceiling [entropy-participants [selection-participants [tokenization-participants [public]]]]]]]");
-  const bool public_api = argc == 13;
-  Check(!public_api || std::string_view(argv[12]) == "public", "Unknown public route flag");
+  Check(argc >= 6 && argc <= 15, "hybrid_profile INPUT OUT cpu|shared-cpu|hybrid|auto auto|buffered "
+                                "best|all [fit-off|schedule|fit-on [learning-participants [cpu-ceiling [entropy-participants [selection-participants [tokenization-participants [public|fitter-cpu|fitter-resumable|fitter-gpu|fitter-auto [minimum-rows [batch-fits]]]]]]]]]");
+  const std::string fitter_flag = argc >= 13 ? argv[12] : "fitter-cpu";
+  const bool public_api = fitter_flag == "public";
+  Check((!public_api || argc == 13) &&
+            (public_api || fitter_flag == "fitter-cpu" || fitter_flag == "fitter-resumable" ||
+             fitter_flag == "fitter-gpu" || fitter_flag == "fitter-auto"), "Unknown fitting route flag");
+  const bool fitter_diagnostics = argc >= 13 && !public_api;
   const bool tokenization_diagnostics = argc >= 12;
   const size_t tokenization_participants = tokenization_diagnostics ? std::stoull(argv[11]) : 1;
   Check(tokenization_participants <= 256, "Invalid tokenization participant limit");
@@ -69,7 +73,10 @@ int main(int argc, char **argv) try {
   Check(fitting_mode == "fit-off" || fitting_mode == "fit-on" || fitting_mode == "schedule",
         "Invalid fitting profile mode");
   const bool fitting_profile_enabled = fitting_mode == "fit-on";
-  const bool schedule_enabled = fitting_mode != "fit-off";
+  // Paused fits migrate between workers; the ordinary job-lane trace would
+  // misrepresent their GPU waits. The new route exposes batch counters/times.
+  const bool schedule_enabled = fitting_mode != "fit-off" &&
+                                (public_api || fitter_flag == "fitter-cpu");
   const std::string route = argv[3], buffering = argv[4], predictors = argv[5];
   Check(route == "cpu" || route == "shared-cpu" || route == "hybrid" || route == "auto",
         "Invalid route");
@@ -103,6 +110,12 @@ int main(int argc, char **argv) try {
                                      : (uint16_t(view.bytes[pos]) << 8) | view.bytes[pos + 1]);
     }
   ReferenceWorkflowOptions options;
+  options.fitting_backend = fitter_flag == "fitter-gpu" ? ReferenceFittingBackend::kGpu
+                            : fitter_flag == "fitter-resumable" ? ReferenceFittingBackend::kResumableCpu
+                            : fitter_flag == "fitter-auto" ? ReferenceFittingBackend::kAuto
+                            : ReferenceFittingBackend::kCpu;
+  if (argc >= 14) options.fitting_minimum_rows = std::stoull(argv[13]);
+  if (argc >= 15) options.fitting_batch_fits = std::stoull(argv[14]);
   options.selection_cpu_participants = selection_participants;
   options.learning_cpu_participants = learning_participants;
   options.buffering =
@@ -214,7 +227,7 @@ int main(int argc, char **argv) try {
         "Completed encode leaked managed storage");
   std::ofstream out(directory / "result.json");
   out.exceptions(std::ios::failbit | std::ios::badbit);
-  out << std::setprecision(17) << std::boolalpha << "{\"schema\":" << (public_api ? 6 : tokenization_diagnostics ? 5 : selection_diagnostics ? 4 : entropy_diagnostics ? 3 : parallel_diagnostics ? 2 : 1)
+  out << std::setprecision(17) << std::boolalpha << "{\"schema\":" << (fitter_diagnostics ? 7 : public_api ? 6 : tokenization_diagnostics ? 5 : selection_diagnostics ? 4 : entropy_diagnostics ? 3 : parallel_diagnostics ? 2 : 1)
       << ",\"public_api\":" << public_api
       << ",\"gpu_submissions\":" << (backend ? backend->stats().committed_submissions - submissions : 0)
       << ",\"route\":" << std::quoted(route)
@@ -287,6 +300,21 @@ int main(int argc, char **argv) try {
       << ",\"peak_feature_samples\":" << stats.peak_feature_samples
       << ",\"peak_feature_bytes\":" << stats.peak_feature_bytes << "},\"histogram_fitting\":";
   WriteHistogramProfile(out, fitting_profile, fitting_profile_enabled);
+  out << ",\"histogram_gpu\":{\"route\":" << std::quoted(fitter_flag)
+      << ",\"minimum_rows\":" << options.fitting_minimum_rows
+      << ",\"batch_fits\":" << options.fitting_batch_fits
+      << ",\"preparations\":" << stats.histogram_gpu_preparations
+      << ",\"batches\":" << stats.histogram_gpu_batches
+      << ",\"nodes\":" << stats.histogram_gpu_nodes
+      << ",\"rows\":" << stats.histogram_gpu_rows
+      << ",\"properties\":" << stats.histogram_gpu_properties
+      << ",\"cpu_nodes\":" << stats.histogram_cpu_nodes
+      << ",\"admission_fallbacks\":" << stats.histogram_admission_fallbacks
+      << ",\"prepared_bytes\":" << stats.histogram_prepared_bytes
+      << ",\"dispatch_bytes\":" << stats.histogram_dispatch_bytes
+      << ",\"peak_scratch_bytes\":" << stats.histogram_peak_scratch_bytes
+      << ",\"preparation_seconds\":" << stats.histogram_preparation_seconds
+      << ",\"evaluation_seconds\":" << stats.histogram_evaluation_seconds << '}';
   out << ",\"learning_schedule\":{\"enabled\":" << schedule_enabled << ",\"dropped\":" << schedule.dropped
       << ",\"waves\":[";
   for (size_t i = 0; i < schedule.waves_written; ++i) {

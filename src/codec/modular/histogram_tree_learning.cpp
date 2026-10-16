@@ -919,12 +919,26 @@ Status ComputeHistogramTreeFitterStorageBound(
           ComputeHistogramTreeLearningStorageBound(samples, options, &bound);
       !s.ok())
     return s;
-  // The existing bound already includes one Workspace. Its replacement is a
-  // larger managed State containing that workspace and the resumable controls.
+  HostStorageBound extra;
+  if (auto s = ComputeHistogramTreeFitterExtraStorageBound(samples.weights.size(), &extra); !s.ok())
+    return s;
+  if (!bound.Add(extra))
+    return Status::InvalidArgument("Resumable histogram storage overflow");
+  *out = bound;
+  return Status::Ok();
+}
+Status ComputeHistogramTreeFitterExtraStorageBound(
+    size_t maximum_rows, resource_budget_internal::HostStorageBound *out) {
+  using namespace resource_budget_internal;
+  if (!out || maximum_rows > kHistogramMaximumSamples)
+    return Status::InvalidArgument("Invalid resumable histogram row bound");
+  // A serial native bound already includes one Workspace. Replace it with the
+  // larger managed State and add its independently owned row-order vector.
   constexpr size_t extra =
       sizeof(histogram_fitting_internal::State) - sizeof(Workspace);
+  HostStorageBound bound;
   if (!bound.Add({extra, extra}) ||
-      !bound.AddVector<uint32_t>(samples.weights.size(),
+      !bound.AddVector<uint32_t>(maximum_rows,
                                  VectorCapacityPolicy::kFreshExact))
     return Status::InvalidArgument("Resumable histogram storage overflow");
   *out = bound;

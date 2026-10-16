@@ -50,7 +50,7 @@ struct Pending {
 };
 struct Context {
   MTL::Buffer *prepared, *dispatch, *output, *scratch;
-  std::array<MTL::ComputePipelineState *, 6> pipelines;
+  std::array<MTL::ComputePipelineState *, 5> pipelines;
   const HistogramFittingEvaluationPlan *plan;
   wire::Params params;
 };
@@ -80,19 +80,21 @@ void Encode(MetalBackend &, MTL::ComputeCommandEncoder *encoder,
     const size_t count = std::min(plan.active_properties, plan.tasks - first);
     params.first_task = static_cast<uint32_t>(first);
     params.tasks = static_cast<uint32_t>(count);
-    launch(1, MTL::Size((count * plan.scratch.bytes / 4 + 127) / 128, 1, 1));
+    const size_t tile_bins =
+        std::min(size_t{256}, wire::kHistogramTileCells / plan.maximum_symbols);
+    const size_t tiles = (plan.maximum_bins + tile_bins - 1) / tile_bins;
+    launch(1, MTL::Size(plan.histogram_shards * tiles, plan.maximum_predictors,
+                        count));
     encoder->memoryBarrier(dependencies, 3);
-    launch(2, MTL::Size(plan.histogram_shards, plan.maximum_predictors, count));
-    encoder->memoryBarrier(dependencies, 3);
-    launch(3, MTL::Size((plan.maximum_predictors * plan.maximum_symbols + 127) /
+    launch(2, MTL::Size((plan.maximum_predictors * plan.maximum_symbols + 127) /
                             128,
                         count, 1));
     encoder->memoryBarrier(dependencies, 3);
-    launch(4,
+    launch(3,
            MTL::Size((plan.maximum_bins * plan.maximum_predictors + 127) / 128,
                      count, 1));
     encoder->memoryBarrier(dependencies, 3);
-    launch(5, MTL::Size(count, 1, 1));
+    launch(4, MTL::Size(count, 1, 1));
     encoder->memoryBarrier(dependencies, 3);
   }
 }
