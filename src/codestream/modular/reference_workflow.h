@@ -12,7 +12,7 @@ enum class ReferenceBuffering : uint8_t { kAutomatic, kBuffered };
 enum class ReferencePredictors : uint8_t { kBest, kAll };
 // Private qualification controls. Public routing remains on the ordinary CPU
 // fitter until complete-call evidence supports an automatic GPU preference.
-enum class ReferenceFittingBackend : uint8_t { kCpu, kResumableCpu, kGpu, kAuto, kGpuResident, kGpuFrontier };
+enum class ReferenceFittingBackend : uint8_t { kCpu, kResumableCpu, kGpu, kAuto, kGpuResident, kGpuFrontier, kGpuTiledFrontier };
 enum class ReferenceLearningSchedule : uint8_t { kCohorts, kPipeline };
 struct ReferenceWorkflowOptions {
   ReferenceBuffering buffering = ReferenceBuffering::kAutomatic;

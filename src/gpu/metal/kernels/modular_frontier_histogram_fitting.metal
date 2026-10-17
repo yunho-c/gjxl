@@ -14,7 +14,7 @@ kernel void gjxl_histogram_frontier_init(
     constant gjxl_histogram_resident::FrontierParams &p [[buffer(2)]],
     uint fit [[threadgroup_position_in_grid]], uint lane [[thread_index_in_threadgroup]]) {
   using namespace frontier_impl;
-  const FitDescriptor f = reinterpret_cast<device const FitDescriptor *>(prepared)[fit];
+  device const FitDescriptor &f = reinterpret_cast<device const FitDescriptor *>(prepared)[fit];
   const Fit d = reinterpret_cast<device const Fit *>(work)[fit];
   if (!lane) {
     *reinterpret_cast<device State *>(work + d.state) = {0, 1, 0, 0, 0, 0, 0, 0, 0};
@@ -58,7 +58,7 @@ kernel void gjxl_histogram_frontier_nodes(
   if (slot >= control.count) return;
   device NodeRef *queue = reinterpret_cast<device NodeRef *>(work + p.queue);
   const NodeRef ref = queue[control.first + slot];
-  const FitDescriptor f = reinterpret_cast<device const FitDescriptor *>(prepared)[ref.fit];
+  device const FitDescriptor &f = reinterpret_cast<device const FitDescriptor *>(prepared)[ref.fit];
   Fit d = reinterpret_cast<device const Fit *>(work)[ref.fit];
   device State &fit_state = *reinterpret_cast<device State *>(work + d.state);
   const uint base = p.scratch + slot * p.slot.bytes;

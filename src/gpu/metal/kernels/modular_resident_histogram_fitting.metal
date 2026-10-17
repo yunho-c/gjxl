@@ -7,14 +7,14 @@ namespace resident_impl {
 using namespace gjxl_histogram_resident;
 struct Split { uint property; Candidate candidate; };
 float Cost(Split s) { return s.candidate.left_cost + s.candidate.right_cost; }
-uint Property(device const uchar *prepared, FitDescriptor f, uint prop, uint row) {
+uint Property(device const uchar *prepared, device const FitDescriptor &f, uint prop, uint row) {
   device const uchar *column = prepared + f.property_offsets[prop];
   return prop < f.static_properties ? reinterpret_cast<device const uint *>(column)[row]
                                      : column[row];
 }
 // Pair the ascending misplaced positions in the two halves. This is the exact
 // native two-pointer swap permutation, with parallel discovery and swaps.
-void Misplaced(device const uchar *prepared, FitDescriptor f,
+void Misplaced(device const uchar *prepared, device const FitDescriptor &f,
                device const uint *order, device uint *positions,
                device uint &count, uint begin, uint end, uint property,
                uint bin, bool low, uint lane, threadgroup uint *groups) {
@@ -42,7 +42,7 @@ kernel void gjxl_histogram_resident_fit(
     uint fit_index [[threadgroup_position_in_grid]],
     uint lane [[thread_index_in_threadgroup]]) {
   using namespace resident_impl;
-  const FitDescriptor f = reinterpret_cast<device const FitDescriptor *>(prepared)[fit_index];
+  device const FitDescriptor &f = reinterpret_cast<device const FitDescriptor *>(prepared)[fit_index];
   const Fit d = reinterpret_cast<device const Fit *>(work)[fit_index];
   device State &state = *reinterpret_cast<device State *>(work + d.state);
   device Node *nodes = reinterpret_cast<device Node *>(work + d.nodes);

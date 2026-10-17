@@ -118,7 +118,7 @@ int main(int argc, char **argv) try {
         "hybrid_profile INPUT OUT cpu|shared-cpu|hybrid|auto auto|buffered best|all "
         "[fit-off|schedule|fit-on [learning-participants [cpu-ceiling [entropy-participants "
         "[selection-participants [tokenization-participants [public|fitter-cpu|fitter-resumable|"
-        "fitter-gpu|fitter-auto|fitter-resident|fitter-frontier [minimum-rows [batch-fits]]]]]]]]] "
+        "fitter-gpu|fitter-auto|fitter-resident|fitter-frontier|fitter-tiled [minimum-rows [batch-fits]]]]]]]]] "
         "[--sample-rows=MODE] [--row-diagnostics=rows-off|rows-on] "
         "[--learning-schedule=cohorts|pipeline] [--feature-window=8|16] "
         "[--gpu-profile=gpu-off|gpu-wall|gpu-stage] [--histogram-shards=N] [--active-properties=N] "
@@ -134,7 +134,7 @@ int main(int argc, char **argv) try {
         "Invalid fitting buffer control");
   Check(fit_encoders == "single" || fit_encoders == "multiple", "Invalid fitting encoder control");
   const std::string fitter_flag = argc >= 13 ? argv[12] : "fitter-cpu";
-  const bool resident_fitter = fitter_flag == "fitter-resident" || fitter_flag == "fitter-frontier";
+  const bool resident_fitter = fitter_flag == "fitter-resident" || fitter_flag == "fitter-frontier" || fitter_flag == "fitter-tiled";
   Check(!resident_fitter ||
             (argc <= 15 && !gpu_profile_enabled && !named_control("--fit-buffers") &&
              !named_control("--fit-encoders") && !named_control("--histogram-shards") &&
@@ -216,7 +216,8 @@ int main(int argc, char **argv) try {
                                      : (uint16_t(view.bytes[pos]) << 8) | view.bytes[pos + 1]);
     }
   ReferenceWorkflowOptions options;
-  options.fitting_backend = fitter_flag == "fitter-frontier" ? ReferenceFittingBackend::kGpuFrontier
+  options.fitting_backend = fitter_flag == "fitter-tiled" ? ReferenceFittingBackend::kGpuTiledFrontier
+                            : fitter_flag == "fitter-frontier" ? ReferenceFittingBackend::kGpuFrontier
                             : fitter_flag == "fitter-resident" ? ReferenceFittingBackend::kGpuResident
                             : fitter_flag == "fitter-gpu" ? ReferenceFittingBackend::kGpu
                             : fitter_flag == "fitter-resumable" ? ReferenceFittingBackend::kResumableCpu

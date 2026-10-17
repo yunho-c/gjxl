@@ -27,7 +27,8 @@ Status ComputeResidentHistogramPlan(const ResidentHistogramInput &input,
     return Status::InvalidArgument("Empty resident histogram request/output");
   if (input.requests.size() > kMaximumResidentHistogramFits)
     return Status::Unsupported("Resident histogram cohort exceeds 64 fits");
-  const bool frontier = input.executor == ResidentHistogramExecutor::kFrontier;
+  const bool tiled = input.executor == ResidentHistogramExecutor::kTiledFrontier;
+  const bool frontier = tiled || input.executor == ResidentHistogramExecutor::kFrontier;
   if ((input.executor != ResidentHistogramExecutor::kDepthFirst && !frontier) ||
       (frontier && (!input.maximum_active_nodes || input.maximum_active_nodes > 1024 ||
                     !input.rounds_per_submission || input.rounds_per_submission > 64 ||
@@ -37,7 +38,8 @@ Status ComputeResidentHistogramPlan(const ResidentHistogramInput &input,
   plan.fits = input.requests.size();
   std::array<HistogramFittingShape, kMaximumResidentHistogramFits> shapes;
   Arena arena{plan.fits * sizeof(resident::Fit)};
-  size_t maximum_bins = 1, maximum_predictors = 1, queue_capacity = 0;
+  size_t maximum_bins = 1, maximum_predictors = 1, maximum_properties = 1,
+         maximum_histogram = 0, queue_capacity = 0;
   for (size_t i = 0; i < plan.fits; ++i) {
     const auto &r = input.requests[i];
     if (!r.source.samples)
@@ -60,6 +62,11 @@ Status ComputeResidentHistogramPlan(const ResidentHistogramInput &input,
     f.fast_decode_multiplier = r.learning.fast_decode_multiplier;
     maximum_bins = std::max(maximum_bins, bins);
     maximum_predictors = std::max(maximum_predictors, shape.predictors);
+    maximum_properties = std::max(maximum_properties, shape.properties);
+    size_t histogram = 0;
+    for (size_t p = 0; p < shape.properties; ++p)
+      if (shape.bins[p] > 1) histogram += shape.bins[p] * shape.predictors * 257 * sizeof(uint32_t);
+    maximum_histogram = std::max(maximum_histogram, histogram);
     plan.maximum_nodes = std::max(plan.maximum_nodes, size_t(f.maximum_nodes));
     queue_capacity += f.maximum_nodes;
     if (!arena.Add(1, sizeof(resident::State), &f.state) ||
@@ -89,7 +96,16 @@ Status ComputeResidentHistogramPlan(const ResidentHistogramInput &input,
     p.queue_capacity = static_cast<uint32_t>(queue_capacity);
     Arena scratch;
     auto &s = p.slot;
-    if (!scratch.Add(1, sizeof(resident::State), &s.state) ||
+    if (tiled) {
+      auto &t = plan.tiled;
+      if (!scratch.Add(1, sizeof(resident::TiledSlot), &s.state) ||
+          !scratch.Add(maximum_predictors * 256, sizeof(uint32_t), &t.parent) ||
+          !scratch.Add(maximum_predictors, sizeof(uint32_t), &t.parent_extra) ||
+          !scratch.Add(maximum_properties * 256, sizeof(uint32_t), &t.occupancy) ||
+          !scratch.Add(maximum_properties * 256, sizeof(uint32_t), &t.bin_map) ||
+          !scratch.Add(maximum_properties, sizeof(resident::TiledProperty), &t.properties))
+        return Status::OutOfMemory("Tiled frontier summaries overflow");
+    } else if (!scratch.Add(1, sizeof(resident::State), &s.state) ||
         !scratch.Add(maximum_predictors * 256, sizeof(uint32_t), &s.parent) ||
         !scratch.Add(maximum_predictors, sizeof(uint32_t), &s.parent_extra) ||
         !scratch.Add(maximum_bins * 256, sizeof(uint32_t), &s.histogram) ||
@@ -100,15 +116,39 @@ Status ComputeResidentHistogramPlan(const ResidentHistogramInput &input,
     s.bytes = static_cast<uint32_t>((scratch.bytes + 255) & ~size_t{255});
     size_t available = std::min(input.maximum_scratch_bytes, size_t{UINT32_MAX});
     if (limits) available = std::min({available, limits->maximum_scratch_bytes, limits->maximum_buffer_bytes});
-    p.active_nodes = static_cast<uint32_t>(std::min({input.maximum_active_nodes, queue_capacity, available / s.bytes}));
+    // Reserve enough pool space for the worst legal single node. Additional
+    // nodes retain summaries while waiting for this pool, with guaranteed
+    // progress and no data-dependent host allocation or resubmission.
+    const size_t task_bytes = tiled ? sizeof(resident::TiledTask) * (1 + maximum_properties) + sizeof(uint32_t) : 0;
+    const size_t reserve = tiled ? maximum_histogram + 3 * 255 : 0;
+    if (available < reserve) return Status::Unsupported("Tiled frontier scratch cannot hold one histogram");
+    p.active_nodes = static_cast<uint32_t>(std::min({input.maximum_active_nodes, queue_capacity,
+        (available - reserve) / (s.bytes + task_bytes)}));
     if (!p.active_nodes) return Status::Unsupported("Frontier scratch cannot hold one node");
     plan.scratch_bytes = p.active_nodes * size_t(s.bytes);
-    if (!arena.Add(1, sizeof(resident::FrontierControl), &p.control) ||
+    if (!arena.Add(1, tiled ? sizeof(resident::TiledControl) : sizeof(resident::FrontierControl), &p.control) ||
         !arena.Add(queue_capacity, sizeof(resident::NodeRef), &p.queue) ||
         !arena.Add(p.active_nodes, s.bytes, &p.scratch) ||
         !plan.publication.AddVector<DecisionNode>(plan.maximum_nodes, VectorCapacityPolicy::kFreshExact) ||
         !plan.publication.AddVector<std::pair<TreeIndex, TreeIndex>>(kMaximumTreeDepth + 1, VectorCapacityPolicy::kFreshExact))
       return Status::OutOfMemory("Frontier storage overflow");
+    if (tiled) {
+      auto &t = plan.tiled;
+      t.frontier = p;
+      const size_t tasks_begin = arena.bytes;
+      if (!arena.Add(p.active_nodes, sizeof(resident::TiledTask), &t.row_tasks) ||
+          !arena.Add(p.active_nodes * maximum_properties, sizeof(resident::TiledTask), &t.jobs) ||
+          !arena.Add(p.active_nodes, sizeof(uint32_t), &t.selected))
+        return Status::OutOfMemory("Tiled frontier tasks overflow");
+      plan.scratch_bytes += ((arena.bytes + 255) & ~size_t{255}) - tasks_begin;
+      t.histogram_bytes = static_cast<uint32_t>(std::min(available - plan.scratch_bytes,
+          p.active_nodes * maximum_histogram) & ~size_t{3});
+      if (t.histogram_bytes < maximum_histogram)
+        return Status::Unsupported("Tiled frontier scratch cannot guarantee progress");
+      if (!arena.Add(t.histogram_bytes, 1, &t.histogram))
+        return Status::OutOfMemory("Tiled frontier histogram overflow");
+      plan.scratch_bytes += t.histogram_bytes;
+    }
   }
   if (auto s = ComputeHistogramFittingPreparationPlan(std::span(shapes).first(plan.fits),
                                                        &plan.prepared, limits); !s.ok()) return s;

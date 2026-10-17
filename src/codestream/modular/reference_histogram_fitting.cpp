@@ -100,7 +100,8 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
     return Status::Ok();
   if (requests.size() > kMaximumHistogramFittingFits || !participants)
     return Invalid();
-  const bool frontier = options.fitting_backend == ReferenceFittingBackend::kGpuFrontier;
+  const bool tiled = options.fitting_backend == ReferenceFittingBackend::kGpuTiledFrontier;
+  const bool frontier = tiled || options.fitting_backend == ReferenceFittingBackend::kGpuFrontier;
   const bool resident = options.fitting_backend == ReferenceFittingBackend::kGpuResident || frontier;
   if (resident && (active_histogram_fitting_profile || options.fitting_gpu_profile))
     return Status::Unsupported("Resident fitting has complete-call diagnostics only");
@@ -293,6 +294,7 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
       if (!count) continue;
       ResidentHistogramInput input{std::span(batch).first(count)};
       if (frontier) input.executor = ResidentHistogramExecutor::kFrontier;
+      if (tiled) input.executor = ResidentHistogramExecutor::kTiledFrontier;
       ResidentHistogramPlan plan;
       const auto limits = op->histogram_fitting_limits();
       if (auto s = ComputeResidentHistogramPlan(input, &plan, &limits); !s.ok()) return s;

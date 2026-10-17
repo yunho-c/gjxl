@@ -10,7 +10,7 @@ namespace {
 using namespace histogram_fitting_test;
 size_t fits = 0, failures = 0;
 ResidentHistogramExecutor executor = ResidentHistogramExecutor::kDepthFirst;
-size_t active_nodes = 128, rounds = 16, same_fit_peak = 0;
+size_t active_nodes = 128, rounds = 16, same_fit_peak = 0, deferred_peak = 0;
 ResidentHistogramInput Input(std::span<const ResidentHistogramRequest> requests, bool capture = false) {
   ResidentHistogramInput input{requests, capture};
   input.executor = executor;
@@ -63,10 +63,16 @@ void Case(GpuBackend &gpu, const std::vector<HistogramTrainingSamples> &samples,
   Ok(QueryGpuModularHistogramFitting(gpu)->FitHistogramTrees(input, &result));
   Check(gpu.stats().committed_submissions == before + result.submissions && result.submissions,
         "Resident fitting submission count differs");
-  if (executor == ResidentHistogramExecutor::kFrontier) {
+  if (executor != ResidentHistogramExecutor::kDepthFirst) {
     Check(result.maximum_active_nodes <= plan.frontier.active_nodes && result.frontier_rounds > 0,
           "Frontier exceeded its admitted active slots");
     same_fit_peak = std::max(same_fit_peak, result.maximum_same_fit_nodes);
+    deferred_peak = std::max(deferred_peak, result.maximum_deferred_nodes);
+    if (executor == ResidentHistogramExecutor::kTiledFrontier) {
+      Check(plan.scratch_bytes <= input.maximum_scratch_bytes &&
+            result.maximum_histogram_bytes <= plan.tiled.histogram_bytes,
+            "Tiled histogram pool exceeded its storage contract");
+    }
   } else Check(result.submissions == 1, "Depth-first fitting added submissions");
   Check(result.trees.size() == expected.size() && result.row_offsets.size() == expected.size() + 1,
         "Resident fitting omitted results");
@@ -152,7 +158,7 @@ void Failures(GpuBackend &gpu) {
   Ok(op->FitHistogramTrees(Input({&request, 1}), &recovered));
   std::vector<uint32_t> order;
   Check(recovered.trees[0] == Oracle(samples, request.learning, &order), "Resident failure recovery differs");
-  if (executor == ResidentHistogramExecutor::kFrontier) {
+  if (executor != ResidentHistogramExecutor::kDepthFirst) {
     auto invalid = Input({&request, 1});
     invalid.maximum_active_nodes = 0;
     Check(!op->FitHistogramTrees(invalid, &result).ok(), "Zero frontier slots accepted"); intact();
@@ -161,6 +167,11 @@ void Failures(GpuBackend &gpu) {
           "Frontier exceeded its scratch allowance"); intact();
     auto bounded = Input({&request, 1});
     bounded.maximum_scratch_bytes = plan.frontier.slot.bytes * 3;
+    if (executor == ResidentHistogramExecutor::kTiledFrontier) {
+      bounded.maximum_active_nodes = 3;
+      // The joint pool must fit one worst-case node, in addition to summaries.
+      bounded.maximum_scratch_bytes = 8 * 1024 * 1024;
+    }
     ResidentHistogramPlan bounded_plan;
     Ok(ComputeResidentHistogramPlan(bounded, &bounded_plan));
     Check(bounded_plan.frontier.active_nodes == 3, "Scratch allowance did not bound active nodes");
@@ -202,8 +213,8 @@ void Failures(GpuBackend &gpu) {
 }
 }
 int main(int argc, char **argv) try {
-  Check(argc == 1 || (argc == 2 && std::string_view(argv[1]) == "--frontier"), "Unknown resident test mode");
-  if (argc == 2) executor = ResidentHistogramExecutor::kFrontier;
+  Check(argc == 1 || (argc == 2 && (std::string_view(argv[1]) == "--frontier" || std::string_view(argv[1]) == "--tiled")), "Unknown resident test mode");
+  if (argc == 2) executor = std::string_view(argv[1]) == "--tiled" ? ResidentHistogramExecutor::kTiledFrontier : ResidentHistogramExecutor::kFrontier;
   std::unique_ptr<GpuBackend> gpu;
   Ok(CreateEmbeddedMetalBackend({}, &gpu));
   std::cout << "Resident histogram device: " << gpu->name() << std::endl;
@@ -239,7 +250,17 @@ int main(int argc, char **argv) try {
   for (size_t i = 0; i < reordered.weights.size(); ++i)
     reordered.static_values[0][i] = (i * 13) % 256;
   Case(*gpu, {reordered});
-  if (executor == ResidentHistogramExecutor::kFrontier) {
+  if (executor == ResidentHistogramExecutor::kTiledFrontier) {
+    // Full bin and symbol spans force pool deferral. Each 512-row hash tile
+    // also exercises collisions, repeated keys and a partial final tile.
+    auto dense = Fixture(2, 1025, 14);
+    for (size_t p = 0; p < dense.property_count - dense.static_property_count; ++p)
+      for (size_t i = 0; i < dense.weights.size(); ++i)
+        dense.values[p][i] = static_cast<uint8_t>((i * (2 * p + 1)) % (p == 13 ? 16 : 256));
+    Case(*gpu, {dense, dense, dense});
+    Check(deferred_peak >= 2, "Tiled pool deferral was not exercised");
+  }
+  if (executor != ResidentHistogramExecutor::kDepthFirst) {
     for (size_t width : {size_t{1}, size_t{3}, size_t{17}}) {
       active_nodes = width; rounds = width == 1 ? 1 : 3;
       Case(*gpu, {Fixture(0, 129, 2)});

@@ -50,7 +50,8 @@ Status PrepareReferenceModularFrame(PackedModularImageView input,
        options.fitting_backend != ReferenceFittingBackend::kGpu &&
        options.fitting_backend != ReferenceFittingBackend::kAuto &&
        options.fitting_backend != ReferenceFittingBackend::kGpuResident &&
-       options.fitting_backend != ReferenceFittingBackend::kGpuFrontier) ||
+       options.fitting_backend != ReferenceFittingBackend::kGpuFrontier &&
+       options.fitting_backend != ReferenceFittingBackend::kGpuTiledFrontier) ||
       (options.buffering != ReferenceBuffering::kAutomatic &&
        options.buffering != ReferenceBuffering::kBuffered) ||
       (options.predictors != ReferencePredictors::kBest &&
@@ -69,7 +70,8 @@ Status PrepareReferenceModularFrame(PackedModularImageView input,
     return Status::Unsupported("Backend does not support histogram workflow stream processing");
   if ((options.fitting_backend == ReferenceFittingBackend::kGpu ||
        options.fitting_backend == ReferenceFittingBackend::kGpuResident ||
-       options.fitting_backend == ReferenceFittingBackend::kGpuFrontier) &&
+       options.fitting_backend == ReferenceFittingBackend::kGpuFrontier ||
+       options.fitting_backend == ReferenceFittingBackend::kGpuTiledFrontier) &&
       (!options.gpu || !histogram_gpu_internal::QueryGpuModularHistogramFitting(*options.gpu)))
     return Status::Unsupported("Backend does not support native histogram fitting");
   if ((options.fitting_backend == ReferenceFittingBackend::kGpu ||

@@ -30,6 +30,7 @@ struct Observation {
   double wall = 0, cpu = 0, restore = 0, gpu_call = 0;
   uint64_t gpu_ns = 0;
   size_t submissions = 0, rounds = 0, ready = 0, active = 0, same_fit = 0;
+  size_t histogram = 0, deferred = 0;
   size_t input_backing = 0, peak_backing = 0, incremental_peak = 0, nodes = 0;
 };
 Observation Run(GpuBackend &gpu, std::span<const ResidentHistogramRequest> requests,
@@ -72,7 +73,7 @@ Observation Run(GpuBackend &gpu, std::span<const ResidentHistogramRequest> reque
       const auto start = Clock::now();
       ResidentHistogramInput input = controls;
       input.requests = requests.first(gpu_count);
-      input.executor = mode == 2 ? ResidentHistogramExecutor::kDepthFirst : ResidentHistogramExecutor::kFrontier;
+      input.executor = mode == 2 ? ResidentHistogramExecutor::kDepthFirst : controls.executor;
       Ok(QueryGpuModularHistogramFitting(gpu)->FitHistogramTrees(input, &resident));
       result.gpu_call = Seconds(start);
     };
@@ -101,6 +102,7 @@ Observation Run(GpuBackend &gpu, std::span<const ResidentHistogramRequest> reque
     result.submissions = resident.submissions; result.rounds = resident.frontier_rounds;
     result.ready = resident.maximum_ready_nodes;
     result.active = resident.maximum_active_nodes; result.same_fit = resident.maximum_same_fit_nodes;
+    result.histogram = resident.maximum_histogram_bytes; result.deferred = resident.maximum_deferred_nodes;
     result.peak_backing = budget.snapshot().peak_backing_bytes;
     result.incremental_peak = result.peak_backing - result.input_backing;
   }
@@ -111,7 +113,7 @@ Observation Run(GpuBackend &gpu, std::span<const ResidentHistogramRequest> reque
 }
 }
 int main(int argc, char **argv) try {
-  Check(argc >= 3 && argc <= 10, "resident_fitting_probe INPUT.pam|SAMPLES.gjfs OUTPUT.json [fits=16 [repeats=6 [tile=128 [cpu-frontier [active_nodes=128 [rounds=16 [scratch_mib=64]]]]]]]");
+  Check(argc >= 3 && argc <= 10, "resident_fitting_probe INPUT.pam|SAMPLES.gjfs OUTPUT.json [fits=16 [repeats=6 [tile=128 [cpu-frontier|cpu-tiled [active_nodes=128 [rounds=16 [scratch_mib=64]]]]]]]");
   Check(!std::filesystem::exists(argv[2]), "Refusing to replace probe output");
   size_t fits = argc > 3 ? std::stoul(argv[3]) : 16;
   const size_t repeats = argc > 4 ? std::stoul(argv[4]) : 6;
@@ -126,7 +128,9 @@ int main(int argc, char **argv) try {
         scratch_mib > 0 && scratch_mib <= 512, "Invalid frontier probe controls");
   controls.maximum_scratch_bytes = scratch_mib * 1024 * 1024;
   const bool from_archive = std::filesystem::path(argv[1]).extension() == ".gjfs";
-  Check(!cpu_frontier_only || std::string_view(argv[6]) == "cpu-frontier", "Unknown replay modes");
+  Check(!cpu_frontier_only || std::string_view(argv[6]) == "cpu-frontier" || std::string_view(argv[6]) == "cpu-tiled", "Unknown replay modes");
+  const bool tiled = cpu_frontier_only && std::string_view(argv[6]) == "cpu-tiled";
+  controls.executor = tiled ? ResidentHistogramExecutor::kTiledFrontier : ResidentHistogramExecutor::kFrontier;
   Check(fits >= 2 && fits <= 64 && repeats > 0 && repeats <= 30 && tile > 0 && tile <= 256,
         "Invalid fitting probe dimensions");
   std::vector<PreparedHistogramSamples> prepared;
@@ -172,15 +176,14 @@ int main(int argc, char **argv) try {
   }
   ResidentHistogramInput input = controls;
   input.requests = requests;
-  input.executor = ResidentHistogramExecutor::kFrontier;
   const auto limits = QueryGpuModularHistogramFitting(*gpu)->histogram_fitting_limits();
   ResidentHistogramPlan plan; Ok(ComputeResidentHistogramPlan(input, &plan, &limits));
   std::ofstream out(argv[2]); out << std::setprecision(17) << std::boolalpha;
-  out << "{\"schema\":4,\"input\":" << std::quoted(argv[1]) << ",\"fits\":" << fits
+  out << "{\"schema\":5,\"input\":" << std::quoted(argv[1]) << ",\"fits\":" << fits
       << ",\"metallib\":" << std::quoted(metallib ? metallib : "embedded")
       << ",\"source_kind\":" << std::quoted(from_archive ? "prepared_archive" : "photo_tiles")
       << ",\"tile\":" << (from_archive ? 0 : tile) << ",\"rows\":" << rows << ",\"population\":" << population
-      << ",\"planned_gpu_executor\":\"frontier\""
+      << ",\"planned_gpu_executor\":" << std::quoted(tiled ? "tiled_frontier" : "frontier")
       << ",\"requested_active_nodes\":" << controls.maximum_active_nodes
       << ",\"rounds_per_submission\":" << controls.rounds_per_submission
       << ",\"maximum_scratch_bytes\":" << controls.maximum_scratch_bytes
@@ -188,12 +191,14 @@ int main(int argc, char **argv) try {
       << ",\"planned_active_nodes\":" << plan.frontier.active_nodes
       << ",\"planned_scratch_bytes\":" << plan.scratch_bytes
       << ",\"scratch_slot_bytes\":" << plan.frontier.slot.bytes
+      << ",\"histogram_pool_bytes\":" << plan.tiled.histogram_bytes
       << ",\"planned_gpu_work_bytes\":" << plan.work_bytes
       << ",\"planned_gpu_input_bytes\":" << plan.prepared.storage_bytes
       << ",\"planned_gpu_peak_bytes\":" << plan.working.peak_bytes
       << ",\"locations\":[";
   for (size_t i = 0; i < locations.size(); ++i) out << (i ? "," : "") << '[' << locations[i][0] << ',' << locations[i][1] << ',' << locations[i][2] << ']';
   const char *names[] = {"cpu1", "cpu14", "resident_depth_first", "frontier", "split_sequential", "split_concurrent"};
+  if (tiled) names[3] = "tiled_frontier";
   out << "],\"boundary\":\"Complete fitting including validation, scratch, partition, node/queue management, canonicalization and publication. GPU upload included. Input sampling, CPU input restoration, backend/domain and worker-pool creation excluded. Concurrent thread launch/join included. CPU seconds are process CPU time.\",\"observations\":[";
   bool comma = false;
   for (size_t iteration = 0; iteration <= repeats; ++iteration) {
@@ -207,6 +212,7 @@ int main(int argc, char **argv) try {
           << ",\"gpu_submissions\":" << r.submissions << ",\"frontier_rounds\":" << r.rounds
           << ",\"maximum_ready_nodes\":" << r.ready
           << ",\"maximum_active_nodes\":" << r.active << ",\"maximum_same_fit_nodes\":" << r.same_fit
+          << ",\"maximum_histogram_bytes\":" << r.histogram << ",\"maximum_deferred_nodes\":" << r.deferred
           << ",\"tree_nodes\":" << r.nodes << ",\"input_and_pool_backing_bytes\":" << r.input_backing
           << ",\"peak_backing_bytes\":" << r.peak_backing << ",\"incremental_peak_bytes\":" << r.incremental_peak << '}';
       comma = true; out.flush();

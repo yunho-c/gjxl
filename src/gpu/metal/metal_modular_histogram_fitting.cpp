@@ -638,8 +638,9 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
   ResidentHistogramPlan plan;
   const auto limits = histogram_fitting_limits();
   if (auto s = ComputeResidentHistogramPlan(input, &plan, &limits); !s.ok()) return s;
-  const bool frontier = input.executor == ResidentHistogramExecutor::kFrontier;
-  auto *pipeline = histogram_fitting_pipelines_[frontier ? 8 : 5].get();
+  const bool tiled = input.executor == ResidentHistogramExecutor::kTiledFrontier;
+  const bool frontier = tiled || input.executor == ResidentHistogramExecutor::kFrontier;
+  auto *pipeline = histogram_fitting_pipelines_[tiled ? 16 : frontier ? 8 : 5].get();
   if (pipeline->threadExecutionWidth() != 32 ||
       pipeline->maxTotalThreadsPerThreadgroup() < 128)
     return Status::Unsupported("Resident histogram prototype requires four 32-lane SIMD groups");
@@ -710,18 +711,21 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
 #endif
     struct FrontierContext {
       MTL::Buffer *prepared, *work;
-      std::array<MTL::ComputePipelineState *, 3> pipelines;
+      std::array<MTL::ComputePipelineState *, 10> pipelines;
       gjxl_histogram_resident::FrontierParams params;
+      gjxl_histogram_resident::TiledParams tiled_params;
       size_t rounds;
-      bool initialize;
-    } c{context.prepared, context.work,
-        {histogram_fitting_pipelines_[6].get(), histogram_fitting_pipelines_[7].get(), pipeline},
-        plan.frontier, input.rounds_per_submission, true};
+      bool initialize, tiled;
+    } c{context.prepared, context.work, {}, plan.frontier, plan.tiled,
+        input.rounds_per_submission, true, tiled};
+    for (size_t i = 0; i < (tiled ? 10 : 3); ++i)
+      c.pipelines[i] = histogram_fitting_pipelines_[(tiled ? 9 : 6) + i].get();
     const auto encode_frontier = [](MetalBackend &, MTL::ComputeCommandEncoder *encoder, const void *opaque) {
       const auto &c = *static_cast<const FrontierContext *>(opaque);
       encoder->setBuffer(c.prepared, 0, 0);
       encoder->setBuffer(c.work, 0, 1);
-      encoder->setBytes(&c.params, sizeof(c.params), 2);
+      if (c.tiled) encoder->setBytes(&c.tiled_params, sizeof(c.tiled_params), 2);
+      else encoder->setBytes(&c.params, sizeof(c.params), 2);
       const MTL::Resource *dependencies[] = {c.work};
       const auto launch = [&](size_t stage, size_t groups) {
         encoder->setComputePipelineState(c.pipelines[stage]);
@@ -729,9 +733,28 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
         DispatchMetalThreadgroups(encoder, MTL::Size(groups, 1, 1), MTL::Size(128, 1, 1));
         encoder->memoryBarrier(dependencies, 1);
       };
+      const auto indirect = [&](size_t stage, size_t offset) {
+        encoder->setComputePipelineState(c.pipelines[stage]);
+        RecordMetalComputePipelineState(c.pipelines[stage]);
+        DispatchMetalIndirectThreadgroups(encoder, c.work,
+            c.params.control + offset, MTL::Size(128, 1, 1));
+        encoder->memoryBarrier(dependencies, 1);
+      };
       if (c.initialize) launch(0, c.params.fits);
       for (size_t round = 0; round < c.rounds; ++round) {
         launch(1, 1);
+        if (c.tiled) {
+          using gjxl_histogram_resident::TiledControl;
+          launch(2, c.params.active_nodes);
+          indirect(3, offsetof(TiledControl, stats_dispatch));
+          launch(4, c.params.active_nodes);
+          launch(5, 1);
+          indirect(6, offsetof(TiledControl, jobs_dispatch));
+          indirect(7, offsetof(TiledControl, collect_dispatch));
+          indirect(8, offsetof(TiledControl, jobs_dispatch));
+          indirect(9, offsetof(TiledControl, finish_dispatch));
+          continue;
+        }
         encoder->setComputePipelineState(c.pipelines[2]);
         RecordMetalComputePipelineState(c.pipelines[2]);
         DispatchMetalIndirectThreadgroups(encoder, c.work,
@@ -739,7 +762,7 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
         encoder->memoryBarrier(dependencies, 1);
       }
     };
-    size_t previous_head = 0;
+    size_t previous_progress = 0;
     for (;;) {
       Pending pending;
 #if defined(GJXL_MODULAR_FRONTIER_DIAGNOSTICS)
@@ -759,20 +782,27 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
       // Only coarse progress/status crosses this boundary. Nodes, summaries,
       // decisions, membership and the next ready queue remain on the GPU.
       const auto &control = *reinterpret_cast<const gjxl_histogram_resident::FrontierControl *>(completed.data() + plan.frontier.control);
+      const auto *tiled_control = tiled ? reinterpret_cast<const gjxl_histogram_resident::TiledControl *>(completed.data() + plan.frontier.control) : nullptr;
+      const size_t progress = tiled ? tiled_control->completed : control.head;
 #if defined(GJXL_MODULAR_FRONTIER_DIAGNOSTICS)
       diagnostic.Record(candidate.submissions - 1, duration, control, plan, completed);
 #endif
       if (control.status & gjxl_histogram_resident::kCapacityError)
         return Status::Unsupported("Frontier fit exceeds tree capacity or depth");
-      if (control.status || control.head <= previous_head || control.head > control.tail ||
-          control.tail > plan.frontier.queue_capacity)
+      if (control.status || progress <= previous_progress || control.head > control.tail ||
+          control.tail > plan.frontier.queue_capacity ||
+          (tiled && (tiled_control->live > plan.frontier.active_nodes || progress + tiled_control->live != control.head)))
         return Status::DeviceError("Invalid resident frontier progress or partition");
       candidate.frontier_rounds = control.rounds;
       candidate.maximum_ready_nodes = control.maximum_ready;
       candidate.maximum_active_nodes = control.maximum_active;
       candidate.maximum_same_fit_nodes = control.maximum_same_fit;
-      if (control.head == control.tail) break;
-      previous_head = control.head;
+      if (tiled) {
+        candidate.maximum_histogram_bytes = tiled_control->histogram_peak;
+        candidate.maximum_deferred_nodes = tiled_control->maximum_deferred;
+      }
+      if (control.head == control.tail && (!tiled || !tiled_control->live)) break;
+      previous_progress = progress;
       c.initialize = false;
     }
   }

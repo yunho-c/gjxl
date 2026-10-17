@@ -47,4 +47,35 @@ struct FrontierParams {
 static_assert(sizeof(NodeRef) == 8);
 static_assert(sizeof(FrontierControl) == 48);
 static_assert(sizeof(FrontierParams) == 56);
+// The tiled executor retains summaries in bounded active slots while a shared
+// histogram pool admits a subset. No node is rescanned just because the pool
+// was full. Only the original-bin dimension is compacted; symbol indices and
+// the four-lane floating-point entropy reduction remain unchanged.
+enum : Word { kTiledFree = 0, kTiledNew = 1, kTiledPending = 2, kTiledSelected = 3,
+              kTiledRows = 512, kTiledHashEntries = 1024 };
+struct TiledSlot {
+  NodeRef ref;
+  Word stage, symbols, parent_index, needed, low_count, high_count;
+  float base_cost;
+};
+struct TiledProperty {
+  Word bins, histogram;
+  gjxl_histogram_fitting::Candidate winners[4];
+};
+struct TiledTask { Word slot, property, first, end; };
+struct TiledControl {
+  FrontierControl frontier; // common diagnostic counters/status/ready queue
+  Word live, completed, row_tasks, jobs, selected, histogram_peak, maximum_deferred;
+  Word stats_dispatch[3], collect_dispatch[3], jobs_dispatch[3], finish_dispatch[3];
+};
+struct TiledParams {
+  FrontierParams frontier;
+  Word row_tasks, jobs, selected, histogram, histogram_bytes;
+  Word parent, parent_extra, occupancy, bin_map, properties;
+};
+static_assert(sizeof(TiledSlot) == 36);
+static_assert(sizeof(TiledProperty) == 136);
+static_assert(sizeof(TiledTask) == 16);
+static_assert(sizeof(TiledControl) == 124);
+static_assert(sizeof(TiledParams) == 96);
 } // namespace gjxl_histogram_resident

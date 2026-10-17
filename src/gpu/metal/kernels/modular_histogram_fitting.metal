@@ -404,3 +404,4 @@ kernel void gjxl_histogram_select(device const uchar *prepared [[buffer(0)]],
 
 #include "modular_resident_histogram_fitting.metal"
 #include "modular_frontier_histogram_fitting.metal"
+#include "modular_tiled_frontier_histogram_fitting.metal"

@@ -7,6 +7,11 @@ implementation readiness (2.2)” conversation distinguishes ready-node
 parallelism from residency and recommends a narrow scalar frontier reference,
 exact canonical numbering, and complete-fit measurements before integration.
 
+The subsequent [tiled-frontier prototype](gpu-frontier-tiled-histogram-fitting.md)
+adds a separate executor with GPU row tasks, compact histogram storage and
+separate scoring/partition phases. This report describes the original
+monolithic frontier implementation and its historical measurements.
+
 ## Execution and exactness
 
 The resident operation now offers `kDepthFirst` and `kFrontier` executors.

@@ -72,7 +72,10 @@ public:
          << ",\"rounds\":" << c.rounds << ",\"last_count\":" << c.count
          << ",\"maximum_ready\":" << c.maximum_ready << "}\n";
     log_.flush();
-    if (!c.status && c.head == c.tail && std::getenv("GJXL_FRONTIER_DUMP_NODES")) {
+    const bool tiled = plan.tiled.frontier.active_nodes != 0;
+    const bool idle = !tiled || !reinterpret_cast<const gjxl_histogram_resident::TiledControl *>(
+        completed.data() + plan.frontier.control)->live;
+    if (!c.status && c.head == c.tail && idle && std::getenv("GJXL_FRONTIER_DUMP_NODES")) {
       const auto path = directory_ / "nodes.jsonl";
       if (std::filesystem::exists(path)) throw std::runtime_error("Node diagnostic already exists");
       std::ofstream nodes(path); nodes.exceptions(std::ios::badbit | std::ios::failbit);

@@ -1164,6 +1164,7 @@ add_custom_command(OUTPUT "${GJXL_HISTOGRAM_FITTING_METAL_IR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/ops/modular_histogram_fitting_layout.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/modular_resident_histogram_fitting.metal"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/modular_frontier_histogram_fitting.metal"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/modular_tiled_frontier_histogram_fitting.metal"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/ops/modular_resident_histogram_layout.h"
   COMMENT "Compiling exact native Metal histogram fitting" VERBATIM)
 
@@ -2529,6 +2530,8 @@ if(GJXL_BUILD_TESTS)
     set_tests_properties(modular_reference_resident PROPERTIES TIMEOUT 180)
     add_test(NAME modular_reference_frontier COMMAND gjxl_modular_reference_hybrid_test --frontier)
     set_tests_properties(modular_reference_frontier PROPERTIES TIMEOUT 180)
+    add_test(NAME modular_reference_tiled_frontier COMMAND gjxl_modular_reference_hybrid_test --tiled)
+    set_tests_properties(modular_reference_tiled_frontier PROPERTIES TIMEOUT 180)
     set_tests_properties(modular_reference_combined PROPERTIES TIMEOUT 300)
     add_test(NAME modular_reference_pipeline COMMAND gjxl_modular_reference_hybrid_test --pipeline)
     set_tests_properties(modular_reference_pipeline PROPERTIES TIMEOUT 180)
@@ -3928,6 +3931,8 @@ if(GJXL_BUILD_TESTS)
   set_tests_properties(metal_modular_resident_histogram PROPERTIES TIMEOUT 180)
   add_test(NAME metal_modular_frontier_histogram COMMAND gjxl_metal_modular_resident_histogram_test --frontier)
   set_tests_properties(metal_modular_frontier_histogram PROPERTIES TIMEOUT 180)
+  add_test(NAME metal_modular_tiled_frontier_histogram COMMAND gjxl_metal_modular_resident_histogram_test --tiled)
+  set_tests_properties(metal_modular_tiled_frontier_histogram PROPERTIES TIMEOUT 180)
   add_executable(gjxl_modular_resident_fitting_probe tools/modular_reference_learning/resident_fitting_probe.cpp src/io/pnm.cpp)
   target_link_libraries(gjxl_modular_resident_fitting_probe PRIVATE gjxl_codestream gjxl_metal)
 
