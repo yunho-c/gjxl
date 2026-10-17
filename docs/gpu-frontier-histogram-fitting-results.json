@@ -1,0 +1,1616 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "prototype_commit": "11bd897",
+  "power": "AC",
+  "prepared": {
+    "provenance": {
+      "manifest": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-prototype/prepared-study/manifest.json",
+      "sha256": "a1fdc8fad3965eae27a81633c0074868fbe0a0bc9938fa59f45203affe080af7",
+      "revision": "11bd897330673889f79fc302387f667ad1278238",
+      "started_unix": 1792201025.8705258,
+      "finished_unix": 1792201047.27535,
+      "rejected": 0
+    },
+    "warmups": 1,
+    "repetitions": 6,
+    "cases": [
+      {
+        "image": "photo-large-1029",
+        "input_sha256": "a1c487b0160d8f3e8cb86753131b919ac3de28e908fde757050ebccdb4407b6d",
+        "rows": 171424,
+        "fits": 16,
+        "tile": 128,
+        "boundary": "Complete fitting including validation, scratch, partition, node/queue management, canonicalization and publication. GPU upload included. Input sampling, CPU input restoration, backend/domain and worker-pool creation excluded. Concurrent thread launch/join included. CPU seconds are process CPU time.",
+        "planned_frontier_peak_bytes": 64336616,
+        "modes": {
+          "cpu1": {
+            "wall_seconds": {
+              "median": 0.26779922899999997,
+              "minimum": 0.241325208,
+              "maximum": 0.285930375
+            },
+            "process_cpu_seconds": {
+              "median": 0.26700100000000004,
+              "minimum": 0.241038,
+              "maximum": 0.285679
+            },
+            "input_restore_seconds": {
+              "median": 0.0002066875,
+              "minimum": 0.000177166,
+              "maximum": 0.000252542
+            },
+            "gpu_call_seconds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "gpu_nanoseconds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 4907080.0,
+              "minimum": 4907080,
+              "maximum": 4907080
+            },
+            "peak_backing_bytes": {
+              "median": 11600672.0,
+              "minimum": 11600672,
+              "maximum": 11600672
+            },
+            "incremental_peak_bytes": {
+              "median": 6693592.0,
+              "minimum": 6693592,
+              "maximum": 6693592
+            },
+            "gpu_submissions": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "frontier_rounds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "maximum_active_nodes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "maximum_same_fit_nodes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "tree_nodes": {
+              "median": 4426.0,
+              "minimum": 4426,
+              "maximum": 4426
+            }
+          },
+          "cpu14": {
+            "wall_seconds": {
+              "median": 0.035339354,
+              "minimum": 0.034597209,
+              "maximum": 0.044658292
+            },
+            "process_cpu_seconds": {
+              "median": 0.302205,
+              "minimum": 0.295011,
+              "maximum": 0.324105
+            },
+            "input_restore_seconds": {
+              "median": 0.000181437,
+              "minimum": 0.000169292,
+              "maximum": 0.000193583
+            },
+            "gpu_call_seconds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "gpu_nanoseconds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 4907184.0,
+              "minimum": 4907184,
+              "maximum": 4907184
+            },
+            "peak_backing_bytes": {
+              "median": 16833536.0,
+              "minimum": 16833536,
+              "maximum": 16833536
+            },
+            "incremental_peak_bytes": {
+              "median": 11926352.0,
+              "minimum": 11926352,
+              "maximum": 11926352
+            },
+            "gpu_submissions": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "frontier_rounds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "maximum_active_nodes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "maximum_same_fit_nodes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "tree_nodes": {
+              "median": 4426.0,
+              "minimum": 4426,
+              "maximum": 4426
+            }
+          },
+          "frontier": {
+            "wall_seconds": {
+              "median": 0.1573968335,
+              "minimum": 0.147257167,
+              "maximum": 0.167556
+            },
+            "process_cpu_seconds": {
+              "median": 0.0033464999999999996,
+              "minimum": 0.003097,
+              "maximum": 0.003657
+            },
+            "input_restore_seconds": {
+              "median": 2.05e-08,
+              "minimum": 0,
+              "maximum": 8.3e-08
+            },
+            "gpu_call_seconds": {
+              "median": 0.157396021,
+              "minimum": 0.14725625,
+              "maximum": 0.167555083
+            },
+            "gpu_nanoseconds": {
+              "median": 153825914.5,
+              "minimum": 143462998,
+              "maximum": 163905123
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "peak_backing_bytes": {
+              "median": 59132936.0,
+              "minimum": 59132936,
+              "maximum": 59132936
+            },
+            "incremental_peak_bytes": {
+              "median": 59132936.0,
+              "minimum": 59132936,
+              "maximum": 59132936
+            },
+            "gpu_submissions": {
+              "median": 3.0,
+              "minimum": 3,
+              "maximum": 3
+            },
+            "frontier_rounds": {
+              "median": 41.0,
+              "minimum": 41,
+              "maximum": 42
+            },
+            "maximum_active_nodes": {
+              "median": 128.0,
+              "minimum": 128,
+              "maximum": 128
+            },
+            "maximum_same_fit_nodes": {
+              "median": 51.0,
+              "minimum": 50,
+              "maximum": 54
+            },
+            "tree_nodes": {
+              "median": 4426.0,
+              "minimum": 4426,
+              "maximum": 4426
+            }
+          },
+          "resident_depth_first": {
+            "wall_seconds": {
+              "median": 0.8588808125,
+              "minimum": 0.819049166,
+              "maximum": 0.9086615
+            },
+            "process_cpu_seconds": {
+              "median": 0.001928,
+              "minimum": 0.0017,
+              "maximum": 0.00208
+            },
+            "input_restore_seconds": {
+              "median": 2.05e-08,
+              "minimum": 0,
+              "maximum": 4.2e-08
+            },
+            "gpu_call_seconds": {
+              "median": 0.858878458,
+              "minimum": 0.819047208,
+              "maximum": 0.908659875
+            },
+            "gpu_nanoseconds": {
+              "median": 857023999.5,
+              "minimum": 817346291,
+              "maximum": 906589791
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "peak_backing_bytes": {
+              "median": 26578108.0,
+              "minimum": 26578108,
+              "maximum": 26578108
+            },
+            "incremental_peak_bytes": {
+              "median": 26578108.0,
+              "minimum": 26578108,
+              "maximum": 26578108
+            },
+            "gpu_submissions": {
+              "median": 1.0,
+              "minimum": 1,
+              "maximum": 1
+            },
+            "frontier_rounds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "maximum_active_nodes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "maximum_same_fit_nodes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "tree_nodes": {
+              "median": 4426.0,
+              "minimum": 4426,
+              "maximum": 4426
+            }
+          },
+          "split_concurrent": {
+            "wall_seconds": {
+              "median": 0.085974042,
+              "minimum": 0.080942709,
+              "maximum": 0.08939625
+            },
+            "process_cpu_seconds": {
+              "median": 0.1567325,
+              "minimum": 0.15297,
+              "maximum": 0.162964
+            },
+            "input_restore_seconds": {
+              "median": 9.18965e-05,
+              "minimum": 8.5708e-05,
+              "maximum": 0.000114417
+            },
+            "gpu_call_seconds": {
+              "median": 0.0859449585,
+              "minimum": 0.08090825,
+              "maximum": 0.089362709
+            },
+            "gpu_nanoseconds": {
+              "median": 83523957.5,
+              "minimum": 78348249,
+              "maximum": 86957082
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 2457700.0,
+              "minimum": 2457700,
+              "maximum": 2457700
+            },
+            "peak_backing_bytes": {
+              "median": 55842916.0,
+              "minimum": 55842916,
+              "maximum": 55842916
+            },
+            "incremental_peak_bytes": {
+              "median": 53385216.0,
+              "minimum": 53385216,
+              "maximum": 53385216
+            },
+            "gpu_submissions": {
+              "median": 2.0,
+              "minimum": 2,
+              "maximum": 2
+            },
+            "frontier_rounds": {
+              "median": 25.0,
+              "minimum": 24,
+              "maximum": 25
+            },
+            "maximum_active_nodes": {
+              "median": 128.0,
+              "minimum": 128,
+              "maximum": 128
+            },
+            "maximum_same_fit_nodes": {
+              "median": 57.0,
+              "minimum": 52,
+              "maximum": 58
+            },
+            "tree_nodes": {
+              "median": 4426.0,
+              "minimum": 4426,
+              "maximum": 4426
+            }
+          },
+          "split_sequential": {
+            "wall_seconds": {
+              "median": 0.1151403755,
+              "minimum": 0.110992291,
+              "maximum": 0.127452042
+            },
+            "process_cpu_seconds": {
+              "median": 0.158375,
+              "minimum": 0.155093,
+              "maximum": 0.217023
+            },
+            "input_restore_seconds": {
+              "median": 0.000115042,
+              "minimum": 0.0001045,
+              "maximum": 0.000127959
+            },
+            "gpu_call_seconds": {
+              "median": 0.0857084165,
+              "minimum": 0.08037975,
+              "maximum": 0.088194166
+            },
+            "gpu_nanoseconds": {
+              "median": 83063666.0,
+              "minimum": 78091332,
+              "maximum": 85630957
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 2457700.0,
+              "minimum": 2457700,
+              "maximum": 2457700
+            },
+            "peak_backing_bytes": {
+              "median": 49497196.0,
+              "minimum": 49497196,
+              "maximum": 49497196
+            },
+            "incremental_peak_bytes": {
+              "median": 47039496.0,
+              "minimum": 47039496,
+              "maximum": 47039496
+            },
+            "gpu_submissions": {
+              "median": 2.0,
+              "minimum": 2,
+              "maximum": 2
+            },
+            "frontier_rounds": {
+              "median": 25.0,
+              "minimum": 24,
+              "maximum": 25
+            },
+            "maximum_active_nodes": {
+              "median": 128.0,
+              "minimum": 128,
+              "maximum": 128
+            },
+            "maximum_same_fit_nodes": {
+              "median": 56.0,
+              "minimum": 54,
+              "maximum": 58
+            },
+            "tree_nodes": {
+              "median": 4426.0,
+              "minimum": 4426,
+              "maximum": 4426
+            }
+          }
+        }
+      },
+      {
+        "image": "photo-large-1039",
+        "input_sha256": "22f487129343ed6d403346653ef99900e2552728ba2e4f5c63c90d058132f302",
+        "rows": 171424,
+        "fits": 16,
+        "tile": 128,
+        "boundary": "Complete fitting including validation, scratch, partition, node/queue management, canonicalization and publication. GPU upload included. Input sampling, CPU input restoration, backend/domain and worker-pool creation excluded. Concurrent thread launch/join included. CPU seconds are process CPU time.",
+        "planned_frontier_peak_bytes": 64306664,
+        "modes": {
+          "cpu1": {
+            "wall_seconds": {
+              "median": 0.08649472899999999,
+              "minimum": 0.0826305,
+              "maximum": 0.089354084
+            },
+            "process_cpu_seconds": {
+              "median": 0.08583750000000001,
+              "minimum": 0.082516,
+              "maximum": 0.089219
+            },
+            "input_restore_seconds": {
+              "median": 0.0001777085,
+              "minimum": 0.000167042,
+              "maximum": 0.000195
+            },
+            "gpu_call_seconds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "gpu_nanoseconds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 4870288.0,
+              "minimum": 4870288,
+              "maximum": 4870288
+            },
+            "peak_backing_bytes": {
+              "median": 9597920.0,
+              "minimum": 9597920,
+              "maximum": 9597920
+            },
+            "incremental_peak_bytes": {
+              "median": 4727632.0,
+              "minimum": 4727632,
+              "maximum": 4727632
+            },
+            "gpu_submissions": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "frontier_rounds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "maximum_active_nodes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "maximum_same_fit_nodes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "tree_nodes": {
+              "median": 1372.0,
+              "minimum": 1372,
+              "maximum": 1372
+            }
+          },
+          "cpu14": {
+            "wall_seconds": {
+              "median": 0.0163726875,
+              "minimum": 0.016037166,
+              "maximum": 0.017900167
+            },
+            "process_cpu_seconds": {
+              "median": 0.10039300000000001,
+              "minimum": 0.097921,
+              "maximum": 0.102783
+            },
+            "input_restore_seconds": {
+              "median": 0.000180875,
+              "minimum": 0.0001515,
+              "maximum": 0.000290417
+            },
+            "gpu_call_seconds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "gpu_nanoseconds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 4870392.0,
+              "minimum": 4870392,
+              "maximum": 4870392
+            },
+            "peak_backing_bytes": {
+              "median": 16010360.0,
+              "minimum": 15611024,
+              "maximum": 16403552
+            },
+            "incremental_peak_bytes": {
+              "median": 11139968.0,
+              "minimum": 10740632,
+              "maximum": 11533160
+            },
+            "gpu_submissions": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "frontier_rounds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "maximum_active_nodes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "maximum_same_fit_nodes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "tree_nodes": {
+              "median": 1372.0,
+              "minimum": 1372,
+              "maximum": 1372
+            }
+          },
+          "frontier": {
+            "wall_seconds": {
+              "median": 0.0476406875,
+              "minimum": 0.047272875,
+              "maximum": 0.049433459
+            },
+            "process_cpu_seconds": {
+              "median": 0.0030975,
+              "minimum": 0.002603,
+              "maximum": 0.004263
+            },
+            "input_restore_seconds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 1.25e-07
+            },
+            "gpu_call_seconds": {
+              "median": 0.0476397915,
+              "minimum": 0.047271625,
+              "maximum": 0.049432209
+            },
+            "gpu_nanoseconds": {
+              "median": 44373936.5,
+              "minimum": 44186123,
+              "maximum": 44994499
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "peak_backing_bytes": {
+              "median": 59091752.0,
+              "minimum": 59091752,
+              "maximum": 59091752
+            },
+            "incremental_peak_bytes": {
+              "median": 59091752.0,
+              "minimum": 59091752,
+              "maximum": 59091752
+            },
+            "gpu_submissions": {
+              "median": 2.0,
+              "minimum": 2,
+              "maximum": 2
+            },
+            "frontier_rounds": {
+              "median": 18.0,
+              "minimum": 18,
+              "maximum": 18
+            },
+            "maximum_active_nodes": {
+              "median": 128.0,
+              "minimum": 128,
+              "maximum": 128
+            },
+            "maximum_same_fit_nodes": {
+              "median": 52.0,
+              "minimum": 50,
+              "maximum": 54
+            },
+            "tree_nodes": {
+              "median": 1372.0,
+              "minimum": 1372,
+              "maximum": 1372
+            }
+          },
+          "resident_depth_first": {
+            "wall_seconds": {
+              "median": 0.3849884995,
+              "minimum": 0.382308791,
+              "maximum": 0.392225083
+            },
+            "process_cpu_seconds": {
+              "median": 0.001765,
+              "minimum": 0.001643,
+              "maximum": 0.001952
+            },
+            "input_restore_seconds": {
+              "median": 4.15e-08,
+              "minimum": 0,
+              "maximum": 4.2e-08
+            },
+            "gpu_call_seconds": {
+              "median": 0.3849866035,
+              "minimum": 0.382306875,
+              "maximum": 0.39222225
+            },
+            "gpu_nanoseconds": {
+              "median": 383166624.5,
+              "minimum": 380613874,
+              "maximum": 390592083
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "peak_backing_bytes": {
+              "median": 26548028.0,
+              "minimum": 26548028,
+              "maximum": 26548028
+            },
+            "incremental_peak_bytes": {
+              "median": 26548028.0,
+              "minimum": 26548028,
+              "maximum": 26548028
+            },
+            "gpu_submissions": {
+              "median": 1.0,
+              "minimum": 1,
+              "maximum": 1
+            },
+            "frontier_rounds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "maximum_active_nodes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "maximum_same_fit_nodes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "tree_nodes": {
+              "median": 1372.0,
+              "minimum": 1372,
+              "maximum": 1372
+            }
+          },
+          "split_concurrent": {
+            "wall_seconds": {
+              "median": 0.031059167,
+              "minimum": 0.03082725,
+              "maximum": 0.031232834
+            },
+            "process_cpu_seconds": {
+              "median": 0.0531175,
+              "minimum": 0.049879,
+              "maximum": 0.063346
+            },
+            "input_restore_seconds": {
+              "median": 8.77085e-05,
+              "minimum": 7.85e-05,
+              "maximum": 0.000111542
+            },
+            "gpu_call_seconds": {
+              "median": 0.031024917,
+              "minimum": 0.030787291,
+              "maximum": 0.031201916
+            },
+            "gpu_nanoseconds": {
+              "median": 28711311.5,
+              "minimum": 28493375,
+              "maximum": 29180666
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 2437560.0,
+              "minimum": 2437560,
+              "maximum": 2437560
+            },
+            "peak_backing_bytes": {
+              "median": 55808440.0,
+              "minimum": 55808440,
+              "maximum": 55808440
+            },
+            "incremental_peak_bytes": {
+              "median": 53370880.0,
+              "minimum": 53370880,
+              "maximum": 53370880
+            },
+            "gpu_submissions": {
+              "median": 1.0,
+              "minimum": 1,
+              "maximum": 1
+            },
+            "frontier_rounds": {
+              "median": 14.0,
+              "minimum": 14,
+              "maximum": 14
+            },
+            "maximum_active_nodes": {
+              "median": 96.0,
+              "minimum": 96,
+              "maximum": 96
+            },
+            "maximum_same_fit_nodes": {
+              "median": 60.0,
+              "minimum": 60,
+              "maximum": 60
+            },
+            "tree_nodes": {
+              "median": 1372.0,
+              "minimum": 1372,
+              "maximum": 1372
+            }
+          },
+          "split_sequential": {
+            "wall_seconds": {
+              "median": 0.042827708000000006,
+              "minimum": 0.041098292,
+              "maximum": 0.047744417
+            },
+            "process_cpu_seconds": {
+              "median": 0.0527365,
+              "minimum": 0.050169,
+              "maximum": 0.067217
+            },
+            "input_restore_seconds": {
+              "median": 0.0001033125,
+              "minimum": 9.7208e-05,
+              "maximum": 0.000123375
+            },
+            "gpu_call_seconds": {
+              "median": 0.031244520499999998,
+              "minimum": 0.03013975,
+              "maximum": 0.031713334
+            },
+            "gpu_nanoseconds": {
+              "median": 28793312.0,
+              "minimum": 28194374,
+              "maximum": 29401874
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 2437560.0,
+              "minimum": 2437560,
+              "maximum": 2437560
+            },
+            "peak_backing_bytes": {
+              "median": 49451488.0,
+              "minimum": 49451488,
+              "maximum": 49451488
+            },
+            "incremental_peak_bytes": {
+              "median": 47013928.0,
+              "minimum": 47013928,
+              "maximum": 47013928
+            },
+            "gpu_submissions": {
+              "median": 1.0,
+              "minimum": 1,
+              "maximum": 1
+            },
+            "frontier_rounds": {
+              "median": 14.0,
+              "minimum": 14,
+              "maximum": 14
+            },
+            "maximum_active_nodes": {
+              "median": 96.0,
+              "minimum": 96,
+              "maximum": 96
+            },
+            "maximum_same_fit_nodes": {
+              "median": 60.0,
+              "minimum": 60,
+              "maximum": 60
+            },
+            "tree_nodes": {
+              "median": 1372.0,
+              "minimum": 1372,
+              "maximum": 1372
+            }
+          }
+        }
+      },
+      {
+        "image": "photo-large-1049",
+        "input_sha256": "0b3feae4d3bf1a13f89d5f4c3d976c8ea1e93e49a65548919cb5474c3cd1d62d",
+        "rows": 171424,
+        "fits": 16,
+        "tile": 128,
+        "boundary": "Complete fitting including validation, scratch, partition, node/queue management, canonicalization and publication. GPU upload included. Input sampling, CPU input restoration, backend/domain and worker-pool creation excluded. Concurrent thread launch/join included. CPU seconds are process CPU time.",
+        "planned_frontier_peak_bytes": 64312040,
+        "modes": {
+          "cpu1": {
+            "wall_seconds": {
+              "median": 0.108585438,
+              "minimum": 0.100635834,
+              "maximum": 0.113557625
+            },
+            "process_cpu_seconds": {
+              "median": 0.1084895,
+              "minimum": 0.100519,
+              "maximum": 0.113461
+            },
+            "input_restore_seconds": {
+              "median": 0.0001955835,
+              "minimum": 0.000188875,
+              "maximum": 0.000225792
+            },
+            "gpu_call_seconds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "gpu_nanoseconds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 4879220.0,
+              "minimum": 4879220,
+              "maximum": 4879220
+            },
+            "peak_backing_bytes": {
+              "median": 10000044.0,
+              "minimum": 10000044,
+              "maximum": 10000044
+            },
+            "incremental_peak_bytes": {
+              "median": 5120824.0,
+              "minimum": 5120824,
+              "maximum": 5120824
+            },
+            "gpu_submissions": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "frontier_rounds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "maximum_active_nodes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "maximum_same_fit_nodes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "tree_nodes": {
+              "median": 1432.0,
+              "minimum": 1432,
+              "maximum": 1432
+            }
+          },
+          "cpu14": {
+            "wall_seconds": {
+              "median": 0.0178280625,
+              "minimum": 0.017333625,
+              "maximum": 0.01802075
+            },
+            "process_cpu_seconds": {
+              "median": 0.123025,
+              "minimum": 0.120838,
+              "maximum": 0.125975
+            },
+            "input_restore_seconds": {
+              "median": 0.0001736665,
+              "minimum": 0.000165583,
+              "maximum": 0.000204792
+            },
+            "gpu_call_seconds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "gpu_nanoseconds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 4879324.0,
+              "minimum": 4879324,
+              "maximum": 4879324
+            },
+            "peak_backing_bytes": {
+              "median": 16019292.0,
+              "minimum": 15629196,
+              "maximum": 16412484
+            },
+            "incremental_peak_bytes": {
+              "median": 11139968.0,
+              "minimum": 10749872,
+              "maximum": 11533160
+            },
+            "gpu_submissions": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "frontier_rounds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "maximum_active_nodes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "maximum_same_fit_nodes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "tree_nodes": {
+              "median": 1432.0,
+              "minimum": 1432,
+              "maximum": 1432
+            }
+          },
+          "frontier": {
+            "wall_seconds": {
+              "median": 0.056802332999999997,
+              "minimum": 0.055020417,
+              "maximum": 0.0575445
+            },
+            "process_cpu_seconds": {
+              "median": 0.0027264999999999998,
+              "minimum": 0.002566,
+              "maximum": 0.003477
+            },
+            "input_restore_seconds": {
+              "median": 4.2e-08,
+              "minimum": 0,
+              "maximum": 1.25e-07
+            },
+            "gpu_call_seconds": {
+              "median": 0.056801583,
+              "minimum": 0.055019667,
+              "maximum": 0.0575435
+            },
+            "gpu_nanoseconds": {
+              "median": 53421270.0,
+              "minimum": 52183458,
+              "maximum": 54402207
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "peak_backing_bytes": {
+              "median": 59102744.0,
+              "minimum": 59102744,
+              "maximum": 59102744
+            },
+            "incremental_peak_bytes": {
+              "median": 59102744.0,
+              "minimum": 59102744,
+              "maximum": 59102744
+            },
+            "gpu_submissions": {
+              "median": 2.0,
+              "minimum": 2,
+              "maximum": 2
+            },
+            "frontier_rounds": {
+              "median": 18.0,
+              "minimum": 18,
+              "maximum": 18
+            },
+            "maximum_active_nodes": {
+              "median": 128.0,
+              "minimum": 128,
+              "maximum": 128
+            },
+            "maximum_same_fit_nodes": {
+              "median": 48.0,
+              "minimum": 46,
+              "maximum": 50
+            },
+            "tree_nodes": {
+              "median": 1432.0,
+              "minimum": 1432,
+              "maximum": 1432
+            }
+          },
+          "resident_depth_first": {
+            "wall_seconds": {
+              "median": 0.4075128335,
+              "minimum": 0.394215875,
+              "maximum": 0.408733083
+            },
+            "process_cpu_seconds": {
+              "median": 0.0017295000000000001,
+              "minimum": 0.001632,
+              "maximum": 0.001814
+            },
+            "input_restore_seconds": {
+              "median": 2.05e-08,
+              "minimum": 0,
+              "maximum": 4.2e-08
+            },
+            "gpu_call_seconds": {
+              "median": 0.40751072899999996,
+              "minimum": 0.394213916,
+              "maximum": 0.4087315
+            },
+            "gpu_nanoseconds": {
+              "median": 405715416.0,
+              "minimum": 392328624,
+              "maximum": 406847541
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "peak_backing_bytes": {
+              "median": 26553384.0,
+              "minimum": 26553384,
+              "maximum": 26553384
+            },
+            "incremental_peak_bytes": {
+              "median": 26553384.0,
+              "minimum": 26553384,
+              "maximum": 26553384
+            },
+            "gpu_submissions": {
+              "median": 1.0,
+              "minimum": 1,
+              "maximum": 1
+            },
+            "frontier_rounds": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "maximum_active_nodes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "maximum_same_fit_nodes": {
+              "median": 0.0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "tree_nodes": {
+              "median": 1432.0,
+              "minimum": 1432,
+              "maximum": 1432
+            }
+          },
+          "split_concurrent": {
+            "wall_seconds": {
+              "median": 0.041833146,
+              "minimum": 0.041615875,
+              "maximum": 0.042867667
+            },
+            "process_cpu_seconds": {
+              "median": 0.053024,
+              "minimum": 0.050189,
+              "maximum": 0.071505
+            },
+            "input_restore_seconds": {
+              "median": 8.73125e-05,
+              "minimum": 8.5292e-05,
+              "maximum": 0.000123625
+            },
+            "gpu_call_seconds": {
+              "median": 0.041797166999999996,
+              "minimum": 0.041580666,
+              "maximum": 0.042820459
+            },
+            "gpu_nanoseconds": {
+              "median": 39444228.5,
+              "minimum": 39176875,
+              "maximum": 40237791
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 2438116.0,
+              "minimum": 2438116,
+              "maximum": 2438116
+            },
+            "peak_backing_bytes": {
+              "median": 55815908.0,
+              "minimum": 55815908,
+              "maximum": 55815908
+            },
+            "incremental_peak_bytes": {
+              "median": 53377792.0,
+              "minimum": 53377792,
+              "maximum": 53377792
+            },
+            "gpu_submissions": {
+              "median": 1.0,
+              "minimum": 1,
+              "maximum": 1
+            },
+            "frontier_rounds": {
+              "median": 15.0,
+              "minimum": 15,
+              "maximum": 15
+            },
+            "maximum_active_nodes": {
+              "median": 128.0,
+              "minimum": 128,
+              "maximum": 128
+            },
+            "maximum_same_fit_nodes": {
+              "median": 50.0,
+              "minimum": 48,
+              "maximum": 50
+            },
+            "tree_nodes": {
+              "median": 1432.0,
+              "minimum": 1432,
+              "maximum": 1432
+            }
+          },
+          "split_sequential": {
+            "wall_seconds": {
+              "median": 0.052660770499999995,
+              "minimum": 0.052142,
+              "maximum": 0.054581208
+            },
+            "process_cpu_seconds": {
+              "median": 0.051228499999999996,
+              "minimum": 0.050496,
+              "maximum": 0.060612
+            },
+            "input_restore_seconds": {
+              "median": 0.0001059795,
+              "minimum": 9.8333e-05,
+              "maximum": 0.000108709
+            },
+            "gpu_call_seconds": {
+              "median": 0.0416693335,
+              "minimum": 0.04101075,
+              "maximum": 0.042269709
+            },
+            "gpu_nanoseconds": {
+              "median": 39549979.0,
+              "minimum": 38894458,
+              "maximum": 39860624
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 2438116.0,
+              "minimum": 2438116,
+              "maximum": 2438116
+            },
+            "peak_backing_bytes": {
+              "median": 49464572.0,
+              "minimum": 49464572,
+              "maximum": 49464572
+            },
+            "incremental_peak_bytes": {
+              "median": 47026456.0,
+              "minimum": 47026456,
+              "maximum": 47026456
+            },
+            "gpu_submissions": {
+              "median": 1.0,
+              "minimum": 1,
+              "maximum": 1
+            },
+            "frontier_rounds": {
+              "median": 15.0,
+              "minimum": 15,
+              "maximum": 15
+            },
+            "maximum_active_nodes": {
+              "median": 128.0,
+              "minimum": 128,
+              "maximum": 128
+            },
+            "maximum_same_fit_nodes": {
+              "median": 50.0,
+              "minimum": 48,
+              "maximum": 52
+            },
+            "tree_nodes": {
+              "median": 1432.0,
+              "minimum": 1432,
+              "maximum": 1432
+            }
+          }
+        }
+      }
+    ]
+  },
+  "full_encode": {
+    "provenance": {
+      "manifest": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-prototype/full-study/results.json",
+      "sha256": "16e382f0e74f007a25b3a1ec4b1b8976a8bf23eceeb195d1d88741b0a83ec4cb",
+      "revision": "11bd897330673889f79fc302387f667ad1278238",
+      "started_unix": 1792201060.515244,
+      "finished_unix": null,
+      "rejected": 0
+    },
+    "warmups": 1,
+    "repetitions": 4,
+    "power_samples": {
+      "path": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-prototype/full-study-binary/power-samples.json",
+      "sha256": "8aa646a556539616105c4484fe43e557d7fad948de299d6e92394cd817c028e7",
+      "count": 498
+    },
+    "boundary": "Complete private encode; excludes backend/domain creation, file IO, independent decode and hashing",
+    "cases": [
+      {
+        "image": "photo-large-1029",
+        "input_sha256": "a1c487b0160d8f3e8cb86753131b919ac3de28e908fde757050ebccdb4407b6d",
+        "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+        "work": {
+          "local_trees": true,
+          "selection_calls": 192,
+          "learning_calls": 193,
+          "fits": 192,
+          "empty_learning_calls": 1,
+          "scanned_pixels": 36000000,
+          "selected_samples": 23460354,
+          "distinct_samples": 23460354,
+          "tree_nodes": 240143
+        },
+        "modes": {
+          "cpu14": {
+            "wall_seconds": {
+              "median": 7.1861833125,
+              "minimum": 6.816947125,
+              "maximum": 7.440151167
+            },
+            "process_cpu_seconds": {
+              "median": 60.3878375,
+              "minimum": 58.805003,
+              "maximum": 61.684152
+            },
+            "learning_wall_seconds": {
+              "median": 5.7071259585,
+              "minimum": 5.362532333000001,
+              "maximum": 5.869260875
+            },
+            "peak_backing_bytes": {
+              "median": 779129499.0,
+              "minimum": 776696515,
+              "maximum": 779448427
+            },
+            "peak_committed_bytes": {
+              "median": 1902548160.0,
+              "minimum": 1902548160,
+              "maximum": 1902548160
+            }
+          },
+          "frontier": {
+            "wall_seconds": {
+              "median": 11.1793855205,
+              "minimum": 11.027062792,
+              "maximum": 11.498224625
+            },
+            "process_cpu_seconds": {
+              "median": 10.526107,
+              "minimum": 9.9177,
+              "maximum": 11.109412
+            },
+            "learning_wall_seconds": {
+              "median": 10.0440682285,
+              "minimum": 9.935512291,
+              "maximum": 10.335211750000001
+            },
+            "peak_backing_bytes": {
+              "median": 1062958752.0,
+              "minimum": 1062958752,
+              "maximum": 1062958752
+            },
+            "peak_committed_bytes": {
+              "median": 1972277616.0,
+              "minimum": 1972277616,
+              "maximum": 1972277616
+            },
+            "resident": {
+              "nodes": {
+                "median": 240142.0,
+                "minimum": 240142,
+                "maximum": 240142
+              },
+              "submissions": {
+                "median": 121.0,
+                "minimum": 121,
+                "maximum": 121
+              },
+              "frontier_rounds": {
+                "median": 1904.0,
+                "minimum": 1904,
+                "maximum": 1905
+              },
+              "maximum_active_nodes": {
+                "median": 128.0,
+                "minimum": 128,
+                "maximum": 128
+              },
+              "maximum_same_fit_nodes": {
+                "median": 102.0,
+                "minimum": 100,
+                "maximum": 112
+              },
+              "complete_fit_seconds": {
+                "median": 9.9749330415,
+                "minimum": 9.872037500000001,
+                "maximum": 10.262895915
+              },
+              "gpu_nanoseconds": {
+                "median": 9817114112.0,
+                "minimum": 9727976234,
+                "maximum": 10092117564
+              }
+            }
+          }
+        },
+        "bytes": 10507251
+      },
+      {
+        "image": "photo-large-1039",
+        "input_sha256": "22f487129343ed6d403346653ef99900e2552728ba2e4f5c63c90d058132f302",
+        "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a",
+        "work": {
+          "local_trees": true,
+          "selection_calls": 192,
+          "learning_calls": 193,
+          "fits": 192,
+          "empty_learning_calls": 1,
+          "scanned_pixels": 31344224,
+          "selected_samples": 20432794,
+          "distinct_samples": 20432447,
+          "tree_nodes": 120547
+        },
+        "modes": {
+          "cpu14": {
+            "wall_seconds": {
+              "median": 5.160985688,
+              "minimum": 4.853959709,
+              "maximum": 5.44987575
+            },
+            "process_cpu_seconds": {
+              "median": 41.3515075,
+              "minimum": 40.242135,
+              "maximum": 42.504687
+            },
+            "learning_wall_seconds": {
+              "median": 3.73673375,
+              "minimum": 3.4865988749999994,
+              "maximum": 4.032472915
+            },
+            "peak_backing_bytes": {
+              "median": 694285464.5,
+              "minimum": 691120654,
+              "maximum": 698329535
+            },
+            "peak_committed_bytes": {
+              "median": 1672463968.0,
+              "minimum": 1672463968,
+              "maximum": 1672463968
+            }
+          },
+          "frontier": {
+            "wall_seconds": {
+              "median": 6.919569833000001,
+              "minimum": 6.663942375,
+              "maximum": 7.15899925
+            },
+            "process_cpu_seconds": {
+              "median": 8.9747845,
+              "minimum": 8.66987,
+              "maximum": 9.462505
+            },
+            "learning_wall_seconds": {
+              "median": 5.879994770500001,
+              "minimum": 5.6884662089999996,
+              "maximum": 6.1062720829999995
+            },
+            "peak_backing_bytes": {
+              "median": 1012953548.0,
+              "minimum": 1012953548,
+              "maximum": 1012953548
+            },
+            "peak_committed_bytes": {
+              "median": 1745063728.0,
+              "minimum": 1745063728,
+              "maximum": 1745063728
+            },
+            "resident": {
+              "nodes": {
+                "median": 120546.0,
+                "minimum": 120546,
+                "maximum": 120546
+              },
+              "submissions": {
+                "median": 63.0,
+                "minimum": 62,
+                "maximum": 63
+              },
+              "frontier_rounds": {
+                "median": 963.0,
+                "minimum": 962,
+                "maximum": 963
+              },
+              "maximum_active_nodes": {
+                "median": 128.0,
+                "minimum": 128,
+                "maximum": 128
+              },
+              "maximum_same_fit_nodes": {
+                "median": 79.0,
+                "minimum": 76,
+                "maximum": 82
+              },
+              "complete_fit_seconds": {
+                "median": 5.8007239995,
+                "minimum": 5.613646833,
+                "maximum": 6.021382583
+              },
+              "gpu_nanoseconds": {
+                "median": 5672225594.5,
+                "minimum": 5494914888,
+                "maximum": 5885492471
+              }
+            }
+          }
+        },
+        "bytes": 7138537
+      },
+      {
+        "image": "photo-large-1049",
+        "input_sha256": "0b3feae4d3bf1a13f89d5f4c3d976c8ea1e93e49a65548919cb5474c3cd1d62d",
+        "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c",
+        "work": {
+          "local_trees": true,
+          "selection_calls": 192,
+          "learning_calls": 193,
+          "fits": 192,
+          "empty_learning_calls": 1,
+          "scanned_pixels": 29871324,
+          "selected_samples": 19470891,
+          "distinct_samples": 19470845,
+          "tree_nodes": 105821
+        },
+        "modes": {
+          "cpu14": {
+            "wall_seconds": {
+              "median": 4.639731854,
+              "minimum": 4.341941,
+              "maximum": 4.937267083
+            },
+            "process_cpu_seconds": {
+              "median": 36.774902,
+              "minimum": 36.023014,
+              "maximum": 37.960839
+            },
+            "learning_wall_seconds": {
+              "median": 3.465418625,
+              "minimum": 3.125840249,
+              "maximum": 3.729539333
+            },
+            "peak_backing_bytes": {
+              "median": 674555413.0,
+              "minimum": 669188638,
+              "maximum": 675667022
+            },
+            "peak_committed_bytes": {
+              "median": 1603050103.0,
+              "minimum": 1603050103,
+              "maximum": 1603050103
+            }
+          },
+          "frontier": {
+            "wall_seconds": {
+              "median": 6.0547303125,
+              "minimum": 5.886719958,
+              "maximum": 6.332424042
+            },
+            "process_cpu_seconds": {
+              "median": 8.286838,
+              "minimum": 7.923831,
+              "maximum": 8.634524
+            },
+            "learning_wall_seconds": {
+              "median": 5.1319111455,
+              "minimum": 5.000471,
+              "maximum": 5.3751208749999995
+            },
+            "peak_backing_bytes": {
+              "median": 984176912.0,
+              "minimum": 984176912,
+              "maximum": 984176912
+            },
+            "peak_committed_bytes": {
+              "median": 1676003287.0,
+              "minimum": 1676003287,
+              "maximum": 1676003287
+            },
+            "resident": {
+              "nodes": {
+                "median": 105820.0,
+                "minimum": 105820,
+                "maximum": 105820
+              },
+              "submissions": {
+                "median": 56.0,
+                "minimum": 56,
+                "maximum": 56
+              },
+              "frontier_rounds": {
+                "median": 846.0,
+                "minimum": 846,
+                "maximum": 846
+              },
+              "maximum_active_nodes": {
+                "median": 128.0,
+                "minimum": 128,
+                "maximum": 128
+              },
+              "maximum_same_fit_nodes": {
+                "median": 64.0,
+                "minimum": 56,
+                "maximum": 68
+              },
+              "complete_fit_seconds": {
+                "median": 5.0554327704999995,
+                "minimum": 4.9247510409999995,
+                "maximum": 5.293190832
+              },
+              "gpu_nanoseconds": {
+                "median": 4932482390.0,
+                "minimum": 4811080472,
+                "maximum": 5163710342
+              }
+            }
+          }
+        },
+        "bytes": 7015756
+      }
+    ]
+  },
+  "tests": {
+    "integration": "10/10",
+    "final_release_frontier": "3/3",
+    "asan_ubsan_frontier": "3/3",
+    "metal_api_and_shader_validation": "27 complete trees and row permutations; 19 failure checks; concurrent operations",
+    "sanitizer_exclusion": "Leak detection disabled; UBSan null suppression for third_party/metal-cpp/*NSObject.hpp; pinned libjxl decoder not instrumented"
+  }
+}

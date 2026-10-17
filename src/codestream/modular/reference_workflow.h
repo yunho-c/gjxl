@@ -12,7 +12,7 @@ enum class ReferenceBuffering : uint8_t { kAutomatic, kBuffered };
 enum class ReferencePredictors : uint8_t { kBest, kAll };
 // Private qualification controls. Public routing remains on the ordinary CPU
 // fitter until complete-call evidence supports an automatic GPU preference.
-enum class ReferenceFittingBackend : uint8_t { kCpu, kResumableCpu, kGpu, kAuto, kGpuResident };
+enum class ReferenceFittingBackend : uint8_t { kCpu, kResumableCpu, kGpu, kAuto, kGpuResident, kGpuFrontier };
 enum class ReferenceLearningSchedule : uint8_t { kCohorts, kPipeline };
 struct ReferenceWorkflowOptions {
   ReferenceBuffering buffering = ReferenceBuffering::kAutomatic;
@@ -68,6 +68,8 @@ struct ReferenceWorkflowStats {
   size_t histogram_resident_fits = 0;
   double histogram_resident_seconds = 0;
   uint64_t histogram_resident_gpu_nanoseconds = 0;
+  size_t histogram_resident_submissions = 0, histogram_frontier_rounds = 0,
+         histogram_frontier_maximum_active = 0, histogram_frontier_maximum_same_fit = 0;
   size_t selection_peak_participants = 0, selection_waves = 0,
          selection_memory_limited_waves = 0;
   // Joined caller wall versus summed job wall; work is not an additive stage.

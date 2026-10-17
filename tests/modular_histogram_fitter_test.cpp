@@ -37,6 +37,11 @@ void Parity(const HistogramTrainingSamples &original,
     HistogramFittingProfileSession p(&old_profile);
     Ok(LearnHistogramTree(reference, &expected, options));
   }
+  auto breadth_first = original;
+  DecisionTree frontier;
+  Ok(LearnHistogramTreeFrontierReference(breadth_first, &frontier, options));
+  Check(frontier == expected && SameRows(reference, breadth_first),
+        "Scalar frontier changed tree or partition permutation");
   HistogramTreeFitter fitter;
   Ok(fitter.Initialize(resumed, options, &new_profile));
   Check(SameRows(original, resumed), "Initialization partitioned sample rows");

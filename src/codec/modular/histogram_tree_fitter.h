@@ -89,4 +89,14 @@ private:
 // Allows a caller to admit a cohort before finalized row counts are available.
 [[nodiscard]] Status ComputeHistogramTreeFitterExtraStorageBound(
     size_t maximum_rows, resource_budget_internal::HostStorageBound *out);
+// Scalar FIFO replay for differential qualification. Reuses native node
+// preparation/evaluation/partitioning; never selected by production routing.
+[[nodiscard]] Status LearnHistogramTreeFrontierReference(
+    HistogramTrainingSamples &samples, DecisionTree *out,
+    HistogramTreeLearningOptions options = {});
+// Validate an arbitrarily numbered completed tree and copy it into native
+// high-side-first sibling allocation order. Temporary backing is
+// size*DecisionNode plus (kMaximumTreeDepth+1)*pair<TreeIndex>.
+// The tree is private candidate storage; allocation/validation precede edits.
+[[nodiscard]] Status CanonicalizeHistogramTreeForPublication(DecisionTree *tree);
 } // namespace gjxl::modular_internal

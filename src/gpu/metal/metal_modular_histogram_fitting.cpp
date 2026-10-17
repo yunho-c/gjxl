@@ -629,7 +629,8 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
   ResidentHistogramPlan plan;
   const auto limits = histogram_fitting_limits();
   if (auto s = ComputeResidentHistogramPlan(input, &plan, &limits); !s.ok()) return s;
-  auto *pipeline = histogram_fitting_pipelines_[5].get();
+  const bool frontier = input.executor == ResidentHistogramExecutor::kFrontier;
+  auto *pipeline = histogram_fitting_pipelines_[frontier ? 8 : 5].get();
   if (pipeline->threadExecutionWidth() != 32 ||
       pipeline->maxTotalThreadsPerThreadgroup() < 128)
     return Status::Unsupported("Resident histogram prototype requires four 32-lane SIMD groups");
@@ -685,20 +686,83 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
     RecordMetalComputePipelineState(c.pipeline);
     DispatchMetalThreadgroups(encoder, MTL::Size(c.fits, 1, 1), MTL::Size(128, 1, 1));
   };
-  Pending pending;
-  if (auto s = SubmitCompute("modular.histogram_resident", encode, &context, &pending.submission); !s.ok()) return s;
-  if (!pending.submission) return Status::Internal("Missing resident histogram submission");
-  if (auto s = pending.Wait(); !s.ok()) return s;
-  if (auto s = GetMetalSubmissionGpuDuration(*pending.submission, &candidate.gpu_nanoseconds); !s.ok()) return s;
   std::span<const std::byte> completed;
-  if (auto s = BorrowCompletedReadOnly(*work, plan.work_bytes, 0, &completed); !s.ok()) return s;
+  if (!frontier) {
+    Pending pending;
+    if (auto s = SubmitCompute("modular.histogram_resident", encode, &context, &pending.submission); !s.ok()) return s;
+    if (!pending.submission) return Status::Internal("Missing resident histogram submission");
+    if (auto s = pending.Wait(); !s.ok()) return s;
+    if (auto s = GetMetalSubmissionGpuDuration(*pending.submission, &candidate.gpu_nanoseconds); !s.ok()) return s;
+    if (auto s = BorrowCompletedReadOnly(*work, plan.work_bytes, 0, &completed); !s.ok()) return s;
+    candidate.submissions = 1;
+  } else {
+    struct FrontierContext {
+      MTL::Buffer *prepared, *work;
+      std::array<MTL::ComputePipelineState *, 3> pipelines;
+      gjxl_histogram_resident::FrontierParams params;
+      size_t rounds;
+      bool initialize;
+    } c{context.prepared, context.work,
+        {histogram_fitting_pipelines_[6].get(), histogram_fitting_pipelines_[7].get(), pipeline},
+        plan.frontier, input.rounds_per_submission, true};
+    const auto encode_frontier = [](MetalBackend &, MTL::ComputeCommandEncoder *encoder, const void *opaque) {
+      const auto &c = *static_cast<const FrontierContext *>(opaque);
+      encoder->setBuffer(c.prepared, 0, 0);
+      encoder->setBuffer(c.work, 0, 1);
+      encoder->setBytes(&c.params, sizeof(c.params), 2);
+      const MTL::Resource *dependencies[] = {c.work};
+      const auto launch = [&](size_t stage, size_t groups) {
+        encoder->setComputePipelineState(c.pipelines[stage]);
+        RecordMetalComputePipelineState(c.pipelines[stage]);
+        DispatchMetalThreadgroups(encoder, MTL::Size(groups, 1, 1), MTL::Size(128, 1, 1));
+        encoder->memoryBarrier(dependencies, 1);
+      };
+      if (c.initialize) launch(0, c.params.fits);
+      for (size_t round = 0; round < c.rounds; ++round) {
+        launch(1, 1);
+        encoder->setComputePipelineState(c.pipelines[2]);
+        RecordMetalComputePipelineState(c.pipelines[2]);
+        DispatchMetalIndirectThreadgroups(encoder, c.work,
+            c.params.control + offsetof(gjxl_histogram_resident::FrontierControl, dispatch), MTL::Size(128, 1, 1));
+        encoder->memoryBarrier(dependencies, 1);
+      }
+    };
+    size_t previous_head = 0;
+    for (;;) {
+      Pending pending;
+      if (auto s = SubmitCompute("modular.histogram_frontier", encode_frontier, &c, &pending.submission); !s.ok()) return s;
+      if (!pending.submission) return Status::Internal("Missing frontier submission");
+      if (auto s = pending.Wait(); !s.ok()) return s;
+      uint64_t duration;
+      if (auto s = GetMetalSubmissionGpuDuration(*pending.submission, &duration); !s.ok()) return s;
+      candidate.gpu_nanoseconds += duration;
+      ++candidate.submissions;
+      if (auto s = BorrowCompletedReadOnly(*work, plan.work_bytes, 0, &completed); !s.ok()) return s;
+      // Only coarse progress/status crosses this boundary. Nodes, summaries,
+      // decisions, membership and the next ready queue remain on the GPU.
+      const auto &control = *reinterpret_cast<const gjxl_histogram_resident::FrontierControl *>(completed.data() + plan.frontier.control);
+      if (control.status & gjxl_histogram_resident::kCapacityError)
+        return Status::Unsupported("Frontier fit exceeds tree capacity or depth");
+      if (control.status || control.head <= previous_head || control.head > control.tail ||
+          control.tail > plan.frontier.queue_capacity)
+        return Status::DeviceError("Invalid resident frontier progress or partition");
+      candidate.frontier_rounds = control.rounds;
+      candidate.maximum_ready_nodes = control.maximum_ready;
+      candidate.maximum_active_nodes = control.maximum_active;
+      candidate.maximum_same_fit_nodes = control.maximum_same_fit;
+      if (control.head == control.tail) break;
+      previous_head = control.head;
+      c.initialize = false;
+    }
+  }
   size_t first_row = 0;
   for (size_t i = 0; i < plan.fits; ++i) {
     const auto &d = plan.layout[i];
     const auto &state = *reinterpret_cast<const gjxl_histogram_resident::State *>(completed.data() + d.state);
     if (state.status == gjxl_histogram_resident::kCapacityError)
       return Status::Unsupported("Resident histogram fit exceeds tree capacity or depth");
-    if (state.status || state.pending || !state.size || state.size > d.maximum_nodes || state.visited > state.size)
+    if (state.status || state.pending || !state.size || state.size > d.maximum_nodes || state.visited > state.size ||
+        (frontier && state.visited != state.size))
       return Status::DeviceError("Resident histogram state or partition failed");
     candidate.visited_nodes += state.visited;
     const auto *nodes = reinterpret_cast<const gjxl_histogram_resident::Node *>(completed.data() + d.nodes);
@@ -713,6 +777,8 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
                       static_cast<modular_internal::Predictor>(nodes[n].predictor), 0, 1};
     }
     modular_internal::TreeLayout layout;
+    if (frontier)
+      if (auto s = modular_internal::CanonicalizeHistogramTreeForPublication(&tree); !s.ok()) return s;
     if (auto s = modular_internal::ValidateTree(tree, &layout); !s.ok()) return s;
     if (tree.size <= modular_internal::kInlineTreeNodes) tree.nodes.resize(tree.size);
     if (input.capture_row_order) {

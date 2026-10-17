@@ -1393,4 +1393,65 @@ Status LearnHistogramTree(HistogramTrainingSamples &s, DecisionTree *out,
 } catch (const std::length_error &) {
   return Status::InvalidArgument("Histogram Modular learning storage overflow");
 }
+Status CanonicalizeHistogramTreeForPublication(DecisionTree *tree) {
+  if (!tree) return Status::InvalidArgument("Null histogram publication tree");
+  TreeLayout layout;
+  if (auto s = ValidateTree(*tree, &layout); !s.ok()) return s;
+  ManagedVector<DecisionNode> source(tree->nodes.begin(), tree->nodes.begin() + tree->size);
+  ManagedVector<std::pair<TreeIndex, TreeIndex>> pending;
+  pending.reserve(kMaximumTreeDepth + 1);
+  pending.emplace_back(0, 0);
+  TreeIndex next = 1;
+  while (!pending.empty()) {
+    const auto [from, to] = pending.back(); pending.pop_back();
+    auto node = source[from];
+    if (node.property != -1) {
+      const TreeIndex left = next++, right = next++;
+      pending.emplace_back(node.right, right);
+      pending.emplace_back(node.left, left);
+      node.left = left; node.right = right;
+    }
+    tree->nodes[to] = node;
+  }
+  return Status::Ok();
+}
+
+Status LearnHistogramTreeFrontierReference(HistogramTrainingSamples &samples,
+                                           DecisionTree *out,
+                                           HistogramTreeLearningOptions options) try {
+  if (!out) return Status::InvalidArgument("Null frontier reference output");
+  if (auto s = ValidateHistogramTrainingSamples(samples, options); !s.ok()) return s;
+  ManagedVector<Workspace> storage(1);
+  auto &w = storage[0];
+  w.nodes.reserve(2 * options.maximum_leaves - 1);
+  w.counts.resize(kSymbols * samples.predictor_count);
+  w.total_extra.resize(samples.predictor_count);
+  w.property.Initialize(MaximumBins(samples));
+  HistogramTreeLearningStats execution{1, 0};
+  DecisionTree tree;
+  tree.nodes.resize(2 * options.maximum_leaves - 1);
+  tree.nodes[0].predictor = samples.predictors[0];
+  SamplesView view{samples};
+  w.nodes.push_back({0, 0, view.NumDistinctSamples(), options.static_range, 1});
+  // FinishNode appends siblings. FIFO processes them before grandchildren;
+  // their allocation order deliberately differs from the native DFS.
+  for (size_t first = 0; first < w.nodes.size(); ++first) {
+    PendingNode node; node.info = w.nodes[first];
+    if (node.info.begin == node.info.end) continue;
+    if (auto s = PrepareNode<false>(view, w, options, &tree, node, nullptr, nullptr); !s.ok()) return s;
+    if (node.needs_evaluation(options.split_threshold))
+      EvaluateNode<false>(view, w, nullptr, execution, options, &tree, node, nullptr);
+    if (auto s = FinishNode<false>(view, w, options, &tree, node, nullptr, nullptr); !s.ok()) return s;
+  }
+  if (auto s = CanonicalizeHistogramTreeForPublication(&tree); !s.ok()) return s;
+  if (tree.size <= kInlineTreeNodes) tree.nodes.resize(tree.size);
+  *out = std::move(tree);
+  return Status::Ok();
+} catch (const resource_budget_internal::ManagedAllocationFailure &e) {
+  return e.status();
+} catch (const std::bad_alloc &) {
+  return Status::OutOfMemory("Frontier reference allocation failed");
+} catch (const std::length_error &) {
+  return Status::InvalidArgument("Frontier reference storage overflow");
+}
 } // namespace gjxl::modular_internal

@@ -27,10 +27,17 @@ Status ComputeResidentHistogramPlan(const ResidentHistogramInput &input,
     return Status::InvalidArgument("Empty resident histogram request/output");
   if (input.requests.size() > kMaximumResidentHistogramFits)
     return Status::Unsupported("Resident histogram cohort exceeds 64 fits");
+  const bool frontier = input.executor == ResidentHistogramExecutor::kFrontier;
+  if ((input.executor != ResidentHistogramExecutor::kDepthFirst && !frontier) ||
+      (frontier && (!input.maximum_active_nodes || input.maximum_active_nodes > 1024 ||
+                    !input.rounds_per_submission || input.rounds_per_submission > 64 ||
+                    !input.maximum_scratch_bytes)))
+    return Status::InvalidArgument("Invalid resident frontier execution controls");
   ResidentHistogramPlan plan;
   plan.fits = input.requests.size();
   std::array<HistogramFittingShape, kMaximumResidentHistogramFits> shapes;
   Arena arena{plan.fits * sizeof(resident::Fit)};
+  size_t maximum_bins = 1, maximum_predictors = 1, queue_capacity = 0;
   for (size_t i = 0; i < plan.fits; ++i) {
     const auto &r = input.requests[i];
     if (!r.source.samples)
@@ -51,17 +58,21 @@ Status ComputeResidentHistogramPlan(const ResidentHistogramInput &input,
     f.maximum_bins = static_cast<uint32_t>(bins);
     f.split_threshold = r.learning.split_threshold;
     f.fast_decode_multiplier = r.learning.fast_decode_multiplier;
+    maximum_bins = std::max(maximum_bins, bins);
+    maximum_predictors = std::max(maximum_predictors, shape.predictors);
+    plan.maximum_nodes = std::max(plan.maximum_nodes, size_t(f.maximum_nodes));
+    queue_capacity += f.maximum_nodes;
     if (!arena.Add(1, sizeof(resident::State), &f.state) ||
         !arena.Add(f.maximum_nodes, sizeof(resident::Node), &f.nodes) ||
-        !arena.Add(f.maximum_depth + 1, sizeof(uint32_t), &f.stack) ||
+        (!frontier && !arena.Add(f.maximum_depth + 1, sizeof(uint32_t), &f.stack)) ||
         !arena.Add(shape.rows, sizeof(uint32_t), &f.order) ||
         !arena.Add(shape.rows, sizeof(uint32_t), &f.partition) ||
-        !arena.Add(shape.predictors * 256, sizeof(uint32_t), &f.parent) ||
-        !arena.Add(shape.predictors, sizeof(uint32_t), &f.parent_extra) ||
-        !arena.Add(bins * 256, sizeof(uint32_t), &f.histogram) ||
-        !arena.Add(bins, sizeof(uint32_t), &f.extra) ||
-        !arena.Add(bins, sizeof(uint32_t), &f.occupancy) ||
-        !arena.Add(bins * 2, sizeof(gjxl_histogram_fitting::SideWinner), &f.sides) ||
+        (!frontier && (!arena.Add(shape.predictors * 256, sizeof(uint32_t), &f.parent) ||
+                      !arena.Add(shape.predictors, sizeof(uint32_t), &f.parent_extra) ||
+                      !arena.Add(bins * 256, sizeof(uint32_t), &f.histogram) ||
+                      !arena.Add(bins, sizeof(uint32_t), &f.extra) ||
+                      !arena.Add(bins, sizeof(uint32_t), &f.occupancy) ||
+                      !arena.Add(bins * 2, sizeof(gjxl_histogram_fitting::SideWinner), &f.sides))) ||
         !arena.Add(shape.predictors * shape.predictors, sizeof(float), &f.penalties))
       return Status::OutOfMemory("Resident histogram arena overflow");
     for (size_t p = 0; p < shape.properties; ++p)
@@ -71,6 +82,33 @@ Status ComputeResidentHistogramPlan(const ResidentHistogramInput &input,
         !plan.output.AddVector<DecisionNode>(f.maximum_nodes, VectorCapacityPolicy::kFreshExact))
       return Status::OutOfMemory("Resident histogram tree bound overflow");
     plan.rows += shape.rows;
+  }
+  if (frontier) {
+    auto &p = plan.frontier;
+    p.fits = static_cast<uint32_t>(plan.fits);
+    p.queue_capacity = static_cast<uint32_t>(queue_capacity);
+    Arena scratch;
+    auto &s = p.slot;
+    if (!scratch.Add(1, sizeof(resident::State), &s.state) ||
+        !scratch.Add(maximum_predictors * 256, sizeof(uint32_t), &s.parent) ||
+        !scratch.Add(maximum_predictors, sizeof(uint32_t), &s.parent_extra) ||
+        !scratch.Add(maximum_bins * 256, sizeof(uint32_t), &s.histogram) ||
+        !scratch.Add(maximum_bins, sizeof(uint32_t), &s.extra) ||
+        !scratch.Add(maximum_bins, sizeof(uint32_t), &s.occupancy) ||
+        !scratch.Add(maximum_bins * 2, sizeof(gjxl_histogram_fitting::SideWinner), &s.sides))
+      return Status::OutOfMemory("Frontier scratch overflow");
+    s.bytes = static_cast<uint32_t>((scratch.bytes + 255) & ~size_t{255});
+    size_t available = std::min(input.maximum_scratch_bytes, size_t{UINT32_MAX});
+    if (limits) available = std::min({available, limits->maximum_scratch_bytes, limits->maximum_buffer_bytes});
+    p.active_nodes = static_cast<uint32_t>(std::min({input.maximum_active_nodes, queue_capacity, available / s.bytes}));
+    if (!p.active_nodes) return Status::Unsupported("Frontier scratch cannot hold one node");
+    plan.scratch_bytes = p.active_nodes * size_t(s.bytes);
+    if (!arena.Add(1, sizeof(resident::FrontierControl), &p.control) ||
+        !arena.Add(queue_capacity, sizeof(resident::NodeRef), &p.queue) ||
+        !arena.Add(p.active_nodes, s.bytes, &p.scratch) ||
+        !plan.publication.AddVector<DecisionNode>(plan.maximum_nodes, VectorCapacityPolicy::kFreshExact) ||
+        !plan.publication.AddVector<std::pair<TreeIndex, TreeIndex>>(kMaximumTreeDepth + 1, VectorCapacityPolicy::kFreshExact))
+      return Status::OutOfMemory("Frontier storage overflow");
   }
   if (auto s = ComputeHistogramFittingPreparationPlan(std::span(shapes).first(plan.fits),
                                                        &plan.prepared, limits); !s.ok()) return s;
@@ -84,7 +122,8 @@ Status ComputeResidentHistogramPlan(const ResidentHistogramInput &input,
     return Status::OutOfMemory("Resident histogram output bound overflow");
   plan.working = plan.output;
   if (!plan.working.Add({plan.work_bytes, plan.work_bytes}) ||
-      !plan.working.Add(plan.prepared.preparation))
+      !plan.working.Add(plan.prepared.preparation) ||
+      !plan.working.Add(plan.publication))
     return Status::OutOfMemory("Resident histogram working bound overflow");
   *out = plan;
   return Status::Ok();

@@ -702,7 +702,7 @@ MetalBackend::MetalBackend(
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 7> modular_token_pipelines,
   NS::SharedPtr<MTL::ComputePipelineState> ans_token_cost_pipeline,
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> tree_statistics_pipelines,
-  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 6> histogram_fitting_pipelines,
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 9> histogram_fitting_pipelines,
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> modular_population_pipelines,
   AqPipelines aq_pipelines,
   ButteraugliPipelines butteraugli_pipelines,
@@ -1853,15 +1853,17 @@ Status CreateMetalBackendImpl(
       return Status::Unavailable("Metal cannot launch Modular tree statistics threadgroups");
   }
 
-  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 6> histogram_fitting_pipelines;
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 9> histogram_fitting_pipelines;
   const char* histogram_kernels[] = {"gjxl_histogram_validate",
-    "gjxl_histogram_collect", "gjxl_histogram_prefix", "gjxl_histogram_costs", "gjxl_histogram_select", "gjxl_histogram_resident_fit"};
+    "gjxl_histogram_collect", "gjxl_histogram_prefix", "gjxl_histogram_costs", "gjxl_histogram_select", "gjxl_histogram_resident_fit", "gjxl_histogram_frontier_init", "gjxl_histogram_frontier_begin", "gjxl_histogram_frontier_nodes"};
   for (size_t i = 0; i < histogram_fitting_pipelines.size(); ++i) {
     status = CreatePipeline(device.get(), library.get(), histogram_kernels[i], &histogram_fitting_pipelines[i]);
     if (!status.ok()) return status;
     if (histogram_fitting_pipelines[i]->maxTotalThreadsPerThreadgroup() < 128 || maximum_threads.width < 128 ||
         histogram_fitting_pipelines[i]->staticThreadgroupMemoryLength() > device->maxThreadgroupMemoryLength())
-      return Status::Unavailable("Metal cannot launch native histogram fitting threadgroups");
+      return Status::Unavailable(std::string("Metal cannot launch native histogram fitting kernel ") +
+          histogram_kernels[i] + " (threads=" + std::to_string(histogram_fitting_pipelines[i]->maxTotalThreadsPerThreadgroup()) +
+          ", shared_bytes=" + std::to_string(histogram_fitting_pipelines[i]->staticThreadgroupMemoryLength()) + ")");
     if (i == 2 && (histogram_fitting_pipelines[i]->threadExecutionWidth() == 0 ||
                    128 % histogram_fitting_pipelines[i]->threadExecutionWidth() != 0))
       return Status::Unavailable("Metal histogram prefix SIMD width is incompatible");

@@ -9,6 +9,15 @@
 namespace {
 using namespace histogram_fitting_test;
 size_t fits = 0, failures = 0;
+ResidentHistogramExecutor executor = ResidentHistogramExecutor::kDepthFirst;
+size_t active_nodes = 128, rounds = 16, same_fit_peak = 0;
+ResidentHistogramInput Input(std::span<const ResidentHistogramRequest> requests, bool capture = false) {
+  ResidentHistogramInput input{requests, capture};
+  input.executor = executor;
+  input.maximum_active_nodes = active_nodes;
+  input.rounds_per_submission = rounds;
+  return input;
+}
 DecisionTree Oracle(HistogramTrainingSamples samples, HistogramTreeLearningOptions options,
                     std::vector<uint32_t> *order) {
   HistogramTreeFitter fitter;
@@ -36,9 +45,13 @@ void Case(GpuBackend &gpu, const std::vector<HistogramTrainingSamples> &samples,
     auto copy = samples[i]; DecisionTree ordinary;
     Ok(LearnHistogramTree(copy, &ordinary, options));
     Check(ordinary == expected.back(), "Ordinary/resumable CPU oracle differs");
+    copy = samples[i];
+    DecisionTree scalar_frontier;
+    Ok(LearnHistogramTreeFrontierReference(copy, &scalar_frontier, options));
+    Check(scalar_frontier == ordinary, "Scalar frontier/native CPU oracle differs");
   }
   const auto originals = samples;
-  const ResidentHistogramInput input{requests, true};
+  const auto input = Input(requests, true);
   ResidentHistogramPlan plan;
   Ok(ComputeResidentHistogramPlan(input, &plan));
   ResourceBudget budget(plan.working.peak_bytes);
@@ -48,8 +61,13 @@ void Case(GpuBackend &gpu, const std::vector<HistogramTrainingSamples> &samples,
   ResidentHistogramResult result;
   const auto before = gpu.stats().committed_submissions;
   Ok(QueryGpuModularHistogramFitting(gpu)->FitHistogramTrees(input, &result));
-  Check(gpu.stats().committed_submissions == before + 1,
-        "Resident fitting must use one complete-fit submission");
+  Check(gpu.stats().committed_submissions == before + result.submissions && result.submissions,
+        "Resident fitting submission count differs");
+  if (executor == ResidentHistogramExecutor::kFrontier) {
+    Check(result.maximum_active_nodes <= plan.frontier.active_nodes && result.frontier_rounds > 0,
+          "Frontier exceeded its admitted active slots");
+    same_fit_peak = std::max(same_fit_peak, result.maximum_same_fit_nodes);
+  } else Check(result.submissions == 1, "Depth-first fitting added submissions");
   Check(result.trees.size() == expected.size() && result.row_offsets.size() == expected.size() + 1,
         "Resident fitting omitted results");
   for (size_t i = 0; i < samples.size(); ++i) {
@@ -93,14 +111,14 @@ void Failures(GpuBackend &gpu) {
     if (kind == 0) Ok(ArmNextMetalAllocationFailureForTest(gpu));
     if (kind == 1 || kind == 2) Ok(ArmNextMetalSubmissionFailureForTest(gpu, kind == 1, kind == 2));
     if (kind == 3) ArmNextManagedHostAllocationFailureForTest();
-    const auto status = op->FitHistogramTrees({{&request, 1}}, &result);
+    const auto status = op->FitHistogramTrees(Input({&request, 1}), &result);
     DisarmManagedHostAllocationFailureForTest();
     Check(!status.ok(), "Injected resident failure was ignored"); intact();
   }
   for (unsigned limit = 0; limit < 2; ++limit) {
     request.learning.maximum_leaves = limit ? kMaximumTreeLeaves : 1;
     request.learning.maximum_depth = limit ? 1 : kMaximumTreeDepth;
-    Check(op->FitHistogramTrees({{&request, 1}}, &result).code() == StatusCode::kUnsupported,
+    Check(op->FitHistogramTrees(Input({&request, 1}), &result).code() == StatusCode::kUnsupported,
           "Resident tree capacity/depth silently truncated"); intact();
   }
   request.learning = {};
@@ -108,38 +126,84 @@ void Failures(GpuBackend &gpu) {
   multiplier.range = request.learning.static_range;
   request.learning.multipliers = {&multiplier, 1};
   const auto before = gpu.stats().committed_submissions;
-  Check(op->FitHistogramTrees({{&request, 1}}, &result).code() == StatusCode::kUnsupported,
+  Check(op->FitHistogramTrees(Input({&request, 1}), &result).code() == StatusCode::kUnsupported,
         "Unsupported resident multiplier accepted"); intact();
   request.learning.multipliers = {};
   samples.static_values[0][0] = 999;
-  Check(op->FitHistogramTrees({{&request, 1}}, &result).code() == StatusCode::kInvalidArgument,
+  Check(op->FitHistogramTrees(Input({&request, 1}), &result).code() == StatusCode::kInvalidArgument,
         "Invalid resident property bin accepted"); intact();
   Check(gpu.stats().committed_submissions == before, "Resident preflight submitted invalid work");
   samples.static_values[0][0] = 0;
   samples.thresholds[0].resize(256);
   std::iota(samples.thresholds[0].begin(), samples.thresholds[0].end(), 0);
-  Check(op->FitHistogramTrees({{&request, 1}}, &result).code() == StatusCode::kUnsupported,
+  Check(op->FitHistogramTrees(Input({&request, 1}), &result).code() == StatusCode::kUnsupported,
         "Oversized resident static bins accepted"); intact();
   samples = Fixture(0, 257, 2);
   ResidentHistogramPlan plan;
-  Ok(ComputeResidentHistogramPlan({{&request, 1}}, &plan));
+  Ok(ComputeResidentHistogramPlan(Input({&request, 1}), &plan));
   {
     ResourceBudget budget(1); ResourceReservation reservation;
     Ok(budget.TryReserve(1, &reservation));
     ResourceContextScope context({&reservation, ResourceClass::kPreparation});
-    Check(!op->FitHistogramTrees({{&request, 1}}, &result).ok(), "Unadmitted resident fitting succeeded"); intact();
+    Check(!op->FitHistogramTrees(Input({&request, 1}), &result).ok(), "Unadmitted resident fitting succeeded"); intact();
     Check(!budget.snapshot().total.live_capacity_bytes, "Failed resident admission leaked backing");
   }
   ResidentHistogramResult recovered;
-  Ok(op->FitHistogramTrees({{&request, 1}}, &recovered));
+  Ok(op->FitHistogramTrees(Input({&request, 1}), &recovered));
   std::vector<uint32_t> order;
   Check(recovered.trees[0] == Oracle(samples, request.learning, &order), "Resident failure recovery differs");
+  if (executor == ResidentHistogramExecutor::kFrontier) {
+    auto invalid = Input({&request, 1});
+    invalid.maximum_active_nodes = 0;
+    Check(!op->FitHistogramTrees(invalid, &result).ok(), "Zero frontier slots accepted"); intact();
+    invalid = Input({&request, 1}); invalid.maximum_scratch_bytes = 1;
+    Check(op->FitHistogramTrees(invalid, &result).code() == StatusCode::kUnsupported,
+          "Frontier exceeded its scratch allowance"); intact();
+    auto bounded = Input({&request, 1});
+    bounded.maximum_scratch_bytes = plan.frontier.slot.bytes * 3;
+    ResidentHistogramPlan bounded_plan;
+    Ok(ComputeResidentHistogramPlan(bounded, &bounded_plan));
+    Check(bounded_plan.frontier.active_nodes == 3, "Scratch allowance did not bound active nodes");
+    ResidentHistogramResult bounded_result;
+    Ok(op->FitHistogramTrees(bounded, &bounded_result));
+    Check(bounded_result.trees == recovered.trees && bounded_result.maximum_active_nodes <= 3,
+          "Bounded frontier changed decisions");
+
+    // Fail after a completed GPU round, rather than only at initial admission.
+    auto late = Input({&request, 1});
+    late.maximum_active_nodes = late.rounds_per_submission = 1;
+    request.learning.maximum_depth = 2;
+    const auto committed = gpu.stats().committed_submissions;
+    Check(op->FitHistogramTrees(late, &result).code() == StatusCode::kUnsupported &&
+          gpu.stats().committed_submissions > committed + 1, "Late frontier capacity failure was not exercised"); intact();
+    request.learning = {};
+    bool failed_after_gpu = false, exhausted = false;
+    for (size_t after = 0; after < 32; ++after) {
+      ResidentHistogramResult retained;
+      retained.visited_nodes = 983;
+      retained.trees.resize(1);
+      retained.trees[0].nodes[0].predictor = Predictor::kZero;
+      const auto before = gpu.stats().committed_submissions;
+      ArmManagedHostAllocationFailureAfterForTest(after);
+      const auto status = op->FitHistogramTrees(Input({&request, 1}), &retained);
+      const bool pending = ManagedHostAllocationFailurePendingForTest();
+      DisarmManagedHostAllocationFailureForTest();
+      if (status.ok()) { Check(pending, "Injected host failure disappeared"); exhausted = true; break; }
+      Check(!pending && retained.visited_nodes == 983 && retained.trees.size() == 1 &&
+            retained.trees[0].nodes[0].predictor == Predictor::kZero, "Frontier publication failure changed output");
+      failed_after_gpu |= gpu.stats().committed_submissions > before;
+      ++failures;
+    }
+    Check(exhausted && failed_after_gpu, "Frontier publication allocation failure was not exercised");
+  }
   samples = Fixture(0, 0, 2);
-  Check(op->FitHistogramTrees({{&request, 1}}, &result).code() == StatusCode::kUnsupported,
+  Check(op->FitHistogramTrees(Input({&request, 1}), &result).code() == StatusCode::kUnsupported,
         "Empty resident upload was not rejected"); intact();
 }
 }
-int main() try {
+int main(int argc, char **argv) try {
+  Check(argc == 1 || (argc == 2 && std::string_view(argv[1]) == "--frontier"), "Unknown resident test mode");
+  if (argc == 2) executor = ResidentHistogramExecutor::kFrontier;
   std::unique_ptr<GpuBackend> gpu;
   Ok(CreateEmbeddedMetalBackend({}, &gpu));
   std::cout << "Resident histogram device: " << gpu->name() << std::endl;
@@ -175,16 +239,24 @@ int main() try {
   for (size_t i = 0; i < reordered.weights.size(); ++i)
     reordered.static_values[0][i] = (i * 13) % 256;
   Case(*gpu, {reordered});
+  if (executor == ResidentHistogramExecutor::kFrontier) {
+    for (size_t width : {size_t{1}, size_t{3}, size_t{17}}) {
+      active_nodes = width; rounds = width == 1 ? 1 : 3;
+      Case(*gpu, {Fixture(0, 129, 2)});
+    }
+    active_nodes = 128; rounds = 16;
+    Check(same_fit_peak > 1, "Frontier never evaluated siblings together");
+  }
   Failures(*gpu);
   auto first = std::async(std::launch::async, [&] {
     ResidentHistogramResult result; auto samples = Fixture(0, 257, 2);
     ResidentHistogramRequest request{{1, &samples}, {}};
-    Ok(QueryGpuModularHistogramFitting(*gpu)->FitHistogramTrees({{&request, 1}}, &result));
+    Ok(QueryGpuModularHistogramFitting(*gpu)->FitHistogramTrees(Input({&request, 1}), &result));
     return result.trees[0];
   });
   ResidentHistogramResult result; auto samples = Fixture(0, 257, 2);
   ResidentHistogramRequest request{{2, &samples}, {}};
-  Ok(QueryGpuModularHistogramFitting(*gpu)->FitHistogramTrees({{&request, 1}}, &result));
+  Ok(QueryGpuModularHistogramFitting(*gpu)->FitHistogramTrees(Input({&request, 1}), &result));
   Check(first.get() == result.trees[0], "Concurrent resident fits shared mutable state");
   result = {}; gpu.reset();
   std::cout << fits << " complete trees and exact row permutations; " << failures

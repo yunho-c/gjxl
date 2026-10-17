@@ -29,4 +29,22 @@ struct Fit {
 static_assert(sizeof(Node) == 36);
 static_assert(sizeof(State) == 36);
 static_assert(sizeof(Fit) == 132);
+// Append-only ready queue. Entries are consumed only after the dispatch that
+// produced them completes, so active ranges are disjoint even within a tree.
+struct NodeRef { Word fit, node; };
+struct FrontierControl {
+  Word status, head, tail, first, count;
+  Word rounds, maximum_ready, maximum_active, maximum_same_fit;
+  Word dispatch[3];
+};
+struct FrontierScratch {
+  Word state, parent, parent_extra, histogram, extra, occupancy, sides, bytes;
+};
+struct FrontierParams {
+  Word fits, queue, control, scratch, active_nodes, queue_capacity;
+  FrontierScratch slot;
+};
+static_assert(sizeof(NodeRef) == 8);
+static_assert(sizeof(FrontierControl) == 48);
+static_assert(sizeof(FrontierParams) == 56);
 } // namespace gjxl_histogram_resident

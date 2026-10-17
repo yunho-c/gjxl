@@ -118,7 +118,7 @@ int main(int argc, char **argv) try {
         "hybrid_profile INPUT OUT cpu|shared-cpu|hybrid|auto auto|buffered best|all "
         "[fit-off|schedule|fit-on [learning-participants [cpu-ceiling [entropy-participants "
         "[selection-participants [tokenization-participants [public|fitter-cpu|fitter-resumable|"
-        "fitter-gpu|fitter-auto|fitter-resident [minimum-rows [batch-fits]]]]]]]]] "
+        "fitter-gpu|fitter-auto|fitter-resident|fitter-frontier [minimum-rows [batch-fits]]]]]]]]] "
         "[--sample-rows=MODE] [--row-diagnostics=rows-off|rows-on] "
         "[--learning-schedule=cohorts|pipeline] [--feature-window=8|16] "
         "[--gpu-profile=gpu-off|gpu-wall|gpu-stage] [--histogram-shards=N] [--active-properties=N] "
@@ -134,7 +134,7 @@ int main(int argc, char **argv) try {
         "Invalid fitting buffer control");
   Check(fit_encoders == "single" || fit_encoders == "multiple", "Invalid fitting encoder control");
   const std::string fitter_flag = argc >= 13 ? argv[12] : "fitter-cpu";
-  const bool resident_fitter = fitter_flag == "fitter-resident";
+  const bool resident_fitter = fitter_flag == "fitter-resident" || fitter_flag == "fitter-frontier";
   Check(!resident_fitter ||
             (argc <= 15 && !gpu_profile_enabled && !named_control("--fit-buffers") &&
              !named_control("--fit-encoders") && !named_control("--histogram-shards") &&
@@ -152,7 +152,7 @@ int main(int argc, char **argv) try {
   Check((!public_api || (argc == 13 && !private_flags)) &&
             (public_api || fitter_flag == "fitter-cpu" || fitter_flag == "fitter-resumable" ||
              fitter_flag == "fitter-gpu" || fitter_flag == "fitter-auto" ||
-             fitter_flag == "fitter-resident"), "Unknown fitting route flag");
+             resident_fitter), "Unknown fitting route flag");
   const bool fitter_diagnostics = argc >= 13 && !public_api;
   Check(is_row_mode(row_mode), "Invalid sample row mode");
   const bool gpu_rows = row_mode == "metal" || row_mode == "metal-deferred" || row_mode == "metal-unique";
@@ -216,7 +216,8 @@ int main(int argc, char **argv) try {
                                      : (uint16_t(view.bytes[pos]) << 8) | view.bytes[pos + 1]);
     }
   ReferenceWorkflowOptions options;
-  options.fitting_backend = fitter_flag == "fitter-resident" ? ReferenceFittingBackend::kGpuResident
+  options.fitting_backend = fitter_flag == "fitter-frontier" ? ReferenceFittingBackend::kGpuFrontier
+                            : fitter_flag == "fitter-resident" ? ReferenceFittingBackend::kGpuResident
                             : fitter_flag == "fitter-gpu" ? ReferenceFittingBackend::kGpu
                             : fitter_flag == "fitter-resumable" ? ReferenceFittingBackend::kResumableCpu
                             : fitter_flag == "fitter-auto" ? ReferenceFittingBackend::kAuto
@@ -520,11 +521,16 @@ int main(int argc, char **argv) try {
       << ",\"evaluation_seconds\":" << stats.histogram_evaluation_seconds << '}';
   if (trace_output)
     out << ",\"histogram_capacity_retries\":" << stats.histogram_capacity_retries;
-  if (fitter_flag == "fitter-resident")
+  if (resident_fitter)
     out << ",\"resident_fitting\":{\"fits\":" << stats.histogram_resident_fits
         << ",\"buffers\":\"fresh\",\"encoders\":\"single\""
         << ",\"nodes\":" << stats.histogram_gpu_nodes
         << ",\"batches\":" << stats.histogram_gpu_batches
+        << ",\"executor\":" << std::quoted(fitter_flag)
+        << ",\"submissions\":" << stats.histogram_resident_submissions
+        << ",\"frontier_rounds\":" << stats.histogram_frontier_rounds
+        << ",\"maximum_active_nodes\":" << stats.histogram_frontier_maximum_active
+        << ",\"maximum_same_fit_nodes\":" << stats.histogram_frontier_maximum_same_fit
         << ",\"complete_fit_seconds\":" << stats.histogram_resident_seconds
         << ",\"gpu_nanoseconds\":" << stats.histogram_resident_gpu_nanoseconds << '}';
   if (gpu_profile_output) {

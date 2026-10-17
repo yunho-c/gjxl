@@ -27,15 +27,16 @@ void Ok(Status s) { if (!s.ok()) throw std::runtime_error(std::string(s.message(
 struct Observation {
   double wall = 0, cpu = 0, restore = 0, gpu_call = 0;
   uint64_t gpu_ns = 0;
+  size_t submissions = 0, rounds = 0, active = 0, same_fit = 0;
   size_t input_backing = 0, peak_backing = 0, incremental_peak = 0, nodes = 0;
 };
 Observation Run(GpuBackend &gpu, std::span<const ResidentHistogramRequest> requests,
                 std::span<const DecisionTree> expected, unsigned mode) {
-  // 0: CPU 1; 1: CPU 14; 2: GPU all; 3/4: same half-GPU/half-CPU assignment,
+  // 0: CPU 1; 1: CPU 14; 2/3: DFS/frontier GPU all; 4/5: half-frontier/half-CPU,
   // sequential or concurrent, with 13 CPU workers plus one GPU caller.
-  const size_t gpu_count = mode < 2 ? 0 : mode == 2 ? requests.size() : requests.size() / 2;
+  const size_t gpu_count = mode < 2 ? 0 : mode < 4 ? requests.size() : requests.size() / 2;
   const size_t cpu_count = requests.size() - gpu_count;
-  const size_t participants = mode == 0 || mode == 2 ? 1 : mode == 1 ? 14 : 13;
+  const size_t participants = mode == 0 || mode == 2 || mode == 3 ? 1 : mode == 1 ? 14 : 13;
   std::shared_ptr<const ExecutionDomain> domain;
   Ok(ExecutionDomain::Create({size_t{2} << 30, 14}, &domain));
   const auto &budget = codestream_internal::WorkflowAdmission::Budget(*domain);
@@ -66,11 +67,13 @@ Observation Run(GpuBackend &gpu, std::span<const ResidentHistogramRequest> reque
     const auto gpu_work = [&] {
       if (!gpu_count) return;
       const auto start = Clock::now();
-      Ok(QueryGpuModularHistogramFitting(gpu)->FitHistogramTrees({requests.first(gpu_count)}, &resident));
+      ResidentHistogramInput input{requests.first(gpu_count)};
+      input.executor = mode == 2 ? ResidentHistogramExecutor::kDepthFirst : ResidentHistogramExecutor::kFrontier;
+      Ok(QueryGpuModularHistogramFitting(gpu)->FitHistogramTrees(input, &resident));
       result.gpu_call = Seconds(start);
     };
     const auto start = Clock::now(); const auto cpu_start = std::clock();
-    if (mode == 4) {
+    if (mode == 5) {
       std::exception_ptr failure;
       std::thread pending([&] {
         try {
@@ -91,6 +94,8 @@ Observation Run(GpuBackend &gpu, std::span<const ResidentHistogramRequest> reque
       result.nodes += tree.size;
     }
     result.gpu_ns = resident.gpu_nanoseconds;
+    result.submissions = resident.submissions; result.rounds = resident.frontier_rounds;
+    result.active = resident.maximum_active_nodes; result.same_fit = resident.maximum_same_fit_nodes;
     result.peak_backing = budget.snapshot().peak_backing_bytes;
     result.incremental_peak = result.peak_backing - result.input_backing;
   }
@@ -101,10 +106,10 @@ Observation Run(GpuBackend &gpu, std::span<const ResidentHistogramRequest> reque
 }
 }
 int main(int argc, char **argv) try {
-  Check(argc >= 3 && argc <= 6, "resident_fitting_probe INPUT OUTPUT.json [fits=16 [repeats=5 [tile=128]]]");
+  Check(argc >= 3 && argc <= 6, "resident_fitting_probe INPUT OUTPUT.json [fits=16 [repeats=6 [tile=128]]]");
   Check(!std::filesystem::exists(argv[2]), "Refusing to replace probe output");
   const size_t fits = argc > 3 ? std::stoul(argv[3]) : 16;
-  const size_t repeats = argc > 4 ? std::stoul(argv[4]) : 5;
+  const size_t repeats = argc > 4 ? std::stoul(argv[4]) : 6;
   const size_t tile = argc > 5 ? std::stoul(argv[5]) : 128;
   Check(fits >= 2 && fits <= 64 && repeats > 0 && repeats <= 30 && tile > 0 && tile <= 256,
         "Invalid fitting probe dimensions");
@@ -134,26 +139,31 @@ int main(int argc, char **argv) try {
     rows += copy.weights.size(); population += copy.total_samples;
     locations.push_back({x0, y0, channel});
   }
-  ResidentHistogramPlan plan; Ok(ComputeResidentHistogramPlan({requests}, &plan));
+  ResidentHistogramInput input{requests};
+  input.executor = ResidentHistogramExecutor::kFrontier;
+  ResidentHistogramPlan plan; Ok(ComputeResidentHistogramPlan(input, &plan));
   std::ofstream out(argv[2]); out << std::setprecision(17) << std::boolalpha;
-  out << "{\"schema\":1,\"input\":" << std::quoted(argv[1]) << ",\"fits\":" << fits
+  out << "{\"schema\":2,\"input\":" << std::quoted(argv[1]) << ",\"fits\":" << fits
       << ",\"tile\":" << tile << ",\"rows\":" << rows << ",\"population\":" << population
+      << ",\"planned_gpu_executor\":\"frontier\""
       << ",\"planned_gpu_work_bytes\":" << plan.work_bytes
       << ",\"planned_gpu_input_bytes\":" << plan.prepared.storage_bytes
       << ",\"planned_gpu_peak_bytes\":" << plan.working.peak_bytes
       << ",\"locations\":[";
   for (size_t i = 0; i < fits; ++i) out << (i ? "," : "") << '[' << locations[i][0] << ',' << locations[i][1] << ',' << locations[i][2] << ']';
-  const char *names[] = {"cpu1", "cpu14", "resident", "split_sequential", "split_concurrent"};
-  out << "],\"boundary\":\"Complete fitting including validation, scratch, partition, node management and publication. GPU upload included. Input sampling, CPU input restoration, backend/domain and worker-pool creation excluded. Concurrent thread launch/join included. CPU seconds are process CPU time.\",\"observations\":[";
+  const char *names[] = {"cpu1", "cpu14", "resident_depth_first", "frontier", "split_sequential", "split_concurrent"};
+  out << "],\"boundary\":\"Complete fitting including validation, scratch, partition, node/queue management, canonicalization and publication. GPU upload included. Input sampling, CPU input restoration, backend/domain and worker-pool creation excluded. Concurrent thread launch/join included. CPU seconds are process CPU time.\",\"observations\":[";
   bool comma = false;
   for (size_t iteration = 0; iteration <= repeats; ++iteration) {
-    for (unsigned position = 0; position < 5; ++position) {
-      const unsigned mode = (position + iteration) % 5;
+    for (unsigned position = 0; position < 6; ++position) {
+      const unsigned mode = (position + iteration) % 6;
       const auto r = Run(*gpu, requests, expected, mode);
       out << (comma ? "," : "") << "{\"mode\":" << std::quoted(names[mode]) << ",\"iteration\":" << iteration
           << ",\"warmup\":" << (iteration == 0) << ",\"exact\":true,\"wall_seconds\":" << r.wall
           << ",\"process_cpu_seconds\":" << r.cpu << ",\"input_restore_seconds\":" << r.restore
           << ",\"gpu_call_seconds\":" << r.gpu_call << ",\"gpu_nanoseconds\":" << r.gpu_ns
+          << ",\"gpu_submissions\":" << r.submissions << ",\"frontier_rounds\":" << r.rounds
+          << ",\"maximum_active_nodes\":" << r.active << ",\"maximum_same_fit_nodes\":" << r.same_fit
           << ",\"tree_nodes\":" << r.nodes << ",\"input_and_pool_backing_bytes\":" << r.input_backing
           << ",\"peak_backing_bytes\":" << r.peak_backing << ",\"incremental_peak_bytes\":" << r.incremental_peak << '}';
       comma = true; out.flush();

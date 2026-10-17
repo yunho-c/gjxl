@@ -100,7 +100,8 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
     return Status::Ok();
   if (requests.size() > kMaximumHistogramFittingFits || !participants)
     return Invalid();
-  const bool resident = options.fitting_backend == ReferenceFittingBackend::kGpuResident;
+  const bool frontier = options.fitting_backend == ReferenceFittingBackend::kGpuFrontier;
+  const bool resident = options.fitting_backend == ReferenceFittingBackend::kGpuResident || frontier;
   if (resident && (active_histogram_fitting_profile || options.fitting_gpu_profile))
     return Status::Unsupported("Resident fitting has complete-call diagnostics only");
   const bool gpu_requested =
@@ -290,7 +291,8 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
         indices[count++] = i;
       }
       if (!count) continue;
-      const ResidentHistogramInput input{std::span(batch).first(count)};
+      ResidentHistogramInput input{std::span(batch).first(count)};
+      if (frontier) input.executor = ResidentHistogramExecutor::kFrontier;
       ResidentHistogramPlan plan;
       const auto limits = op->histogram_fitting_limits();
       if (auto s = ComputeResidentHistogramPlan(input, &plan, &limits); !s.ok()) return s;
@@ -306,6 +308,10 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
       }
       stats->histogram_resident_fits += count;
       stats->histogram_resident_gpu_nanoseconds += result.gpu_nanoseconds;
+      stats->histogram_resident_submissions += result.submissions;
+      stats->histogram_frontier_rounds += result.frontier_rounds;
+      stats->histogram_frontier_maximum_active = std::max(stats->histogram_frontier_maximum_active, result.maximum_active_nodes);
+      stats->histogram_frontier_maximum_same_fit = std::max(stats->histogram_frontier_maximum_same_fit, result.maximum_same_fit_nodes);
       ++stats->histogram_gpu_preparations;
       ++stats->histogram_gpu_batches;
       stats->histogram_gpu_nodes += result.visited_nodes;
