@@ -401,3 +401,5 @@ kernel void gjxl_histogram_select(device const uchar *prepared [[buffer(0)]],
     output[n.result_first + task.property] = result;
   }
 }
+
+#include "modular_resident_histogram_fitting.metal"

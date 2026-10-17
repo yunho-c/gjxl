@@ -10,6 +10,8 @@
 #include <span>
 
 namespace gjxl::histogram_gpu_internal {
+struct ResidentHistogramInput;
+struct ResidentHistogramResult;
 inline constexpr size_t kMaximumHistogramFittingFits = 256;
 inline constexpr size_t kMaximumHistogramFittingRows = 8 * 1024 * 1024;
 inline constexpr size_t kHistogramFittingAlignment = 256;
@@ -275,6 +277,8 @@ protected:
 class GpuModularHistogramFitting {
 public:
   virtual ~GpuModularHistogramFitting() = default;
+  [[nodiscard]] virtual Status FitHistogramTrees(
+      const ResidentHistogramInput &input, ResidentHistogramResult *out) = 0;
   // Advisory, without borrowing/activating backing. Call after shape planning,
   // reserve the capacity bound, and pass this same snapshot into evaluation.
   [[nodiscard]] virtual std::array<size_t, 3> HistogramFittingBufferCapacities(

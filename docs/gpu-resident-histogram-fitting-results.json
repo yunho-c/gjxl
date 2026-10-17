@@ -1,0 +1,2576 @@
+{
+  "schema": 1,
+  "status": "passed",
+  "base_revision": "7f66a10c09eaf36d44ebb0718b53c3272f009853",
+  "branch": "feat/gpu-resident-fitting",
+  "artifact_directory": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/prepared-study",
+  "manifest_sha256": "5efdf178341e870e1cefc24337ae0cf29f1aab4f9101c646be336ce6aae487eb",
+  "frozen_binary_sha256": "87b72313459bab7e053c1f4af50c8ea9c429d45ddf255be84744108c004fff9d",
+  "source_patch_sha256": "3ecf3554d341aa570e6a1c399462c850f94f8d4ded74b11b2eb2a1c7e7044696",
+  "platform": {
+    "platform": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+    "load_average": [
+      6.20458984375,
+      7.77294921875,
+      8.0595703125
+    ],
+    "power": "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=35782755)\t90%; discharging; 11:24 remaining present: true",
+    "cpu": "Apple M4 Pro",
+    "physical_memory_bytes": 51539607552,
+    "thermal": "Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded\nNote: No CPU power status has been recorded",
+    "top_processes": [
+      "1  35.5 /sbin/launchd",
+      "25696  28.0 /Applications/Claude.app/Contents/Frameworks/Claude Helper (Renderer).app/Contents/MacOS/Claude Helper (Renderer)",
+      " 2950  25.7 /opt/homebrew/Cellar/python@3.14/3.14.8/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python",
+      " 2986  25.5 (ps)",
+      "  698  12.2 /usr/libexec/syspolicyd",
+      " 1688   9.7 /Applications/Orca.app/Contents/Frameworks/Orca Helper (Renderer).app/Contents/MacOS/Orca Helper (Renderer)",
+      " 4736   6.6 /Applications/BetterTouchTool.app/Contents/MacOS/BetterTouchTool",
+      "  655   6.2 /usr/libexec/trustd",
+      "  602   5.3 /System/Library/PrivateFrameworks/SkyLight.framework/Resources/WindowServer",
+      "79804   4.4 codex",
+      "  574   3.5 /System/Library/CoreServices/launchservicesd",
+      "38330   3.1 /usr/libexec/trustd"
+    ]
+  },
+  "power_settings": "Battery Power:\n Sleep On Power Button 1\n powermode            1\n standby              1\n ttyskeepawake        1\n hibernatemode        3\n powernap             1\n hibernatefile        /var/vm/sleepimage\n displaysleep         10\n womp                 0\n networkoversleep     0\n sleep                1\n lessbright           1\n tcpkeepalive         1\n disksleep            10\nAC Power:\n Sleep On Power Button 1\n powermode            0\n standby              1\n ttyskeepawake        1\n hibernatemode        3\n powernap             1\n hibernatefile        /var/vm/sleepimage\n displaysleep         30\n womp                 1\n networkoversleep     0\n sleep                0\n tcpkeepalive         1\n disksleep            10\n",
+  "rejected_runs": 0,
+  "fit_policy": "Default Best predictor policy; 16 deterministic single-channel 128x128 tiles per photograph; prepared once and replayed immutably. Not complete-image encoding or selected transformed production fits.",
+  "cases": [
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1029.pam",
+      "input_sha256": "a1c487b0160d8f3e8cb86753131b919ac3de28e908fde757050ebccdb4407b6d",
+      "width": 4000,
+      "height": 3000,
+      "result": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/prepared-study/1029-a0.json",
+      "result_sha256": "de56019a5966e8d96bda80dd6da1b8af2149eb1ef21354f9c61a2c460d3b49fe",
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/prepared-study/gjxl_modular_resident_fitting_probe",
+        "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1029.pam",
+        "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/prepared-study/1029-a0.json",
+        "16",
+        "5",
+        "128"
+      ],
+      "fits": 16,
+      "tile": 128,
+      "rows": 171424,
+      "population": 171424,
+      "tree_nodes": 4426,
+      "locations": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          977,
+          613,
+          1
+        ],
+        [
+          1954,
+          1226,
+          2
+        ],
+        [
+          2931,
+          1839,
+          0
+        ],
+        [
+          35,
+          2452,
+          1
+        ],
+        [
+          1012,
+          192,
+          2
+        ],
+        [
+          1989,
+          805,
+          0
+        ],
+        [
+          2966,
+          1418,
+          1
+        ],
+        [
+          70,
+          2031,
+          2
+        ],
+        [
+          1047,
+          2644,
+          0
+        ],
+        [
+          2024,
+          384,
+          1
+        ],
+        [
+          3001,
+          997,
+          2
+        ],
+        [
+          105,
+          1610,
+          0
+        ],
+        [
+          1082,
+          2223,
+          1
+        ],
+        [
+          2059,
+          2836,
+          2
+        ],
+        [
+          3036,
+          576,
+          0
+        ]
+      ],
+      "planned_gpu_peak_bytes": 31400380,
+      "boundary": "Complete fitting including validation, scratch, partition, node management and publication. GPU upload included. Input sampling, CPU input restoration, backend/domain and worker-pool creation excluded. Concurrent thread launch/join included. CPU seconds are process CPU time.",
+      "modes": {
+        "cpu1": {
+          "measured_repetitions": 5,
+          "warmups": 1,
+          "all_trees_exact": true,
+          "stats": {
+            "wall_seconds": {
+              "median": 0.377199042,
+              "minimum": 0.376437625,
+              "maximum": 0.384122041
+            },
+            "process_cpu_seconds": {
+              "median": 0.3765,
+              "minimum": 0.375646,
+              "maximum": 0.382801
+            },
+            "input_restore_seconds": {
+              "median": 0.000249,
+              "minimum": 0.00022525,
+              "maximum": 0.000368875
+            },
+            "gpu_call_seconds": {
+              "median": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "gpu_nanoseconds": {
+              "median": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 4907080,
+              "minimum": 4907080,
+              "maximum": 4907080
+            },
+            "peak_backing_bytes": {
+              "median": 11600672,
+              "minimum": 11600672,
+              "maximum": 11600672
+            },
+            "incremental_peak_bytes": {
+              "median": 6693592,
+              "minimum": 6693592,
+              "maximum": 6693592
+            }
+          },
+          "observations": [
+            {
+              "mode": "cpu1",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.377270208,
+              "process_cpu_seconds": 0.376324,
+              "input_restore_seconds": 0.000515583,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 4907080,
+              "peak_backing_bytes": 11600672,
+              "incremental_peak_bytes": 6693592
+            },
+            {
+              "mode": "cpu1",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.376437625,
+              "process_cpu_seconds": 0.375909,
+              "input_restore_seconds": 0.000368875,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 4907080,
+              "peak_backing_bytes": 11600672,
+              "incremental_peak_bytes": 6693592
+            },
+            {
+              "mode": "cpu1",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.37644325,
+              "process_cpu_seconds": 0.375646,
+              "input_restore_seconds": 0.000234583,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 4907080,
+              "peak_backing_bytes": 11600672,
+              "incremental_peak_bytes": 6693592
+            },
+            {
+              "mode": "cpu1",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.384122041,
+              "process_cpu_seconds": 0.382801,
+              "input_restore_seconds": 0.000336333,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 4907080,
+              "peak_backing_bytes": 11600672,
+              "incremental_peak_bytes": 6693592
+            },
+            {
+              "mode": "cpu1",
+              "iteration": 4,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.377199042,
+              "process_cpu_seconds": 0.376643,
+              "input_restore_seconds": 0.000249,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 4907080,
+              "peak_backing_bytes": 11600672,
+              "incremental_peak_bytes": 6693592
+            },
+            {
+              "mode": "cpu1",
+              "iteration": 5,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.377573334,
+              "process_cpu_seconds": 0.3765,
+              "input_restore_seconds": 0.00022525,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 4907080,
+              "peak_backing_bytes": 11600672,
+              "incremental_peak_bytes": 6693592
+            }
+          ]
+        },
+        "cpu14": {
+          "measured_repetitions": 5,
+          "warmups": 1,
+          "all_trees_exact": true,
+          "stats": {
+            "wall_seconds": {
+              "median": 0.053852083,
+              "minimum": 0.049652833,
+              "maximum": 0.057536458
+            },
+            "process_cpu_seconds": {
+              "median": 0.407661,
+              "minimum": 0.404574,
+              "maximum": 0.407796
+            },
+            "input_restore_seconds": {
+              "median": 0.000218708,
+              "minimum": 0.000215125,
+              "maximum": 0.000234459
+            },
+            "gpu_call_seconds": {
+              "median": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "gpu_nanoseconds": {
+              "median": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 4907184,
+              "minimum": 4907184,
+              "maximum": 4907184
+            },
+            "peak_backing_bytes": {
+              "median": 16833536,
+              "minimum": 16833536,
+              "maximum": 16833536
+            },
+            "incremental_peak_bytes": {
+              "median": 11926352,
+              "minimum": 11926352,
+              "maximum": 11926352
+            }
+          },
+          "observations": [
+            {
+              "mode": "cpu14",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.052489209,
+              "process_cpu_seconds": 0.411178,
+              "input_restore_seconds": 0.000231208,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 4907184,
+              "peak_backing_bytes": 16833536,
+              "incremental_peak_bytes": 11926352
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.057536458,
+              "process_cpu_seconds": 0.404574,
+              "input_restore_seconds": 0.000234459,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 4907184,
+              "peak_backing_bytes": 16833536,
+              "incremental_peak_bytes": 11926352
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.05352625,
+              "process_cpu_seconds": 0.407661,
+              "input_restore_seconds": 0.000217375,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 4907184,
+              "peak_backing_bytes": 16833536,
+              "incremental_peak_bytes": 11926352
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.053852083,
+              "process_cpu_seconds": 0.404878,
+              "input_restore_seconds": 0.000215125,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 4907184,
+              "peak_backing_bytes": 16833536,
+              "incremental_peak_bytes": 11926352
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 4,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.057134791,
+              "process_cpu_seconds": 0.407751,
+              "input_restore_seconds": 0.000218708,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 4907184,
+              "peak_backing_bytes": 16833536,
+              "incremental_peak_bytes": 11926352
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 5,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.049652833,
+              "process_cpu_seconds": 0.407796,
+              "input_restore_seconds": 0.00022325,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 4907184,
+              "peak_backing_bytes": 16833536,
+              "incremental_peak_bytes": 11926352
+            }
+          ]
+        },
+        "resident": {
+          "measured_repetitions": 5,
+          "warmups": 1,
+          "all_trees_exact": true,
+          "stats": {
+            "wall_seconds": {
+              "median": 0.690028583,
+              "minimum": 0.686764417,
+              "maximum": 0.692257042
+            },
+            "process_cpu_seconds": {
+              "median": 0.0024,
+              "minimum": 0.00239,
+              "maximum": 0.003376
+            },
+            "input_restore_seconds": {
+              "median": 1.66e-07,
+              "minimum": 0,
+              "maximum": 2.08e-07
+            },
+            "gpu_call_seconds": {
+              "median": 0.690025583,
+              "minimum": 0.686760084,
+              "maximum": 0.69225425
+            },
+            "gpu_nanoseconds": {
+              "median": 687252249,
+              "minimum": 684141749,
+              "maximum": 689845374
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "peak_backing_bytes": {
+              "median": 26578108,
+              "minimum": 26578108,
+              "maximum": 26578108
+            },
+            "incremental_peak_bytes": {
+              "median": 26578108,
+              "minimum": 26578108,
+              "maximum": 26578108
+            }
+          },
+          "observations": [
+            {
+              "mode": "resident",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.708517,
+              "process_cpu_seconds": 0.005878,
+              "input_restore_seconds": 1.66e-07,
+              "gpu_call_seconds": 0.708513292,
+              "gpu_nanoseconds": 702742124,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 26578108,
+              "incremental_peak_bytes": 26578108
+            },
+            {
+              "mode": "resident",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.686764417,
+              "process_cpu_seconds": 0.0024,
+              "input_restore_seconds": 1.66e-07,
+              "gpu_call_seconds": 0.686760084,
+              "gpu_nanoseconds": 684141749,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 26578108,
+              "incremental_peak_bytes": 26578108
+            },
+            {
+              "mode": "resident",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.690028583,
+              "process_cpu_seconds": 0.0024,
+              "input_restore_seconds": 1.67e-07,
+              "gpu_call_seconds": 0.690025583,
+              "gpu_nanoseconds": 687252249,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 26578108,
+              "incremental_peak_bytes": 26578108
+            },
+            {
+              "mode": "resident",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.690808958,
+              "process_cpu_seconds": 0.003376,
+              "input_restore_seconds": 1.25e-07,
+              "gpu_call_seconds": 0.690805041,
+              "gpu_nanoseconds": 687399541,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 26578108,
+              "incremental_peak_bytes": 26578108
+            },
+            {
+              "mode": "resident",
+              "iteration": 4,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.688420833,
+              "process_cpu_seconds": 0.002436,
+              "input_restore_seconds": 0,
+              "gpu_call_seconds": 0.688418459,
+              "gpu_nanoseconds": 685906499,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 26578108,
+              "incremental_peak_bytes": 26578108
+            },
+            {
+              "mode": "resident",
+              "iteration": 5,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.692257042,
+              "process_cpu_seconds": 0.00239,
+              "input_restore_seconds": 2.08e-07,
+              "gpu_call_seconds": 0.69225425,
+              "gpu_nanoseconds": 689845374,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 26578108,
+              "incremental_peak_bytes": 26578108
+            }
+          ]
+        },
+        "split_sequential": {
+          "measured_repetitions": 5,
+          "warmups": 1,
+          "all_trees_exact": true,
+          "stats": {
+            "wall_seconds": {
+              "median": 0.728679541,
+              "minimum": 0.727796125,
+              "maximum": 0.740380167
+            },
+            "process_cpu_seconds": {
+              "median": 0.231509,
+              "minimum": 0.214841,
+              "maximum": 0.276104
+            },
+            "input_restore_seconds": {
+              "median": 0.000177833,
+              "minimum": 0.00011475,
+              "maximum": 0.000271042
+            },
+            "gpu_call_seconds": {
+              "median": 0.685487417,
+              "minimum": 0.685099458,
+              "maximum": 0.687032917
+            },
+            "gpu_nanoseconds": {
+              "median": 683080499,
+              "minimum": 682453749,
+              "maximum": 685493999
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 2457700,
+              "minimum": 2457700,
+              "maximum": 2457700
+            },
+            "peak_backing_bytes": {
+              "median": 15744176,
+              "minimum": 15744176,
+              "maximum": 15744176
+            },
+            "incremental_peak_bytes": {
+              "median": 13286476,
+              "minimum": 13286476,
+              "maximum": 13286476
+            }
+          },
+          "observations": [
+            {
+              "mode": "split_sequential",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.727952041,
+              "process_cpu_seconds": 0.216173,
+              "input_restore_seconds": 0.000271292,
+              "gpu_call_seconds": 0.687028625,
+              "gpu_nanoseconds": 683364291,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 2457700,
+              "peak_backing_bytes": 15744176,
+              "incremental_peak_bytes": 13286476
+            },
+            {
+              "mode": "split_sequential",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.736172667,
+              "process_cpu_seconds": 0.273878,
+              "input_restore_seconds": 0.000271042,
+              "gpu_call_seconds": 0.685487417,
+              "gpu_nanoseconds": 682453749,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 2457700,
+              "peak_backing_bytes": 15744176,
+              "incremental_peak_bytes": 13286476
+            },
+            {
+              "mode": "split_sequential",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.728679541,
+              "process_cpu_seconds": 0.217455,
+              "input_restore_seconds": 0.0002325,
+              "gpu_call_seconds": 0.687032917,
+              "gpu_nanoseconds": 683080499,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 2457700,
+              "peak_backing_bytes": 15744176,
+              "incremental_peak_bytes": 13286476
+            },
+            {
+              "mode": "split_sequential",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.727796125,
+              "process_cpu_seconds": 0.214841,
+              "input_restore_seconds": 0.00011475,
+              "gpu_call_seconds": 0.68681375,
+              "gpu_nanoseconds": 685493999,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 2457700,
+              "peak_backing_bytes": 15744176,
+              "incremental_peak_bytes": 13286476
+            },
+            {
+              "mode": "split_sequential",
+              "iteration": 4,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.740380167,
+              "process_cpu_seconds": 0.276104,
+              "input_restore_seconds": 0.000151209,
+              "gpu_call_seconds": 0.685166417,
+              "gpu_nanoseconds": 683152166,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 2457700,
+              "peak_backing_bytes": 15744176,
+              "incremental_peak_bytes": 13286476
+            },
+            {
+              "mode": "split_sequential",
+              "iteration": 5,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.728644583,
+              "process_cpu_seconds": 0.231509,
+              "input_restore_seconds": 0.000177833,
+              "gpu_call_seconds": 0.685099458,
+              "gpu_nanoseconds": 682871333,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 2457700,
+              "peak_backing_bytes": 15744176,
+              "incremental_peak_bytes": 13286476
+            }
+          ]
+        },
+        "split_concurrent": {
+          "measured_repetitions": 5,
+          "warmups": 1,
+          "all_trees_exact": true,
+          "stats": {
+            "wall_seconds": {
+              "median": 0.685113875,
+              "minimum": 0.684722958,
+              "maximum": 0.685484708
+            },
+            "process_cpu_seconds": {
+              "median": 0.212511,
+              "minimum": 0.212218,
+              "maximum": 0.242445
+            },
+            "input_restore_seconds": {
+              "median": 0.000116041,
+              "minimum": 0.000110667,
+              "maximum": 0.000144542
+            },
+            "gpu_call_seconds": {
+              "median": 0.685059125,
+              "minimum": 0.684684,
+              "maximum": 0.685445375
+            },
+            "gpu_nanoseconds": {
+              "median": 683448583,
+              "minimum": 683286708,
+              "maximum": 684035166
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 2457700,
+              "minimum": 2457700,
+              "maximum": 2457700
+            },
+            "peak_backing_bytes": {
+              "median": 22109872,
+              "minimum": 22109872,
+              "maximum": 22109872
+            },
+            "incremental_peak_bytes": {
+              "median": 19652172,
+              "minimum": 19652172,
+              "maximum": 19652172
+            }
+          },
+          "observations": [
+            {
+              "mode": "split_concurrent",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.685448208,
+              "process_cpu_seconds": 0.212331,
+              "input_restore_seconds": 0.000136584,
+              "gpu_call_seconds": 0.685403958,
+              "gpu_nanoseconds": 683948375,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 2457700,
+              "peak_backing_bytes": 22109872,
+              "incremental_peak_bytes": 19652172
+            },
+            {
+              "mode": "split_concurrent",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.684722958,
+              "process_cpu_seconds": 0.212218,
+              "input_restore_seconds": 0.000110667,
+              "gpu_call_seconds": 0.684684,
+              "gpu_nanoseconds": 683286708,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 2457700,
+              "peak_backing_bytes": 22109872,
+              "incremental_peak_bytes": 19652172
+            },
+            {
+              "mode": "split_concurrent",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.685484708,
+              "process_cpu_seconds": 0.212511,
+              "input_restore_seconds": 0.000116666,
+              "gpu_call_seconds": 0.685445375,
+              "gpu_nanoseconds": 684035166,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 2457700,
+              "peak_backing_bytes": 22109872,
+              "incremental_peak_bytes": 19652172
+            },
+            {
+              "mode": "split_concurrent",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.685113875,
+              "process_cpu_seconds": 0.213019,
+              "input_restore_seconds": 0.000116041,
+              "gpu_call_seconds": 0.685059125,
+              "gpu_nanoseconds": 683559500,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 2457700,
+              "peak_backing_bytes": 22109872,
+              "incremental_peak_bytes": 19652172
+            },
+            {
+              "mode": "split_concurrent",
+              "iteration": 4,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.685392834,
+              "process_cpu_seconds": 0.242445,
+              "input_restore_seconds": 0.000144542,
+              "gpu_call_seconds": 0.685345917,
+              "gpu_nanoseconds": 683448583,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 2457700,
+              "peak_backing_bytes": 22109872,
+              "incremental_peak_bytes": 19652172
+            },
+            {
+              "mode": "split_concurrent",
+              "iteration": 5,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.684777292,
+              "process_cpu_seconds": 0.212218,
+              "input_restore_seconds": 0.000110958,
+              "gpu_call_seconds": 0.68473225,
+              "gpu_nanoseconds": 683418625,
+              "tree_nodes": 4426,
+              "input_and_pool_backing_bytes": 2457700,
+              "peak_backing_bytes": 22109872,
+              "incremental_peak_bytes": 19652172
+            }
+          ]
+        }
+      },
+      "resident_over_cpu14": 12.813405620725943,
+      "concurrent_over_sequential": 0.9402128596334504,
+      "gpu_span_fraction": 0.9959764942085015
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1039.pam",
+      "input_sha256": "22f487129343ed6d403346653ef99900e2552728ba2e4f5c63c90d058132f302",
+      "width": 4000,
+      "height": 3000,
+      "result": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/prepared-study/1039-a0.json",
+      "result_sha256": "cb33ef9cbd606f9424d5032e0254ed63070e910feda5e05c20d79b9a89390171",
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/prepared-study/gjxl_modular_resident_fitting_probe",
+        "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1039.pam",
+        "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/prepared-study/1039-a0.json",
+        "16",
+        "5",
+        "128"
+      ],
+      "fits": 16,
+      "tile": 128,
+      "rows": 171424,
+      "population": 171424,
+      "tree_nodes": 1372,
+      "locations": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          977,
+          613,
+          1
+        ],
+        [
+          1954,
+          1226,
+          2
+        ],
+        [
+          2931,
+          1839,
+          0
+        ],
+        [
+          35,
+          2452,
+          1
+        ],
+        [
+          1012,
+          192,
+          2
+        ],
+        [
+          1989,
+          805,
+          0
+        ],
+        [
+          2966,
+          1418,
+          1
+        ],
+        [
+          70,
+          2031,
+          2
+        ],
+        [
+          1047,
+          2644,
+          0
+        ],
+        [
+          2024,
+          384,
+          1
+        ],
+        [
+          3001,
+          997,
+          2
+        ],
+        [
+          105,
+          1610,
+          0
+        ],
+        [
+          1082,
+          2223,
+          1
+        ],
+        [
+          2059,
+          2836,
+          2
+        ],
+        [
+          3036,
+          576,
+          0
+        ]
+      ],
+      "planned_gpu_peak_bytes": 31370300,
+      "boundary": "Complete fitting including validation, scratch, partition, node management and publication. GPU upload included. Input sampling, CPU input restoration, backend/domain and worker-pool creation excluded. Concurrent thread launch/join included. CPU seconds are process CPU time.",
+      "modes": {
+        "cpu1": {
+          "measured_repetitions": 5,
+          "warmups": 1,
+          "all_trees_exact": true,
+          "stats": {
+            "wall_seconds": {
+              "median": 0.12932325,
+              "minimum": 0.129073917,
+              "maximum": 0.137777208
+            },
+            "process_cpu_seconds": {
+              "median": 0.128896,
+              "minimum": 0.128698,
+              "maximum": 0.137328
+            },
+            "input_restore_seconds": {
+              "median": 0.000224958,
+              "minimum": 0.000221334,
+              "maximum": 0.000372041
+            },
+            "gpu_call_seconds": {
+              "median": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "gpu_nanoseconds": {
+              "median": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 4870288,
+              "minimum": 4870288,
+              "maximum": 4870288
+            },
+            "peak_backing_bytes": {
+              "median": 9597920,
+              "minimum": 9597920,
+              "maximum": 9597920
+            },
+            "incremental_peak_bytes": {
+              "median": 4727632,
+              "minimum": 4727632,
+              "maximum": 4727632
+            }
+          },
+          "observations": [
+            {
+              "mode": "cpu1",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.130495375,
+              "process_cpu_seconds": 0.130024,
+              "input_restore_seconds": 0.000530625,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 4870288,
+              "peak_backing_bytes": 9597920,
+              "incremental_peak_bytes": 4727632
+            },
+            {
+              "mode": "cpu1",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.129236917,
+              "process_cpu_seconds": 0.128713,
+              "input_restore_seconds": 0.000226708,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 4870288,
+              "peak_backing_bytes": 9597920,
+              "incremental_peak_bytes": 4727632
+            },
+            {
+              "mode": "cpu1",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.129459708,
+              "process_cpu_seconds": 0.129042,
+              "input_restore_seconds": 0.000224958,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 4870288,
+              "peak_backing_bytes": 9597920,
+              "incremental_peak_bytes": 4727632
+            },
+            {
+              "mode": "cpu1",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.137777208,
+              "process_cpu_seconds": 0.137328,
+              "input_restore_seconds": 0.000372041,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 4870288,
+              "peak_backing_bytes": 9597920,
+              "incremental_peak_bytes": 4727632
+            },
+            {
+              "mode": "cpu1",
+              "iteration": 4,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.12932325,
+              "process_cpu_seconds": 0.128698,
+              "input_restore_seconds": 0.000221334,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 4870288,
+              "peak_backing_bytes": 9597920,
+              "incremental_peak_bytes": 4727632
+            },
+            {
+              "mode": "cpu1",
+              "iteration": 5,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.129073917,
+              "process_cpu_seconds": 0.128896,
+              "input_restore_seconds": 0.000221667,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 4870288,
+              "peak_backing_bytes": 9597920,
+              "incremental_peak_bytes": 4727632
+            }
+          ]
+        },
+        "cpu14": {
+          "measured_repetitions": 5,
+          "warmups": 1,
+          "all_trees_exact": true,
+          "stats": {
+            "wall_seconds": {
+              "median": 0.024241958,
+              "minimum": 0.023152417,
+              "maximum": 0.0263475
+            },
+            "process_cpu_seconds": {
+              "median": 0.138549,
+              "minimum": 0.13662,
+              "maximum": 0.165373
+            },
+            "input_restore_seconds": {
+              "median": 0.000218709,
+              "minimum": 0.000212333,
+              "maximum": 0.000264083
+            },
+            "gpu_call_seconds": {
+              "median": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "gpu_nanoseconds": {
+              "median": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 4870392,
+              "minimum": 4870392,
+              "maximum": 4870392
+            },
+            "peak_backing_bytes": {
+              "median": 16010360,
+              "minimum": 16010360,
+              "maximum": 16010360
+            },
+            "incremental_peak_bytes": {
+              "median": 11139968,
+              "minimum": 11139968,
+              "maximum": 11139968
+            }
+          },
+          "observations": [
+            {
+              "mode": "cpu14",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.02324875,
+              "process_cpu_seconds": 0.140201,
+              "input_restore_seconds": 0.000217833,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 4870392,
+              "peak_backing_bytes": 16403552,
+              "incremental_peak_bytes": 11533160
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.0263475,
+              "process_cpu_seconds": 0.165373,
+              "input_restore_seconds": 0.000264083,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 4870392,
+              "peak_backing_bytes": 16010360,
+              "incremental_peak_bytes": 11139968
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.023152417,
+              "process_cpu_seconds": 0.138549,
+              "input_restore_seconds": 0.000212333,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 4870392,
+              "peak_backing_bytes": 16010360,
+              "incremental_peak_bytes": 11139968
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.0232345,
+              "process_cpu_seconds": 0.137968,
+              "input_restore_seconds": 0.000218917,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 4870392,
+              "peak_backing_bytes": 16010360,
+              "incremental_peak_bytes": 11139968
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 4,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.024241958,
+              "process_cpu_seconds": 0.139807,
+              "input_restore_seconds": 0.000217333,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 4870392,
+              "peak_backing_bytes": 16010360,
+              "incremental_peak_bytes": 11139968
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 5,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.025486375,
+              "process_cpu_seconds": 0.13662,
+              "input_restore_seconds": 0.000218709,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 4870392,
+              "peak_backing_bytes": 16010360,
+              "incremental_peak_bytes": 11139968
+            }
+          ]
+        },
+        "resident": {
+          "measured_repetitions": 5,
+          "warmups": 1,
+          "all_trees_exact": true,
+          "stats": {
+            "wall_seconds": {
+              "median": 0.33183325,
+              "minimum": 0.33169275,
+              "maximum": 0.332778833
+            },
+            "process_cpu_seconds": {
+              "median": 0.002131,
+              "minimum": 0.001992,
+              "maximum": 0.002901
+            },
+            "input_restore_seconds": {
+              "median": 4.2e-08,
+              "minimum": 4.1e-08,
+              "maximum": 1.67e-07
+            },
+            "gpu_call_seconds": {
+              "median": 0.331830833,
+              "minimum": 0.331689333,
+              "maximum": 0.332775709
+            },
+            "gpu_nanoseconds": {
+              "median": 329699791,
+              "minimum": 329537500,
+              "maximum": 329891250
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "peak_backing_bytes": {
+              "median": 26548028,
+              "minimum": 26548028,
+              "maximum": 26548028
+            },
+            "incremental_peak_bytes": {
+              "median": 26548028,
+              "minimum": 26548028,
+              "maximum": 26548028
+            }
+          },
+          "observations": [
+            {
+              "mode": "resident",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.345973458,
+              "process_cpu_seconds": 0.005468,
+              "input_restore_seconds": 1.67e-07,
+              "gpu_call_seconds": 0.3459705,
+              "gpu_nanoseconds": 340594458,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 26548028,
+              "incremental_peak_bytes": 26548028
+            },
+            {
+              "mode": "resident",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.332778833,
+              "process_cpu_seconds": 0.002901,
+              "input_restore_seconds": 4.1e-08,
+              "gpu_call_seconds": 0.332775709,
+              "gpu_nanoseconds": 329791541,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 26548028,
+              "incremental_peak_bytes": 26548028
+            },
+            {
+              "mode": "resident",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.331980083,
+              "process_cpu_seconds": 0.001992,
+              "input_restore_seconds": 4.2e-08,
+              "gpu_call_seconds": 0.331978334,
+              "gpu_nanoseconds": 329891250,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 26548028,
+              "incremental_peak_bytes": 26548028
+            },
+            {
+              "mode": "resident",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.33183325,
+              "process_cpu_seconds": 0.002201,
+              "input_restore_seconds": 1.25e-07,
+              "gpu_call_seconds": 0.331830833,
+              "gpu_nanoseconds": 329537500,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 26548028,
+              "incremental_peak_bytes": 26548028
+            },
+            {
+              "mode": "resident",
+              "iteration": 4,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.33169275,
+              "process_cpu_seconds": 0.002131,
+              "input_restore_seconds": 4.2e-08,
+              "gpu_call_seconds": 0.331689333,
+              "gpu_nanoseconds": 329550625,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 26548028,
+              "incremental_peak_bytes": 26548028
+            },
+            {
+              "mode": "resident",
+              "iteration": 5,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.331794125,
+              "process_cpu_seconds": 0.002025,
+              "input_restore_seconds": 1.67e-07,
+              "gpu_call_seconds": 0.331791375,
+              "gpu_nanoseconds": 329699791,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 26548028,
+              "incremental_peak_bytes": 26548028
+            }
+          ]
+        },
+        "split_sequential": {
+          "measured_repetitions": 5,
+          "warmups": 1,
+          "all_trees_exact": true,
+          "stats": {
+            "wall_seconds": {
+              "median": 0.351164958,
+              "minimum": 0.346833042,
+              "maximum": 0.356761084
+            },
+            "process_cpu_seconds": {
+              "median": 0.092267,
+              "minimum": 0.070382,
+              "maximum": 0.110186
+            },
+            "input_restore_seconds": {
+              "median": 0.000131584,
+              "minimum": 0.000114833,
+              "maximum": 0.00015725
+            },
+            "gpu_call_seconds": {
+              "median": 0.331320333,
+              "minimum": 0.331015291,
+              "maximum": 0.331680625
+            },
+            "gpu_nanoseconds": {
+              "median": 329721083,
+              "minimum": 329385374,
+              "maximum": 330167499
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 2437560,
+              "minimum": 2437560,
+              "maximum": 2437560
+            },
+            "peak_backing_bytes": {
+              "median": 15709644,
+              "minimum": 15709644,
+              "maximum": 15709644
+            },
+            "incremental_peak_bytes": {
+              "median": 13272084,
+              "minimum": 13272084,
+              "maximum": 13272084
+            }
+          },
+          "observations": [
+            {
+              "mode": "split_sequential",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.354449,
+              "process_cpu_seconds": 0.111282,
+              "input_restore_seconds": 0.000127917,
+              "gpu_call_seconds": 0.330686625,
+              "gpu_nanoseconds": 329290208,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 2437560,
+              "peak_backing_bytes": 15709644,
+              "incremental_peak_bytes": 13272084
+            },
+            {
+              "mode": "split_sequential",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.346833042,
+              "process_cpu_seconds": 0.070382,
+              "input_restore_seconds": 0.00015725,
+              "gpu_call_seconds": 0.331015291,
+              "gpu_nanoseconds": 329385374,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 2437560,
+              "peak_backing_bytes": 15709644,
+              "incremental_peak_bytes": 13272084
+            },
+            {
+              "mode": "split_sequential",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.354692083,
+              "process_cpu_seconds": 0.110186,
+              "input_restore_seconds": 0.000131584,
+              "gpu_call_seconds": 0.331680625,
+              "gpu_nanoseconds": 330167499,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 2437560,
+              "peak_backing_bytes": 15709644,
+              "incremental_peak_bytes": 13272084
+            },
+            {
+              "mode": "split_sequential",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.356761084,
+              "process_cpu_seconds": 0.097565,
+              "input_restore_seconds": 0.000114833,
+              "gpu_call_seconds": 0.331037708,
+              "gpu_nanoseconds": 329721083,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 2437560,
+              "peak_backing_bytes": 15709644,
+              "incremental_peak_bytes": 13272084
+            },
+            {
+              "mode": "split_sequential",
+              "iteration": 4,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.34752,
+              "process_cpu_seconds": 0.075365,
+              "input_restore_seconds": 0.00015725,
+              "gpu_call_seconds": 0.331456791,
+              "gpu_nanoseconds": 329595874,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 2437560,
+              "peak_backing_bytes": 15709644,
+              "incremental_peak_bytes": 13272084
+            },
+            {
+              "mode": "split_sequential",
+              "iteration": 5,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.351164958,
+              "process_cpu_seconds": 0.092267,
+              "input_restore_seconds": 0.000118708,
+              "gpu_call_seconds": 0.331320333,
+              "gpu_nanoseconds": 330046916,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 2437560,
+              "peak_backing_bytes": 15709644,
+              "incremental_peak_bytes": 13272084
+            }
+          ]
+        },
+        "split_concurrent": {
+          "measured_repetitions": 5,
+          "warmups": 1,
+          "all_trees_exact": true,
+          "stats": {
+            "wall_seconds": {
+              "median": 0.331210042,
+              "minimum": 0.330967417,
+              "maximum": 0.331925125
+            },
+            "process_cpu_seconds": {
+              "median": 0.074298,
+              "minimum": 0.069648,
+              "maximum": 0.083287
+            },
+            "input_restore_seconds": {
+              "median": 0.000106291,
+              "minimum": 0.000103791,
+              "maximum": 0.000135
+            },
+            "gpu_call_seconds": {
+              "median": 0.331158,
+              "minimum": 0.330915,
+              "maximum": 0.3318825
+            },
+            "gpu_nanoseconds": {
+              "median": 329660583,
+              "minimum": 329554625,
+              "maximum": 330147624
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 2437560,
+              "minimum": 2437560,
+              "maximum": 2437560
+            },
+            "peak_backing_bytes": {
+              "median": 22075340,
+              "minimum": 22075340,
+              "maximum": 22075340
+            },
+            "incremental_peak_bytes": {
+              "median": 19637780,
+              "minimum": 19637780,
+              "maximum": 19637780
+            }
+          },
+          "observations": [
+            {
+              "mode": "split_concurrent",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.331326,
+              "process_cpu_seconds": 0.075435,
+              "input_restore_seconds": 0.000166583,
+              "gpu_call_seconds": 0.33127525,
+              "gpu_nanoseconds": 329546791,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 2437560,
+              "peak_backing_bytes": 22075340,
+              "incremental_peak_bytes": 19637780
+            },
+            {
+              "mode": "split_concurrent",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.33116725,
+              "process_cpu_seconds": 0.069648,
+              "input_restore_seconds": 0.000103791,
+              "gpu_call_seconds": 0.331122083,
+              "gpu_nanoseconds": 329839958,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 2437560,
+              "peak_backing_bytes": 22075340,
+              "incremental_peak_bytes": 19637780
+            },
+            {
+              "mode": "split_concurrent",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.330967417,
+              "process_cpu_seconds": 0.074298,
+              "input_restore_seconds": 0.000105084,
+              "gpu_call_seconds": 0.330915,
+              "gpu_nanoseconds": 329554625,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 2437560,
+              "peak_backing_bytes": 22075340,
+              "incremental_peak_bytes": 19637780
+            },
+            {
+              "mode": "split_concurrent",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.331210042,
+              "process_cpu_seconds": 0.075933,
+              "input_restore_seconds": 0.000118375,
+              "gpu_call_seconds": 0.331158,
+              "gpu_nanoseconds": 329660583,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 2437560,
+              "peak_backing_bytes": 22075340,
+              "incremental_peak_bytes": 19637780
+            },
+            {
+              "mode": "split_concurrent",
+              "iteration": 4,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.331925125,
+              "process_cpu_seconds": 0.083287,
+              "input_restore_seconds": 0.000135,
+              "gpu_call_seconds": 0.3318825,
+              "gpu_nanoseconds": 329593958,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 2437560,
+              "peak_backing_bytes": 22075340,
+              "incremental_peak_bytes": 19637780
+            },
+            {
+              "mode": "split_concurrent",
+              "iteration": 5,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.331658958,
+              "process_cpu_seconds": 0.071757,
+              "input_restore_seconds": 0.000106291,
+              "gpu_call_seconds": 0.331605,
+              "gpu_nanoseconds": 330147624,
+              "tree_nodes": 1372,
+              "input_and_pool_backing_bytes": 2437560,
+              "peak_backing_bytes": 22075340,
+              "incremental_peak_bytes": 19637780
+            }
+          ]
+        }
+      },
+      "resident_over_cpu14": 13.688384824361135,
+      "concurrent_over_sequential": 0.9431750932278384,
+      "gpu_span_fraction": 0.9935706894954016
+    },
+    {
+      "input": "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1049.pam",
+      "input_sha256": "0b3feae4d3bf1a13f89d5f4c3d976c8ea1e93e49a65548919cb5474c3cd1d62d",
+      "width": 4000,
+      "height": 3000,
+      "result": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/prepared-study/1049-a0.json",
+      "result_sha256": "394cd24625dc658c850a5f088da448ec554dd0cc65a47dab23742713e04be0b8",
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/prepared-study/gjxl_modular_resident_fitting_probe",
+        "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1049.pam",
+        "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/prepared-study/1049-a0.json",
+        "16",
+        "5",
+        "128"
+      ],
+      "fits": 16,
+      "tile": 128,
+      "rows": 171424,
+      "population": 171424,
+      "tree_nodes": 1432,
+      "locations": [
+        [
+          0,
+          0,
+          0
+        ],
+        [
+          977,
+          613,
+          1
+        ],
+        [
+          1954,
+          1226,
+          2
+        ],
+        [
+          2931,
+          1839,
+          0
+        ],
+        [
+          35,
+          2452,
+          1
+        ],
+        [
+          1012,
+          192,
+          2
+        ],
+        [
+          1989,
+          805,
+          0
+        ],
+        [
+          2966,
+          1418,
+          1
+        ],
+        [
+          70,
+          2031,
+          2
+        ],
+        [
+          1047,
+          2644,
+          0
+        ],
+        [
+          2024,
+          384,
+          1
+        ],
+        [
+          3001,
+          997,
+          2
+        ],
+        [
+          105,
+          1610,
+          0
+        ],
+        [
+          1082,
+          2223,
+          1
+        ],
+        [
+          2059,
+          2836,
+          2
+        ],
+        [
+          3036,
+          576,
+          0
+        ]
+      ],
+      "planned_gpu_peak_bytes": 31375656,
+      "boundary": "Complete fitting including validation, scratch, partition, node management and publication. GPU upload included. Input sampling, CPU input restoration, backend/domain and worker-pool creation excluded. Concurrent thread launch/join included. CPU seconds are process CPU time.",
+      "modes": {
+        "cpu1": {
+          "measured_repetitions": 5,
+          "warmups": 1,
+          "all_trees_exact": true,
+          "stats": {
+            "wall_seconds": {
+              "median": 0.157631292,
+              "minimum": 0.155976208,
+              "maximum": 0.166009166
+            },
+            "process_cpu_seconds": {
+              "median": 0.157416,
+              "minimum": 0.155567,
+              "maximum": 0.165751
+            },
+            "input_restore_seconds": {
+              "median": 0.000264708,
+              "minimum": 0.00020825,
+              "maximum": 0.000412375
+            },
+            "gpu_call_seconds": {
+              "median": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "gpu_nanoseconds": {
+              "median": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 4879220,
+              "minimum": 4879220,
+              "maximum": 4879220
+            },
+            "peak_backing_bytes": {
+              "median": 10000044,
+              "minimum": 10000044,
+              "maximum": 10000044
+            },
+            "incremental_peak_bytes": {
+              "median": 5120824,
+              "minimum": 5120824,
+              "maximum": 5120824
+            }
+          },
+          "observations": [
+            {
+              "mode": "cpu1",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.158327292,
+              "process_cpu_seconds": 0.157035,
+              "input_restore_seconds": 0.000480667,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 4879220,
+              "peak_backing_bytes": 10000044,
+              "incremental_peak_bytes": 5120824
+            },
+            {
+              "mode": "cpu1",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.158366292,
+              "process_cpu_seconds": 0.157416,
+              "input_restore_seconds": 0.000273333,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 4879220,
+              "peak_backing_bytes": 10000044,
+              "incremental_peak_bytes": 5120824
+            },
+            {
+              "mode": "cpu1",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.157631292,
+              "process_cpu_seconds": 0.157465,
+              "input_restore_seconds": 0.000264708,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 4879220,
+              "peak_backing_bytes": 10000044,
+              "incremental_peak_bytes": 5120824
+            },
+            {
+              "mode": "cpu1",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.155976208,
+              "process_cpu_seconds": 0.155567,
+              "input_restore_seconds": 0.000254917,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 4879220,
+              "peak_backing_bytes": 10000044,
+              "incremental_peak_bytes": 5120824
+            },
+            {
+              "mode": "cpu1",
+              "iteration": 4,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.166009166,
+              "process_cpu_seconds": 0.165751,
+              "input_restore_seconds": 0.000412375,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 4879220,
+              "peak_backing_bytes": 10000044,
+              "incremental_peak_bytes": 5120824
+            },
+            {
+              "mode": "cpu1",
+              "iteration": 5,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.156393792,
+              "process_cpu_seconds": 0.156064,
+              "input_restore_seconds": 0.00020825,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 4879220,
+              "peak_backing_bytes": 10000044,
+              "incremental_peak_bytes": 5120824
+            }
+          ]
+        },
+        "cpu14": {
+          "measured_repetitions": 5,
+          "warmups": 1,
+          "all_trees_exact": true,
+          "stats": {
+            "wall_seconds": {
+              "median": 0.025529667,
+              "minimum": 0.02495425,
+              "maximum": 0.027187083
+            },
+            "process_cpu_seconds": {
+              "median": 0.165326,
+              "minimum": 0.161796,
+              "maximum": 0.16956
+            },
+            "input_restore_seconds": {
+              "median": 0.00022475,
+              "minimum": 0.000205917,
+              "maximum": 0.000246667
+            },
+            "gpu_call_seconds": {
+              "median": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "gpu_nanoseconds": {
+              "median": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 4879324,
+              "minimum": 4879324,
+              "maximum": 4879324
+            },
+            "peak_backing_bytes": {
+              "median": 16019292,
+              "minimum": 15616772,
+              "maximum": 16412484
+            },
+            "incremental_peak_bytes": {
+              "median": 11139968,
+              "minimum": 10737448,
+              "maximum": 11533160
+            }
+          },
+          "observations": [
+            {
+              "mode": "cpu14",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.028896708,
+              "process_cpu_seconds": 0.169673,
+              "input_restore_seconds": 0.000269959,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 4879324,
+              "peak_backing_bytes": 16412484,
+              "incremental_peak_bytes": 11533160
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.026685792,
+              "process_cpu_seconds": 0.16956,
+              "input_restore_seconds": 0.000246667,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 4879324,
+              "peak_backing_bytes": 16019292,
+              "incremental_peak_bytes": 11139968
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.025129208,
+              "process_cpu_seconds": 0.161796,
+              "input_restore_seconds": 0.000215667,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 4879324,
+              "peak_backing_bytes": 16412484,
+              "incremental_peak_bytes": 11533160
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.025529667,
+              "process_cpu_seconds": 0.165326,
+              "input_restore_seconds": 0.000205917,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 4879324,
+              "peak_backing_bytes": 16019292,
+              "incremental_peak_bytes": 11139968
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 4,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.02495425,
+              "process_cpu_seconds": 0.166272,
+              "input_restore_seconds": 0.00022475,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 4879324,
+              "peak_backing_bytes": 15616772,
+              "incremental_peak_bytes": 10737448
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 5,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.027187083,
+              "process_cpu_seconds": 0.164938,
+              "input_restore_seconds": 0.000228,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 4879324,
+              "peak_backing_bytes": 16412484,
+              "incremental_peak_bytes": 11533160
+            }
+          ]
+        },
+        "resident": {
+          "measured_repetitions": 5,
+          "warmups": 1,
+          "all_trees_exact": true,
+          "stats": {
+            "wall_seconds": {
+              "median": 0.346148583,
+              "minimum": 0.34566675,
+              "maximum": 0.347065667
+            },
+            "process_cpu_seconds": {
+              "median": 0.002114,
+              "minimum": 0.002015,
+              "maximum": 0.002288
+            },
+            "input_restore_seconds": {
+              "median": 4.1e-08,
+              "minimum": 0,
+              "maximum": 1.25e-07
+            },
+            "gpu_call_seconds": {
+              "median": 0.346146583,
+              "minimum": 0.34566425,
+              "maximum": 0.347062583
+            },
+            "gpu_nanoseconds": {
+              "median": 343946958,
+              "minimum": 343303749,
+              "maximum": 344873375
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 0,
+              "minimum": 0,
+              "maximum": 0
+            },
+            "peak_backing_bytes": {
+              "median": 26553384,
+              "minimum": 26553384,
+              "maximum": 26553384
+            },
+            "incremental_peak_bytes": {
+              "median": 26553384,
+              "minimum": 26553384,
+              "maximum": 26553384
+            }
+          },
+          "observations": [
+            {
+              "mode": "resident",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.380003833,
+              "process_cpu_seconds": 0.005608,
+              "input_restore_seconds": 4.2e-08,
+              "gpu_call_seconds": 0.380001292,
+              "gpu_nanoseconds": 374812999,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 26553384,
+              "incremental_peak_bytes": 26553384
+            },
+            {
+              "mode": "resident",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.347065667,
+              "process_cpu_seconds": 0.002106,
+              "input_restore_seconds": 0,
+              "gpu_call_seconds": 0.347062583,
+              "gpu_nanoseconds": 344873375,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 26553384,
+              "incremental_peak_bytes": 26553384
+            },
+            {
+              "mode": "resident",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.346148583,
+              "process_cpu_seconds": 0.002114,
+              "input_restore_seconds": 0,
+              "gpu_call_seconds": 0.346146583,
+              "gpu_nanoseconds": 343946958,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 26553384,
+              "incremental_peak_bytes": 26553384
+            },
+            {
+              "mode": "resident",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.346066417,
+              "process_cpu_seconds": 0.002241,
+              "input_restore_seconds": 1.25e-07,
+              "gpu_call_seconds": 0.346063708,
+              "gpu_nanoseconds": 343769124,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 26553384,
+              "incremental_peak_bytes": 26553384
+            },
+            {
+              "mode": "resident",
+              "iteration": 4,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.34640525,
+              "process_cpu_seconds": 0.002015,
+              "input_restore_seconds": 4.1e-08,
+              "gpu_call_seconds": 0.346402917,
+              "gpu_nanoseconds": 344325583,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 26553384,
+              "incremental_peak_bytes": 26553384
+            },
+            {
+              "mode": "resident",
+              "iteration": 5,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.34566675,
+              "process_cpu_seconds": 0.002288,
+              "input_restore_seconds": 4.2e-08,
+              "gpu_call_seconds": 0.34566425,
+              "gpu_nanoseconds": 343303749,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 26553384,
+              "incremental_peak_bytes": 26553384
+            }
+          ]
+        },
+        "split_sequential": {
+          "measured_repetitions": 5,
+          "warmups": 1,
+          "all_trees_exact": true,
+          "stats": {
+            "wall_seconds": {
+              "median": 0.360035208,
+              "minimum": 0.359058333,
+              "maximum": 0.364446458
+            },
+            "process_cpu_seconds": {
+              "median": 0.069653,
+              "minimum": 0.069319,
+              "maximum": 0.09632
+            },
+            "input_restore_seconds": {
+              "median": 0.000121625,
+              "minimum": 0.000102792,
+              "maximum": 0.000135208
+            },
+            "gpu_call_seconds": {
+              "median": 0.344646917,
+              "minimum": 0.343130208,
+              "maximum": 0.345749917
+            },
+            "gpu_nanoseconds": {
+              "median": 343377249,
+              "minimum": 341733541,
+              "maximum": 344430041
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 2438116,
+              "minimum": 2438116,
+              "maximum": 2438116
+            },
+            "peak_backing_bytes": {
+              "median": 15717304,
+              "minimum": 15717304,
+              "maximum": 15717304
+            },
+            "incremental_peak_bytes": {
+              "median": 13279188,
+              "minimum": 13279188,
+              "maximum": 13279188
+            }
+          },
+          "observations": [
+            {
+              "mode": "split_sequential",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.363170709,
+              "process_cpu_seconds": 0.071696,
+              "input_restore_seconds": 0.000118833,
+              "gpu_call_seconds": 0.347212541,
+              "gpu_nanoseconds": 345735416,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 2438116,
+              "peak_backing_bytes": 15717304,
+              "incremental_peak_bytes": 13279188
+            },
+            {
+              "mode": "split_sequential",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.364446458,
+              "process_cpu_seconds": 0.09632,
+              "input_restore_seconds": 0.000121625,
+              "gpu_call_seconds": 0.344031792,
+              "gpu_nanoseconds": 342632208,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 2438116,
+              "peak_backing_bytes": 15717304,
+              "incremental_peak_bytes": 13279188
+            },
+            {
+              "mode": "split_sequential",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.360888084,
+              "process_cpu_seconds": 0.069653,
+              "input_restore_seconds": 0.000119917,
+              "gpu_call_seconds": 0.345749917,
+              "gpu_nanoseconds": 344430041,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 2438116,
+              "peak_backing_bytes": 15717304,
+              "incremental_peak_bytes": 13279188
+            },
+            {
+              "mode": "split_sequential",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.359823666,
+              "process_cpu_seconds": 0.069319,
+              "input_restore_seconds": 0.000102792,
+              "gpu_call_seconds": 0.344646917,
+              "gpu_nanoseconds": 343377249,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 2438116,
+              "peak_backing_bytes": 15717304,
+              "incremental_peak_bytes": 13279188
+            },
+            {
+              "mode": "split_sequential",
+              "iteration": 4,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.360035208,
+              "process_cpu_seconds": 0.069486,
+              "input_restore_seconds": 0.000126,
+              "gpu_call_seconds": 0.344819875,
+              "gpu_nanoseconds": 343486124,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 2438116,
+              "peak_backing_bytes": 15717304,
+              "incremental_peak_bytes": 13279188
+            },
+            {
+              "mode": "split_sequential",
+              "iteration": 5,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.359058333,
+              "process_cpu_seconds": 0.070949,
+              "input_restore_seconds": 0.000135208,
+              "gpu_call_seconds": 0.343130208,
+              "gpu_nanoseconds": 341733541,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 2438116,
+              "peak_backing_bytes": 15717304,
+              "incremental_peak_bytes": 13279188
+            }
+          ]
+        },
+        "split_concurrent": {
+          "measured_repetitions": 5,
+          "warmups": 1,
+          "all_trees_exact": true,
+          "stats": {
+            "wall_seconds": {
+              "median": 0.34451125,
+              "minimum": 0.343975458,
+              "maximum": 0.346472334
+            },
+            "process_cpu_seconds": {
+              "median": 0.068663,
+              "minimum": 0.068481,
+              "maximum": 0.0716
+            },
+            "input_restore_seconds": {
+              "median": 0.0001245,
+              "minimum": 0.0001065,
+              "maximum": 0.000139042
+            },
+            "gpu_call_seconds": {
+              "median": 0.34447375,
+              "minimum": 0.343929625,
+              "maximum": 0.346082792
+            },
+            "gpu_nanoseconds": {
+              "median": 343024958,
+              "minimum": 342624000,
+              "maximum": 343716958
+            },
+            "input_and_pool_backing_bytes": {
+              "median": 2438116,
+              "minimum": 2438116,
+              "maximum": 2438116
+            },
+            "peak_backing_bytes": {
+              "median": 22083000,
+              "minimum": 22083000,
+              "maximum": 22083000
+            },
+            "incremental_peak_bytes": {
+              "median": 19644884,
+              "minimum": 19644884,
+              "maximum": 19644884
+            }
+          },
+          "observations": [
+            {
+              "mode": "split_concurrent",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.349070792,
+              "process_cpu_seconds": 0.071213,
+              "input_restore_seconds": 0.000112625,
+              "gpu_call_seconds": 0.348984542,
+              "gpu_nanoseconds": 347337999,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 2438116,
+              "peak_backing_bytes": 22083000,
+              "incremental_peak_bytes": 19644884
+            },
+            {
+              "mode": "split_concurrent",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.345193584,
+              "process_cpu_seconds": 0.0716,
+              "input_restore_seconds": 0.000125917,
+              "gpu_call_seconds": 0.345146958,
+              "gpu_nanoseconds": 343716958,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 2438116,
+              "peak_backing_bytes": 22083000,
+              "incremental_peak_bytes": 19644884
+            },
+            {
+              "mode": "split_concurrent",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.343975458,
+              "process_cpu_seconds": 0.068663,
+              "input_restore_seconds": 0.000109333,
+              "gpu_call_seconds": 0.343929625,
+              "gpu_nanoseconds": 342624000,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 2438116,
+              "peak_backing_bytes": 22083000,
+              "incremental_peak_bytes": 19644884
+            },
+            {
+              "mode": "split_concurrent",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.34451125,
+              "process_cpu_seconds": 0.068643,
+              "input_restore_seconds": 0.0001065,
+              "gpu_call_seconds": 0.34447375,
+              "gpu_nanoseconds": 343024958,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 2438116,
+              "peak_backing_bytes": 22083000,
+              "incremental_peak_bytes": 19644884
+            },
+            {
+              "mode": "split_concurrent",
+              "iteration": 4,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.346472334,
+              "process_cpu_seconds": 0.071248,
+              "input_restore_seconds": 0.0001245,
+              "gpu_call_seconds": 0.346082792,
+              "gpu_nanoseconds": 343224375,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 2438116,
+              "peak_backing_bytes": 22083000,
+              "incremental_peak_bytes": 19644884
+            },
+            {
+              "mode": "split_concurrent",
+              "iteration": 5,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.3440035,
+              "process_cpu_seconds": 0.068481,
+              "input_restore_seconds": 0.000139042,
+              "gpu_call_seconds": 0.343964709,
+              "gpu_nanoseconds": 342731249,
+              "tree_nodes": 1432,
+              "input_and_pool_backing_bytes": 2438116,
+              "peak_backing_bytes": 22083000,
+              "incremental_peak_bytes": 19644884
+            }
+          ]
+        }
+      },
+      "resident_over_cpu14": 13.558679907575764,
+      "concurrent_over_sequential": 0.9568821113739521,
+      "gpu_span_fraction": 0.9936396532930485
+    }
+  ],
+  "sums_of_batch_medians": {
+    "cpu1": 0.664153584,
+    "cpu14": 0.10362370800000001,
+    "resident": 1.3680104160000002,
+    "split_sequential": 1.439879707,
+    "split_concurrent": 1.3608351669999998
+  },
+  "validation": {
+    "release_ctest": {
+      "tests_passed": 8,
+      "log": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/final-tests.log"
+    },
+    "resident_exact_trees_and_row_permutations": 24,
+    "atomic_failures": 11,
+    "metal_api_validation": true,
+    "asan_ubsan": {
+      "tests_passed": 2,
+      "leak_detection": false,
+      "suppression": "null:*third_party/metal-cpp/*NSObject.hpp",
+      "unsuppressed_vendor_failure_retained": true,
+      "gpu_shaders_instrumented": false,
+      "libjxl_instrumented": false
+    },
+    "artifacts": {
+      "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/final-tests.log": "878c1096aaf83e65dc9d7bc616494da0397af697698631feac0ab8bb11097e1f",
+      "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/final-metal-api.log": "d1e7453cc016756b24b854c863622221950c89d61480607e58800ecadaea9013",
+      "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/sanitizer-configure.log": "c3f507f8a886e2941573aeaabf7ab9f8ba68fcdd8bc7cc229453a9529816bd6b",
+      "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/sanitizer-build.log": "402a7515b5914b2f48c884e85de86c1e32d95d16c5ed72415d9ec9576dbea0de",
+      "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/sanitizer-tests.log": "052d561df9305d9a784e3bb9812d66e2012289f812ca7ee640be9b54de215d89",
+      "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/sanitizer-tests-metal-cpp-suppressed.log": "a1ce07e3b520d300c5eca5589f572cc98ab0275079b444804f9e7b010e98864f",
+      "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/sanitizer-tests-metal-cpp-nsobject.log": "f025d95bd0cf02b6a0ac684b0e26c1c4b4a463b58ecd1368fe08fcb27a3425f8",
+      "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/ubsan-metal-cpp.supp": "a7cca0642b1fbf983be7d347e44d35c38bb15e263a1f5b34a0289dd47d1049ff",
+      "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/final-diagnostics-verification.json": "1a41639985684c460fa481f2c58ad3f129a55dd98a1b61c9312fa7acaea2db92"
+    }
+  },
+  "full_photo_correctness": {
+    "manifest": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/full-photo-smokes/manifest.json",
+    "manifest_sha256": "f54cac51653aa891b9816bd98784a30f67325318a02f56213c12af69d712271a",
+    "timing_claim": false,
+    "cases": [
+      {
+        "input": "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1029.pam",
+        "input_sha256": "a1c487b0160d8f3e8cb86753131b919ac3de28e908fde757050ebccdb4407b6d",
+        "bytes": 10507251,
+        "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+        "exact_decode": true,
+        "matched_qualified_bytes": true,
+        "fits": 192,
+        "gpu_nodes": 240142,
+        "resident_submissions": 5,
+        "cpu_fitter_nodes": 0,
+        "result": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/full-photo-smokes/1029/result.json",
+        "result_sha256": "6c39d85196d7d53e94b29201cd480ca9c0a59c8247f15913fba63b90834ebfc8"
+      },
+      {
+        "input": "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1039.pam",
+        "input_sha256": "22f487129343ed6d403346653ef99900e2552728ba2e4f5c63c90d058132f302",
+        "bytes": 7138537,
+        "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a",
+        "exact_decode": true,
+        "matched_qualified_bytes": true,
+        "fits": 192,
+        "gpu_nodes": 120546,
+        "resident_submissions": 5,
+        "cpu_fitter_nodes": 0,
+        "result": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/full-photo-smokes/1039/result.json",
+        "result_sha256": "6693e95a96a326464b27c1c4c41e9366255aa66346180e2294693d66f2611eee"
+      },
+      {
+        "input": "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1049.pam",
+        "input_sha256": "0b3feae4d3bf1a13f89d5f4c3d976c8ea1e93e49a65548919cb5474c3cd1d62d",
+        "bytes": 7015756,
+        "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c",
+        "exact_decode": true,
+        "matched_qualified_bytes": true,
+        "fits": 192,
+        "gpu_nodes": 105820,
+        "resident_submissions": 5,
+        "cpu_fitter_nodes": 0,
+        "result": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/full-photo-smokes/1049/result.json",
+        "result_sha256": "7276b364c02fee9f29af5a78e821bdebb4e30213f4ad0a1d90acb57c463e8390"
+      }
+    ]
+  },
+  "final_profile_diagnostics": {
+    "passed": true,
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/release/gjxl_modular_hybrid_profile",
+      "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1029.pam",
+      "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/final-diagnostics-1029",
+      "auto",
+      "auto",
+      "best",
+      "fit-off",
+      "14",
+      "14",
+      "14",
+      "14",
+      "14",
+      "fitter-resident",
+      "16384",
+      "64",
+      "--sample-rows=metal-unique"
+    ],
+    "binary_sha256": "a000a6acb99869ca10cb9908f1a9bb3e7e4ff0c504072fd4a8be3eb10ef6efa8",
+    "result_sha256": "0a8d2f0c50fc357a910ac07da60fe900a43e65663876a6dfc0b92887870e95b6",
+    "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+    "exact_decode": true,
+    "rejected_inapplicable_controls": 2,
+    "resident": {
+      "fits": 192,
+      "buffers": "fresh",
+      "encoders": "single",
+      "nodes": 240142,
+      "batches": 5,
+      "complete_fit_seconds": 12.699809748999998,
+      "gpu_nanoseconds": 12559880247
+    },
+    "timing_claim": false
+  }
+}

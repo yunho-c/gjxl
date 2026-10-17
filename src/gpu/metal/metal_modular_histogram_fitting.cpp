@@ -3,6 +3,7 @@
 #include "gpu/metal/kernels/modular_histogram_fitting_params.h"
 #include "gpu/metal/metal_backend_internal.h"
 #include "gpu/ops/modular_histogram_fitting.h"
+#include "gpu/ops/modular_resident_histogram_fitting.h"
 #include <chrono>
 #include <cstring>
 
@@ -621,5 +622,116 @@ Status MetalBackend::EvaluateHistogramNodes(
   return Status::OutOfMemory("Histogram evaluation allocation failed");
 } catch (const std::length_error &) {
   return Status::InvalidArgument("Histogram evaluation storage overflow");
+}
+Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
+                                      ResidentHistogramResult *out) try {
+  if (!out) return Status::InvalidArgument("Null resident histogram output");
+  ResidentHistogramPlan plan;
+  const auto limits = histogram_fitting_limits();
+  if (auto s = ComputeResidentHistogramPlan(input, &plan, &limits); !s.ok()) return s;
+  auto *pipeline = histogram_fitting_pipelines_[5].get();
+  if (pipeline->threadExecutionWidth() != 32 ||
+      pipeline->maxTotalThreadsPerThreadgroup() < 128)
+    return Status::Unsupported("Resident histogram prototype requires four 32-lane SIMD groups");
+  const ManagedHostScope resources(ResourceClass::kPreparation);
+  ResidentHistogramResult candidate;
+  {
+    const ResourceClassScope retained(ResourceClass::kCompletedFrame);
+    candidate.trees.resize(plan.fits);
+    for (size_t i = 0; i < plan.fits; ++i)
+      candidate.trees[i].nodes.resize(plan.layout[i].maximum_nodes);
+    if (input.capture_row_order) {
+      candidate.row_order.resize(plan.rows);
+      candidate.row_offsets.resize(plan.fits + 1);
+    }
+  }
+  std::array<HistogramFittingSource, kMaximumResidentHistogramFits> sources;
+  for (size_t i = 0; i < plan.fits; ++i) sources[i] = input.requests[i].source;
+  std::unique_ptr<PreparedGpuHistogramRows> prepared;
+  if (auto s = PrepareHistogramRows(std::span(sources).first(plan.fits), &prepared); !s.ok()) return s;
+  auto *rows = dynamic_cast<Prepared *>(prepared.get());
+  if (!rows) return Status::Internal("Missing resident histogram prepared owner");
+  std::unique_ptr<DeviceBuffer> work;
+  if (auto s = Allocate(plan.work_bytes, &work); !s.ok()) return s;
+  auto *bytes = static_cast<std::byte *>(AsMetalBuffer(*work)->contents());
+  std::memcpy(bytes, plan.layout.data(), plan.fits * sizeof(plan.layout[0]));
+  for (size_t i = 0; i < plan.fits; ++i) {
+    const auto &r = input.requests[i];
+    const auto &samples = *r.source.samples;
+    const auto &d = plan.layout[i];
+    for (size_t p = 0; p < samples.property_count; ++p)
+      if (!samples.thresholds[p].empty())
+        std::memcpy(bytes + d.thresholds[p], samples.thresholds[p].data(),
+                    samples.thresholds[p].size() * sizeof(int32_t));
+    // Native predictor penalties contain deliberate double-literal rounding.
+    // Prepare this small policy table once; GPU node state chooses its row.
+    const float change = 800.0f / (100.0f + r.learning.split_threshold);
+    for (size_t p = 0; p < samples.predictor_count; ++p)
+      if (auto s = ComputeHistogramFittingPredictorPenalties(
+              std::span(samples.predictors).first(samples.predictor_count), samples.predictors[p],
+              change, {reinterpret_cast<float *>(bytes + d.penalties) + p * samples.predictor_count,
+                       samples.predictor_count}); !s.ok()) return s;
+  }
+  struct ResidentContext {
+    MTL::Buffer *prepared, *work;
+    MTL::ComputePipelineState *pipeline;
+    size_t fits;
+  } context{AsMetalBuffer(*rows->buffer)->handle(), AsMetalBuffer(*work)->handle(), pipeline, plan.fits};
+  const auto encode = [](MetalBackend &, MTL::ComputeCommandEncoder *encoder, const void *opaque) {
+    const auto &c = *static_cast<const ResidentContext *>(opaque);
+    encoder->setBuffer(c.prepared, 0, 0);
+    encoder->setBuffer(c.work, 0, 1);
+    encoder->setComputePipelineState(c.pipeline);
+    RecordMetalComputePipelineState(c.pipeline);
+    DispatchMetalThreadgroups(encoder, MTL::Size(c.fits, 1, 1), MTL::Size(128, 1, 1));
+  };
+  Pending pending;
+  if (auto s = SubmitCompute("modular.histogram_resident", encode, &context, &pending.submission); !s.ok()) return s;
+  if (!pending.submission) return Status::Internal("Missing resident histogram submission");
+  if (auto s = pending.Wait(); !s.ok()) return s;
+  if (auto s = GetMetalSubmissionGpuDuration(*pending.submission, &candidate.gpu_nanoseconds); !s.ok()) return s;
+  std::span<const std::byte> completed;
+  if (auto s = BorrowCompletedReadOnly(*work, plan.work_bytes, 0, &completed); !s.ok()) return s;
+  size_t first_row = 0;
+  for (size_t i = 0; i < plan.fits; ++i) {
+    const auto &d = plan.layout[i];
+    const auto &state = *reinterpret_cast<const gjxl_histogram_resident::State *>(completed.data() + d.state);
+    if (state.status == gjxl_histogram_resident::kCapacityError)
+      return Status::Unsupported("Resident histogram fit exceeds tree capacity or depth");
+    if (state.status || state.pending || !state.size || state.size > d.maximum_nodes || state.visited > state.size)
+      return Status::DeviceError("Resident histogram state or partition failed");
+    candidate.visited_nodes += state.visited;
+    const auto *nodes = reinterpret_cast<const gjxl_histogram_resident::Node *>(completed.data() + d.nodes);
+    auto &tree = candidate.trees[i];
+    tree.size = state.size;
+    for (size_t n = 0; n < tree.size; ++n) {
+      if (nodes[n].left >= tree.size || nodes[n].right >= tree.size || nodes[n].predictor >= 14)
+        return Status::DeviceError("Resident histogram produced invalid tree links");
+      tree.nodes[n] = {nodes[n].property, nodes[n].split,
+                      static_cast<modular_internal::TreeIndex>(nodes[n].left),
+                      static_cast<modular_internal::TreeIndex>(nodes[n].right),
+                      static_cast<modular_internal::Predictor>(nodes[n].predictor), 0, 1};
+    }
+    modular_internal::TreeLayout layout;
+    if (auto s = modular_internal::ValidateTree(tree, &layout); !s.ok()) return s;
+    if (tree.size <= modular_internal::kInlineTreeNodes) tree.nodes.resize(tree.size);
+    if (input.capture_row_order) {
+      const size_t count = input.requests[i].source.samples->weights.size();
+      candidate.row_offsets[i] = first_row;
+      if (count) std::memcpy(candidate.row_order.data() + first_row, completed.data() + d.order, count * sizeof(uint32_t));
+      first_row += count;
+      candidate.row_offsets[i + 1] = first_row;
+    }
+  }
+  candidate.device_bytes = plan.prepared.storage_bytes + plan.work_bytes;
+  candidate.planned_peak_bytes = plan.working.peak_bytes;
+  *out = std::move(candidate);
+  return Status::Ok();
+} catch (const ManagedAllocationFailure &e) {
+  return e.status();
+} catch (const std::bad_alloc &) {
+  return Status::OutOfMemory("Resident histogram fitting allocation failed");
+} catch (const std::length_error &) {
+  return Status::InvalidArgument("Resident histogram fitting storage overflow");
 }
 } // namespace gjxl::metal_internal

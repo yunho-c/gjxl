@@ -126,7 +126,8 @@ void Case(GpuBackend &gpu, Fixture f, ReferenceWorkflowOptions options,
   }
   if (combined_unique)
     Check(hybrid.stats().rows.uniqueness_checks != 0, "Combined workflow lost uniqueness control");
-  if (combined_fitter == ReferenceFittingBackend::kGpu)
+  if (combined_fitter == ReferenceFittingBackend::kGpu ||
+      combined_fitter == ReferenceFittingBackend::kGpuResident)
     Check(hybrid.stats().histogram_gpu_batches != 0, "Combined workflow did not exercise GPU fitting");
   Check(hybrid.stats().learning_peak_participants >= 1 &&
             hybrid.stats().learning_peak_participants <= participants &&
@@ -366,7 +367,16 @@ int main(int argc, char **argv) try {
   pipeline = focused || (argc == 2 && std::string_view(argv[1]) == "--pipeline");
   std::unique_ptr<GpuBackend> gpu;
   Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &gpu));
-  if (argc == 2 && std::string_view(argv[1]) == "--combined") {
+  if (argc == 2 && std::string_view(argv[1]) == "--resident") {
+    combined_fitter = ReferenceFittingBackend::kGpuResident;
+    Case(*gpu, Make({17, 9}, 1, 8, 1), {}, WeightedFeatureBackend::kGpu);
+    Case(*gpu, Make({257, 257}, 3, 8, 1), {}, WeightedFeatureBackend::kGpu);
+    ReferenceWorkflowOptions all;
+    all.predictors = ReferencePredictors::kAll;
+    combined_unique = true;
+    combined_rows = HistogramRowBackend::kGpu;
+    Case(*gpu, Make({2049, 17}, 4, 16, 1), all, WeightedFeatureBackend::kGpu);
+  } else if (argc == 2 && std::string_view(argv[1]) == "--combined") {
     combined_unique = true;
     ReferenceWorkflowOptions all;
     all.predictors = ReferencePredictors::kAll;

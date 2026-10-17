@@ -401,7 +401,7 @@ public:
     std::array<NS::SharedPtr<MTL::ComputePipelineState>, 7> modular_token_pipelines,
     NS::SharedPtr<MTL::ComputePipelineState> ans_token_cost_pipeline,
     std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> tree_statistics_pipelines,
-    std::array<NS::SharedPtr<MTL::ComputePipelineState>, 5> histogram_fitting_pipelines,
+    std::array<NS::SharedPtr<MTL::ComputePipelineState>, 6> histogram_fitting_pipelines,
     std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> modular_population_pipelines,
     AqPipelines aq_pipelines,
     ButteraugliPipelines butteraugli_pipelines,
@@ -573,6 +573,9 @@ public:
       const histogram_gpu_internal::HistogramFittingEvaluationPlan &plan,
       histogram_gpu_internal::HistogramFittingProfileMode mode,
       resource_budget_internal::HostStorageBound *out) const override;
+  Status FitHistogramTrees(
+      const histogram_gpu_internal::ResidentHistogramInput &input,
+      histogram_gpu_internal::ResidentHistogramResult *out) override;
   Status PrepareHistogramRows(
     std::span<const histogram_gpu_internal::HistogramFittingSource> sources,
     std::unique_ptr<histogram_gpu_internal::PreparedGpuHistogramRows>* out) override;
@@ -951,7 +954,7 @@ private:
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> modular_population_pipelines_;
   NS::SharedPtr<MTL::ComputePipelineState> ans_token_cost_pipeline_;
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> tree_statistics_pipelines_;
-  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 5> histogram_fitting_pipelines_;
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 6> histogram_fitting_pipelines_;
   AqPipelines aq_pipelines_;
   ButteraugliPipelines butteraugli_pipelines_;
   bool test_fail_submission_ = false;

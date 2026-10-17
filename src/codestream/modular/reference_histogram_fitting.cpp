@@ -5,6 +5,7 @@
 #include "codec/modular/profile.h"
 #include "codestream/modular/histogram_fit_queue.h"
 #include "codestream/modular/reference_workflow_internal.h"
+#include "gpu/ops/modular_resident_histogram_fitting.h"
 #include <algorithm>
 #include <optional>
 
@@ -99,6 +100,9 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
     return Status::Ok();
   if (requests.size() > kMaximumHistogramFittingFits || !participants)
     return Invalid();
+  const bool resident = options.fitting_backend == ReferenceFittingBackend::kGpuResident;
+  if (resident && (active_histogram_fitting_profile || options.fitting_gpu_profile))
+    return Status::Unsupported("Resident fitting has complete-call diagnostics only");
   const bool gpu_requested =
       options.fitting_backend != ReferenceFittingBackend::kResumableCpu;
   if (options.fitting_backend == ReferenceFittingBackend::kAuto &&
@@ -223,6 +227,7 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
           job.done = true;
           return Status::Ok();
         }
+        if (resident) return Status::Ok();
         Seconds fitting(job.stats.fitting_seconds);
         auto *profile_sink = parent_fit_profile ? &profiles[i] : nullptr;
         if (profile_sink)
@@ -233,6 +238,95 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
       });
       !s.ok())
     return s;
+
+  const auto merge_stats = [&] {
+    for (size_t i = 0; i < jobs.size(); ++i) {
+      const auto &job = jobs[i];
+      for (auto member : {&ReferenceWorkflowStats::learning_calls,
+                          &ReferenceWorkflowStats::fits,
+                          &ReferenceWorkflowStats::empty_learning_calls,
+                          &ReferenceWorkflowStats::scanned_pixels,
+                          &ReferenceWorkflowStats::selected_samples,
+                          &ReferenceWorkflowStats::distinct_samples,
+                          &ReferenceWorkflowStats::tree_nodes,
+                          &ReferenceWorkflowStats::histogram_cpu_nodes})
+        stats->*member += job.stats.*member;
+      stats->maximum_stage_bytes =
+          std::max(stats->maximum_stage_bytes, job.stats.maximum_stage_bytes);
+      MergeHistogramRowProfile(stats->rows, job.stats.rows);
+      stats->sample_preparation_seconds += job.stats.sample_preparation_seconds;
+      stats->fitting_seconds += job.stats.fitting_seconds;
+      if (parent_profile) {
+        parent_profile->training_work.weighted_prediction_samples += job.computed;
+        parent_profile->training_work.reused_prediction_samples += job.reused;
+      }
+      if (parent_fit_profile) {
+        profiles[i].records = {};
+        profiles[i].records_written = 0;
+        MergeHistogramFittingProfile(*parent_fit_profile, profiles[i]);
+        if (job.stats.fits) {
+          if (parent_fit_profile->records_written <
+              parent_fit_profile->records.size())
+            parent_fit_profile->records[parent_fit_profile->records_written++] =
+                job.fit_record;
+          else
+            ++parent_fit_profile->records_dropped;
+        }
+      }
+    }
+  };
+  if (resident) {
+    // Initial integration keeps coarse cohorts. Every nonempty tree, including
+    // its small tails, is completed by one resident GPU operation.
+    for (size_t first = 0; first < jobs.size(); first += kMaximumResidentHistogramFits) {
+      std::array<ResidentHistogramRequest, kMaximumResidentHistogramFits> batch;
+      std::array<size_t, kMaximumResidentHistogramFits> indices;
+      size_t count = 0;
+      for (size_t i = first; i < std::min(jobs.size(), first + kMaximumResidentHistogramFits); ++i) {
+        if (jobs[i].done) continue;
+        auto learning = jobs[i].samples.tree_options();
+        learning.maximum_leaves = requests[i].maximum_leaves;
+        batch[count] = {{static_cast<uint32_t>(i), &jobs[i].samples.samples()}, learning};
+        indices[count++] = i;
+      }
+      if (!count) continue;
+      const ResidentHistogramInput input{std::span(batch).first(count)};
+      ResidentHistogramPlan plan;
+      const auto limits = op->histogram_fitting_limits();
+      if (auto s = ComputeResidentHistogramPlan(input, &plan, &limits); !s.ok()) return s;
+      ResourceReservation reservation;
+      if (auto s = budget.TryReserve(plan.working.peak_bytes, &reservation); !s.ok()) return s;
+      ResidentHistogramResult result;
+      {
+        auto resources = CurrentResourceContext();
+        resources.reservation = &reservation;
+        ResourceContextScope scope(resources);
+        Seconds timer(stats->histogram_resident_seconds);
+        if (auto s = op->FitHistogramTrees(input, &result); !s.ok()) return s;
+      }
+      stats->histogram_resident_fits += count;
+      stats->histogram_resident_gpu_nanoseconds += result.gpu_nanoseconds;
+      ++stats->histogram_gpu_preparations;
+      ++stats->histogram_gpu_batches;
+      stats->histogram_gpu_nodes += result.visited_nodes;
+      stats->histogram_prepared_bytes += plan.prepared.storage_bytes;
+      stats->maximum_stage_bytes = std::max(stats->maximum_stage_bytes, plan.working.peak_bytes);
+      for (size_t j = 0; j < count; ++j) {
+        const size_t i = indices[j];
+        auto &job = jobs[i];
+        auto &record = *requests[i].record;
+        record.tree = std::move(result.trees[j]);
+        record.learning.tree_nodes = record.tree.size;
+        ++job.stats.fits;
+        job.stats.tree_nodes += record.tree.size;
+        job.samples = {};
+        job.done = true;
+        job.reservation.Reset();
+      }
+    }
+    merge_stats();
+    return Status::Ok();
+  }
 
   std::unique_ptr<PreparedGpuHistogramRows> prepared;
   HistogramFittingDeviceLimits limits{};
@@ -508,40 +602,7 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
       if (!job.status.ok())
         return job.status;
   }
-  for (size_t i = 0; i < jobs.size(); ++i) {
-    const auto &job = jobs[i];
-    for (auto member : {&ReferenceWorkflowStats::learning_calls,
-                        &ReferenceWorkflowStats::fits,
-                        &ReferenceWorkflowStats::empty_learning_calls,
-                        &ReferenceWorkflowStats::scanned_pixels,
-                        &ReferenceWorkflowStats::selected_samples,
-                        &ReferenceWorkflowStats::distinct_samples,
-                        &ReferenceWorkflowStats::tree_nodes,
-                        &ReferenceWorkflowStats::histogram_cpu_nodes})
-      stats->*member += job.stats.*member;
-    stats->maximum_stage_bytes =
-        std::max(stats->maximum_stage_bytes, job.stats.maximum_stage_bytes);
-    MergeHistogramRowProfile(stats->rows, job.stats.rows);
-    stats->sample_preparation_seconds += job.stats.sample_preparation_seconds;
-    stats->fitting_seconds += job.stats.fitting_seconds;
-    if (parent_profile) {
-      parent_profile->training_work.weighted_prediction_samples += job.computed;
-      parent_profile->training_work.reused_prediction_samples += job.reused;
-    }
-    if (parent_fit_profile) {
-      profiles[i].records = {};
-      profiles[i].records_written = 0;
-      MergeHistogramFittingProfile(*parent_fit_profile, profiles[i]);
-      if (job.stats.fits) {
-        if (parent_fit_profile->records_written <
-            parent_fit_profile->records.size())
-          parent_fit_profile->records[parent_fit_profile->records_written++] =
-              job.fit_record;
-        else
-          ++parent_fit_profile->records_dropped;
-      }
-    }
-  }
+  merge_stats();
   return Status::Ok();
 }
 } // namespace gjxl::modular_internal::reference_workflow_internal

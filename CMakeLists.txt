@@ -611,6 +611,7 @@ add_library(
   src/gpu/ops/ans_token_cost.cpp
   src/gpu/ops/modular_tree_statistics.cpp
   src/gpu/ops/modular_histogram_fitting.cpp
+  src/gpu/ops/modular_resident_histogram_fitting.cpp
   src/gpu/ops/modular_input_storage_plan.cpp
   src/gpu/ops/modular_token_storage_plan.cpp
   src/gpu/ops/modular_adaptive_token_storage_plan.cpp
@@ -1160,6 +1161,8 @@ add_custom_command(OUTPUT "${GJXL_HISTOGRAM_FITTING_METAL_IR}"
   DEPENDS "${GJXL_HISTOGRAM_FITTING_METAL_SOURCE}"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/modular_histogram_fitting_params.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/ops/modular_histogram_fitting_layout.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/metal/kernels/modular_resident_histogram_fitting.metal"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/gpu/ops/modular_resident_histogram_layout.h"
   COMMENT "Compiling exact native Metal histogram fitting" VERBATIM)
 
 add_custom_command(OUTPUT "${GJXL_MODULAR_POPULATIONS_METAL_IR}"
@@ -2515,6 +2518,8 @@ if(GJXL_BUILD_TESTS)
     add_test(NAME modular_reference_hybrid COMMAND gjxl_modular_reference_hybrid_test)
     set_tests_properties(modular_reference_hybrid PROPERTIES TIMEOUT 180)
     add_test(NAME modular_reference_combined COMMAND gjxl_modular_reference_hybrid_test --combined)
+    add_test(NAME modular_reference_resident COMMAND gjxl_modular_reference_hybrid_test --resident)
+    set_tests_properties(modular_reference_resident PROPERTIES TIMEOUT 180)
     set_tests_properties(modular_reference_combined PROPERTIES TIMEOUT 300)
     add_test(NAME modular_reference_pipeline COMMAND gjxl_modular_reference_hybrid_test --pipeline)
     set_tests_properties(modular_reference_pipeline PROPERTIES TIMEOUT 180)
@@ -3908,6 +3913,12 @@ if(GJXL_BUILD_TESTS)
   target_compile_definitions(gjxl_metal_modular_histogram_fitting_test PRIVATE GJXL_METALLIB_PATH="${GJXL_METALLIB}")
   add_test(NAME metal_modular_histogram_fitting COMMAND gjxl_metal_modular_histogram_fitting_test)
   set_tests_properties(metal_modular_histogram_fitting PROPERTIES TIMEOUT 180)
+  add_executable(gjxl_metal_modular_resident_histogram_test tests/metal_modular_resident_histogram_test.cpp)
+  target_link_libraries(gjxl_metal_modular_resident_histogram_test PRIVATE gjxl_codestream gjxl_metal)
+  add_test(NAME metal_modular_resident_histogram COMMAND gjxl_metal_modular_resident_histogram_test)
+  set_tests_properties(metal_modular_resident_histogram PROPERTIES TIMEOUT 180)
+  add_executable(gjxl_modular_resident_fitting_probe tools/modular_reference_learning/resident_fitting_probe.cpp src/io/pnm.cpp)
+  target_link_libraries(gjxl_modular_resident_fitting_probe PRIVATE gjxl_codestream gjxl_metal)
 
   # Explicit research probe, never part of CTest timing or public routing.
   add_executable(gjxl_modular_histogram_submission_probe
