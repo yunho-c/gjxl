@@ -6,6 +6,9 @@
 #include "gpu/ops/modular_resident_histogram_fitting.h"
 #include <chrono>
 #include <cstring>
+#if defined(GJXL_MODULAR_FRONTIER_DIAGNOSTICS)
+#include "modular_reference_learning/frontier_metal_diagnostics.h"
+#endif
 
 namespace gjxl::metal_internal {
 using namespace histogram_gpu_internal;
@@ -696,6 +699,9 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
     if (auto s = BorrowCompletedReadOnly(*work, plan.work_bytes, 0, &completed); !s.ok()) return s;
     candidate.submissions = 1;
   } else {
+#if defined(GJXL_MODULAR_FRONTIER_DIAGNOSTICS)
+    frontier_diagnostic::Capture diagnostic(input, device_.get());
+#endif
     struct FrontierContext {
       MTL::Buffer *prepared, *work;
       std::array<MTL::ComputePipelineState *, 3> pipelines;
@@ -730,9 +736,15 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
     size_t previous_head = 0;
     for (;;) {
       Pending pending;
+#if defined(GJXL_MODULAR_FRONTIER_DIAGNOSTICS)
+      diagnostic.Begin(candidate.submissions);
+#endif
       if (auto s = SubmitCompute("modular.histogram_frontier", encode_frontier, &c, &pending.submission); !s.ok()) return s;
       if (!pending.submission) return Status::Internal("Missing frontier submission");
       if (auto s = pending.Wait(); !s.ok()) return s;
+#if defined(GJXL_MODULAR_FRONTIER_DIAGNOSTICS)
+      diagnostic.End();
+#endif
       uint64_t duration;
       if (auto s = GetMetalSubmissionGpuDuration(*pending.submission, &duration); !s.ok()) return s;
       candidate.gpu_nanoseconds += duration;
@@ -741,6 +753,9 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
       // Only coarse progress/status crosses this boundary. Nodes, summaries,
       // decisions, membership and the next ready queue remain on the GPU.
       const auto &control = *reinterpret_cast<const gjxl_histogram_resident::FrontierControl *>(completed.data() + plan.frontier.control);
+#if defined(GJXL_MODULAR_FRONTIER_DIAGNOSTICS)
+      diagnostic.Record(candidate.submissions - 1, duration, control, plan, completed);
+#endif
       if (control.status & gjxl_histogram_resident::kCapacityError)
         return Status::Unsupported("Frontier fit exceeds tree capacity or depth");
       if (control.status || control.head <= previous_head || control.head > control.tail ||

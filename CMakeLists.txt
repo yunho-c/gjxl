@@ -10,6 +10,7 @@ project(
 )
 
 option(GJXL_BUILD_TOKENIZATION_EXPERIMENT "Enable diagnostic tokenization controls" OFF)
+option(GJXL_BUILD_MODULAR_FRONTIER_DIAGNOSTICS "Enable private frontier sample archives and bounded Metal captures" OFF)
 if(GJXL_BUILD_TOKENIZATION_EXPERIMENT)
   add_compile_definitions(GJXL_TOKENIZATION_EXPERIMENT=1)
 endif()
@@ -1403,6 +1404,11 @@ target_compile_definitions(
   PRIVATE
     GJXL_ENABLE_METAL=1
 )
+
+if(GJXL_BUILD_MODULAR_FRONTIER_DIAGNOSTICS)
+  target_compile_definitions(gjxl_metal PRIVATE GJXL_MODULAR_FRONTIER_DIAGNOSTICS=1)
+  target_include_directories(gjxl_metal PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+endif()
 
 endif()
 

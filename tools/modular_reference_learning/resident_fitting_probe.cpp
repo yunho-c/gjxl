@@ -6,7 +6,9 @@
 #include "gpu/metal/metal_backend.h"
 #include "gpu/ops/modular_resident_histogram_fitting.h"
 #include "io/pnm.h"
+#include "frontier_sample_archive.h"
 #include <chrono>
+#include <cstdlib>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -27,11 +29,12 @@ void Ok(Status s) { if (!s.ok()) throw std::runtime_error(std::string(s.message(
 struct Observation {
   double wall = 0, cpu = 0, restore = 0, gpu_call = 0;
   uint64_t gpu_ns = 0;
-  size_t submissions = 0, rounds = 0, active = 0, same_fit = 0;
+  size_t submissions = 0, rounds = 0, ready = 0, active = 0, same_fit = 0;
   size_t input_backing = 0, peak_backing = 0, incremental_peak = 0, nodes = 0;
 };
 Observation Run(GpuBackend &gpu, std::span<const ResidentHistogramRequest> requests,
-                std::span<const DecisionTree> expected, unsigned mode) {
+                std::span<const DecisionTree> expected, unsigned mode,
+                const ResidentHistogramInput &controls) {
   // 0: CPU 1; 1: CPU 14; 2/3: DFS/frontier GPU all; 4/5: half-frontier/half-CPU,
   // sequential or concurrent, with 13 CPU workers plus one GPU caller.
   const size_t gpu_count = mode < 2 ? 0 : mode < 4 ? requests.size() : requests.size() / 2;
@@ -67,7 +70,8 @@ Observation Run(GpuBackend &gpu, std::span<const ResidentHistogramRequest> reque
     const auto gpu_work = [&] {
       if (!gpu_count) return;
       const auto start = Clock::now();
-      ResidentHistogramInput input{requests.first(gpu_count)};
+      ResidentHistogramInput input = controls;
+      input.requests = requests.first(gpu_count);
       input.executor = mode == 2 ? ResidentHistogramExecutor::kDepthFirst : ResidentHistogramExecutor::kFrontier;
       Ok(QueryGpuModularHistogramFitting(gpu)->FitHistogramTrees(input, &resident));
       result.gpu_call = Seconds(start);
@@ -95,6 +99,7 @@ Observation Run(GpuBackend &gpu, std::span<const ResidentHistogramRequest> reque
     }
     result.gpu_ns = resident.gpu_nanoseconds;
     result.submissions = resident.submissions; result.rounds = resident.frontier_rounds;
+    result.ready = resident.maximum_ready_nodes;
     result.active = resident.maximum_active_nodes; result.same_fit = resident.maximum_same_fit_nodes;
     result.peak_backing = budget.snapshot().peak_backing_bytes;
     result.incremental_peak = result.peak_backing - result.input_backing;
@@ -106,63 +111,99 @@ Observation Run(GpuBackend &gpu, std::span<const ResidentHistogramRequest> reque
 }
 }
 int main(int argc, char **argv) try {
-  Check(argc >= 3 && argc <= 6, "resident_fitting_probe INPUT OUTPUT.json [fits=16 [repeats=6 [tile=128]]]");
+  Check(argc >= 3 && argc <= 10, "resident_fitting_probe INPUT.pam|SAMPLES.gjfs OUTPUT.json [fits=16 [repeats=6 [tile=128 [cpu-frontier [active_nodes=128 [rounds=16 [scratch_mib=64]]]]]]]");
   Check(!std::filesystem::exists(argv[2]), "Refusing to replace probe output");
-  const size_t fits = argc > 3 ? std::stoul(argv[3]) : 16;
+  size_t fits = argc > 3 ? std::stoul(argv[3]) : 16;
   const size_t repeats = argc > 4 ? std::stoul(argv[4]) : 6;
   const size_t tile = argc > 5 ? std::stoul(argv[5]) : 128;
+  const bool cpu_frontier_only = argc >= 7;
+  ResidentHistogramInput controls{};
+  controls.maximum_active_nodes = argc > 7 ? std::stoul(argv[7]) : 128;
+  controls.rounds_per_submission = argc > 8 ? std::stoul(argv[8]) : 16;
+  const size_t scratch_mib = argc > 9 ? std::stoul(argv[9]) : 64;
+  Check(controls.maximum_active_nodes > 0 && controls.maximum_active_nodes <= 1024 &&
+        controls.rounds_per_submission > 0 && controls.rounds_per_submission <= 64 &&
+        scratch_mib > 0 && scratch_mib <= 512, "Invalid frontier probe controls");
+  controls.maximum_scratch_bytes = scratch_mib * 1024 * 1024;
+  const bool from_archive = std::filesystem::path(argv[1]).extension() == ".gjfs";
+  Check(!cpu_frontier_only || std::string_view(argv[6]) == "cpu-frontier", "Unknown replay modes");
   Check(fits >= 2 && fits <= 64 && repeats > 0 && repeats <= 30 && tile > 0 && tile <= 256,
         "Invalid fitting probe dimensions");
-  io::IntegerImage image; Ok(io::ReadPnm(argv[1], &image));
-  Check(image.format == ModularPixelFormat::kRgb8 && image.extent.width >= tile && image.extent.height >= tile,
-        "Probe requires RGB8 input at least one tile large");
-  std::vector<PreparedHistogramSamples> prepared(fits);
+  std::vector<PreparedHistogramSamples> prepared;
+  frontier_diagnostic::Archive archive;
   std::vector<ResidentHistogramRequest> requests;
-  std::vector<DecisionTree> expected(fits);
+  std::vector<DecisionTree> expected;
   std::vector<std::array<size_t, 3>> locations;
   requests.reserve(fits);
-  std::unique_ptr<GpuBackend> gpu; Ok(CreateEmbeddedMetalBackend({}, &gpu));
+  std::unique_ptr<GpuBackend> gpu;
+  const char *metallib = std::getenv("GJXL_FRONTIER_PROBE_METALLIB");
+  if (metallib && *metallib) Ok(CreateMetalBackend(metallib, &gpu));
+  else Ok(CreateEmbeddedMetalBackend({}, &gpu));
   size_t rows = 0, population = 0;
-  for (size_t i = 0; i < fits; ++i) {
-    const size_t x0 = (i * 977) % (image.extent.width - tile + 1);
-    const size_t y0 = (i * 613) % (image.extent.height - tile + 1), channel = i % 3;
-    std::vector<int32_t> pixels(tile * tile);
-    for (size_t y = 0; y < tile; ++y) for (size_t x = 0; x < tile; ++x)
-      pixels[y * tile + x] = image.bytes[(y0 + y) * image.row_stride + (x0 + x) * 3 + channel];
-    const Extent2D extent{tile, tile};
-    const ModularChannelView plane{pixels, {extent}, tile};
-    const HistogramTrainingImage training{extent, {&plane, 1}};
-    Ok(PrepareHistogramSamples({&training, 1}, &prepared[i]));
-    requests.push_back({{static_cast<uint32_t>(i), &prepared[i].samples()}, prepared[i].tree_options()});
-    auto copy = prepared[i].samples();
-    Ok(LearnHistogramTree(copy, &expected[i], requests.back().learning));
-    rows += copy.weights.size(); population += copy.total_samples;
-    locations.push_back({x0, y0, channel});
+  if (from_archive) {
+    archive = frontier_diagnostic::Load(argv[1]);
+    fits = archive.samples.size();
+    for (size_t i = 0; i < fits; ++i)
+      requests.push_back({{archive.ids[i], &archive.samples[i]}, archive.options[i]});
+  } else {
+    io::IntegerImage image; Ok(io::ReadPnm(argv[1], &image));
+    Check(image.format == ModularPixelFormat::kRgb8 && image.extent.width >= tile && image.extent.height >= tile,
+          "Probe requires RGB8 input at least one tile large");
+    prepared.resize(fits);
+    for (size_t i = 0; i < fits; ++i) {
+      const size_t x0 = (i * 977) % (image.extent.width - tile + 1);
+      const size_t y0 = (i * 613) % (image.extent.height - tile + 1), channel = i % 3;
+      std::vector<int32_t> pixels(tile * tile);
+      for (size_t y = 0; y < tile; ++y) for (size_t x = 0; x < tile; ++x)
+        pixels[y * tile + x] = image.bytes[(y0 + y) * image.row_stride + (x0 + x) * 3 + channel];
+      const Extent2D extent{tile, tile};
+      const ModularChannelView plane{pixels, {extent}, tile};
+      const HistogramTrainingImage training{extent, {&plane, 1}};
+      Ok(PrepareHistogramSamples({&training, 1}, &prepared[i]));
+      requests.push_back({{static_cast<uint32_t>(i), &prepared[i].samples()}, prepared[i].tree_options()});
+      locations.push_back({x0, y0, channel});
+    }
   }
-  ResidentHistogramInput input{requests};
+  expected.resize(fits);
+  for (size_t i = 0; i < fits; ++i) {
+    auto copy = *requests[i].source.samples;
+    Ok(LearnHistogramTree(copy, &expected[i], requests[i].learning));
+    rows += copy.weights.size(); population += copy.total_samples;
+  }
+  ResidentHistogramInput input = controls;
+  input.requests = requests;
   input.executor = ResidentHistogramExecutor::kFrontier;
   ResidentHistogramPlan plan; Ok(ComputeResidentHistogramPlan(input, &plan));
   std::ofstream out(argv[2]); out << std::setprecision(17) << std::boolalpha;
-  out << "{\"schema\":2,\"input\":" << std::quoted(argv[1]) << ",\"fits\":" << fits
-      << ",\"tile\":" << tile << ",\"rows\":" << rows << ",\"population\":" << population
+  out << "{\"schema\":3,\"input\":" << std::quoted(argv[1]) << ",\"fits\":" << fits
+      << ",\"metallib\":" << std::quoted(metallib ? metallib : "embedded")
+      << ",\"source_kind\":" << std::quoted(from_archive ? "prepared_archive" : "photo_tiles")
+      << ",\"tile\":" << (from_archive ? 0 : tile) << ",\"rows\":" << rows << ",\"population\":" << population
       << ",\"planned_gpu_executor\":\"frontier\""
+      << ",\"requested_active_nodes\":" << controls.maximum_active_nodes
+      << ",\"rounds_per_submission\":" << controls.rounds_per_submission
+      << ",\"maximum_scratch_bytes\":" << controls.maximum_scratch_bytes
+      << ",\"planned_active_nodes\":" << plan.frontier.active_nodes
+      << ",\"planned_scratch_bytes\":" << plan.scratch_bytes
+      << ",\"scratch_slot_bytes\":" << plan.frontier.slot.bytes
       << ",\"planned_gpu_work_bytes\":" << plan.work_bytes
       << ",\"planned_gpu_input_bytes\":" << plan.prepared.storage_bytes
       << ",\"planned_gpu_peak_bytes\":" << plan.working.peak_bytes
       << ",\"locations\":[";
-  for (size_t i = 0; i < fits; ++i) out << (i ? "," : "") << '[' << locations[i][0] << ',' << locations[i][1] << ',' << locations[i][2] << ']';
+  for (size_t i = 0; i < locations.size(); ++i) out << (i ? "," : "") << '[' << locations[i][0] << ',' << locations[i][1] << ',' << locations[i][2] << ']';
   const char *names[] = {"cpu1", "cpu14", "resident_depth_first", "frontier", "split_sequential", "split_concurrent"};
   out << "],\"boundary\":\"Complete fitting including validation, scratch, partition, node/queue management, canonicalization and publication. GPU upload included. Input sampling, CPU input restoration, backend/domain and worker-pool creation excluded. Concurrent thread launch/join included. CPU seconds are process CPU time.\",\"observations\":[";
   bool comma = false;
   for (size_t iteration = 0; iteration <= repeats; ++iteration) {
-    for (unsigned position = 0; position < 6; ++position) {
-      const unsigned mode = (position + iteration) % 6;
-      const auto r = Run(*gpu, requests, expected, mode);
+    for (unsigned position = 0; position < (cpu_frontier_only ? 2 : 6); ++position) {
+      const unsigned mode = cpu_frontier_only ? ((position + iteration) % 2 ? 3 : 1) : (position + iteration) % 6;
+      const auto r = Run(*gpu, requests, expected, mode, controls);
       out << (comma ? "," : "") << "{\"mode\":" << std::quoted(names[mode]) << ",\"iteration\":" << iteration
           << ",\"warmup\":" << (iteration == 0) << ",\"exact\":true,\"wall_seconds\":" << r.wall
           << ",\"process_cpu_seconds\":" << r.cpu << ",\"input_restore_seconds\":" << r.restore
           << ",\"gpu_call_seconds\":" << r.gpu_call << ",\"gpu_nanoseconds\":" << r.gpu_ns
           << ",\"gpu_submissions\":" << r.submissions << ",\"frontier_rounds\":" << r.rounds
+          << ",\"maximum_ready_nodes\":" << r.ready
           << ",\"maximum_active_nodes\":" << r.active << ",\"maximum_same_fit_nodes\":" << r.same_fit
           << ",\"tree_nodes\":" << r.nodes << ",\"input_and_pool_backing_bytes\":" << r.input_backing
           << ",\"peak_backing_bytes\":" << r.peak_backing << ",\"incremental_peak_bytes\":" << r.incremental_peak << '}';
