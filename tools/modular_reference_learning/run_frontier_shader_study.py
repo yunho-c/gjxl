@@ -3,7 +3,9 @@
 """Interleave exact complete-fit shader/admission comparisons on one archive.
 
 Configurations JSON: [{"name": ..., "metallib": ..., "active": 128,
-"scratch_mib": 64, "rounds": 16}]. Each process includes CPU14 controls,
+"scratch_mib": 64, "rounds": 16, "probe": optional_binary_override}].
+Binary overrides allow comparisons across kernel-dispatch changes without
+adding artificial dispatches to the frozen baseline. Each process includes CPU14 controls,
 one warmup and the requested measured repetitions. Diagnostic captures and
 validation layers are excluded. Outputs and frozen inputs are never replaced.
 """
@@ -43,11 +45,23 @@ def main():
     shutil.copy2(args.probe, binary)
     shutil.copy2(__file__, args.output / Path(__file__).name)
     frozen = {str(binary): sha(binary)}
+    overrides = {}
     for c in configurations:
         library = (args.output / (c["name"] + ".metallib")).resolve()
         shutil.copy2(c["metallib"], library)
         c.update(metallib_source=str(Path(c["metallib"]).resolve()), metallib=str(library))
         frozen[str(library)] = sha(library)
+        if "probe" in c:
+            source = Path(c["probe"]).resolve(strict=True)
+            if source not in overrides:
+                dest = (args.output / (c["name"] + "-probe")).resolve()
+                shutil.copy2(source, dest)
+                overrides[source] = dest
+                _, extra_dependencies = mac_dependencies(dest)
+                frozen.update({str(dest): sha(dest), **extra_dependencies})
+            c.update(probe_source=str(source), probe=str(overrides[source]))
+        else:
+            c["probe"] = str(binary)
     archive = args.archive.resolve(strict=True)
     frozen[str(archive)] = sha(archive)
     listing, dependencies = mac_dependencies(binary)
@@ -72,7 +86,7 @@ def main():
                 if f"'{args.power} Power'" not in before["power"]:
                     raise RuntimeError("Requested power condition is not active")
                 output = (args.output / f"block-{block}-{c['name']}.json").resolve()
-                command = [str(binary), str(archive), str(output), "16", str(args.repeats), "128", "cpu-tiled",
+                command = [c["probe"], str(archive), str(output), "16", str(args.repeats), "128", "cpu-tiled",
                            str(c.get("active", 128)), str(c.get("rounds", 16)), str(c.get("scratch_mib", 64))]
                 run = dict(block=block, name=c["name"], command=command, before=before,
                            started=time.time(), power=[], competitors=[])

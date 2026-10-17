@@ -702,7 +702,7 @@ MetalBackend::MetalBackend(
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 7> modular_token_pipelines,
   NS::SharedPtr<MTL::ComputePipelineState> ans_token_cost_pipeline,
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> tree_statistics_pipelines,
-  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 19> histogram_fitting_pipelines,
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 20> histogram_fitting_pipelines,
   std::array<NS::SharedPtr<MTL::ComputePipelineState>, 2> modular_population_pipelines,
   AqPipelines aq_pipelines,
   ButteraugliPipelines butteraugli_pipelines,
@@ -1853,13 +1853,13 @@ Status CreateMetalBackendImpl(
       return Status::Unavailable("Metal cannot launch Modular tree statistics threadgroups");
   }
 
-  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 19> histogram_fitting_pipelines;
+  std::array<NS::SharedPtr<MTL::ComputePipelineState>, 20> histogram_fitting_pipelines;
   const char* histogram_kernels[] = {"gjxl_histogram_validate",
     "gjxl_histogram_collect", "gjxl_histogram_prefix", "gjxl_histogram_costs", "gjxl_histogram_select", "gjxl_histogram_resident_fit", "gjxl_histogram_frontier_init", "gjxl_histogram_frontier_begin", "gjxl_histogram_frontier_nodes",
     "gjxl_histogram_tiled_init", "gjxl_histogram_tiled_begin", "gjxl_histogram_tiled_clear_stats",
     "gjxl_histogram_tiled_stats", "gjxl_histogram_tiled_summarize", "gjxl_histogram_tiled_schedule",
     "gjxl_histogram_tiled_clear_histogram", "gjxl_histogram_tiled_collect", "gjxl_histogram_tiled_score",
-    "gjxl_histogram_tiled_finish"};
+    "gjxl_histogram_tiled_collect_score", "gjxl_histogram_tiled_finish"};
   for (size_t i = 0; i < histogram_fitting_pipelines.size(); ++i) {
     status = CreatePipeline(device.get(), library.get(), histogram_kernels[i], &histogram_fitting_pipelines[i]);
     if (!status.ok()) return status;

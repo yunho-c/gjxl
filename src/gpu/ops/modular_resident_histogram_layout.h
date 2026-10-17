@@ -52,13 +52,16 @@ static_assert(sizeof(FrontierParams) == 56);
 // was full. Only the original-bin dimension is compacted; symbol indices and
 // the four-lane floating-point entropy reduction remain unchanged.
 enum : Word { kTiledFree = 0, kTiledNew = 1, kTiledPending = 2, kTiledSelected = 3,
-              kTiledRows = 512, kTiledHashEntries = 1024 };
+              kTiledRows = 512, kTiledHashEntries = 1024,
+              kTiledSmallCells = 1024, kTiledLocalHistogram = 0xffffffffu };
 struct TiledSlot {
   NodeRef ref;
   Word stage, symbols, parent_index, needed, low_count, high_count;
   float base_cost;
 };
 struct TiledProperty {
+  // Histogram is an aligned work-arena byte offset, or kTiledLocalHistogram
+  // for a single-tile job collected and scored entirely in threadgroup memory.
   Word bins, histogram;
   gjxl_histogram_fitting::Candidate winners[4];
 };

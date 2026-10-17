@@ -35,7 +35,7 @@ DecisionTree Oracle(HistogramTrainingSamples samples, HistogramTreeLearningOptio
   return result;
 }
 void Case(GpuBackend &gpu, const std::vector<HistogramTrainingSamples> &samples,
-          HistogramTreeLearningOptions options = {}) {
+          HistogramTreeLearningOptions options = {}, bool local_histograms_only = false) {
   std::vector<ResidentHistogramRequest> requests;
   std::vector<DecisionTree> expected;
   std::vector<std::vector<uint32_t>> orders(samples.size());
@@ -72,6 +72,9 @@ void Case(GpuBackend &gpu, const std::vector<HistogramTrainingSamples> &samples,
       Check(plan.scratch_bytes <= input.maximum_scratch_bytes &&
             result.maximum_histogram_bytes <= plan.tiled.histogram_bytes,
             "Tiled histogram pool exceeded its storage contract");
+      if (local_histograms_only)
+        Check(result.maximum_histogram_bytes == 0 && expected.front().size > 1,
+              "Local-only split tree used a device histogram or did not split");
     }
   } else Check(result.submissions == 1, "Depth-first fitting added submissions");
   Check(result.trees.size() == expected.size() && result.row_offsets.size() == expected.size() + 1,
@@ -252,21 +255,27 @@ int main(int argc, char **argv) try {
   Case(*gpu, {reordered});
   if (executor == ResidentHistogramExecutor::kTiledFrontier) {
     // Exercise compact histograms on both sides of the 1024-cell shared
-    // collection boundary, with weighted counts, extra bits and a partial
-    // second row tile. The native oracle also checks ties and row partitioning.
-    for (size_t symbols : {size_t{16}, size_t{256}}) {
-      auto compact = Fixture(1, 513, 2);
+    // collection boundary and the 512-row fused-job limit, with weighted
+    // counts and extra bits. The native oracle checks ties and row partitioning.
+    for (size_t symbols : {size_t{4}, size_t{16}, size_t{256}}) for (size_t rows : {size_t{511}, size_t{512}, size_t{513}}) {
+      auto compact = Fixture(1, rows, 2);
       for (size_t i = 0; i < compact.weights.size(); ++i) {
         compact.static_values[0][i] = i % 3;
         compact.static_values[1][i] = i % 4;
-        compact.values[0][i] = i % 60;
-        compact.values[1][i] = i % 61;
+        compact.values[0][i] = i % (symbols == 4 ? 204 : 60);
+        compact.values[1][i] = i % (symbols == 4 ? 205 : 61);
         for (size_t pred = 0; pred < compact.predictor_count; ++pred)
           compact.residuals[pred][i] = {
               static_cast<uint8_t>((i + pred) % symbols),
               static_cast<uint8_t>(i % 2 ? 0 : 63)};
       }
       Case(*gpu, {compact}, options);
+      if (symbols == 16 && rows == 512) {
+        // Every property in every descendant fits locally. The scheduler must
+        // make progress when no device histogram or collection group is needed.
+        for (size_t i = 0; i < compact.weights.size(); ++i) compact.values[1][i] = i % 59;
+        Case(*gpu, {compact}, options, true);
+      }
     }
     // Full bin and symbol spans force pool deferral. Each 512-row hash tile
     // also exercises collisions, repeated keys and a partial final tile.

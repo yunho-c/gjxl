@@ -123,9 +123,13 @@ public:
         const auto &node = reinterpret_cast<const Node *>(completed.data() + plan.layout[slot.ref.fit].nodes)[slot.ref.node];
         const auto &source = *requests_[slot.ref.fit].source.samples;
         const auto *properties = reinterpret_cast<const TiledProperty *>(base + plan.tiled.properties);
+        size_t local_properties = 0;
+        for (size_t p = 0; p < source.property_count; ++p)
+          local_properties += properties[p].bins && properties[p].histogram == kTiledLocalHistogram;
         workload_ << (i ? "," : "") << "{\"fit\":" << slot.ref.fit << ",\"node\":" << slot.ref.node
                   << ",\"rows\":" << node.end - node.begin << ",\"symbols\":" << slot.symbols
                   << ",\"histogram_bytes\":" << slot.needed << ",\"predictors\":" << source.predictor_count
+                  << ",\"local_properties\":" << local_properties
                   << ",\"split\":" << (node.property >= 0 ? "true" : "false") << ",\"property_bins\":[";
         for (size_t p = 0; p < source.property_count; ++p)
           workload_ << (p ? "," : "") << properties[p].bins;

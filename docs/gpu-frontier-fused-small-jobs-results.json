@@ -1,0 +1,4246 @@
+{
+  "schema": 1,
+  "baseline_commit": "9bffcff95ff7add1378e01dc04b9588c84e86fe8",
+  "power": "Battery",
+  "hardware": "Apple M4 Pro",
+  "cpu_participants": 14,
+  "raw_artifact_root": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017",
+  "prepared_work": {
+    "fits": 42,
+    "rows": 5285712,
+    "population": 5285712,
+    "tree_nodes": 35878
+  },
+  "prepared_boundary": "Complete fitting including validation, scratch, partition, node/queue management, canonicalization and publication. GPU upload included. Input sampling, CPU input restoration, backend/domain and worker-pool creation excluded. Concurrent thread launch/join included. CPU seconds are process CPU time.",
+  "source_sha256": {
+    "src/gpu/metal/kernels/modular_tiled_frontier_histogram_fitting.metal": "5c834219841c6657caaba15efe76bf41df399ee81d465745ebf0c767ce213b2e",
+    "src/gpu/metal/metal_backend.cpp": "6b7f848fcfc97e850d7f08134361de46f77b159520e8098a43ba26839f05f752",
+    "src/gpu/metal/metal_backend_internal.h": "c51356bb2d07a1dc9c3a01b5bf4be9b356a49745e61697d0633f89de7488981b",
+    "src/gpu/metal/metal_modular_histogram_fitting.cpp": "0b2fb4556948d682926098f037e06bc30ee01a08741de56388e2034d29570b80",
+    "src/gpu/ops/modular_resident_histogram_layout.h": "5ea00eb13cc66cd525960463ec0a0e5d8fdffbe98582486443b56cd115bd6710",
+    "tests/metal_modular_resident_histogram_test.cpp": "2b8843063964a3cc51cb5acb31733fc8f63903393481074c1a147cc440037cad",
+    "tools/modular_reference_learning/frontier_metal_diagnostics.h": "4be17c2a887806f63c161f84b5364c866f7e6f73ad70944a7746f4d23265872a",
+    "tools/modular_reference_learning/run_frontier_shader_study.py": "2dc5b5f36a83e4115d6209da5ef365e76f1cbf18eeecc9f7554fbc1be1ee1b46"
+  },
+  "patch_sha256": "1a430c0d97436e9949f6c44ffeab8a97ea73adec6031989b9056b231a10082d7",
+  "prepared": {
+    "baseline": {
+      "configuration": {
+        "name": "baseline",
+        "probe": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/qualified-study/baseline-probe",
+        "metallib": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/qualified-study/baseline.metallib",
+        "active": 256,
+        "scratch_mib": 64,
+        "metallib_source": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/baseline.metallib",
+        "probe_source": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/baseline-probe"
+      },
+      "runs": [
+        {
+          "block": 0,
+          "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/qualified-study/block-0-baseline.json",
+          "artifact_sha256": "6199f907730a11a15009c6f60641817fd7da92038f4c10c3fa924694fe6569e0",
+          "observations": [
+            {
+              "mode": "cpu14",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.417011375,
+              "process_cpu_seconds": 4.605749,
+              "input_restore_seconds": 0.00906775,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.467404416,
+              "process_cpu_seconds": 0.027718,
+              "input_restore_seconds": 0,
+              "gpu_call_seconds": 0.467402709,
+              "gpu_nanoseconds": 439166829,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4800,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 70,
+              "maximum_histogram_bytes": 57401832,
+              "maximum_deferred_nodes": 59,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.462124084,
+              "process_cpu_seconds": 0.024302,
+              "input_restore_seconds": 4.1e-08,
+              "gpu_call_seconds": 0.462123041,
+              "gpu_nanoseconds": 436728371,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4716,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 68,
+              "maximum_histogram_bytes": 57401264,
+              "maximum_deferred_nodes": 59,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.503175542,
+              "process_cpu_seconds": 4.750089,
+              "input_restore_seconds": 0.0046445,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.402610375,
+              "process_cpu_seconds": 4.606725,
+              "input_restore_seconds": 0.003313667,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.470942875,
+              "process_cpu_seconds": 0.023928,
+              "input_restore_seconds": 4.2e-08,
+              "gpu_call_seconds": 0.470940667,
+              "gpu_nanoseconds": 445890660,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4720,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 64,
+              "maximum_histogram_bytes": 57401920,
+              "maximum_deferred_nodes": 57,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.46757525,
+              "process_cpu_seconds": 0.029547,
+              "input_restore_seconds": 0,
+              "gpu_call_seconds": 0.467574083,
+              "gpu_nanoseconds": 436657162,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4791,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 72,
+              "maximum_histogram_bytes": 57403592,
+              "maximum_deferred_nodes": 57,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.433013083,
+              "process_cpu_seconds": 4.69933,
+              "input_restore_seconds": 0.005069834,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            }
+          ],
+          "gpu_median": 0.46757525,
+          "cpu14_median": 0.433013083
+        },
+        {
+          "block": 1,
+          "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/qualified-study/block-1-baseline.json",
+          "artifact_sha256": "8459b53a2e4c160fa5ce6a35ce8054c9442d5e94ffe2b1f648fe9bbd40a4b4fd",
+          "observations": [
+            {
+              "mode": "cpu14",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.457299958,
+              "process_cpu_seconds": 4.637334,
+              "input_restore_seconds": 0.009275875,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.471545833,
+              "process_cpu_seconds": 0.03002,
+              "input_restore_seconds": 0,
+              "gpu_call_seconds": 0.471542208,
+              "gpu_nanoseconds": 440758119,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4747,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 67,
+              "maximum_histogram_bytes": 57398944,
+              "maximum_deferred_nodes": 58,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.46617875,
+              "process_cpu_seconds": 0.033464,
+              "input_restore_seconds": 0,
+              "gpu_call_seconds": 0.466177125,
+              "gpu_nanoseconds": 431662871,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4828,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 66,
+              "maximum_histogram_bytes": 57400240,
+              "maximum_deferred_nodes": 60,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.402739709,
+              "process_cpu_seconds": 4.682398,
+              "input_restore_seconds": 0.010504875,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.418296875,
+              "process_cpu_seconds": 4.560452,
+              "input_restore_seconds": 0.002634625,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.48185075,
+              "process_cpu_seconds": 0.026063,
+              "input_restore_seconds": 4.1e-08,
+              "gpu_call_seconds": 0.481846959,
+              "gpu_nanoseconds": 454940079,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4764,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 74,
+              "maximum_histogram_bytes": 57404232,
+              "maximum_deferred_nodes": 58,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.484301041,
+              "process_cpu_seconds": 0.034701,
+              "input_restore_seconds": 2.5e-07,
+              "gpu_call_seconds": 0.484298875,
+              "gpu_nanoseconds": 448306287,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4775,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 81,
+              "maximum_histogram_bytes": 57399752,
+              "maximum_deferred_nodes": 59,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.443867208,
+              "process_cpu_seconds": 4.619867,
+              "input_restore_seconds": 0.002843459,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            }
+          ],
+          "gpu_median": 0.48185075,
+          "cpu14_median": 0.418296875
+        },
+        {
+          "block": 2,
+          "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/qualified-study/block-2-baseline.json",
+          "artifact_sha256": "a6156e225b260144abe7388aab5ab2b8e49e4c05818281b8203f71f9341dc7aa",
+          "observations": [
+            {
+              "mode": "cpu14",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.506578958,
+              "process_cpu_seconds": 4.591193,
+              "input_restore_seconds": 0.009262583,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.531657542,
+              "process_cpu_seconds": 0.029065,
+              "input_restore_seconds": 0,
+              "gpu_call_seconds": 0.531652833,
+              "gpu_nanoseconds": 502528495,
+              "gpu_submissions": 10,
+              "frontier_rounds": 146,
+              "maximum_ready_nodes": 4745,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 73,
+              "maximum_histogram_bytes": 57374984,
+              "maximum_deferred_nodes": 58,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.527148583,
+              "process_cpu_seconds": 0.050574,
+              "input_restore_seconds": 0,
+              "gpu_call_seconds": 0.527146209,
+              "gpu_nanoseconds": 434520203,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4775,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 61,
+              "maximum_histogram_bytes": 57398016,
+              "maximum_deferred_nodes": 60,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.420566666,
+              "process_cpu_seconds": 4.737907,
+              "input_restore_seconds": 0.01572125,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.458129833,
+              "process_cpu_seconds": 4.666813,
+              "input_restore_seconds": 0.003290833,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.49792475,
+              "process_cpu_seconds": 0.027765,
+              "input_restore_seconds": 1.25e-07,
+              "gpu_call_seconds": 0.497921875,
+              "gpu_nanoseconds": 469196037,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4761,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 67,
+              "maximum_histogram_bytes": 57393240,
+              "maximum_deferred_nodes": 60,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.4856925,
+              "process_cpu_seconds": 0.028327,
+              "input_restore_seconds": 0,
+              "gpu_call_seconds": 0.485691417,
+              "gpu_nanoseconds": 456034992,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4817,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 79,
+              "maximum_histogram_bytes": 57394480,
+              "maximum_deferred_nodes": 60,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.490729542,
+              "process_cpu_seconds": 4.639516,
+              "input_restore_seconds": 0.002772541,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            }
+          ],
+          "gpu_median": 0.49792475,
+          "cpu14_median": 0.458129833
+        }
+      ],
+      "wall_seconds": {
+        "n": 9,
+        "median": 0.48185075,
+        "min": 0.462124084,
+        "max": 0.527148583,
+        "values": [
+          0.462124084,
+          0.470942875,
+          0.46757525,
+          0.46617875,
+          0.48185075,
+          0.484301041,
+          0.527148583,
+          0.49792475,
+          0.4856925
+        ]
+      },
+      "gpu_command_seconds": {
+        "n": 9,
+        "median": 0.44589066,
+        "min": 0.431662871,
+        "max": 0.469196037,
+        "values": [
+          0.436728371,
+          0.44589066,
+          0.436657162,
+          0.431662871,
+          0.454940079,
+          0.448306287,
+          0.434520203,
+          0.469196037,
+          0.456034992
+        ]
+      },
+      "cpu14_wall_seconds": {
+        "n": 9,
+        "median": 0.433013083,
+        "min": 0.402610375,
+        "max": 0.503175542,
+        "values": [
+          0.503175542,
+          0.402610375,
+          0.433013083,
+          0.402739709,
+          0.418296875,
+          0.443867208,
+          0.420566666,
+          0.458129833,
+          0.490729542
+        ]
+      },
+      "peak_backing_bytes": [
+        304702152
+      ],
+      "peak_histogram_bytes": {
+        "n": 9,
+        "median": 57400240,
+        "min": 57393240,
+        "max": 57404232,
+        "values": [
+          57401264,
+          57401920,
+          57403592,
+          57400240,
+          57404232,
+          57399752,
+          57398016,
+          57393240,
+          57394480
+        ]
+      }
+    },
+    "fused": {
+      "configuration": {
+        "name": "fused",
+        "metallib": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/qualified-study/fused.metallib",
+        "active": 256,
+        "scratch_mib": 64,
+        "metallib_source": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/final/gjxl.metallib",
+        "probe": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/qualified-study/gjxl_frontier_probe"
+      },
+      "runs": [
+        {
+          "block": 0,
+          "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/qualified-study/block-0-fused.json",
+          "artifact_sha256": "27e4ddf51e1b8683a1c796bbe09e1bc68443d03bb7990032e2ddf0f17a7be6fe",
+          "observations": [
+            {
+              "mode": "cpu14",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.447062333,
+              "process_cpu_seconds": 4.62471,
+              "input_restore_seconds": 0.008316875,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.464086167,
+              "process_cpu_seconds": 0.028449,
+              "input_restore_seconds": 0,
+              "gpu_call_seconds": 0.464083792,
+              "gpu_nanoseconds": 434898330,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4829,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 73,
+              "maximum_histogram_bytes": 57388064,
+              "maximum_deferred_nodes": 60,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.462671875,
+              "process_cpu_seconds": 0.032046,
+              "input_restore_seconds": 4.1e-08,
+              "gpu_call_seconds": 0.462670333,
+              "gpu_nanoseconds": 429769746,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4729,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 64,
+              "maximum_histogram_bytes": 57393000,
+              "maximum_deferred_nodes": 60,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.395791458,
+              "process_cpu_seconds": 4.624408,
+              "input_restore_seconds": 0.004788541,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.413604542,
+              "process_cpu_seconds": 4.613491,
+              "input_restore_seconds": 0.006539083,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.463752583,
+              "process_cpu_seconds": 0.025662,
+              "input_restore_seconds": 4.2e-08,
+              "gpu_call_seconds": 0.46374925,
+              "gpu_nanoseconds": 436836578,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4842,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 70,
+              "maximum_histogram_bytes": 57400248,
+              "maximum_deferred_nodes": 60,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.461240291,
+              "process_cpu_seconds": 0.031209,
+              "input_restore_seconds": 4.2e-08,
+              "gpu_call_seconds": 0.461238834,
+              "gpu_nanoseconds": 427594912,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4848,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 82,
+              "maximum_histogram_bytes": 57400792,
+              "maximum_deferred_nodes": 57,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.416696458,
+              "process_cpu_seconds": 4.620098,
+              "input_restore_seconds": 0.003189417,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            }
+          ],
+          "gpu_median": 0.462671875,
+          "cpu14_median": 0.413604542
+        },
+        {
+          "block": 1,
+          "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/qualified-study/block-1-fused.json",
+          "artifact_sha256": "72a6ff1288cc7f5dddb44d70e1bced85b929a5d76af959e1495dd35448a98195",
+          "observations": [
+            {
+              "mode": "cpu14",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.4295365,
+              "process_cpu_seconds": 4.643304,
+              "input_restore_seconds": 0.009213458,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.465777459,
+              "process_cpu_seconds": 0.029813,
+              "input_restore_seconds": 4.2e-08,
+              "gpu_call_seconds": 0.465775625,
+              "gpu_nanoseconds": 434021662,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4749,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 67,
+              "maximum_histogram_bytes": 57392360,
+              "maximum_deferred_nodes": 56,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.454184792,
+              "process_cpu_seconds": 0.033102,
+              "input_restore_seconds": 0,
+              "gpu_call_seconds": 0.454182958,
+              "gpu_nanoseconds": 419958913,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4772,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 74,
+              "maximum_histogram_bytes": 57398056,
+              "maximum_deferred_nodes": 59,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.436967791,
+              "process_cpu_seconds": 4.729867,
+              "input_restore_seconds": 0.008018875,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.424558792,
+              "process_cpu_seconds": 4.65931,
+              "input_restore_seconds": 0.002614834,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.453270834,
+              "process_cpu_seconds": 0.02637,
+              "input_restore_seconds": 0,
+              "gpu_call_seconds": 0.453267959,
+              "gpu_nanoseconds": 425652704,
+              "gpu_submissions": 10,
+              "frontier_rounds": 146,
+              "maximum_ready_nodes": 4810,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 76,
+              "maximum_histogram_bytes": 57401208,
+              "maximum_deferred_nodes": 57,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.457558916,
+              "process_cpu_seconds": 0.036102,
+              "input_restore_seconds": 0,
+              "gpu_call_seconds": 0.457557292,
+              "gpu_nanoseconds": 419910662,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4814,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 74,
+              "maximum_histogram_bytes": 57401088,
+              "maximum_deferred_nodes": 58,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.397430458,
+              "process_cpu_seconds": 4.663598,
+              "input_restore_seconds": 0.004319917,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            }
+          ],
+          "gpu_median": 0.454184792,
+          "cpu14_median": 0.424558792
+        },
+        {
+          "block": 2,
+          "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/qualified-study/block-2-fused.json",
+          "artifact_sha256": "5dee5c9e5f04d327332dc159a459d3169f57749d74d557fd22cd43646a2e0c9a",
+          "observations": [
+            {
+              "mode": "cpu14",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.425698458,
+              "process_cpu_seconds": 4.631189,
+              "input_restore_seconds": 0.008966125,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 0,
+              "warmup": true,
+              "exact": true,
+              "wall_seconds": 0.455154416,
+              "process_cpu_seconds": 0.030133,
+              "input_restore_seconds": 0,
+              "gpu_call_seconds": 0.455151959,
+              "gpu_nanoseconds": 424318704,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4779,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 75,
+              "maximum_histogram_bytes": 57401088,
+              "maximum_deferred_nodes": 58,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.460772833,
+              "process_cpu_seconds": 0.025281,
+              "input_restore_seconds": 4.2e-08,
+              "gpu_call_seconds": 0.460770875,
+              "gpu_nanoseconds": 434767872,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4810,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 76,
+              "maximum_histogram_bytes": 57387216,
+              "maximum_deferred_nodes": 60,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 1,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.470276917,
+              "process_cpu_seconds": 4.723035,
+              "input_restore_seconds": 0.006219041,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.478356959,
+              "process_cpu_seconds": 4.710598,
+              "input_restore_seconds": 0.002751875,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 2,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.468882958,
+              "process_cpu_seconds": 0.029861,
+              "input_restore_seconds": 0,
+              "gpu_call_seconds": 0.468880416,
+              "gpu_nanoseconds": 437070953,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4802,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 76,
+              "maximum_histogram_bytes": 57396936,
+              "maximum_deferred_nodes": 59,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "tiled_frontier",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.466252084,
+              "process_cpu_seconds": 0.039456,
+              "input_restore_seconds": 4.2e-08,
+              "gpu_call_seconds": 0.466250417,
+              "gpu_nanoseconds": 423599702,
+              "gpu_submissions": 10,
+              "frontier_rounds": 147,
+              "maximum_ready_nodes": 4758,
+              "maximum_active_nodes": 256,
+              "maximum_same_fit_nodes": 74,
+              "maximum_histogram_bytes": 57398816,
+              "maximum_deferred_nodes": 59,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 0,
+              "peak_backing_bytes": 304702152,
+              "incremental_peak_bytes": 304702152
+            },
+            {
+              "mode": "cpu14",
+              "iteration": 3,
+              "warmup": false,
+              "exact": true,
+              "wall_seconds": 0.403179458,
+              "process_cpu_seconds": 4.636787,
+              "input_restore_seconds": 0.004244209,
+              "gpu_call_seconds": 0,
+              "gpu_nanoseconds": 0,
+              "gpu_submissions": 0,
+              "frontier_rounds": 0,
+              "maximum_ready_nodes": 0,
+              "maximum_active_nodes": 0,
+              "maximum_same_fit_nodes": 0,
+              "maximum_histogram_bytes": 0,
+              "maximum_deferred_nodes": 0,
+              "tree_nodes": 35878,
+              "input_and_pool_backing_bytes": 148192292,
+              "peak_backing_bytes": 170341636,
+              "incremental_peak_bytes": 22149344
+            }
+          ],
+          "gpu_median": 0.466252084,
+          "cpu14_median": 0.470276917
+        }
+      ],
+      "wall_seconds": {
+        "n": 9,
+        "median": 0.461240291,
+        "min": 0.453270834,
+        "max": 0.468882958,
+        "values": [
+          0.462671875,
+          0.463752583,
+          0.461240291,
+          0.454184792,
+          0.453270834,
+          0.457558916,
+          0.460772833,
+          0.468882958,
+          0.466252084
+        ]
+      },
+      "gpu_command_seconds": {
+        "n": 9,
+        "median": 0.427594912,
+        "min": 0.419910662,
+        "max": 0.437070953,
+        "values": [
+          0.429769746,
+          0.436836578,
+          0.427594912,
+          0.419958913,
+          0.425652704,
+          0.419910662,
+          0.434767872,
+          0.437070953,
+          0.423599702
+        ]
+      },
+      "cpu14_wall_seconds": {
+        "n": 9,
+        "median": 0.416696458,
+        "min": 0.395791458,
+        "max": 0.478356959,
+        "values": [
+          0.395791458,
+          0.413604542,
+          0.416696458,
+          0.436967791,
+          0.424558792,
+          0.397430458,
+          0.470276917,
+          0.478356959,
+          0.403179458
+        ]
+      },
+      "peak_backing_bytes": [
+        304702152
+      ],
+      "peak_histogram_bytes": {
+        "n": 9,
+        "median": 57398816,
+        "min": 57387216,
+        "max": 57401208,
+        "values": [
+          57393000,
+          57400248,
+          57400792,
+          57398056,
+          57401208,
+          57401088,
+          57387216,
+          57396936,
+          57398816
+        ]
+      }
+    }
+  },
+  "pooled_cpu14_wall_seconds": {
+    "n": 18,
+    "median": 0.422562729,
+    "min": 0.395791458,
+    "max": 0.503175542,
+    "values": [
+      0.503175542,
+      0.402610375,
+      0.433013083,
+      0.402739709,
+      0.418296875,
+      0.443867208,
+      0.420566666,
+      0.458129833,
+      0.490729542,
+      0.395791458,
+      0.413604542,
+      0.416696458,
+      0.436967791,
+      0.424558792,
+      0.397430458,
+      0.470276917,
+      0.478356959,
+      0.403179458
+    ]
+  },
+  "full_encode": {
+    "boundary": "Complete private encode; excludes backend/domain creation, file IO, independent decode and hashing",
+    "variants": {
+      "previous_gpu": {
+        "fitter": "fitter-tiled",
+        "schedule": "cohorts",
+        "window": 8,
+        "args": [
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "binary": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/previous_gpu-hybrid-profile",
+        "binary_source": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/baseline-hybrid-profile"
+      },
+      "fused_gpu": {
+        "fitter": "fitter-tiled",
+        "schedule": "cohorts",
+        "window": 8,
+        "args": [
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "binary": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile"
+      },
+      "cpu_continuous": {
+        "fitter": "fitter-cpu",
+        "schedule": "pipeline",
+        "window": 16,
+        "args": [],
+        "binary": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile"
+      }
+    },
+    "cases": [
+      {
+        "name": "photo-large-1029",
+        "input": "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1029.pam",
+        "input_sha256": "a1c487b0160d8f3e8cb86753131b919ac3de28e908fde757050ebccdb4407b6d",
+        "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+        "work": {
+          "local_trees": true,
+          "selection_calls": 192,
+          "learning_calls": 193,
+          "fits": 192,
+          "empty_learning_calls": 1,
+          "scanned_pixels": 36000000,
+          "selected_samples": 23460354,
+          "distinct_samples": 23460354,
+          "tree_nodes": 240143
+        }
+      },
+      {
+        "name": "photo-large-1039",
+        "input": "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1039.pam",
+        "input_sha256": "22f487129343ed6d403346653ef99900e2552728ba2e4f5c63c90d058132f302",
+        "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a",
+        "work": {
+          "local_trees": true,
+          "selection_calls": 192,
+          "learning_calls": 193,
+          "fits": 192,
+          "empty_learning_calls": 1,
+          "scanned_pixels": 31344224,
+          "selected_samples": 20432794,
+          "distinct_samples": 20432447,
+          "tree_nodes": 120547
+        }
+      },
+      {
+        "name": "photo-large-1049",
+        "input": "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1049.pam",
+        "input_sha256": "0b3feae4d3bf1a13f89d5f4c3d976c8ea1e93e49a65548919cb5474c3cd1d62d",
+        "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c",
+        "work": {
+          "local_trees": true,
+          "selection_calls": 192,
+          "learning_calls": 193,
+          "fits": 192,
+          "empty_learning_calls": 1,
+          "scanned_pixels": 29871324,
+          "selected_samples": 19470891,
+          "distinct_samples": 19470845,
+          "tree_nodes": 105821
+        }
+      }
+    ],
+    "summary": {
+      "previous_gpu": {
+        "cases": {
+          "photo-large-1029": {
+            "wall_seconds": {
+              "n": 3,
+              "median": 3.968660292,
+              "min": 3.9383565,
+              "max": 4.029385958,
+              "values": [
+                4.029385958,
+                3.9383565,
+                3.968660292
+              ]
+            },
+            "peak_backing_bytes": {
+              "n": 3,
+              "median": 1095136928,
+              "min": 1095136928,
+              "max": 1095136928,
+              "values": [
+                1095136928,
+                1095136928,
+                1095136928
+              ]
+            },
+            "peak_committed_bytes": {
+              "n": 3,
+              "median": 1972277616,
+              "min": 1972277616,
+              "max": 1972277616,
+              "values": [
+                1972277616,
+                1972277616,
+                1972277616
+              ]
+            },
+            "complete_fit_seconds": {
+              "n": 3,
+              "median": 2.871052083,
+              "min": 2.8687562079999998,
+              "max": 2.9546831239999998,
+              "values": [
+                2.9546831239999998,
+                2.8687562079999998,
+                2.871052083
+              ]
+            },
+            "gpu_command_seconds": {
+              "n": 3,
+              "median": 2.738489256,
+              "min": 2.738412597,
+              "max": 2.811592635,
+              "values": [
+                2.811592635,
+                2.738412597,
+                2.738489256
+              ]
+            }
+          },
+          "photo-large-1039": {
+            "wall_seconds": {
+              "n": 3,
+              "median": 2.577584417,
+              "min": 2.55643975,
+              "max": 2.707475042,
+              "values": [
+                2.55643975,
+                2.577584417,
+                2.707475042
+              ]
+            },
+            "peak_backing_bytes": {
+              "n": 3,
+              "median": 1045131724,
+              "min": 1045131724,
+              "max": 1045131724,
+              "values": [
+                1045131724,
+                1045131724,
+                1045131724
+              ]
+            },
+            "peak_committed_bytes": {
+              "n": 3,
+              "median": 1745063728,
+              "min": 1745063728,
+              "max": 1745063728,
+              "values": [
+                1745063728,
+                1745063728,
+                1745063728
+              ]
+            },
+            "complete_fit_seconds": {
+              "n": 3,
+              "median": 1.574468833,
+              "min": 1.544067458,
+              "max": 1.6184477929999999,
+              "values": [
+                1.544067458,
+                1.574468833,
+                1.6184477929999999
+              ]
+            },
+            "gpu_command_seconds": {
+              "n": 3,
+              "median": 1.463476114,
+              "min": 1.437431363,
+              "max": 1.492827857,
+              "values": [
+                1.437431363,
+                1.463476114,
+                1.492827857
+              ]
+            }
+          },
+          "photo-large-1049": {
+            "wall_seconds": {
+              "n": 3,
+              "median": 2.368435,
+              "min": 2.314757333,
+              "max": 2.381438417,
+              "values": [
+                2.381438417,
+                2.368435,
+                2.314757333
+              ]
+            },
+            "peak_backing_bytes": {
+              "n": 3,
+              "median": 1016355088,
+              "min": 1016355088,
+              "max": 1016355088,
+              "values": [
+                1016355088,
+                1016355088,
+                1016355088
+              ]
+            },
+            "peak_committed_bytes": {
+              "n": 3,
+              "median": 1676003287,
+              "min": 1676003287,
+              "max": 1676003287,
+              "values": [
+                1676003287,
+                1676003287,
+                1676003287
+              ]
+            },
+            "complete_fit_seconds": {
+              "n": 3,
+              "median": 1.423453125,
+              "min": 1.398189458,
+              "max": 1.434213625,
+              "values": [
+                1.434213625,
+                1.423453125,
+                1.398189458
+              ]
+            },
+            "gpu_command_seconds": {
+              "n": 3,
+              "median": 1.307273279,
+              "min": 1.291296862,
+              "max": 1.331112402,
+              "values": [
+                1.331112402,
+                1.307273279,
+                1.291296862
+              ]
+            }
+          }
+        },
+        "sum_of_per_image_medians": 8.914679709
+      },
+      "fused_gpu": {
+        "cases": {
+          "photo-large-1029": {
+            "wall_seconds": {
+              "n": 3,
+              "median": 3.864809041,
+              "min": 3.839203709,
+              "max": 3.970534625,
+              "values": [
+                3.970534625,
+                3.839203709,
+                3.864809041
+              ]
+            },
+            "peak_backing_bytes": {
+              "n": 3,
+              "median": 1095136928,
+              "min": 1095136928,
+              "max": 1095136928,
+              "values": [
+                1095136928,
+                1095136928,
+                1095136928
+              ]
+            },
+            "peak_committed_bytes": {
+              "n": 3,
+              "median": 1972277616,
+              "min": 1972277616,
+              "max": 1972277616,
+              "values": [
+                1972277616,
+                1972277616,
+                1972277616
+              ]
+            },
+            "complete_fit_seconds": {
+              "n": 3,
+              "median": 2.802475125,
+              "min": 2.7961462929999996,
+              "max": 2.840088041,
+              "values": [
+                2.840088041,
+                2.7961462929999996,
+                2.802475125
+              ]
+            },
+            "gpu_command_seconds": {
+              "n": 3,
+              "median": 2.670661848,
+              "min": 2.662825385,
+              "max": 2.705514468,
+              "values": [
+                2.705514468,
+                2.662825385,
+                2.670661848
+              ]
+            }
+          },
+          "photo-large-1039": {
+            "wall_seconds": {
+              "n": 3,
+              "median": 2.552250959,
+              "min": 2.547139375,
+              "max": 2.557916542,
+              "values": [
+                2.557916542,
+                2.547139375,
+                2.552250959
+              ]
+            },
+            "peak_backing_bytes": {
+              "n": 3,
+              "median": 1045131724,
+              "min": 1045131724,
+              "max": 1045131724,
+              "values": [
+                1045131724,
+                1045131724,
+                1045131724
+              ]
+            },
+            "peak_committed_bytes": {
+              "n": 3,
+              "median": 1745063728,
+              "min": 1745063728,
+              "max": 1745063728,
+              "values": [
+                1745063728,
+                1745063728,
+                1745063728
+              ]
+            },
+            "complete_fit_seconds": {
+              "n": 3,
+              "median": 1.524338958,
+              "min": 1.518871418,
+              "max": 1.529948125,
+              "values": [
+                1.529948125,
+                1.524338958,
+                1.518871418
+              ]
+            },
+            "gpu_command_seconds": {
+              "n": 3,
+              "median": 1.411545814,
+              "min": 1.409132857,
+              "max": 1.419464652,
+              "values": [
+                1.419464652,
+                1.411545814,
+                1.409132857
+              ]
+            }
+          },
+          "photo-large-1049": {
+            "wall_seconds": {
+              "n": 3,
+              "median": 2.347796917,
+              "min": 2.32077575,
+              "max": 2.400510083,
+              "values": [
+                2.32077575,
+                2.400510083,
+                2.347796917
+              ]
+            },
+            "peak_backing_bytes": {
+              "n": 3,
+              "median": 1016355088,
+              "min": 1016355088,
+              "max": 1016355088,
+              "values": [
+                1016355088,
+                1016355088,
+                1016355088
+              ]
+            },
+            "peak_committed_bytes": {
+              "n": 3,
+              "median": 1676003287,
+              "min": 1676003287,
+              "max": 1676003287,
+              "values": [
+                1676003287,
+                1676003287,
+                1676003287
+              ]
+            },
+            "complete_fit_seconds": {
+              "n": 3,
+              "median": 1.409453584,
+              "min": 1.3865687930000001,
+              "max": 1.436475749,
+              "values": [
+                1.3865687930000001,
+                1.436475749,
+                1.409453584
+              ]
+            },
+            "gpu_command_seconds": {
+              "n": 3,
+              "median": 1.300783443,
+              "min": 1.281719653,
+              "max": 1.320551651,
+              "values": [
+                1.281719653,
+                1.320551651,
+                1.300783443
+              ]
+            }
+          }
+        },
+        "sum_of_per_image_medians": 8.764856917
+      },
+      "cpu_continuous": {
+        "cases": {
+          "photo-large-1029": {
+            "wall_seconds": {
+              "n": 3,
+              "median": 3.039360417,
+              "min": 2.974083667,
+              "max": 3.242292333,
+              "values": [
+                2.974083667,
+                3.039360417,
+                3.242292333
+              ]
+            },
+            "peak_backing_bytes": {
+              "n": 3,
+              "median": 811036284,
+              "min": 790615628,
+              "max": 834024444,
+              "values": [
+                811036284,
+                790615628,
+                834024444
+              ]
+            },
+            "peak_committed_bytes": {
+              "n": 3,
+              "median": 1902548160,
+              "min": 1902548160,
+              "max": 1902548160,
+              "values": [
+                1902548160,
+                1902548160,
+                1902548160
+              ]
+            }
+          },
+          "photo-large-1039": {
+            "wall_seconds": {
+              "n": 3,
+              "median": 2.27847375,
+              "min": 2.1731055,
+              "max": 2.54604575,
+              "values": [
+                2.27847375,
+                2.54604575,
+                2.1731055
+              ]
+            },
+            "peak_backing_bytes": {
+              "n": 3,
+              "median": 767152716,
+              "min": 762734268,
+              "max": 777287904,
+              "values": [
+                762734268,
+                767152716,
+                777287904
+              ]
+            },
+            "peak_committed_bytes": {
+              "n": 3,
+              "median": 1672463968,
+              "min": 1672463968,
+              "max": 1672463968,
+              "values": [
+                1672463968,
+                1672463968,
+                1672463968
+              ]
+            }
+          },
+          "photo-large-1049": {
+            "wall_seconds": {
+              "n": 3,
+              "median": 2.044212292,
+              "min": 2.026365709,
+              "max": 2.082938417,
+              "values": [
+                2.044212292,
+                2.082938417,
+                2.026365709
+              ]
+            },
+            "peak_backing_bytes": {
+              "n": 3,
+              "median": 754270444,
+              "min": 747030612,
+              "max": 754379164,
+              "values": [
+                747030612,
+                754379164,
+                754270444
+              ]
+            },
+            "peak_committed_bytes": {
+              "n": 3,
+              "median": 1603050103,
+              "min": 1603050103,
+              "max": 1603050103,
+              "values": [
+                1603050103,
+                1603050103,
+                1603050103
+              ]
+            }
+          }
+        },
+        "sum_of_per_image_medians": 7.362046459
+      }
+    },
+    "observations": [
+      {
+        "case": "photo-large-1029",
+        "variant": "previous_gpu",
+        "repetition": 0,
+        "warmup": true,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/previous_gpu-hybrid-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1029.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-0-previous_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-0-previous_gpu",
+        "exit_code": 0,
+        "result_sha256": "fed0ebfb76addc22669304e6b221a29448395b4072ffef78e89ed70b5cc885df",
+        "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+        "wall": 4.050192833,
+        "cpu": 9.264129,
+        "training_wall": 3.099946001,
+        "memory": {
+          "peak_backing_bytes": 1095136928,
+          "peak_committed_bytes": 1972277616,
+          "maximum_stage_bytes": 1392307800,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 240142,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 64,
+          "frontier_rounds": 985,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 96,
+          "complete_fit_seconds": 2.901449167,
+          "gpu_nanoseconds": 2732099761
+        }
+      },
+      {
+        "case": "photo-large-1029",
+        "variant": "fused_gpu",
+        "repetition": 0,
+        "warmup": true,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1029.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-0-fused_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-0-fused_gpu",
+        "exit_code": 0,
+        "result_sha256": "1d78fd730e971eb77e13c12d0abbdf2afb42955dcd042e5946c8189f6c8f5c61",
+        "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+        "wall": 3.898661208,
+        "cpu": 9.910573,
+        "training_wall": 2.941923042,
+        "memory": {
+          "peak_backing_bytes": 1095136928,
+          "peak_committed_bytes": 1972277616,
+          "maximum_stage_bytes": 1392307800,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 240142,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 64,
+          "frontier_rounds": 983,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 86,
+          "complete_fit_seconds": 2.796744333,
+          "gpu_nanoseconds": 2660465639
+        }
+      },
+      {
+        "case": "photo-large-1029",
+        "variant": "cpu_continuous",
+        "repetition": 0,
+        "warmup": true,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1029.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-0-cpu_continuous",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-cpu",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=pipeline",
+          "--feature-window=16"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-0-cpu_continuous",
+        "exit_code": 0,
+        "result_sha256": "33cfa886eda49bceee1c70fefb70f8c0e3f2db0fbc64960f997ba99b783867a7",
+        "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+        "wall": 3.134008167,
+        "cpu": 34.881671,
+        "training_wall": 2.191600209,
+        "memory": {
+          "peak_backing_bytes": 826826036,
+          "peak_committed_bytes": 1902548160,
+          "maximum_stage_bytes": 1392307800,
+          "peak_feature_samples": 16146432,
+          "peak_feature_bytes": 322960896
+        },
+        "resident_fitting": null
+      },
+      {
+        "case": "photo-large-1029",
+        "variant": "fused_gpu",
+        "repetition": 1,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1029.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-1-fused_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-1-fused_gpu",
+        "exit_code": 0,
+        "result_sha256": "8362f6ada087e24fdccf1c531ca5fc71ab5cb493e0b676d709617be8a55badbf",
+        "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+        "wall": 3.970534625,
+        "cpu": 9.608208,
+        "training_wall": 2.990631208,
+        "memory": {
+          "peak_backing_bytes": 1095136928,
+          "peak_committed_bytes": 1972277616,
+          "maximum_stage_bytes": 1392307800,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 240142,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 64,
+          "frontier_rounds": 984,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 94,
+          "complete_fit_seconds": 2.840088041,
+          "gpu_nanoseconds": 2705514468
+        }
+      },
+      {
+        "case": "photo-large-1029",
+        "variant": "cpu_continuous",
+        "repetition": 1,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1029.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-1-cpu_continuous",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-cpu",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=pipeline",
+          "--feature-window=16"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-1-cpu_continuous",
+        "exit_code": 0,
+        "result_sha256": "f528a12def91b76002914a9270e93ed67cf8af39f0e3c6b19601ff9ac22bdc10",
+        "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+        "wall": 2.974083667,
+        "cpu": 34.6535,
+        "training_wall": 2.029126334,
+        "memory": {
+          "peak_backing_bytes": 811036284,
+          "peak_committed_bytes": 1902548160,
+          "maximum_stage_bytes": 1392307800,
+          "peak_feature_samples": 16146432,
+          "peak_feature_bytes": 322960896
+        },
+        "resident_fitting": null
+      },
+      {
+        "case": "photo-large-1029",
+        "variant": "previous_gpu",
+        "repetition": 1,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/previous_gpu-hybrid-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1029.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-1-previous_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-1-previous_gpu",
+        "exit_code": 0,
+        "result_sha256": "0c6daed8804d4aaf2f316f7568ce00663ab6e930a7cf9403b1366a8a30c75805",
+        "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+        "wall": 4.029385958,
+        "cpu": 9.498946,
+        "training_wall": 3.097038999,
+        "memory": {
+          "peak_backing_bytes": 1095136928,
+          "peak_committed_bytes": 1972277616,
+          "maximum_stage_bytes": 1392307800,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 240142,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 64,
+          "frontier_rounds": 986,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 99,
+          "complete_fit_seconds": 2.9546831239999998,
+          "gpu_nanoseconds": 2811592635
+        }
+      },
+      {
+        "case": "photo-large-1029",
+        "variant": "cpu_continuous",
+        "repetition": 2,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1029.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-2-cpu_continuous",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-cpu",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=pipeline",
+          "--feature-window=16"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-2-cpu_continuous",
+        "exit_code": 0,
+        "result_sha256": "3d694897718e337a2bd1b7200671c3f48b18854770dace8b07ce01df98b8f334",
+        "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+        "wall": 3.039360417,
+        "cpu": 34.630374,
+        "training_wall": 2.0528737510000004,
+        "memory": {
+          "peak_backing_bytes": 790615628,
+          "peak_committed_bytes": 1902548160,
+          "maximum_stage_bytes": 1392307800,
+          "peak_feature_samples": 16146432,
+          "peak_feature_bytes": 322960896
+        },
+        "resident_fitting": null
+      },
+      {
+        "case": "photo-large-1029",
+        "variant": "previous_gpu",
+        "repetition": 2,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/previous_gpu-hybrid-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1029.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-2-previous_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-2-previous_gpu",
+        "exit_code": 0,
+        "result_sha256": "d75c0e0d6d1a75e4bbc8dcf6904825d87bc8df96134a5787e8d075401e520540",
+        "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+        "wall": 3.9383565,
+        "cpu": 9.662468,
+        "training_wall": 3.0059420410000004,
+        "memory": {
+          "peak_backing_bytes": 1095136928,
+          "peak_committed_bytes": 1972277616,
+          "maximum_stage_bytes": 1392307800,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 240142,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 64,
+          "frontier_rounds": 985,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 100,
+          "complete_fit_seconds": 2.8687562079999998,
+          "gpu_nanoseconds": 2738412597
+        }
+      },
+      {
+        "case": "photo-large-1029",
+        "variant": "fused_gpu",
+        "repetition": 2,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1029.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-2-fused_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-2-fused_gpu",
+        "exit_code": 0,
+        "result_sha256": "a2461a07be16e07c7e718c0202370cf22096c0d0ca640470f03648a88ff6fdcc",
+        "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+        "wall": 3.839203709,
+        "cpu": 9.202522,
+        "training_wall": 2.9392664170000007,
+        "memory": {
+          "peak_backing_bytes": 1095136928,
+          "peak_committed_bytes": 1972277616,
+          "maximum_stage_bytes": 1392307800,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 240142,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 64,
+          "frontier_rounds": 984,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 86,
+          "complete_fit_seconds": 2.7961462929999996,
+          "gpu_nanoseconds": 2662825385
+        }
+      },
+      {
+        "case": "photo-large-1029",
+        "variant": "previous_gpu",
+        "repetition": 3,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/previous_gpu-hybrid-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1029.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-3-previous_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-3-previous_gpu",
+        "exit_code": 0,
+        "result_sha256": "880d412d051ce54f4ff2efc34028361a7d852d9879b1c3dda34e329674e4232f",
+        "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+        "wall": 3.968660292,
+        "cpu": 9.694391,
+        "training_wall": 3.014326125,
+        "memory": {
+          "peak_backing_bytes": 1095136928,
+          "peak_committed_bytes": 1972277616,
+          "maximum_stage_bytes": 1392307800,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 240142,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 64,
+          "frontier_rounds": 985,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 140,
+          "complete_fit_seconds": 2.871052083,
+          "gpu_nanoseconds": 2738489256
+        }
+      },
+      {
+        "case": "photo-large-1029",
+        "variant": "fused_gpu",
+        "repetition": 3,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1029.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-3-fused_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-3-fused_gpu",
+        "exit_code": 0,
+        "result_sha256": "10ee739119615892529212377b43877cfb099184b20c559cef83e2c960e55640",
+        "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+        "wall": 3.864809041,
+        "cpu": 9.368361,
+        "training_wall": 2.9450488330000004,
+        "memory": {
+          "peak_backing_bytes": 1095136928,
+          "peak_committed_bytes": 1972277616,
+          "maximum_stage_bytes": 1392307800,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 240142,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 64,
+          "frontier_rounds": 984,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 97,
+          "complete_fit_seconds": 2.802475125,
+          "gpu_nanoseconds": 2670661848
+        }
+      },
+      {
+        "case": "photo-large-1029",
+        "variant": "cpu_continuous",
+        "repetition": 3,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1029.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-3-cpu_continuous",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-cpu",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=pipeline",
+          "--feature-window=16"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1029-3-cpu_continuous",
+        "exit_code": 0,
+        "result_sha256": "52b2dc979e84451ee6ca0dac5da28d4e7369dbb1f14090a6c41c16cab036d39f",
+        "output_sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad",
+        "wall": 3.242292333,
+        "cpu": 34.76987,
+        "training_wall": 2.2741722510000004,
+        "memory": {
+          "peak_backing_bytes": 834024444,
+          "peak_committed_bytes": 1902548160,
+          "maximum_stage_bytes": 1392307800,
+          "peak_feature_samples": 16146432,
+          "peak_feature_bytes": 322960896
+        },
+        "resident_fitting": null
+      },
+      {
+        "case": "photo-large-1039",
+        "variant": "fused_gpu",
+        "repetition": 0,
+        "warmup": true,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1039.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-0-fused_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-0-fused_gpu",
+        "exit_code": 0,
+        "result_sha256": "097c6410fe131cb1d16c789af37103a2f651ad99dee2917b1cd2d316eac104dd",
+        "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a",
+        "wall": 2.725065792,
+        "cpu": 8.769325,
+        "training_wall": 1.7682792889999999,
+        "memory": {
+          "peak_backing_bytes": 1045131724,
+          "peak_committed_bytes": 1745063728,
+          "maximum_stage_bytes": 1211651832,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 120546,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 33,
+          "frontier_rounds": 501,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 82,
+          "complete_fit_seconds": 1.5545722940000002,
+          "gpu_nanoseconds": 1445490860
+        }
+      },
+      {
+        "case": "photo-large-1039",
+        "variant": "cpu_continuous",
+        "repetition": 0,
+        "warmup": true,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1039.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-0-cpu_continuous",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-cpu",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=pipeline",
+          "--feature-window=16"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-0-cpu_continuous",
+        "exit_code": 0,
+        "result_sha256": "24a1a87fa7800445207afe10eb9b66555f7fde4a33c32f0c507cb691fb46eced",
+        "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a",
+        "wall": 2.249930791,
+        "cpu": 24.965334,
+        "training_wall": 1.3546687929999999,
+        "memory": {
+          "peak_backing_bytes": 784540192,
+          "peak_committed_bytes": 1672463968,
+          "maximum_stage_bytes": 1211651832,
+          "peak_feature_samples": 16450029,
+          "peak_feature_bytes": 329033988
+        },
+        "resident_fitting": null
+      },
+      {
+        "case": "photo-large-1039",
+        "variant": "previous_gpu",
+        "repetition": 0,
+        "warmup": true,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/previous_gpu-hybrid-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1039.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-0-previous_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-0-previous_gpu",
+        "exit_code": 0,
+        "result_sha256": "443cb2925d02016726de93ddc13900d41de98966e34eb57af039d6d79b37a22a",
+        "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a",
+        "wall": 2.652429791,
+        "cpu": 8.242971,
+        "training_wall": 1.8500927090000001,
+        "memory": {
+          "peak_backing_bytes": 1045131724,
+          "peak_committed_bytes": 1745063728,
+          "maximum_stage_bytes": 1211651832,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 120546,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 33,
+          "frontier_rounds": 501,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 90,
+          "complete_fit_seconds": 1.628072749,
+          "gpu_nanoseconds": 1513737942
+        }
+      },
+      {
+        "case": "photo-large-1039",
+        "variant": "cpu_continuous",
+        "repetition": 1,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1039.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-1-cpu_continuous",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-cpu",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=pipeline",
+          "--feature-window=16"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-1-cpu_continuous",
+        "exit_code": 0,
+        "result_sha256": "f806dceb02395fa6a24f701baf73570b568542bb7a024c1c86827d951d6ae291",
+        "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a",
+        "wall": 2.27847375,
+        "cpu": 24.887369,
+        "training_wall": 1.403668335,
+        "memory": {
+          "peak_backing_bytes": 762734268,
+          "peak_committed_bytes": 1672463968,
+          "maximum_stage_bytes": 1211651832,
+          "peak_feature_samples": 16450029,
+          "peak_feature_bytes": 329033988
+        },
+        "resident_fitting": null
+      },
+      {
+        "case": "photo-large-1039",
+        "variant": "previous_gpu",
+        "repetition": 1,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/previous_gpu-hybrid-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1039.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-1-previous_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-1-previous_gpu",
+        "exit_code": 0,
+        "result_sha256": "69b0579ed8910f74bf6e36ce6633744dd354aadded2eb1537a6f56299a03c6e6",
+        "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a",
+        "wall": 2.55643975,
+        "cpu": 8.523158,
+        "training_wall": 1.7436181680000002,
+        "memory": {
+          "peak_backing_bytes": 1045131724,
+          "peak_committed_bytes": 1745063728,
+          "maximum_stage_bytes": 1211651832,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 120546,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 33,
+          "frontier_rounds": 501,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 88,
+          "complete_fit_seconds": 1.544067458,
+          "gpu_nanoseconds": 1437431363
+        }
+      },
+      {
+        "case": "photo-large-1039",
+        "variant": "fused_gpu",
+        "repetition": 1,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1039.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-1-fused_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-1-fused_gpu",
+        "exit_code": 0,
+        "result_sha256": "9fc76db1cd538ae4345ce73074d9d475c50a33a54f9aed5368847a17a3ee723d",
+        "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a",
+        "wall": 2.557916542,
+        "cpu": 8.485793,
+        "training_wall": 1.73999521,
+        "memory": {
+          "peak_backing_bytes": 1045131724,
+          "peak_committed_bytes": 1745063728,
+          "maximum_stage_bytes": 1211651832,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 120546,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 33,
+          "frontier_rounds": 501,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 86,
+          "complete_fit_seconds": 1.529948125,
+          "gpu_nanoseconds": 1419464652
+        }
+      },
+      {
+        "case": "photo-large-1039",
+        "variant": "previous_gpu",
+        "repetition": 2,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/previous_gpu-hybrid-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1039.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-2-previous_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-2-previous_gpu",
+        "exit_code": 0,
+        "result_sha256": "7e5385ac17677ff930bf93b020c4d5cdb7df7aa477aa90f494fc924130bef381",
+        "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a",
+        "wall": 2.577584417,
+        "cpu": 8.402677,
+        "training_wall": 1.7854297889999997,
+        "memory": {
+          "peak_backing_bytes": 1045131724,
+          "peak_committed_bytes": 1745063728,
+          "maximum_stage_bytes": 1211651832,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 120546,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 33,
+          "frontier_rounds": 501,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 94,
+          "complete_fit_seconds": 1.574468833,
+          "gpu_nanoseconds": 1463476114
+        }
+      },
+      {
+        "case": "photo-large-1039",
+        "variant": "fused_gpu",
+        "repetition": 2,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1039.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-2-fused_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-2-fused_gpu",
+        "exit_code": 0,
+        "result_sha256": "27d1fdf85dc445c511280e05538fc67886084642a08d3a2225baad3df5282343",
+        "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a",
+        "wall": 2.547139375,
+        "cpu": 8.560103,
+        "training_wall": 1.7332098710000001,
+        "memory": {
+          "peak_backing_bytes": 1045131724,
+          "peak_committed_bytes": 1745063728,
+          "maximum_stage_bytes": 1211651832,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 120546,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 33,
+          "frontier_rounds": 501,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 84,
+          "complete_fit_seconds": 1.524338958,
+          "gpu_nanoseconds": 1411545814
+        }
+      },
+      {
+        "case": "photo-large-1039",
+        "variant": "cpu_continuous",
+        "repetition": 2,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1039.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-2-cpu_continuous",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-cpu",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=pipeline",
+          "--feature-window=16"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-2-cpu_continuous",
+        "exit_code": 0,
+        "result_sha256": "f059d206c704e3480997e8c8bc4b671d16893f65f43129d199319290351c82e4",
+        "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a",
+        "wall": 2.54604575,
+        "cpu": 24.523172,
+        "training_wall": 1.6170965379999998,
+        "memory": {
+          "peak_backing_bytes": 767152716,
+          "peak_committed_bytes": 1672463968,
+          "maximum_stage_bytes": 1211651832,
+          "peak_feature_samples": 16450029,
+          "peak_feature_bytes": 329033988
+        },
+        "resident_fitting": null
+      },
+      {
+        "case": "photo-large-1039",
+        "variant": "fused_gpu",
+        "repetition": 3,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1039.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-3-fused_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-3-fused_gpu",
+        "exit_code": 0,
+        "result_sha256": "1f532793b3ba9c23e343b3dea3bd51291b4b0397bb09f0dd15a552f7026552da",
+        "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a",
+        "wall": 2.552250959,
+        "cpu": 8.227814,
+        "training_wall": 1.731489041,
+        "memory": {
+          "peak_backing_bytes": 1045131724,
+          "peak_committed_bytes": 1745063728,
+          "maximum_stage_bytes": 1211651832,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 120546,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 33,
+          "frontier_rounds": 500,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 82,
+          "complete_fit_seconds": 1.518871418,
+          "gpu_nanoseconds": 1409132857
+        }
+      },
+      {
+        "case": "photo-large-1039",
+        "variant": "cpu_continuous",
+        "repetition": 3,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1039.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-3-cpu_continuous",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-cpu",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=pipeline",
+          "--feature-window=16"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-3-cpu_continuous",
+        "exit_code": 0,
+        "result_sha256": "c131646191ae5fe0074a5c89ce162a85ddb1f8bb8a33d7e4708753ad4624901d",
+        "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a",
+        "wall": 2.1731055,
+        "cpu": 24.68582,
+        "training_wall": 1.3294412519999999,
+        "memory": {
+          "peak_backing_bytes": 777287904,
+          "peak_committed_bytes": 1672463968,
+          "maximum_stage_bytes": 1211651832,
+          "peak_feature_samples": 16450029,
+          "peak_feature_bytes": 329033988
+        },
+        "resident_fitting": null
+      },
+      {
+        "case": "photo-large-1039",
+        "variant": "previous_gpu",
+        "repetition": 3,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/previous_gpu-hybrid-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1039.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-3-previous_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1039-3-previous_gpu",
+        "exit_code": 0,
+        "result_sha256": "49bcd642a3399397b84bbabc78f39089278cb458a8601145ad27684ee9983f98",
+        "output_sha256": "2f57e0e04bf7513be8c42b0bc1e0c488a99bba579baae0b3ed75c63bbfb2b76a",
+        "wall": 2.707475042,
+        "cpu": 8.735438,
+        "training_wall": 1.8473769160000002,
+        "memory": {
+          "peak_backing_bytes": 1045131724,
+          "peak_committed_bytes": 1745063728,
+          "maximum_stage_bytes": 1211651832,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 120546,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 33,
+          "frontier_rounds": 501,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 78,
+          "complete_fit_seconds": 1.6184477929999999,
+          "gpu_nanoseconds": 1492827857
+        }
+      },
+      {
+        "case": "photo-large-1049",
+        "variant": "cpu_continuous",
+        "repetition": 0,
+        "warmup": true,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1049.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-0-cpu_continuous",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-cpu",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=pipeline",
+          "--feature-window=16"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-0-cpu_continuous",
+        "exit_code": 0,
+        "result_sha256": "c844d402f4256657b8d8db3ad012b79b525ddd0e2adce097302f20e1e0d967e1",
+        "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c",
+        "wall": 2.283502417,
+        "cpu": 22.332798,
+        "training_wall": 1.4416607929999998,
+        "memory": {
+          "peak_backing_bytes": 758655012,
+          "peak_committed_bytes": 1603050103,
+          "maximum_stage_bytes": 1157322135,
+          "peak_feature_samples": 16146432,
+          "peak_feature_bytes": 322960896
+        },
+        "resident_fitting": null
+      },
+      {
+        "case": "photo-large-1049",
+        "variant": "previous_gpu",
+        "repetition": 0,
+        "warmup": true,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/previous_gpu-hybrid-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1049.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-0-previous_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-0-previous_gpu",
+        "exit_code": 0,
+        "result_sha256": "dc606150701c4d74d0d5b6dc88259016ffd367686bd9ea0a398db573c5f98fc4",
+        "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c",
+        "wall": 2.38185675,
+        "cpu": 7.591691,
+        "training_wall": 1.5806061700000003,
+        "memory": {
+          "peak_backing_bytes": 1016355088,
+          "peak_committed_bytes": 1676003287,
+          "maximum_stage_bytes": 1157322135,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 105820,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 29,
+          "frontier_rounds": 442,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 80,
+          "complete_fit_seconds": 1.436093042,
+          "gpu_nanoseconds": 1324666737
+        }
+      },
+      {
+        "case": "photo-large-1049",
+        "variant": "fused_gpu",
+        "repetition": 0,
+        "warmup": true,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1049.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-0-fused_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-0-fused_gpu",
+        "exit_code": 0,
+        "result_sha256": "82f3308fbbaba8051aa73a700876726f9924c65ff1ab4cd1c5a26d3fc50c68ca",
+        "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c",
+        "wall": 2.361066416,
+        "cpu": 7.681526,
+        "training_wall": 1.5603539999999998,
+        "memory": {
+          "peak_backing_bytes": 1016355088,
+          "peak_committed_bytes": 1676003287,
+          "maximum_stage_bytes": 1157322135,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 105820,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 29,
+          "frontier_rounds": 441,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 84,
+          "complete_fit_seconds": 1.421875958,
+          "gpu_nanoseconds": 1316678405
+        }
+      },
+      {
+        "case": "photo-large-1049",
+        "variant": "previous_gpu",
+        "repetition": 1,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/previous_gpu-hybrid-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1049.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-1-previous_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-1-previous_gpu",
+        "exit_code": 0,
+        "result_sha256": "99e6e0ef69ef64f2c902c2a2a0d17139f7207e46b223f9c6b82324f8face715a",
+        "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c",
+        "wall": 2.381438417,
+        "cpu": 8.034553,
+        "training_wall": 1.5740359550000003,
+        "memory": {
+          "peak_backing_bytes": 1016355088,
+          "peak_committed_bytes": 1676003287,
+          "maximum_stage_bytes": 1157322135,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 105820,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 29,
+          "frontier_rounds": 442,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 82,
+          "complete_fit_seconds": 1.434213625,
+          "gpu_nanoseconds": 1331112402
+        }
+      },
+      {
+        "case": "photo-large-1049",
+        "variant": "fused_gpu",
+        "repetition": 1,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1049.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-1-fused_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-1-fused_gpu",
+        "exit_code": 0,
+        "result_sha256": "8012e7c6c3162605652e84e0e43743deddce27e69598fa3552c660f13c690b0a",
+        "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c",
+        "wall": 2.32077575,
+        "cpu": 7.992713,
+        "training_wall": 1.524120292,
+        "memory": {
+          "peak_backing_bytes": 1016355088,
+          "peak_committed_bytes": 1676003287,
+          "maximum_stage_bytes": 1157322135,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 105820,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 29,
+          "frontier_rounds": 441,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 82,
+          "complete_fit_seconds": 1.3865687930000001,
+          "gpu_nanoseconds": 1281719653
+        }
+      },
+      {
+        "case": "photo-large-1049",
+        "variant": "cpu_continuous",
+        "repetition": 1,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1049.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-1-cpu_continuous",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-cpu",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=pipeline",
+          "--feature-window=16"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-1-cpu_continuous",
+        "exit_code": 0,
+        "result_sha256": "61ca3781fd4ba8429a32d98c81c9e72527055127cfe8d7097f18701b0165d000",
+        "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c",
+        "wall": 2.044212292,
+        "cpu": 22.289882,
+        "training_wall": 1.2507292920000002,
+        "memory": {
+          "peak_backing_bytes": 747030612,
+          "peak_committed_bytes": 1603050103,
+          "maximum_stage_bytes": 1157322135,
+          "peak_feature_samples": 16146432,
+          "peak_feature_bytes": 322960896
+        },
+        "resident_fitting": null
+      },
+      {
+        "case": "photo-large-1049",
+        "variant": "fused_gpu",
+        "repetition": 2,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1049.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-2-fused_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-2-fused_gpu",
+        "exit_code": 0,
+        "result_sha256": "41a88bed30cc16f196c5ef65c5c49ad0f550a0c20d90e8d6d8e4f3393f952c27",
+        "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c",
+        "wall": 2.400510083,
+        "cpu": 7.91839,
+        "training_wall": 1.575492837,
+        "memory": {
+          "peak_backing_bytes": 1016355088,
+          "peak_committed_bytes": 1676003287,
+          "maximum_stage_bytes": 1157322135,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 105820,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 29,
+          "frontier_rounds": 441,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 86,
+          "complete_fit_seconds": 1.436475749,
+          "gpu_nanoseconds": 1320551651
+        }
+      },
+      {
+        "case": "photo-large-1049",
+        "variant": "cpu_continuous",
+        "repetition": 2,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1049.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-2-cpu_continuous",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-cpu",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=pipeline",
+          "--feature-window=16"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-2-cpu_continuous",
+        "exit_code": 0,
+        "result_sha256": "76ef6f2b2a77409608fdb1f30f6fc52a98861f6d0e79aeaa860f8cfd011b379c",
+        "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c",
+        "wall": 2.082938417,
+        "cpu": 22.479893,
+        "training_wall": 1.2329460840000002,
+        "memory": {
+          "peak_backing_bytes": 754379164,
+          "peak_committed_bytes": 1603050103,
+          "maximum_stage_bytes": 1157322135,
+          "peak_feature_samples": 16146432,
+          "peak_feature_bytes": 322960896
+        },
+        "resident_fitting": null
+      },
+      {
+        "case": "photo-large-1049",
+        "variant": "previous_gpu",
+        "repetition": 2,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/previous_gpu-hybrid-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1049.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-2-previous_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-2-previous_gpu",
+        "exit_code": 0,
+        "result_sha256": "a89141d025bedfd33d59c704ee0e0364e6ad09c15ffa92b4e68d82fccea3952b",
+        "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c",
+        "wall": 2.368435,
+        "cpu": 7.824555,
+        "training_wall": 1.5599188769999999,
+        "memory": {
+          "peak_backing_bytes": 1016355088,
+          "peak_committed_bytes": 1676003287,
+          "maximum_stage_bytes": 1157322135,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 105820,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 29,
+          "frontier_rounds": 442,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 80,
+          "complete_fit_seconds": 1.423453125,
+          "gpu_nanoseconds": 1307273279
+        }
+      },
+      {
+        "case": "photo-large-1049",
+        "variant": "cpu_continuous",
+        "repetition": 3,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1049.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-3-cpu_continuous",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-cpu",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=pipeline",
+          "--feature-window=16"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-3-cpu_continuous",
+        "exit_code": 0,
+        "result_sha256": "6da45e0f2f12408c721865bc0339089cba5756277c894172df272f823042377d",
+        "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c",
+        "wall": 2.026365709,
+        "cpu": 22.497223,
+        "training_wall": 1.239810292,
+        "memory": {
+          "peak_backing_bytes": 754270444,
+          "peak_committed_bytes": 1603050103,
+          "maximum_stage_bytes": 1157322135,
+          "peak_feature_samples": 16146432,
+          "peak_feature_bytes": 322960896
+        },
+        "resident_fitting": null
+      },
+      {
+        "case": "photo-large-1049",
+        "variant": "previous_gpu",
+        "repetition": 3,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/previous_gpu-hybrid-profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1049.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-3-previous_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-3-previous_gpu",
+        "exit_code": 0,
+        "result_sha256": "8b8cf53a4fa38b20bfc64513e5cc19aa6a474792bd945faa463971aab030a7a8",
+        "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c",
+        "wall": 2.314757333,
+        "cpu": 7.928969,
+        "training_wall": 1.5357846259999999,
+        "memory": {
+          "peak_backing_bytes": 1016355088,
+          "peak_committed_bytes": 1676003287,
+          "maximum_stage_bytes": 1157322135,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 105820,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 29,
+          "frontier_rounds": 441,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 82,
+          "complete_fit_seconds": 1.398189458,
+          "gpu_nanoseconds": 1291296862
+        }
+      },
+      {
+        "case": "photo-large-1049",
+        "variant": "fused_gpu",
+        "repetition": 3,
+        "warmup": false,
+        "command": [
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/gjxl_modular_hybrid_profile",
+          "/Users/yunhocho/GitHub/gjxl-modular/build/learned-metal-qualification-20261015/inputs/photo-large-1049.pam",
+          "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-3-fused_gpu",
+          "auto",
+          "auto",
+          "best",
+          "fit-off",
+          "14",
+          "14",
+          "14",
+          "14",
+          "14",
+          "fitter-tiled",
+          "16384",
+          "64",
+          "--sample-rows=metal-unique",
+          "--learning-schedule=cohorts",
+          "--feature-window=8",
+          "--resident-active=256",
+          "--resident-scratch=64"
+        ],
+        "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/full-study/photo-large-1049-3-fused_gpu",
+        "exit_code": 0,
+        "result_sha256": "ed5299b4697b8dbe981d078458b1fc8759584187707ce6b3512d8f058adaee91",
+        "output_sha256": "5b8a453656024061fb00757078b3e14b0712869ef4be4cce8b7aaeb4fa0aa14c",
+        "wall": 2.347796917,
+        "cpu": 8.03922,
+        "training_wall": 1.550771751,
+        "memory": {
+          "peak_backing_bytes": 1016355088,
+          "peak_committed_bytes": 1676003287,
+          "maximum_stage_bytes": 1157322135,
+          "peak_feature_samples": 8110080,
+          "peak_feature_bytes": 162217728
+        },
+        "resident_fitting": {
+          "fits": 192,
+          "requested_active_nodes": 256,
+          "scratch_cap_bytes": 67108864,
+          "buffers": "fresh",
+          "encoders": "single",
+          "nodes": 105820,
+          "batches": 5,
+          "executor": "fitter-tiled",
+          "submissions": 29,
+          "frontier_rounds": 441,
+          "maximum_active_nodes": 256,
+          "maximum_same_fit_nodes": 78,
+          "complete_fit_seconds": 1.409453584,
+          "gpu_nanoseconds": 1300783443
+        }
+      }
+    ]
+  },
+  "diagnostic_phases": {
+    "baseline": {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/baseline-phase-probe",
+        "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-attribution-20261017/capture-early/samples.gjfs",
+        "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/phases-final-baseline.json",
+        "16",
+        "1",
+        "128",
+        "cpu-tiled",
+        "256",
+        "16",
+        "64"
+      ],
+      "metallib_sha256": "eb184e1863ec03e17ccad43861d113d439db6640c2a01ea7bdc5a4db2d707c25",
+      "exit_code": 0,
+      "result_sha256": "df50badd61977ce66b032ee94811036ef34499eca373044b08976c987abee905",
+      "phase_ns": {
+        "init": 176083,
+        "begin": 31187129,
+        "clear_stats": 1763255,
+        "stats": 59875505,
+        "summarize": 23775454,
+        "schedule": 10443204,
+        "clear_histogram": 22277751,
+        "collect": 146644742,
+        "score": 121701879,
+        "finish": 28343496
+      },
+      "total_ns": 446188498
+    },
+    "optimized": {
+      "command": [
+        "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/phase-probe",
+        "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-attribution-20261017/capture-early/samples.gjfs",
+        "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/phases-final-optimized.json",
+        "16",
+        "1",
+        "128",
+        "cpu-tiled",
+        "256",
+        "16",
+        "64"
+      ],
+      "metallib_sha256": "9a279dad2742812361e91c1e64de14df1a0030bbfed67c62be54cc6ee305f1a2",
+      "exit_code": 0,
+      "result_sha256": "0169e5a589bf2ebbcb08ee55f7e0398b3c2fa7151afafd70d80cac5d64167e03",
+      "phase_ns": {
+        "init": 167459,
+        "begin": 31883118,
+        "clear_stats": 1626332,
+        "stats": 56657789,
+        "summarize": 24032458,
+        "schedule": 11131421,
+        "clear_histogram": 19663161,
+        "collect": 133454386,
+        "score": 88111879,
+        "collect_score": 43063333,
+        "finish": 24334708
+      },
+      "total_ns": 434126044
+    }
+  },
+  "diagnostic_workload": {
+    "status": "passed",
+    "boundary": "One-round diagnostic workload capture, not benchmark timing",
+    "command": [
+      "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/phase-probe",
+      "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-attribution-20261017/capture-early/samples.gjfs",
+      "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/workload-final-result.json",
+      "16",
+      "1",
+      "128",
+      "cpu-tiled",
+      "256",
+      "1",
+      "64"
+    ],
+    "env": {
+      "GJXL_FRONTIER_DIAGNOSTIC_DIR": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/workload-final",
+      "GJXL_FRONTIER_PROFILE_PHASES": "1",
+      "GJXL_FRONTIER_PROBE_METALLIB": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/final/gjxl.metallib"
+    },
+    "binary_sha256": "3d0481b0af1e794d88be6d143e947c624b4991f0354a97f32ceaa8d93f4eccd8",
+    "metallib_sha256": "9a279dad2742812361e91c1e64de14df1a0030bbfed67c62be54cc6ee305f1a2",
+    "archive_sha256": "b8144519b3f7e61425f4d45d5b2496b764dc748195240aa7e631b099932b8124",
+    "exit_code": 0,
+    "result_sha256": "125aebf36a3d0d192b67d3ce9483647a40ea0ec4079ba40bde7556b9c50df809",
+    "workload_sha256": "a30f8b017c9eb35455bba522c6646cdef1a52e1e460139b5f1954588eccda120",
+    "rounds": 147,
+    "nodes": 35878,
+    "jobs": 482729,
+    "local_jobs": 239456,
+    "nodes_with_local_jobs": 24774,
+    "collect_groups": 3478356,
+    "eliminated_collect_groups": 478912
+  },
+  "pipeline_resources": {
+    "kernels": [
+      {
+        "kernel": "gjxl_histogram_tiled_collect",
+        "maximum_threads": 1024,
+        "execution_width": 32,
+        "static_threadgroup_bytes": 9216
+      },
+      {
+        "kernel": "gjxl_histogram_tiled_score",
+        "maximum_threads": 1024,
+        "execution_width": 32,
+        "static_threadgroup_bytes": 6144
+      },
+      {
+        "kernel": "gjxl_histogram_tiled_collect_score",
+        "maximum_threads": 1024,
+        "execution_width": 32,
+        "static_threadgroup_bytes": 4896
+      },
+      {
+        "kernel": "gjxl_histogram_tiled_schedule",
+        "maximum_threads": 1024,
+        "execution_width": 32,
+        "static_threadgroup_bytes": 12304
+      }
+    ],
+    "device": "Apple M4 Pro",
+    "maximum_threadgroup_bytes": 32768
+  },
+  "pilots": {
+    "pilot": {
+      "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/pilot/manifest.json",
+      "sha256": "68f4f16bb449fc06bf0680fcf3ff4688fc2a958097d95d2b8c68a4eea47916d4",
+      "configurations": {
+        "baseline": {
+          "wall_seconds": {
+            "n": 3,
+            "median": 0.488947209,
+            "min": 0.484941667,
+            "max": 0.497379917,
+            "values": [
+              0.484941667,
+              0.488947209,
+              0.497379917
+            ]
+          },
+          "blocks": [
+            {
+              "block": 0,
+              "median": 0.484941667
+            },
+            {
+              "block": 1,
+              "median": 0.488947209
+            },
+            {
+              "block": 2,
+              "median": 0.497379917
+            }
+          ]
+        },
+        "fused": {
+          "wall_seconds": {
+            "n": 3,
+            "median": 0.477127125,
+            "min": 0.457500834,
+            "max": 0.491135708,
+            "values": [
+              0.457500834,
+              0.491135708,
+              0.477127125
+            ]
+          },
+          "blocks": [
+            {
+              "block": 0,
+              "median": 0.457500834
+            },
+            {
+              "block": 1,
+              "median": 0.491135708
+            },
+            {
+              "block": 2,
+              "median": 0.477127125
+            }
+          ]
+        }
+      }
+    },
+    "compact-pilot": {
+      "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/compact-pilot/manifest.json",
+      "sha256": "4b7b5f6ccaf42cb46e6a439d9807da62c6abdf1635a03906f575bf21274e71b9",
+      "configurations": {
+        "baseline": {
+          "wall_seconds": {
+            "n": 6,
+            "median": 0.47698308349999996,
+            "min": 0.455981667,
+            "max": 0.501597791,
+            "values": [
+              0.455981667,
+              0.481737542,
+              0.475760792,
+              0.501597791,
+              0.459348667,
+              0.478205375
+            ]
+          },
+          "blocks": [
+            {
+              "block": 0,
+              "median": 0.46885960449999997
+            },
+            {
+              "block": 1,
+              "median": 0.4886792915
+            },
+            {
+              "block": 2,
+              "median": 0.46877702099999996
+            }
+          ]
+        },
+        "fused_initial": {
+          "wall_seconds": {
+            "n": 6,
+            "median": 0.4709932915,
+            "min": 0.459241583,
+            "max": 0.482051125,
+            "values": [
+              0.468359083,
+              0.4736275,
+              0.47385975,
+              0.482051125,
+              0.459241583,
+              0.462518375
+            ]
+          },
+          "blocks": [
+            {
+              "block": 0,
+              "median": 0.4709932915
+            },
+            {
+              "block": 1,
+              "median": 0.4779554375
+            },
+            {
+              "block": 2,
+              "median": 0.460879979
+            }
+          ]
+        },
+        "fused_compact": {
+          "wall_seconds": {
+            "n": 6,
+            "median": 0.46412789600000004,
+            "min": 0.456186834,
+            "max": 0.47505075,
+            "values": [
+              0.467244084,
+              0.47505075,
+              0.459190125,
+              0.456186834,
+              0.467282083,
+              0.461011708
+            ]
+          },
+          "blocks": [
+            {
+              "block": 0,
+              "median": 0.471147417
+            },
+            {
+              "block": 1,
+              "median": 0.4576884795
+            },
+            {
+              "block": 2,
+              "median": 0.4641468955
+            }
+          ]
+        }
+      }
+    },
+    "dense-pilot": {
+      "artifact": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-fused-small-jobs-20261017/dense-pilot/manifest.json",
+      "sha256": "365f95a711025a1b24687b3c741c628723eac38a639408e8ce45d259cab3812c",
+      "configurations": {
+        "baseline": {
+          "wall_seconds": {
+            "n": 6,
+            "median": 0.460459917,
+            "min": 0.454220667,
+            "max": 0.462751667,
+            "values": [
+              0.4557275,
+              0.459701542,
+              0.461218292,
+              0.462751667,
+              0.454220667,
+              0.462620792
+            ]
+          },
+          "blocks": [
+            {
+              "block": 0,
+              "median": 0.457714521
+            },
+            {
+              "block": 1,
+              "median": 0.46198497949999995
+            },
+            {
+              "block": 2,
+              "median": 0.4584207295
+            }
+          ]
+        },
+        "fused_compact": {
+          "wall_seconds": {
+            "n": 6,
+            "median": 0.454712542,
+            "min": 0.446416875,
+            "max": 0.456877667,
+            "values": [
+              0.446416875,
+              0.456493416,
+              0.452564042,
+              0.45461925,
+              0.454805834,
+              0.456877667
+            ]
+          },
+          "blocks": [
+            {
+              "block": 0,
+              "median": 0.4514551455
+            },
+            {
+              "block": 1,
+              "median": 0.453591646
+            },
+            {
+              "block": 2,
+              "median": 0.4558417505
+            }
+          ]
+        },
+        "fused_dense": {
+          "wall_seconds": {
+            "n": 6,
+            "median": 0.4487490415,
+            "min": 0.443737959,
+            "max": 0.455355583,
+            "values": [
+              0.443791334,
+              0.45217,
+              0.443737959,
+              0.455355583,
+              0.446054625,
+              0.451443458
+            ]
+          },
+          "blocks": [
+            {
+              "block": 0,
+              "median": 0.447980667
+            },
+            {
+              "block": 1,
+              "median": 0.449546771
+            },
+            {
+              "block": 2,
+              "median": 0.4487490415
+            }
+          ]
+        }
+      }
+    }
+  },
+  "validation": [
+    {
+      "name": "release-tests",
+      "command": [
+        "ctest",
+        "--test-dir",
+        "build/release",
+        "--output-on-failure",
+        "-R",
+        "^(metal_modular_(resident|frontier|tiled_frontier)_histogram|modular_reference_(combined|tiled_frontier|tiled_pipeline))$"
+      ],
+      "env": {},
+      "exit_code": 0,
+      "seconds": 81.89678907394409
+    },
+    {
+      "name": "metal-final-validation",
+      "command": [
+        "build/release/gjxl_metal_modular_resident_histogram_test",
+        "--tiled"
+      ],
+      "env": {
+        "MTL_DEBUG_LAYER": "1",
+        "MTL_SHADER_VALIDATION": "1"
+      },
+      "exit_code": 0,
+      "seconds": 2.4389572143554688
+    },
+    {
+      "name": "metal-pipeline-failures",
+      "command": [
+        "build/release/gjxl_modular_reference_hybrid_test",
+        "--tiled-pipeline-failures"
+      ],
+      "env": {
+        "MTL_DEBUG_LAYER": "1",
+        "MTL_SHADER_VALIDATION": "1"
+      },
+      "exit_code": 0,
+      "seconds": 0.7139191627502441
+    },
+    {
+      "name": "sanitizer-tests",
+      "command": [
+        "ctest",
+        "--test-dir",
+        "build/resident-sanitize",
+        "--output-on-failure",
+        "-R",
+        "^(metal_modular_tiled_frontier_histogram|modular_reference_tiled_frontier|modular_reference_tiled_pipeline)$"
+      ],
+      "env": {
+        "ASAN_OPTIONS": "detect_leaks=0:halt_on_error=1",
+        "UBSAN_OPTIONS": "halt_on_error=1:suppressions=/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/ubsan-metal-cpp.supp"
+      },
+      "exit_code": 0,
+      "seconds": 165.3281590938568
+    },
+    {
+      "name": "sanitizer-pipeline-failures",
+      "command": [
+        "build/resident-sanitize/gjxl_modular_reference_hybrid_test",
+        "--tiled-pipeline-failures"
+      ],
+      "env": {
+        "ASAN_OPTIONS": "detect_leaks=0:halt_on_error=1",
+        "UBSAN_OPTIONS": "halt_on_error=1:suppressions=/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/resident-prototype/ubsan-metal-cpp.supp"
+      },
+      "exit_code": 0,
+      "seconds": 0.8132269382476807
+    }
+  ],
+  "preserved_untracked_sha256": {
+    "docs/gpu-frontier-repeat-results.json": "a274dd059f38ab0f75e951f476c7bf6ce429e3b4baebdd3e1dbe41368b7bea2e",
+    "docs/gpu-frontier-repeat.md": "1042f39c0de012d3256f4e5b4b66e24d92cac29e7a11e8246709ec577dc5a635",
+    "docs/newer-hybrid-pipeline-results.json": "eb99d5225dabd9495429a49b6164535a24915c9ed73acce4056681894b523681",
+    "docs/newer-hybrid-pipeline.md": "a436b40e7d2631180b24a4d5a7c0b5657eb41af66fba228083f910b94fdf8eac"
+  },
+  "artifacts": {
+    "build/frontier-fused-small-jobs-20261017/manifest.json": "68f54f06ed9c51db931574552863775edff713feb0de22ddf2c69532c32837a2",
+    "build/frontier-fused-small-jobs-20261017/qualified-study/manifest.json": "4ce77b54c7a5e5d731df43f36acca434bff20d45eadc16786a551ddc63cbdb29",
+    "build/frontier-fused-small-jobs-20261017/full-study/manifest.json": "6b8a06a6a7f7a0482eb3fe38db038b83bf2d71307f04f44f9a6350f116bc8d32",
+    "build/frontier-fused-small-jobs-20261017/phase-final-comparison.json": "9ec48592ce6ff714abe50df099611c7fc36eaa6e8c791ec13870b29035563c31",
+    "build/frontier-fused-small-jobs-20261017/workload-final-manifest.json": "cb700b528ccc7983c21e932f9ef1801bcf18aa6dc9adb95abb7ae6bd7de1ed7c",
+    "build/frontier-fused-small-jobs-20261017/final/manifest.json": "22c55f75e0ebdcdc9c5742c2f54c46ede1c052900c955062a2c4b0056b1d03c5",
+    "build/frontier-fused-small-jobs-20261017/pipeline-resources.json": "32e60ddc212607e477469dafcba5f771936c8e28758aebe3503cd9301a955178",
+    "build/frontier-fused-small-jobs-20261017/pipeline-resources.mm": "4299fb2bb142ff24098fcc2ea26f6fcca7f52058700633add054e8d897ee66ae",
+    "build/frontier-fused-small-jobs-20261017/validation.json": "7a475634ac2ca32093a790264c2ee3980040c4fc6dbae6eff7f1538c87756584",
+    "build/frontier-fused-small-jobs-20261017/release-tests.log": "df236674a806f0c36f88076416fb4a4a5d174523bc64df2818a52aae52c22e3a",
+    "build/frontier-fused-small-jobs-20261017/metal-final-validation.log": "1d52cf297fa3f9b4adbb754a3f66a4224829efaa7e79002932f96923120dda67",
+    "build/frontier-fused-small-jobs-20261017/metal-pipeline-failures.log": "9d160943812d6c2937d6a4f4b2d94d7a62df99117c3e5f5ac4d2f8714828165d",
+    "build/frontier-fused-small-jobs-20261017/sanitizer-tests.log": "9835c085e0628f86091cd0f64322d2cdac6b90103084bbb04b1ef014476aca9f",
+    "build/frontier-fused-small-jobs-20261017/sanitizer-pipeline-failures.log": "fc47478827b6631454a04838a26cb2cf5914f1cba65dbe9f4055fee5e53d987f",
+    "build/frontier-fused-small-jobs-20261017/implementation.patch": "1a430c0d97436e9949f6c44ffeab8a97ea73adec6031989b9056b231a10082d7",
+    "build/frontier-fused-small-jobs-20261017/profile-phases-final.py": "a936d76b8c843eb6e8d1a3434a8dd9fa72f89fd291bc80bb9c49e3b54c9d4a7e",
+    "build/frontier-fused-small-jobs-20261017/profile-workload-final.py": "83d8bfa970ea4248401c4b7689823dc4d55678851662f24bdaef289447cb793f",
+    "build/frontier-fused-small-jobs-20261017/summarize.py": "7f21b2262193750d9092d325bee1b2963873cce3da08fecfd58b2fbc80513bb4"
+  }
+}

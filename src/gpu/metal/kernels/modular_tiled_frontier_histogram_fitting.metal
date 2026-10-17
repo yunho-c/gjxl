@@ -26,7 +26,8 @@ uint FindTask(device const TiledTask *tasks, uint count, uint group) {
 }
 // Reuse lower-histogram loads between children. Each side retains Entropy's
 // native four-lane arithmetic and final pairwise sum, without reassociation.
-float2 EntropyPair(device const uint *lower, device const uint *parent, uint symbols) {
+template <typename Histogram>
+float2 EntropyPair(Histogram lower, device const uint *parent, uint symbols) {
   uint low_total = 0, high_total = 0;
   for (uint sym = 0; sym < symbols; ++sym) {
     const uint low = lower[sym];
@@ -48,6 +49,13 @@ float2 EntropyPair(device const uint *lower, device const uint *parent, uint sym
                 (high_bits.x + high_bits.y) + (high_bits.z + high_bits.w));
 }
 Candidate EmptyCandidate() { return {0, 0, 0, 0, kMaximumCost, kMaximumCost, 0, 0}; }
+// Histogram reads finish before winners are shared for the final ordered scan.
+// Nonempty nodes have at least four symbol slots plus one extra-bit column,
+// bounding compact bins and keeping this scratch below 5 KiB.
+union SmallJobScratch {
+  uint histogram[kTiledSmallCells];
+  SideWinner sides[2 * (kTiledSmallCells / 5)];
+};
 }
 
 kernel void gjxl_histogram_tiled_init(
@@ -197,7 +205,7 @@ kernel void gjxl_histogram_tiled_summarize(
       reinterpret_cast<device const int *>(parent + s.parent_index * 256), s.symbols, false) + float(extra[s.parent_index]);
   device TiledProperty *properties = reinterpret_cast<device TiledProperty *>(base + p.properties);
   for (uint prop = 0; prop < f.properties; ++prop) {
-    device TiledProperty &q = properties[prop]; q.bins = 0;
+    device TiledProperty &q = properties[prop]; q.bins = q.histogram = 0;
     for (uint c = 0; c < 4; ++c) q.winners[c] = EmptyCandidate();
     if (!(s.base_cost > d.split_threshold)) continue;
     if ((n.constants & (1u << prop)) || f.bins[prop] == 1) { n.constants |= 1u << prop; continue; }
@@ -210,7 +218,10 @@ kernel void gjxl_histogram_tiled_summarize(
       sum += count; occupancy[b] = sum;
     }
     if (q.bins <= 1) { n.constants |= 1u << prop; q.bins = 0; }
-    s.needed += q.bins * f.predictors * (s.symbols + 1) * 4;
+    if (q.bins && n.end - n.begin <= kTiledRows && q.bins * (s.symbols + 1) <= kTiledSmallCells)
+      q.histogram = kTiledLocalHistogram;
+    else
+      s.needed += q.bins * f.predictors * (s.symbols + 1) * 4;
   }
   s.stage = kTiledPending;
 }
@@ -237,9 +248,12 @@ kernel void gjxl_histogram_tiled_schedule(
       device const Fit &d = reinterpret_cast<device const Fit *>(work)[s.ref.fit];
       device const Node &n = reinterpret_cast<device const Node *>(work + d.nodes)[s.ref.node];
       device const TiledProperty *properties = reinterpret_cast<device const TiledProperty *>(SlotBytes(work, p, i) + p.properties);
-      uint jobs = 0;
-      for (uint prop = 0; prop < f.properties; ++prop) jobs += properties[prop].bins != 0;
-      count = uint3(s.needed, jobs | (1u << 16), jobs * ((n.end - n.begin + kTiledRows - 1) / kTiledRows) * f.predictors);
+      uint jobs = 0, device_jobs = 0;
+      for (uint prop = 0; prop < f.properties; ++prop) {
+        jobs += properties[prop].bins != 0;
+        device_jobs += properties[prop].bins && properties[prop].histogram != kTiledLocalHistogram;
+      }
+      count = uint3(s.needed, jobs | (1u << 16), device_jobs * ((n.end - n.begin + kTiledRows - 1) / kTiledRows) * f.predictors);
     }
     offsets[i] = count;
   }
@@ -275,10 +289,13 @@ kernel void gjxl_histogram_tiled_schedule(
       uint used = offset.x, job = offset.y, groups = offset.z;
       for (uint prop = 0; prop < f.properties; ++prop) {
         device TiledProperty &q = properties[prop]; if (!q.bins) continue;
-        q.histogram = p.histogram + used;
-        used += q.bins * f.predictors * (s.symbols + 1) * 4;
-        tasks[job++] = {i, prop, groups, groups + tiles * f.predictors};
-        groups += tiles * f.predictors;
+        const uint count = q.histogram == kTiledLocalHistogram ? 0 : tiles * f.predictors;
+        if (count) {
+          q.histogram = p.histogram + used;
+          used += q.bins * f.predictors * (s.symbols + 1) * 4;
+        }
+        tasks[job++] = {i, prop, groups, groups + count};
+        groups += count;
       }
     }
     if (!lane) {
@@ -306,10 +323,13 @@ kernel void gjxl_histogram_tiled_schedule(
     for (uint prop = 0; prop < f.properties; ++prop) {
       device TiledProperty &q = properties[prop];
       if (!q.bins) continue;
-      q.histogram = p.histogram + used;
-      used += q.bins * f.predictors * (s.symbols + 1) * 4;
-      tasks[c.jobs++] = {i, prop, groups, groups + tiles * f.predictors};
-      groups += tiles * f.predictors;
+      const uint count = q.histogram == kTiledLocalHistogram ? 0 : tiles * f.predictors;
+      if (count) {
+        q.histogram = p.histogram + used;
+        used += q.bins * f.predictors * (s.symbols + 1) * 4;
+      }
+      tasks[c.jobs++] = {i, prop, groups, groups + count};
+      groups += count;
     }
   }
   if (!c.frontier.status && c.live && !c.selected) Fail(c.frontier, kCapacityError);
@@ -331,6 +351,7 @@ kernel void gjxl_histogram_tiled_clear_histogram(
   device TiledSlot &s = Slot(work, p, task.slot);
   device const FitDescriptor &f = reinterpret_cast<device const FitDescriptor *>(prepared)[s.ref.fit];
   device const TiledProperty &q = reinterpret_cast<device const TiledProperty *>(SlotBytes(work, p, task.slot) + p.properties)[task.property];
+  if (q.histogram == kTiledLocalHistogram) return;
   device uint *hist = reinterpret_cast<device uint *>(work + q.histogram);
   for (uint i = lane; i < q.bins * f.predictors * (s.symbols + 1); i += 128) hist[i] = 0;
 }
@@ -420,6 +441,7 @@ kernel void gjxl_histogram_tiled_score(
   const Node n = reinterpret_cast<device const Node *>(work + d.nodes)[s.ref.node];
   device uchar *base = SlotBytes(work, p, task.slot);
   device TiledProperty &q = reinterpret_cast<device TiledProperty *>(base + p.properties)[task.property];
+  if (q.histogram == kTiledLocalHistogram) return;
   device const uint *parent = reinterpret_cast<device const uint *>(base + p.parent);
   device const uint *parent_extra = reinterpret_cast<device const uint *>(base + p.parent_extra);
   device const uint *occupancy = reinterpret_cast<device const uint *>(base + p.occupancy) + task.property * 256;
@@ -458,6 +480,94 @@ kernel void gjxl_histogram_tiled_score(
   if (!lane) for (uint b = 0; b < bins; ++b) {
     if (!Threshold(occupancy, b, n.end - n.begin)) continue;
     const SideWinner low = sides[2 * b], high = sides[2 * b + 1];
+    const bool wp = f.property_ids[task.property] == 15 || low.predictor == 6 || high.predictor == 6;
+    const uint category = f.property_ids[task.property] < 2 ?
+        (low.cost == 0 || high.cost == 0 ? 0 : 1) : (wp ? 2 : 3);
+    device Candidate &best = q.winners[category];
+    if (low.cost + high.cost < best.left_cost + best.right_cost)
+      best = {b, occupancy[b], low.predictor, high.predictor, low.cost, high.cost, 1, 0};
+  }
+}
+
+// Single-tile compact jobs never allocate, clear or publish a device histogram.
+// Keep this separate from collection/scoring of large jobs so its shared storage
+// and register needs do not change those kernels' resource requirements.
+kernel void gjxl_histogram_tiled_collect_score(
+    device const uchar *prepared [[buffer(0)]], device uchar *work [[buffer(1)]],
+    constant gjxl_histogram_resident::TiledParams &p [[buffer(2)]],
+    uint job [[threadgroup_position_in_grid]], uint lane [[thread_index_in_threadgroup]]) {
+  using namespace tiled_frontier_impl;
+  device TiledControl &c = Control(work, p); if (c.frontier.status || job >= c.jobs) return;
+  const TiledTask task = reinterpret_cast<device const TiledTask *>(work + p.jobs)[job];
+  device TiledSlot &s = Slot(work, p, task.slot);
+  device uchar *base = SlotBytes(work, p, task.slot);
+  device TiledProperty &q = reinterpret_cast<device TiledProperty *>(base + p.properties)[task.property];
+  if (q.histogram != kTiledLocalHistogram) return;
+  device const FitDescriptor &f = reinterpret_cast<device const FitDescriptor *>(prepared)[s.ref.fit];
+  device const Fit &d = reinterpret_cast<device const Fit *>(work)[s.ref.fit];
+  const Node n = reinterpret_cast<device const Node *>(work + d.nodes)[s.ref.node];
+  device const uint *order = reinterpret_cast<device const uint *>(work + d.order);
+  device const ushort *weights = reinterpret_cast<device const ushort *>(prepared + f.weights_offset);
+  device const uint *parent = reinterpret_cast<device const uint *>(base + p.parent);
+  device const uint *parent_extra = reinterpret_cast<device const uint *>(base + p.parent_extra);
+  device const uint *occupancy = reinterpret_cast<device const uint *>(base + p.occupancy) + task.property * 256;
+  device const uint *map = reinterpret_cast<device const uint *>(base + p.bin_map) + task.property * 256;
+  device const float *penalties = reinterpret_cast<device const float *>(work + d.penalties) + s.parent_index * f.predictors;
+  const uint bins = f.bins[task.property], symbols = s.symbols, stride = symbols + 1, cells = q.bins * stride;
+  threadgroup SmallJobScratch scratch;
+  threadgroup uint *hist = scratch.histogram;
+  SideWinner lows[2], highs[2];
+  for (uint i = 0; i < 2; ++i) lows[i] = highs[i] = {kMaximumCost, 0, 0};
+  threadgroup atomic_uint *counts = reinterpret_cast<threadgroup atomic_uint *>(hist);
+  // Preserve canonical predictor preference. Each iteration owns the entire
+  // node histogram and finishes all reads before reusing it for the next one.
+  for (uint pred = 0; pred < f.predictors; ++pred) {
+    for (uint i = lane; i < cells; i += 128) hist[i] = 0;
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    device const uchar2 *tokens = reinterpret_cast<device const uchar2 *>(prepared + f.residual_offsets[pred]);
+    for (uint i = n.begin + lane; i < n.end; i += 128) {
+      const uint row = order[i], weight = weights[row];
+      const uint bin = map[Property(prepared, f, task.property, row)];
+      const uchar2 token = tokens[row];
+      atomic_fetch_add_explicit(&counts[bin * stride + token.x], weight, memory_order_relaxed);
+      if (token.y) atomic_fetch_add_explicit(&counts[bin * stride + symbols], weight * uint(token.y), memory_order_relaxed);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint sym = lane / 32; sym < stride; sym += 4) {
+      uint carry = 0;
+      for (uint first = 0; first < q.bins; first += 32) {
+        const uint b = first + (lane & 31);
+        const uint value = b < q.bins ? hist[b * stride + sym] : 0;
+        const uint sum = carry + simd_prefix_inclusive_sum(value);
+        if (b < q.bins) hist[b * stride + sym] = sum;
+        carry = simd_broadcast(sum, 31);
+      }
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    const float penalty = penalties[pred];
+    #pragma unroll
+    for (uint i = 0; i < 2; ++i) {
+      // Every compact bin except the last is a valid split threshold. Assign
+      // these densely to lanes; the ordered scan below restores original bins.
+      const uint compact = lane + 128 * i;
+      if (compact + 1 >= q.bins) continue;
+      threadgroup const uint *low_hist = hist + compact * stride;
+      const float2 costs = EntropyPair(low_hist, parent + pred * 256, symbols);
+      const float low = costs.x + float(low_hist[symbols]);
+      const float high = costs.y + float(parent_extra[pred]) - float(low_hist[symbols]);
+      if (low + penalty < lows[i].cost + lows[i].penalty) lows[i] = {low, penalty, f.predictor_ids[pred]};
+      if (high + penalty < highs[i].cost + highs[i].penalty) highs[i] = {high, penalty, f.predictor_ids[pred]};
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+  for (uint compact = lane; compact + 1 < q.bins; compact += 128) {
+    scratch.sides[2 * compact] = lows[compact / 128];
+    scratch.sides[2 * compact + 1] = highs[compact / 128];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (!lane) for (uint b = 0; b < bins; ++b) {
+    if (!Threshold(occupancy, b, n.end - n.begin)) continue;
+    const SideWinner low = scratch.sides[2 * map[b]], high = scratch.sides[2 * map[b] + 1];
     const bool wp = f.property_ids[task.property] == 15 || low.predictor == 6 || high.predictor == 6;
     const uint category = f.property_ids[task.property] < 2 ?
         (low.cost == 0 || high.cost == 0 ? 0 : 1) : (wp ? 2 : 3);

@@ -711,7 +711,7 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
 #endif
     struct FrontierContext {
       MTL::Buffer *prepared, *work;
-      std::array<MTL::ComputePipelineState *, 10> pipelines;
+      std::array<MTL::ComputePipelineState *, 11> pipelines;
       gjxl_histogram_resident::FrontierParams params;
       gjxl_histogram_resident::TiledParams tiled_params;
       size_t rounds;
@@ -721,7 +721,7 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
       size_t phase = SIZE_MAX;
     } c{context.prepared, context.work, {}, plan.frontier, plan.tiled,
         input.rounds_per_submission, true, tiled};
-    for (size_t i = 0; i < (tiled ? 10 : 3); ++i)
+    for (size_t i = 0; i < (tiled ? 11 : 3); ++i)
       c.pipelines[i] = histogram_fitting_pipelines_[(tiled ? 9 : 6) + i].get();
     const auto encode_frontier = [](MetalBackend &, MTL::ComputeCommandEncoder *encoder, const void *opaque) {
       const auto &c = *static_cast<const FrontierContext *>(opaque);
@@ -757,7 +757,8 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
           indirect(6, offsetof(TiledControl, jobs_dispatch));
           indirect(7, offsetof(TiledControl, collect_dispatch));
           indirect(8, offsetof(TiledControl, jobs_dispatch));
-          indirect(9, offsetof(TiledControl, finish_dispatch));
+          indirect(9, offsetof(TiledControl, jobs_dispatch));
+          indirect(10, offsetof(TiledControl, finish_dispatch));
           continue;
         }
         indirect(2, offsetof(gjxl_histogram_resident::FrontierControl, dispatch));
@@ -771,7 +772,7 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
       if (diagnostic.ProfilePhases()) {
         // This device supports encoder-boundary timestamps. Added encoder
         // boundaries perturb scheduling: these are attribution runs only.
-        const size_t phases = tiled ? 9 : 2;
+        const size_t phases = tiled ? 10 : 2;
         const size_t count = c.rounds * phases + size_t(c.initialize);
         gpu_profile_internal::ProfileStorage<FrontierContext> contexts(count, c);
         gpu_profile_internal::ProfileStorage<MetalProfiledComputeStage> stages(count);
