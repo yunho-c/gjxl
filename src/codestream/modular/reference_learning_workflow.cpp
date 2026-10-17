@@ -798,16 +798,24 @@ struct HybridLearning {
   }
   Status RunPipeline(bool *handled) {
     *handled = false;
+    const bool resident = options.fitting_backend == ReferenceFittingBackend::kGpuResident ||
+        options.fitting_backend == ReferenceFittingBackend::kGpuFrontier ||
+        options.fitting_backend == ReferenceFittingBackend::kGpuTiledFrontier;
+    if (resident && (active_histogram_fitting_profile || options.fitting_gpu_profile))
+      return Status::Unsupported("Resident fitting has complete-call diagnostics only");
     struct PipelineJob : LocalLearningJob {
       Status status;
-      size_t batch = 0;
-      bool admitted = true;
+      size_t batch = 0, group = 0;
+      bool admitted = true, prepared = false;
       double start = 0, finish = 0;
     };
+    struct ResidentGroup { size_t first = 0, stop = 0, unprepared = 0; };
     const size_t desired = LearningParticipants(options, records.size());
     auto *const parent_profile = active_modular_profile;
     auto *const parent_fit_profile = active_histogram_fitting_profile;
     HostStorageBound metadata;
+    if (resident && (!metadata.AddVector<PreparedHistogramSamples>(records.size(), VectorCapacityPolicy::kFreshExact) ||
+        !metadata.AddVector<ResidentGroup>(records.size(), VectorCapacityPolicy::kFreshExact))) return Invalid();
     if (!metadata.AddVector<PipelineJob>(records.size(), VectorCapacityPolicy::kFreshExact) ||
         !metadata.AddVector<std::thread>(desired - 1, VectorCapacityPolicy::kFreshExact) ||
         (parent_fit_profile && !metadata.AddVector<HistogramFittingProfile>(
@@ -826,6 +834,23 @@ struct HybridLearning {
     context.resource_class = ResourceClass::kPreparation;
     ResourceContextScope metadata_scope(context);
     LearningStorage<PipelineJob> fit_jobs(records.size());
+    LearningStorage<PreparedHistogramSamples> prepared(resident ? records.size() : 0);
+    LearningStorage<ResidentGroup> groups(resident ? records.size() : 0);
+    size_t group_count = 0;
+    if (resident) for (size_t first = 0; first < records.size();) {
+      size_t stop;
+      if (auto s = CohortStop(first, &stop); !s.ok()) return s;
+      while (first < stop) {
+        auto &group = groups[group_count];
+        group.first = first;
+        group.stop = std::min(stop, first + std::min(options.fitting_batch_fits,
+            histogram_gpu_internal::kMaximumResidentHistogramFits));
+        group.unprepared = group.stop - first;
+        for (size_t i = first; i < group.stop; ++i) fit_jobs[i].group = group_count;
+        first = group.stop;
+        ++group_count;
+      }
+    }
     LearningStorage<HistogramFittingProfile> profiles(parent_fit_profile ? desired : 0);
     LearningWaveProbe trace;
     using Clock = std::chrono::steady_clock;
@@ -847,8 +872,36 @@ struct HybridLearning {
           fit_profile->records_written = 0;
         }
         HistogramFittingProfileSession fitting_session(fit_profile);
-        job.status = LearnLocal(records[i], streams[i], LocalOptions(options, &features[i]), budget, &job.stats,
-            std::span(features[i].views).first(records[i].channel_count), job.admitted);
+        if (resident) {
+          auto &record = records[i];
+          if (record.channel_count) {
+            const auto sampling = SamplingOptions(LocalOptions(options, &features[i]));
+            const HistogramTrainingImage image{record.learning_extent, record.training_channels(),
+                record.metadata_channels, streams[i].weighted,
+                std::span(features[i].views).first(record.channel_count)};
+            {
+              Seconds preparation(job.stats.sample_preparation_seconds);
+              job.status = PrepareHistogramSamples({&image, 1}, &prepared[i], sampling);
+            }
+            if (job.status.ok()) {
+              const auto &p = prepared[i].stats();
+              record.learning = {0, 1, p, prepared[i].samples().weights.size(), 1};
+              job.stats.rows = p.rows;
+              job.stats.learning_calls = 1;
+              job.stats.scanned_pixels = p.scanned_pixels;
+              job.stats.selected_samples = p.selected_samples;
+              job.stats.distinct_samples = prepared[i].samples().weights.size();
+              if (!prepared[i].samples().total_samples) {
+                record.tree.nodes[0].predictor = sampling.predictors[0];
+                job.stats.empty_learning_calls = 1;
+                job.stats.tree_nodes = 1;
+              }
+            }
+          }
+        } else {
+          job.status = LearnLocal(records[i], streams[i], LocalOptions(options, &features[i]), budget, &job.stats,
+              std::span(features[i].views).first(records[i].channel_count), job.admitted);
+        }
         job.computed_features = worker_profile.training_work.weighted_prediction_samples;
         job.reused_features = worker_profile.training_work.reused_prediction_samples;
       } catch (const ManagedAllocationFailure &e) {
@@ -871,7 +924,9 @@ struct HybridLearning {
     ++stats->learning_waves;
     stats->learning_peak_participants = queue.participants();
     stats->maximum_stage_bytes = std::max(stats->maximum_stage_bytes, metadata.peak_bytes);
-    const size_t slots = std::min(LocalLearningQueue::kCapacity, 2 * queue.participants());
+    const size_t slots = std::min(LocalLearningQueue::kCapacity,
+        resident ? 2 * std::min(options.fitting_batch_fits, histogram_gpu_internal::kMaximumResidentHistogramFits)
+                 : 2 * queue.participants());
     size_t next = 0, next_fit = 0, complete = 0, active = 0, count = 0, live_batches = 0;
     size_t cohort_stop = 0;
     bool new_cohort = false;
@@ -885,10 +940,15 @@ struct HybridLearning {
       return Status::Ok();
     };
     while (complete != records.size() || live_batches) {
+      Status deferred_admission;
       size_t i;
       while (queue.Take(&i)) {
         --active;
-        if (auto s = finished(i); !s.ok()) return s;
+        if (!fit_jobs[i].status.ok()) return fit_jobs[i].status;
+        if (resident) {
+          fit_jobs[i].prepared = true;
+          --groups[fit_jobs[i].group].unprepared;
+        } else if (auto s = finished(i); !s.ok()) return s;
       }
       // Only a batch's own completed fits gate tokenization. Other batches may
       // still be fitting; their disjoint records and feature borrows stay live.
@@ -906,13 +966,24 @@ struct HybridLearning {
       }
       while (next_fit < next && active < slots) {
         auto &job = fit_jobs[next_fit];
-        if (!job.bytes)
-          if (auto s = LocalLearningBound(records[next_fit], streams[next_fit], LocalOptions(options, &features[next_fit]),
+        if (!job.bytes) {
+          if (resident && records[next_fit].channel_count) {
+            const auto &record = records[next_fit];
+            const HistogramTrainingImage image{record.learning_extent, record.training_channels(),
+                record.metadata_channels, streams[next_fit].weighted,
+                std::span(features[next_fit].views).first(record.channel_count)};
+            HostStorageBound bound;
+            if (auto s = ComputeHistogramSamplePreparationStorageBound({&image, 1},
+                    SamplingOptions(LocalOptions(options, &features[next_fit])), &bound); !s.ok()) return s;
+            job.bytes = std::max(size_t{1}, bound.peak_bytes);
+          } else if (auto s = LocalLearningBound(records[next_fit], streams[next_fit], LocalOptions(options, &features[next_fit]),
               std::span(features[next_fit].views).first(records[next_fit].channel_count), &job.bytes);
               !s.ok()) return s;
+        }
         if (auto s = budget.TryReserve(job.bytes, &job.reservation); !s.ok()) {
           if (s.code() != StatusCode::kUnavailable && s.code() != StatusCode::kOutOfMemory) return s;
           ++stats->pipeline_admission_stalls;
+          if (resident) { deferred_admission = s; break; }
           if (active) break;
           // With all admitted jobs drained, the original tighter stage bounds
           // may still succeed. Never retry a job that actually started.
@@ -939,6 +1010,7 @@ struct HybridLearning {
           if (auto s = Prepare(next, cohort_stop, &batches[count], &limited, true); !s.ok()) {
             if (!limited) return s;
             ++stats->pipeline_admission_stalls;
+            if (resident) deferred_admission = s;
             if (!active && !live_batches) {
               if (next) return s;
               // Protected completion may be too conservative for a tight
@@ -963,6 +1035,59 @@ struct HybridLearning {
             continue;  // Publish this batch's jobs before doing more device work.
           }
         }
+      }
+      if (resident) {
+        bool dispatched = false;
+        for (size_t g = 0; g < group_count; ++g) {
+          auto &group = groups[g];
+          if (group.first == group.stop || (group.unprepared && active)) continue;
+          size_t stop = group.first;
+          while (stop < group.stop && fit_jobs[stop].prepared) ++stop;
+          if (stop == group.first) continue;
+          // Prefer complete cohorts. Under admission pressure a prepared
+          // prefix can retire owners without recomputing samples or CPU fits.
+          std::array<histogram_gpu_internal::ResidentHistogramRequest,
+                     histogram_gpu_internal::kMaximumResidentHistogramFits> requests;
+          std::array<size_t, histogram_gpu_internal::kMaximumResidentHistogramFits> indices;
+          size_t count = 0;
+          for (size_t j = group.first; j < stop; ++j) {
+            if (!records[j].channel_count || !prepared[j].samples().total_samples) continue;
+            auto learning = prepared[j].tree_options();
+            learning.maximum_leaves = LocalTreeLeaves(streams[j]);
+            requests[count] = {{static_cast<uint32_t>(records[j].id), &prepared[j].samples()}, learning};
+            indices[count++] = j;
+          }
+          histogram_gpu_internal::ResidentHistogramResult result;
+          bool limited = false;
+          if (count) {
+            auto s = FitResidentHistogramBatch(std::span(requests).first(count), options, budget, stats, &result, &limited);
+            if (!s.ok()) {
+              if (!limited || !active) return s;
+              ++stats->pipeline_admission_stalls;
+              deferred_admission = s;
+              break;
+            }
+          }
+          for (size_t j = 0; j < count; ++j) {
+            const size_t index = indices[j];
+            auto &record = records[index];
+            record.tree = std::move(result.trees[j]);
+            record.learning.tree_nodes = record.tree.size;
+            ++fit_jobs[index].stats.fits;
+            fit_jobs[index].stats.tree_nodes += record.tree.size;
+          }
+          for (size_t j = group.first; j < stop; ++j) {
+            prepared[j] = {};
+            fit_jobs[j].finish = now();
+            trace.CompleteDeferred(j, fit_jobs[j].stats);
+            if (auto s = finished(j); !s.ok()) return s;
+          }
+          group.first = stop;
+          dispatched = true;
+          break;  // Retire completed owners before fitting another cohort.
+        }
+        if (dispatched) continue;
+        if (!active && !deferred_admission.ok()) return deferred_admission;
       }
       if (active) queue.Progress();
     }

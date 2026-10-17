@@ -259,6 +259,13 @@ int main(int argc, char **argv) try {
         dense.values[p][i] = static_cast<uint8_t>((i * (2 * p + 1)) % (p == 13 ? 16 : 256));
     Case(*gpu, {dense, dense, dense});
     Check(deferred_peak >= 2, "Tiled pool deferral was not exercised");
+    // Exercise scheduler lanes owning multiple slots and the exact upper
+    // bound of its shared prefix array, including mostly empty frontiers.
+    for (size_t width : {size_t{129}, size_t{1024}}) {
+      active_nodes = width;
+      Case(*gpu, {Fixture(0, 2051, 2)});
+    }
+    active_nodes = 128;
   }
   if (executor != ResidentHistogramExecutor::kDepthFirst) {
     for (size_t width : {size_t{1}, size_t{3}, size_t{17}}) {

@@ -129,7 +129,7 @@ kernel void gjxl_histogram_tiled_stats(
     for (uint i = first + lane; i < end; i += 128) {
       const uint row = order[i], weight = weights[row]; const uchar2 t = tokens[row];
       atomic_fetch_add_explicit(&counts[t.x], weight, memory_order_relaxed);
-      atomic_fetch_add_explicit(&extra, weight * uint(t.y), memory_order_relaxed);
+      if (t.y) atomic_fetch_add_explicit(&extra, weight * uint(t.y), memory_order_relaxed);
       maximum = max(maximum, uint(t.x) + 1);
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -138,7 +138,9 @@ kernel void gjxl_histogram_tiled_stats(
     if (!lane) Add(reinterpret_cast<device uint *>(base + p.parent_extra) + pred, atomic_load_explicit(&extra, memory_order_relaxed));
     threadgroup_barrier(mem_flags::mem_threadgroup);
   }
-  atomic_fetch_max_explicit(reinterpret_cast<device atomic_uint *>(&s.symbols), maximum, memory_order_relaxed);
+  maximum = simd_max(maximum);
+  if (!(lane & 31))
+    atomic_fetch_max_explicit(reinterpret_cast<device atomic_uint *>(&s.symbols), maximum, memory_order_relaxed);
   for (uint prop = 0; prop < f.properties; ++prop) {
     if ((n.constants & (1u << prop)) || f.bins[prop] == 1) continue;
     for (uint i = lane; i < 256; i += 128) atomic_store_explicit(&counts[i], 0, memory_order_relaxed);
@@ -195,8 +197,77 @@ kernel void gjxl_histogram_tiled_schedule(
     constant gjxl_histogram_resident::TiledParams &p [[buffer(2)]],
     uint lane [[thread_index_in_threadgroup]]) {
   using namespace tiled_frontier_impl;
-  if (lane) return;
   device TiledControl &c = Control(work, p);
+  // The common case admits every pending node. Build each node's task list
+  // independently, after a small prefix over counts. The bounded serial path
+  // below retains the original first-fit policy when the pool is too small.
+  // At most 1024 * 16 property jobs fit below bit 16. Pack the selected-node
+  // count above them to keep this array at 12 KiB, leaving validation room
+  // within the device's 32 KiB shared-memory limit.
+  threadgroup packed_uint3 offsets[1024];
+  threadgroup uint4 total;
+  for (uint i = lane; i < p.frontier.active_nodes; i += 128) {
+    device const TiledSlot &s = Slot(work, p, i);
+    uint3 count = 0;
+    if (!c.frontier.status && s.stage == kTiledPending) {
+      device const FitDescriptor &f = reinterpret_cast<device const FitDescriptor *>(prepared)[s.ref.fit];
+      device const Fit &d = reinterpret_cast<device const Fit *>(work)[s.ref.fit];
+      device const Node &n = reinterpret_cast<device const Node *>(work + d.nodes)[s.ref.node];
+      device const TiledProperty *properties = reinterpret_cast<device const TiledProperty *>(SlotBytes(work, p, i) + p.properties);
+      uint jobs = 0;
+      for (uint prop = 0; prop < f.properties; ++prop) jobs += properties[prop].bins != 0;
+      count = uint3(s.needed, jobs | (1u << 16), jobs * ((n.end - n.begin + kTiledRows - 1) / kTiledRows) * f.predictors);
+    }
+    offsets[i] = count;
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (!lane) {
+    uint3 sum = 0;
+    ulong bytes = 0;
+    for (uint i = 0; i < p.frontier.active_nodes; ++i) {
+      const uint3 count = offsets[i]; offsets[i] = sum;
+      bytes += count.x;
+      sum += uint3(0, count.yz);
+      // Only the all-admitted path uses byte offsets. Saturation avoids
+      // overflow for a wide frontier whose combined histograms exceed 4 GiB.
+      sum.x = uint(min(bytes, ulong(p.histogram_bytes) + 1));
+    }
+    total = uint4(sum.x, sum.y & 65535u, sum.z, sum.y >> 16);
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (total.x <= p.histogram_bytes) {
+    device TiledTask *tasks = reinterpret_cast<device TiledTask *>(work + p.jobs);
+    device uint *selected = reinterpret_cast<device uint *>(work + p.selected);
+    for (uint i = lane; i < p.frontier.active_nodes; i += 128) {
+      device TiledSlot &s = Slot(work, p, i);
+      if (c.frontier.status || s.stage != kTiledPending) continue;
+      const uint3 packed = offsets[i];
+      const uint4 offset = uint4(packed.x, packed.y & 65535u, packed.z, packed.y >> 16);
+      s.stage = kTiledSelected; selected[offset.w] = i;
+      device const FitDescriptor &f = reinterpret_cast<device const FitDescriptor *>(prepared)[s.ref.fit];
+      device const Fit &d = reinterpret_cast<device const Fit *>(work)[s.ref.fit];
+      device const Node &n = reinterpret_cast<device const Node *>(work + d.nodes)[s.ref.node];
+      device TiledProperty *properties = reinterpret_cast<device TiledProperty *>(SlotBytes(work, p, i) + p.properties);
+      const uint tiles = (n.end - n.begin + kTiledRows - 1) / kTiledRows;
+      uint used = offset.x, job = offset.y, groups = offset.z;
+      for (uint prop = 0; prop < f.properties; ++prop) {
+        device TiledProperty &q = properties[prop]; if (!q.bins) continue;
+        q.histogram = p.histogram + used;
+        used += q.bins * f.predictors * (s.symbols + 1) * 4;
+        tasks[job++] = {i, prop, groups, groups + tiles * f.predictors};
+        groups += tiles * f.predictors;
+      }
+    }
+    if (!lane) {
+      c.jobs = total.y; c.selected = total.w;
+      c.histogram_peak = max(c.histogram_peak, total.x);
+      c.collect_dispatch[0] = max(1u, total.z); c.collect_dispatch[1] = c.collect_dispatch[2] = 1;
+      c.jobs_dispatch[0] = max(1u, c.jobs); c.jobs_dispatch[1] = c.jobs_dispatch[2] = 1;
+      c.finish_dispatch[0] = max(1u, c.selected); c.finish_dispatch[1] = c.finish_dispatch[2] = 1;
+    }
+    return;
+  }
+  if (lane) return;
   c.jobs = c.selected = 0; uint used = 0, groups = 0;
   device TiledTask *tasks = reinterpret_cast<device TiledTask *>(work + p.jobs);
   device uint *selected = reinterpret_cast<device uint *>(work + p.selected);
@@ -284,7 +355,7 @@ kernel void gjxl_histogram_tiled_collect(
       bucket = (bucket + 1) & (kTiledHashEntries - 1);
     }
     atomic_fetch_add_explicit(&counts[bucket], weight, memory_order_relaxed);
-    atomic_fetch_add_explicit(&extra[bin], weight * uint(token.y), memory_order_relaxed);
+    if (token.y) atomic_fetch_add_explicit(&extra[bin], weight * uint(token.y), memory_order_relaxed);
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
   for (uint i = lane; i < kTiledHashEntries; i += 128) {
@@ -317,9 +388,17 @@ kernel void gjxl_histogram_tiled_score(
   for (uint b = lane; b < bins; b += 128) sides[2 * b] = sides[2 * b + 1] = {kMaximumCost, 0, 0};
   for (uint pred = 0; pred < f.predictors; ++pred) {
     device uint *hist = reinterpret_cast<device uint *>(work + q.histogram) + pred * q.bins * stride;
-    for (uint sym = lane; sym < stride; sym += 128) {
-      uint sum = 0;
-      for (uint b = 0; b < q.bins; ++b) { sum += hist[b * stride + sym]; hist[b * stride + sym] = sum; }
+    // Prefix independent integer columns using every SIMD lane. The native
+    // floating-point scoring order below is unchanged.
+    for (uint sym = lane / 32; sym < stride; sym += 4) {
+      uint carry = 0;
+      for (uint first = 0; first < q.bins; first += 32) {
+        const uint b = first + (lane & 31);
+        const uint value = b < q.bins ? hist[b * stride + sym] : 0;
+        const uint sum = carry + simd_prefix_inclusive_sum(value);
+        if (b < q.bins) hist[b * stride + sym] = sum;
+        carry = simd_broadcast(sum, 31);
+      }
     }
     threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
     const float penalty = penalties[pred];

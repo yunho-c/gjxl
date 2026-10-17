@@ -716,6 +716,9 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
       gjxl_histogram_resident::TiledParams tiled_params;
       size_t rounds;
       bool initialize, tiled;
+      // A diagnostic phase encoder contains exactly one dispatch. Ordinary
+      // builds retain one encoder containing all dependent rounds/phases.
+      size_t phase = SIZE_MAX;
     } c{context.prepared, context.work, {}, plan.frontier, plan.tiled,
         input.rounds_per_submission, true, tiled};
     for (size_t i = 0; i < (tiled ? 10 : 3); ++i)
@@ -728,12 +731,14 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
       else encoder->setBytes(&c.params, sizeof(c.params), 2);
       const MTL::Resource *dependencies[] = {c.work};
       const auto launch = [&](size_t stage, size_t groups) {
+        if (c.phase != SIZE_MAX && c.phase != stage) return;
         encoder->setComputePipelineState(c.pipelines[stage]);
         RecordMetalComputePipelineState(c.pipelines[stage]);
         DispatchMetalThreadgroups(encoder, MTL::Size(groups, 1, 1), MTL::Size(128, 1, 1));
         encoder->memoryBarrier(dependencies, 1);
       };
       const auto indirect = [&](size_t stage, size_t offset) {
+        if (c.phase != SIZE_MAX && c.phase != stage) return;
         encoder->setComputePipelineState(c.pipelines[stage]);
         RecordMetalComputePipelineState(c.pipelines[stage]);
         DispatchMetalIndirectThreadgroups(encoder, c.work,
@@ -755,11 +760,7 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
           indirect(9, offsetof(TiledControl, finish_dispatch));
           continue;
         }
-        encoder->setComputePipelineState(c.pipelines[2]);
-        RecordMetalComputePipelineState(c.pipelines[2]);
-        DispatchMetalIndirectThreadgroups(encoder, c.work,
-            c.params.control + offsetof(gjxl_histogram_resident::FrontierControl, dispatch), MTL::Size(128, 1, 1));
-        encoder->memoryBarrier(dependencies, 1);
+        indirect(2, offsetof(gjxl_histogram_resident::FrontierControl, dispatch));
       }
     };
     size_t previous_progress = 0;
@@ -767,12 +768,35 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
       Pending pending;
 #if defined(GJXL_MODULAR_FRONTIER_DIAGNOSTICS)
       diagnostic.Begin(candidate.submissions);
+      if (diagnostic.ProfilePhases()) {
+        // This device supports encoder-boundary timestamps. Added encoder
+        // boundaries perturb scheduling: these are attribution runs only.
+        const size_t phases = tiled ? 9 : 2;
+        const size_t count = c.rounds * phases + size_t(c.initialize);
+        gpu_profile_internal::ProfileStorage<FrontierContext> contexts(count, c);
+        gpu_profile_internal::ProfileStorage<MetalProfiledComputeStage> stages(count);
+        for (size_t i = 0; i < count; ++i) {
+          auto &context = contexts[i];
+          context.initialize = c.initialize && !i;
+          context.rounds = context.initialize ? 0 : 1;
+          context.phase = context.initialize ? 0 : 1 + (i - size_t(c.initialize)) % phases;
+          stages[i] = {"modular.histogram_frontier.phase", "fitting", 0,
+                       static_cast<uint32_t>(i), encode_frontier, &context};
+        }
+        if (auto s = SubmitComputeProfiled("modular.histogram_frontier", stages,
+                gpu_profile_internal::GpuProfilingMode::kStage, &pending.submission); !s.ok()) return s;
+      } else
 #endif
       if (auto s = SubmitCompute("modular.histogram_frontier", encode_frontier, &c, &pending.submission); !s.ok()) return s;
       if (!pending.submission) return Status::Internal("Missing frontier submission");
       if (auto s = pending.Wait(); !s.ok()) return s;
 #if defined(GJXL_MODULAR_FRONTIER_DIAGNOSTICS)
       diagnostic.End();
+      if (diagnostic.ProfilePhases()) {
+        gpu_profile_internal::GpuSubmissionProfile resolved;
+        if (auto s = GetMetalSubmissionGpuProfile(*pending.submission, &resolved); !s.ok()) return s;
+        diagnostic.RecordProfile(candidate.submissions, resolved);
+      }
 #endif
       uint64_t duration;
       if (auto s = GetMetalSubmissionGpuDuration(*pending.submission, &duration); !s.ok()) return s;

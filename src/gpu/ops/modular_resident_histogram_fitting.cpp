@@ -47,9 +47,12 @@ Status ComputeResidentHistogramPlan(const ResidentHistogramInput &input,
     if (auto s = ValidateHistogramTrainingSamples(*r.source.samples, r.learning); !s.ok()) return s;
     if (auto s = ResolveHistogramFittingSource(r.source, &shapes[i]); !s.ok()) return s;
     const auto &shape = shapes[i];
-    if (!r.learning.multipliers.empty() || r.learning.execution_stats ||
-        shape.rows > kMaximumResidentHistogramRowsPerFit)
-      return Status::Unsupported("Resident histogram prototype eligibility exceeded");
+    if (!r.learning.multipliers.empty())
+      return Status::Unsupported("Resident histogram prototype does not support multiplier ranges");
+    if (r.learning.execution_stats)
+      return Status::Unsupported("Resident histogram prototype does not support CPU execution statistics");
+    if (shape.rows > kMaximumResidentHistogramRowsPerFit)
+      return Status::Unsupported("Resident histogram prototype exceeds 131072 rows per fit");
     size_t bins = 1;
     for (size_t p = 0; p < shape.properties; ++p) bins = std::max(bins, shape.bins[p]);
     if (bins > 256)

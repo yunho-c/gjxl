@@ -34,6 +34,10 @@ void Ok(Status status) {
 }
 void Released(const ResourceBudget &budget) {
   const auto s = budget.snapshot();
+  if (s.committed_bytes() || s.total.backing_count || s.total.pending_count || s.open_reservations)
+    std::cerr << "Retained bytes " << s.committed_bytes() << " idle " << s.total.idle_capacity_bytes
+              << " backings " << s.total.backing_count << " pending " << s.total.pending_count
+              << " reservations " << s.open_reservations << '\n';
   Check(!s.committed_bytes() && !s.total.backing_count && !s.total.pending_count &&
             !s.open_reservations,
         "Hybrid workflow leaked resources");
@@ -181,6 +185,9 @@ void Case(GpuBackend &gpu, Fixture f, ReferenceWorkflowOptions options,
   }
   cpu = {};
   hybrid = {};
+  // The capacity-reuse fitter deliberately retains idle backing in its
+  // backend. Exercise explicit cache release before asserting no ownership.
+  Ok(gpu.TrimPreparationCache());
   Released(budget);
 }
 void WidePalette(GpuBackend &gpu) {
@@ -198,8 +205,8 @@ void WidePalette(GpuBackend &gpu) {
   options.buffering = ReferenceBuffering::kBuffered;
   Case(gpu, std::move(f), options, WeightedFeatureBackend::kGpu, false, true);
 }
-Fixture MixedCohortFixture(bool alternating = true) {
-  auto f = Make({alternating ? 2049u : 5121u, 257}, 3, 16, 3);
+Fixture MixedCohortFixture(bool alternating = true, uint32_t height = 257) {
+  auto f = Make({alternating ? 2049u : 5121u, height}, 3, 16, 3);
   // Mix wide local palette metadata (CPU features) and unpaletted groups
   // (GPU features), alternating or in two long runs. All maps fit within
   // the local cohort's sample ceiling.
@@ -363,13 +370,110 @@ void Failures(GpuBackend &gpu) {
   output = {};
   Released(budget);
 }
+void ResidentPipelineFailures(GpuBackend &gpu) {
+  using namespace thread_budget_internal;
+  CpuExecutionScope execution;
+  Ok(execution.Start({}, 4));
+  EncodeScope participation(4);
+  // Nine groups select local trees; a smaller group count would exercise a
+  // shared fit and could exceed resident per-fit admission before the test.
+  const auto f = Make({2049, 17}, 3, 8, 3);
+  ReferenceWorkflowOptions options;
+  options.gpu = &gpu;
+  options.fitting_backend = ReferenceFittingBackend::kGpuTiledFrontier;
+  options.learning_schedule = ReferenceLearningSchedule::kPipeline;
+  options.learning_cpu_participants = 4;
+  options.feature_window_samples = 16 * 1024 * 1024;
+  // No preceding GPU submission: CPU features/rows make the injected device
+  // fault hit resident fitting after the CPU preparation workers have run.
+  options.feature_producer = WeightedFeatureBackend::kCpu;
+  options.sample_rows = HistogramRowBackend::kSelectedCpu;
+  ResourceBudget budget(size_t{1} << 30);
+  ReferenceModularFrame frame;
+  Ok(PrepareReferenceModularFrame(f.view(), options, budget, &frame));
+  Check(frame.stats().local_trees && frame.stats().histogram_resident_fits == frame.stats().fits &&
+            frame.stats().fits > 1 && !frame.stats().histogram_cpu_nodes,
+        "Resident pipeline failure fixture did not use local GPU fits");
+  const auto *old = frame.streams().data();
+  const size_t retained = budget.snapshot().committed_bytes();
+  for (bool submission : {false, true}) {
+    const auto before = gpu.stats().committed_submissions;
+    Ok(ArmNextMetalSubmissionFailureForTest(gpu, submission, !submission));
+    const auto s = PrepareReferenceModularFrame(f.view(), options, budget, &frame);
+    Check(!s.ok() && frame.streams().data() == old &&
+              budget.snapshot().committed_bytes() == retained &&
+              !budget.snapshot().total.pending_count &&
+              gpu.stats().committed_submissions == before + size_t(!submission),
+          "Resident pipeline GPU failure published or retained partial work");
+    ++faults;
+  }
+  {
+    WorkerLaunchFaultForTesting fault{WorkerLaunchSite::kModularTreeLearning, 1};
+    WorkerLaunchFaultScopeForTesting inject(&fault);
+    const auto s = PrepareReferenceModularFrame(f.view(), options, budget, &frame);
+    Check(!s.ok() && fault.triggered && fault.launched_in_group == 1 &&
+              frame.streams().data() == old && budget.snapshot().committed_bytes() == retained,
+          "Resident pipeline launch failure did not join and preserve output");
+    ++faults;
+  }
+  {
+    ResourceBudget small(size_t{32} << 20);
+    const auto s = PrepareReferenceModularFrame(f.view(), options, small, &frame);
+    Check((s.code() == StatusCode::kUnavailable || s.code() == StatusCode::kOutOfMemory) &&
+              !s.resource_plan_exceeded() && frame.streams().data() == old &&
+              small.snapshot().peak_committed_bytes <= (size_t{32} << 20),
+          "Resident pipeline exceeded admission or published a partial frame");
+    Released(small);
+    ++faults;
+  }
+  {
+    // Six groups select one shared tree with more than 131072 distinct rows.
+    // Reject the resident contract violation atomically, without truncation.
+    const auto unsupported = Make({513, 257}, 3, 8, 3);
+    const auto s = PrepareReferenceModularFrame(unsupported.view(), options, budget, &frame);
+    if (s.code() != StatusCode::kUnsupported || frame.streams().data() != old ||
+        budget.snapshot().committed_bytes() != retained)
+      std::cerr << "Eligibility status: " << s.message() << "; retained "
+                << budget.snapshot().committed_bytes() << " versus " << retained
+                << "; idle " << budget.snapshot().total.idle_capacity_bytes << '\n';
+    Check(s.code() == StatusCode::kUnsupported && frame.streams().data() == old &&
+              budget.snapshot().committed_bytes() == retained,
+          "Resident pipeline changed eligibility or retained rejected samples");
+    ++faults;
+  }
+  Ok(PrepareReferenceModularFrame(f.view(), options, budget, &frame));
+  frame = {};
+  Released(budget);
+}
 } // namespace
 int main(int argc, char **argv) try {
   const bool focused = argc == 2 && std::string_view(argv[1]) == "--pipeline-focused";
   pipeline = focused || (argc == 2 && std::string_view(argv[1]) == "--pipeline");
   std::unique_ptr<GpuBackend> gpu;
   Ok(CreateMetalBackend(GJXL_METALLIB_PATH, &gpu));
-  if (argc == 2 && (std::string_view(argv[1]) == "--resident" || std::string_view(argv[1]) == "--frontier" || std::string_view(argv[1]) == "--tiled")) {
+  if (argc == 2 && std::string_view(argv[1]) == "--tiled-pipeline-failures") {
+    ResidentPipelineFailures(*gpu);
+    std::cout << "Resident pipeline failure checks passed: " << faults << '\n';
+    return 0;
+  } else if (argc == 2 && std::string_view(argv[1]) == "--tiled-pipeline") {
+    pipeline = true;
+    combined_fitter = ReferenceFittingBackend::kGpuTiledFrontier;
+    combined_rows = HistogramRowBackend::kGpu;
+    combined_unique = true;
+    ReferenceWorkflowOptions all;
+    all.predictors = ReferencePredictors::kAll;
+    for (size_t p : {1, 2, 4}) {
+      participants = p;
+      for (size_t window : {8, 16}) {
+        pipeline_window = window;
+        Case(*gpu, Make({2049, 17}, 4, 16, 1), all, WeightedFeatureBackend::kGpu);
+      }
+    }
+    pipeline_window = 16;
+    Case(*gpu, Make({2049, 1537}, 3, 8, 3), {}, WeightedFeatureBackend::kAuto, true);
+    Case(*gpu, MixedCohortFixture(true, 129), {}, WeightedFeatureBackend::kGpu, false, false, true);
+    ResidentPipelineFailures(*gpu);
+  } else if (argc == 2 && (std::string_view(argv[1]) == "--resident" || std::string_view(argv[1]) == "--frontier" || std::string_view(argv[1]) == "--tiled")) {
     combined_fitter = std::string_view(argv[1]) == "--tiled" ? ReferenceFittingBackend::kGpuTiledFrontier : std::string_view(argv[1]) == "--frontier" ? ReferenceFittingBackend::kGpuFrontier : ReferenceFittingBackend::kGpuResident;
     Case(*gpu, Make({17, 9}, 1, 8, 1), {}, WeightedFeatureBackend::kGpu);
     Case(*gpu, Make({257, 257}, 3, 8, 1), {}, WeightedFeatureBackend::kGpu);

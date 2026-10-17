@@ -52,6 +52,7 @@ int main(int argc, char **argv) try {
   std::string gpu_profile_mode = "gpu-off", histogram_shards, active_properties;
   std::string wait_trace = "off", ready_target = "32", flush_us = "500";
   std::string fit_buffers = "capacity", fit_encoders = "single";
+  std::string resident_active = "128", resident_scratch = "64";
   bool private_flags = false;
   int positional = 1;
   std::vector<std::string_view> named;
@@ -79,6 +80,8 @@ int main(int argc, char **argv) try {
     else if (key == "--fit-encoders") fit_encoders = value;
     else if (key == "--fit-ready-target") ready_target = value;
     else if (key == "--fit-flush-us") flush_us = value;
+    else if (key == "--resident-active") resident_active = value;
+    else if (key == "--resident-scratch") resident_scratch = value;
     else Check(false, "Unknown named profile control");
     private_flags = true;
   }
@@ -124,7 +127,7 @@ int main(int argc, char **argv) try {
         "[--gpu-profile=gpu-off|gpu-wall|gpu-stage] [--histogram-shards=N] [--active-properties=N] "
         "[--gpu-wait-trace=off|on] [--fit-ready-target=N] [--fit-flush-us=N] "
         "[--fit-buffers=fresh|reuse|capacity (default: capacity)] "
-        "[--fit-encoders=single|multiple]");
+        "[--fit-encoders=single|multiple] [--resident-active=N] [--resident-scratch=MiB]");
   Check(gpu_profile_mode == "gpu-off" || gpu_profile_mode == "gpu-wall" ||
             gpu_profile_mode == "gpu-stage", "Unknown histogram GPU profiling mode");
   const bool gpu_profile_enabled = gpu_profile_mode != "gpu-off";
@@ -225,6 +228,10 @@ int main(int argc, char **argv) try {
                             : ReferenceFittingBackend::kCpu;
   if (argc >= 14) options.fitting_minimum_rows = std::stoull(argv[13]);
   if (argc >= 15) options.fitting_batch_fits = std::stoull(argv[14]);
+  options.resident_active_nodes = std::stoull(resident_active);
+  const size_t resident_scratch_mib = std::stoull(resident_scratch);
+  Check(resident_scratch_mib && resident_scratch_mib <= 512, "Invalid resident scratch cap");
+  options.resident_scratch_bytes = resident_scratch_mib * 1024 * 1024;
   options.fitting_ready_target = std::stoull(ready_target);
   options.fitting_flush_microseconds = std::stoull(flush_us);
   Check(options.fitting_ready_target > 0 && options.fitting_ready_target <= 256 &&
@@ -524,6 +531,8 @@ int main(int argc, char **argv) try {
     out << ",\"histogram_capacity_retries\":" << stats.histogram_capacity_retries;
   if (resident_fitter)
     out << ",\"resident_fitting\":{\"fits\":" << stats.histogram_resident_fits
+        << ",\"requested_active_nodes\":" << options.resident_active_nodes
+        << ",\"scratch_cap_bytes\":" << options.resident_scratch_bytes
         << ",\"buffers\":\"fresh\",\"encoders\":\"single\""
         << ",\"nodes\":" << stats.histogram_gpu_nodes
         << ",\"batches\":" << stats.histogram_gpu_batches

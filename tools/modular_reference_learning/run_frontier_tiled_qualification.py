@@ -19,6 +19,7 @@ def main():
     parser.add_argument("oracle_manifest", type=Path, help="Prior full-study results with cases/input/output hashes and work counts")
     parser.add_argument("output", type=Path)
     parser.add_argument("--power", choices=("AC", "Battery"), default="AC")
+    parser.add_argument("--variants", type=Path, help="Optional named configurations: fitter, schedule, window, args, and binary override")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[2]
     args.output.mkdir(parents=True, exist_ok=False)
@@ -32,10 +33,32 @@ def main():
         "frontier": ("fitter-frontier", "cohorts", 8),
         "tiled": ("fitter-tiled", "cohorts", 8),
     }
+    variants = {name: dict(fitter=fitter, schedule=schedule, window=window, args=[])
+                for name, (fitter, schedule, window) in variants.items()}
+    if args.variants:
+        variants = json.loads(args.variants.read_text())
+        if not variants or any(not name.replace("_", "").replace("-", "").isalnum() for name in variants):
+            raise ValueError("Invalid variant names")
     dependency_listing, dependencies = mac_dependencies(binary)
+    frozen = {str(binary): sha(binary), **dependencies}
+    overrides = {}
+    for name, variant in variants.items():
+        if "binary" in variant:
+            source = Path(variant["binary"]).resolve(strict=True)
+            if source not in overrides:
+                dest = (args.output / (name + "-hybrid-profile")).resolve()
+                shutil.copy2(source, dest)
+                overrides[source] = dest
+                _, extra_dependencies = mac_dependencies(dest)
+                frozen.update({str(dest): sha(dest), **extra_dependencies})
+            variant["binary_source"] = str(source)
+            variant["binary"] = str(overrides[source])
+        else:
+            variant["binary"] = str(binary)
     record = dict(schema=1, status="running", binary=str(binary), binary_sha256=sha(binary),
                   oracle_manifest=str(args.oracle_manifest.resolve()), oracle_sha256=sha(args.oracle_manifest),
                   source_hashes=source_files(repo), power=args.power, before=snapshot(),
+                  frozen_sha256=frozen,
                   dependency_listing=dependency_listing, dependencies=dependencies,
                   boundary=prior["boundary"], variants=variants, cases=[], observations=[])
     env = {k: v for k, v in os.environ.items() if not k.startswith(("GJXL_", "MTL_"))}
@@ -57,12 +80,14 @@ def main():
                     before = snapshot()
                     if f"'{args.power} Power'" not in before["power"]:
                         raise RuntimeError("Requested power condition is not active")
-                    fitter, schedule, window = variants[name]
+                    variant = variants[name]
+                    fitter, schedule, window = (variant[k] for k in ("fitter", "schedule", "window"))
                     tag = f"{case['name']}-{repetition}-{name}"
                     dest = (args.output / tag).resolve()
-                    command = [str(binary), case["input"], str(dest), "auto", "auto", "best", "fit-off",
+                    command = [variant["binary"], case["input"], str(dest), "auto", "auto", "best", "fit-off",
                                "14", "14", "14", "14", "14", fitter, "16384", "64",
-                               "--sample-rows=metal-unique", f"--learning-schedule={schedule}", f"--feature-window={window}"]
+                               "--sample-rows=metal-unique", f"--learning-schedule={schedule}", f"--feature-window={window}",
+                               *variant.get("args", [])]
                     run = dict(case=case["name"], variant=name, repetition=repetition, warmup=repetition == 0,
                                command=command, artifact=str(dest), before=before, started=time.time(),
                                competitors=[], power=[])
@@ -93,7 +118,7 @@ def main():
                         raise RuntimeError("Decode, bytes or work differs")
                     if result["learning"]["schedule"] != schedule:
                         raise RuntimeError("Learning schedule differs")
-                    if name in ("frontier", "tiled"):
+                    if fitter in ("fitter-resident", "fitter-frontier", "fitter-tiled"):
                         if result["resident_fitting"]["fits"] != case["work"]["fits"] or result["histogram_gpu"]["cpu_nodes"] or result["histogram_gpu"]["admission_fallbacks"]:
                             raise RuntimeError("Incomplete resident fitting coverage")
                     run.update(result_sha256=sha(dest / "result.json"), output_sha256=sha(dest / "output.jxl"),
@@ -102,7 +127,7 @@ def main():
                                resident_fitting=result.get("resident_fitting"))
                     save()
                     print(f"{tag}: {run['wall']:.6f} s, exact", flush=True)
-        if sha(binary) != record["binary_sha256"] or any(sha(p) != h for p, h in dependencies.items()):
+        if any(sha(p) != h for p, h in frozen.items()):
             raise RuntimeError("Frozen binary/dependencies changed")
         record["status"] = "passed"
     except BaseException as error:

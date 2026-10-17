@@ -36,13 +36,15 @@ struct ReferenceWorkflowOptions {
   // still precedes stream placement and always runs as one job.
   size_t selection_cpu_participants = 0;
   ReferenceFittingBackend fitting_backend = ReferenceFittingBackend::kCpu;
-  // Private local CPU-fitting experiment. Batch shapes/producer routing remain
-  // unchanged; only their lifetimes overlap. Shared fits retain their scope.
+  // Private local CPU/resident-fitting experiment. CPU preparation can overlap
+  // complete resident GPU cohorts; owners retire after their own tokenization.
+  // Shared fits retain their scope.
   ReferenceLearningSchedule learning_schedule = ReferenceLearningSchedule::kCohorts;
   size_t feature_window_samples = 8 * 1024 * 1024;
   // Private experiments use the measured 16K-row cutoff; GPU fitting remains
   // disabled by default. This is not a guaranteed CPU/GPU speed crossover.
   size_t fitting_minimum_rows = 16384, fitting_batch_fits = 64;
+  size_t resident_active_nodes = 128, resident_scratch_bytes = 64 * 1024 * 1024;
   // Private scheduling controls; defaults preserve the qualified policy.
   size_t fitting_ready_target = 32, fitting_flush_microseconds = 500;
   histogram_gpu_internal::HistogramFittingExecutionOptions fitting_execution;

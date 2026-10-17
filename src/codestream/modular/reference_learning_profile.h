@@ -69,6 +69,16 @@ public:
     profile_->jobs_written += count;
   }
   void Joined() { if (wave_) wave_->joined = profile_->Now(); }
+  // Resident jobs prepare on CPU workers and finish in a shared GPU batch.
+  // Attribute the lifetime and counts here; GPU batch time is reported once
+  // by the workflow rather than duplicated across its member jobs.
+  void CompleteDeferred(size_t index, const ReferenceWorkflowStats &stats) {
+    if (!wave_) return;
+    auto &job = profile_->jobs[wave_->first_job + index];
+    job.finish = profile_->Now();
+    job.calls = stats.learning_calls;
+    job.fits = stats.fits;
+  }
   // A ready queue reserves trace slots for its remaining canonical range.
   // Memory pressure may stop admission early; trim only after all jobs join.
   void Joined(size_t count) {

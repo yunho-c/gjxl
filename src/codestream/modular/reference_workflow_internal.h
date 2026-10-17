@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Yunho Cho
 #pragma once
+#include "gpu/ops/modular_resident_histogram_fitting.h"
 #include "codestream/modular/reference_workflow.h"
 #include <chrono>
 
@@ -49,6 +50,15 @@ struct HistogramFitRequest {
     const ReferenceWorkflowOptions &options,
     const resource_budget_internal::ResourceBudget &budget,
     ReferenceWorkflowStats *stats, bool *handled, bool measure_learning = true);
+// Shared complete resident operation for cohorts and the continuous scheduler.
+// admission_limited is true only when reservation fails before GPU work starts.
+[[nodiscard]] Status FitResidentHistogramBatch(
+    std::span<const histogram_gpu_internal::ResidentHistogramRequest> requests,
+    const ReferenceWorkflowOptions &options,
+    const resource_budget_internal::ResourceBudget &budget,
+    ReferenceWorkflowStats *stats,
+    histogram_gpu_internal::ResidentHistogramResult *out,
+    bool *admission_limited = nullptr);
 // Select independent unpublished records, retaining each record's original
 // candidate order. Input views stay alive until all jobs have joined. Records
 // may be partially updated on failure; the owning frame is published later.

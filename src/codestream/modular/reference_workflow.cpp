@@ -44,6 +44,8 @@ Status PrepareReferenceModularFrame(PackedModularImageView input,
       (options.feature_window_samples != 8 * 1024 * 1024 &&
        options.feature_window_samples != 16 * 1024 * 1024) ||
       !options.fitting_batch_fits || options.fitting_batch_fits > 256 ||
+      !options.resident_active_nodes || options.resident_active_nodes > 1024 ||
+      !options.resident_scratch_bytes || options.resident_scratch_bytes > 512 * 1024 * 1024 ||
       options.fitting_minimum_rows > kHistogramMaximumSamples ||
       (options.fitting_backend != ReferenceFittingBackend::kCpu &&
        options.fitting_backend != ReferenceFittingBackend::kResumableCpu &&
@@ -64,8 +66,11 @@ Status PrepareReferenceModularFrame(PackedModularImageView input,
        options.feature_producer != WeightedFeatureBackend::kAuto))
     return Invalid();
   if (options.learning_schedule == ReferenceLearningSchedule::kPipeline &&
-      options.fitting_backend != ReferenceFittingBackend::kCpu)
-    return Status::Unsupported("Local learning pipeline currently requires the ordinary CPU fitter");
+      options.fitting_backend != ReferenceFittingBackend::kCpu &&
+      options.fitting_backend != ReferenceFittingBackend::kGpuResident &&
+      options.fitting_backend != ReferenceFittingBackend::kGpuFrontier &&
+      options.fitting_backend != ReferenceFittingBackend::kGpuTiledFrontier)
+    return Status::Unsupported("Local learning pipeline requires CPU or complete resident fitting");
   if (options.gpu && !modular_gpu_internal::QueryGpuModularStreamProcessing(*options.gpu))
     return Status::Unsupported("Backend does not support histogram workflow stream processing");
   if ((options.fitting_backend == ReferenceFittingBackend::kGpu ||

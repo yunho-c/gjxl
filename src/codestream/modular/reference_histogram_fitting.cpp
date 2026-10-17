@@ -86,6 +86,53 @@ Status Finish(Job &job, ReferenceModularStream &record) {
 }
 } // namespace
 
+Status FitResidentHistogramBatch(std::span<const ResidentHistogramRequest> requests,
+                                 const ReferenceWorkflowOptions &options,
+                                 const ResourceBudget &budget,
+                                 ReferenceWorkflowStats *stats,
+                                 ResidentHistogramResult *out, bool *admission_limited) {
+  if (admission_limited) *admission_limited = false;
+  auto *op = options.gpu ? QueryGpuModularHistogramFitting(*options.gpu) : nullptr;
+  if (!op || !out || !stats) return Invalid();
+  ResidentHistogramInput input{requests};
+  input.maximum_active_nodes = options.resident_active_nodes;
+  input.maximum_scratch_bytes = options.resident_scratch_bytes;
+  if (options.fitting_backend == ReferenceFittingBackend::kGpuFrontier)
+    input.executor = ResidentHistogramExecutor::kFrontier;
+  else if (options.fitting_backend == ReferenceFittingBackend::kGpuTiledFrontier)
+    input.executor = ResidentHistogramExecutor::kTiledFrontier;
+  else if (options.fitting_backend != ReferenceFittingBackend::kGpuResident)
+    return Invalid();
+  ResidentHistogramPlan plan;
+  const auto limits = op->histogram_fitting_limits();
+  if (auto s = ComputeResidentHistogramPlan(input, &plan, &limits); !s.ok()) return s;
+  ResourceReservation reservation;
+  if (auto s = budget.TryReserve(plan.working.peak_bytes, &reservation); !s.ok()) {
+    if (admission_limited) *admission_limited = AdmissionFailure(s);
+    return s;
+  }
+  ResidentHistogramResult result;
+  {
+    auto resources = CurrentResourceContext(); resources.reservation = &reservation;
+    ResourceContextScope scope(resources);
+    Seconds timer(stats->histogram_resident_seconds);
+    if (auto s = op->FitHistogramTrees(input, &result); !s.ok()) return s;
+  }
+  stats->histogram_resident_fits += requests.size();
+  stats->histogram_resident_gpu_nanoseconds += result.gpu_nanoseconds;
+  stats->histogram_resident_submissions += result.submissions;
+  stats->histogram_frontier_rounds += result.frontier_rounds;
+  stats->histogram_frontier_maximum_active = std::max(stats->histogram_frontier_maximum_active, result.maximum_active_nodes);
+  stats->histogram_frontier_maximum_same_fit = std::max(stats->histogram_frontier_maximum_same_fit, result.maximum_same_fit_nodes);
+  ++stats->histogram_gpu_preparations;
+  ++stats->histogram_gpu_batches;
+  stats->histogram_gpu_nodes += result.visited_nodes;
+  stats->histogram_prepared_bytes += plan.prepared.storage_bytes;
+  stats->maximum_stage_bytes = std::max(stats->maximum_stage_bytes, plan.working.peak_bytes);
+  *out = std::move(result);
+  return Status::Ok();
+}
+
 Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
                               HistogramSamplingOptions sampling,
                               size_t participants,
@@ -292,33 +339,9 @@ Status TryLearnHistogramBatch(std::span<const HistogramFitRequest> requests,
         indices[count++] = i;
       }
       if (!count) continue;
-      ResidentHistogramInput input{std::span(batch).first(count)};
-      if (frontier) input.executor = ResidentHistogramExecutor::kFrontier;
-      if (tiled) input.executor = ResidentHistogramExecutor::kTiledFrontier;
-      ResidentHistogramPlan plan;
-      const auto limits = op->histogram_fitting_limits();
-      if (auto s = ComputeResidentHistogramPlan(input, &plan, &limits); !s.ok()) return s;
-      ResourceReservation reservation;
-      if (auto s = budget.TryReserve(plan.working.peak_bytes, &reservation); !s.ok()) return s;
       ResidentHistogramResult result;
-      {
-        auto resources = CurrentResourceContext();
-        resources.reservation = &reservation;
-        ResourceContextScope scope(resources);
-        Seconds timer(stats->histogram_resident_seconds);
-        if (auto s = op->FitHistogramTrees(input, &result); !s.ok()) return s;
-      }
-      stats->histogram_resident_fits += count;
-      stats->histogram_resident_gpu_nanoseconds += result.gpu_nanoseconds;
-      stats->histogram_resident_submissions += result.submissions;
-      stats->histogram_frontier_rounds += result.frontier_rounds;
-      stats->histogram_frontier_maximum_active = std::max(stats->histogram_frontier_maximum_active, result.maximum_active_nodes);
-      stats->histogram_frontier_maximum_same_fit = std::max(stats->histogram_frontier_maximum_same_fit, result.maximum_same_fit_nodes);
-      ++stats->histogram_gpu_preparations;
-      ++stats->histogram_gpu_batches;
-      stats->histogram_gpu_nodes += result.visited_nodes;
-      stats->histogram_prepared_bytes += plan.prepared.storage_bytes;
-      stats->maximum_stage_bytes = std::max(stats->maximum_stage_bytes, plan.working.peak_bytes);
+      if (auto s = FitResidentHistogramBatch(std::span(batch).first(count), options,
+              budget, stats, &result); !s.ok()) return s;
       for (size_t j = 0; j < count; ++j) {
         const size_t i = indices[j];
         auto &job = jobs[i];
