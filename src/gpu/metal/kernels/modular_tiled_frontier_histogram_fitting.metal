@@ -24,6 +24,20 @@ uint FindTask(device const TiledTask *tasks, uint count, uint group) {
   }
   return lo;
 }
+// Exclusive prefixes and totals for two integer counts over all 128 lanes.
+// The final barrier permits the caller to reuse the four shared SIMD totals.
+uint4 GroupPrefix(uint2 value, uint lane, threadgroup uint2 *groups) {
+  const uint2 sum(simd_prefix_inclusive_sum(value.x), simd_prefix_inclusive_sum(value.y));
+  if ((lane & 31) == 31) groups[lane / 32] = sum;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  uint2 offset = sum - value, total = 0;
+  for (uint i = 0; i < 4; ++i) {
+    if (i < lane / 32) offset += groups[i];
+    total += groups[i];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  return uint4(offset, total);
+}
 // Reuse lower-histogram loads between children. Each side retains Entropy's
 // native four-lane arithmetic and final pairwise sum, without reassociation.
 template <typename Histogram>
@@ -85,32 +99,64 @@ kernel void gjxl_histogram_tiled_begin(
     constant gjxl_histogram_resident::TiledParams &p [[buffer(2)]],
     uint lane [[thread_index_in_threadgroup]]) {
   using namespace tiled_frontier_impl;
-  if (lane) return;
   device TiledControl &c = Control(work, p);
-  c.row_tasks = 0;
-  uint groups = 0;
-  if (!c.frontier.status) {
-    c.frontier.maximum_ready = max(c.frontier.maximum_ready, c.frontier.tail - c.frontier.head + c.live);
-    device const NodeRef *queue = reinterpret_cast<device const NodeRef *>(work + p.frontier.queue);
-    device TiledTask *tasks = reinterpret_cast<device TiledTask *>(work + p.row_tasks);
-    uint counts[64] = {};
-    for (uint i = 0; i < p.frontier.active_nodes; ++i) {
-      device TiledSlot &s = Slot(work, p, i);
-      if (s.stage == kTiledFree && c.frontier.head < c.frontier.tail) {
-        s = {queue[c.frontier.head++], kTiledNew, 0, 0, 0, 0, 0, 0};
-        ++c.live;
+  if (c.frontier.status) {
+    if (!lane) { c.row_tasks = 0; c.stats_dispatch[0] = c.stats_dispatch[1] = c.stats_dispatch[2] = 1; }
+    return;
+  }
+  // Contiguous ranges per lane preserve the original slot/queue order. The
+  // admitted maximum is 1024 slots, so each lane owns at most eight slots.
+  const uint owned = (p.frontier.active_nodes + 127) / 128, first = lane * owned;
+  const uint head = c.frontier.head, ready = c.frontier.tail - head;
+  threadgroup uint2 groups[4];
+  threadgroup atomic_uint counts[64];
+  if (lane < 64) atomic_store_explicit(&counts[lane], 0, memory_order_relaxed);
+  uint free_slots[8] = {}, tiles[8] = {}, free_count = 0;
+  #pragma unroll
+  for (uint i = 0; i < 8; ++i) {
+    if (i < owned && first + i < p.frontier.active_nodes)
+      free_slots[i] = Slot(work, p, first + i).stage == kTiledFree;
+    free_count += free_slots[i];
+  }
+  const uint4 free_prefix = GroupPrefix(uint2(free_count, 0), lane, groups);
+  const uint admitted = min(ready, free_prefix.z);
+  device const NodeRef *queue = reinterpret_cast<device const NodeRef *>(work + p.frontier.queue);
+  uint rank = free_prefix.x, new_nodes = 0, row_groups = 0;
+  #pragma unroll
+  for (uint i = 0; i < 8; ++i) {
+    if (i < owned && first + i < p.frontier.active_nodes) {
+      device TiledSlot &s = Slot(work, p, first + i);
+      if (free_slots[i] && rank < admitted) {
+        s = {queue[head + rank], kTiledNew, 0, 0, 0, 0, 0, 0};
         device const Fit &d = reinterpret_cast<device const Fit *>(work)[s.ref.fit];
         device const Node &n = reinterpret_cast<device const Node *>(work + d.nodes)[s.ref.node];
-        const uint tiles = (n.end - n.begin + kTiledRows - 1) / kTiledRows;
-        tasks[c.row_tasks++] = {i, 0, groups, groups + tiles}; groups += tiles;
+        tiles[i] = (n.end - n.begin + kTiledRows - 1) / kTiledRows;
+        ++new_nodes; row_groups += tiles[i];
       }
+      rank += free_slots[i];
       if (s.stage != kTiledFree)
-        c.frontier.maximum_same_fit = max(c.frontier.maximum_same_fit, ++counts[s.ref.fit]);
+        atomic_fetch_add_explicit(&counts[s.ref.fit], 1, memory_order_relaxed);
     }
+  }
+  const uint4 task_prefix = GroupPrefix(uint2(new_nodes, row_groups), lane, groups);
+  device TiledTask *tasks = reinterpret_cast<device TiledTask *>(work + p.row_tasks);
+  uint task = task_prefix.x, group = task_prefix.y;
+  #pragma unroll
+  for (uint i = 0; i < 8; ++i) if (tiles[i]) {
+    tasks[task++] = {first + i, 0, group, group + tiles[i]}; group += tiles[i];
+  }
+  const uint same_fit = simd_max(lane < 64 ? atomic_load_explicit(&counts[lane], memory_order_relaxed) : 0);
+  if (!(lane & 31))
+    atomic_fetch_max_explicit(reinterpret_cast<device atomic_uint *>(&c.frontier.maximum_same_fit), same_fit, memory_order_relaxed);
+  if (!lane) {
+    c.frontier.maximum_ready = max(c.frontier.maximum_ready, ready + c.live);
+    c.frontier.head = head + admitted;
+    c.live += admitted;
     c.frontier.maximum_active = max(c.frontier.maximum_active, c.live);
     c.frontier.rounds += c.live != 0;
+    c.row_tasks = task_prefix.z;
+    c.stats_dispatch[0] = max(1u, task_prefix.w); c.stats_dispatch[1] = c.stats_dispatch[2] = 1;
   }
-  c.stats_dispatch[0] = max(1u, groups); c.stats_dispatch[1] = c.stats_dispatch[2] = 1;
 }
 
 kernel void gjxl_histogram_tiled_clear_stats(
@@ -192,38 +238,63 @@ kernel void gjxl_histogram_tiled_summarize(
   using namespace tiled_frontier_impl;
   if (Control(work, p).frontier.status) return;
   device TiledSlot &s = Slot(work, p, slot);
-  if (s.stage != kTiledNew || lane) return;
+  if (s.stage != kTiledNew) return;
   device const FitDescriptor &f = reinterpret_cast<device const FitDescriptor *>(prepared)[s.ref.fit];
   device const Fit &d = reinterpret_cast<device const Fit *>(work)[s.ref.fit];
   device Node &n = reinterpret_cast<device Node *>(work + d.nodes)[s.ref.node];
   device uchar *base = SlotBytes(work, p, slot);
   device const uint *parent = reinterpret_cast<device const uint *>(base + p.parent);
   device const uint *extra = reinterpret_cast<device const uint *>(base + p.parent_extra);
-  s.symbols = (s.symbols + 3) & ~3u;
-  while (f.predictor_ids[s.parent_index] != n.predictor) ++s.parent_index;
-  s.base_cost = Entropy(parent + s.parent_index * 256,
-      reinterpret_cast<device const int *>(parent + s.parent_index * 256), s.symbols, false) + float(extra[s.parent_index]);
+  if (!lane) {
+    s.symbols = (s.symbols + 3) & ~3u;
+    while (f.predictor_ids[s.parent_index] != n.predictor) ++s.parent_index;
+    s.base_cost = Entropy(parent + s.parent_index * 256,
+        reinterpret_cast<device const int *>(parent + s.parent_index * 256), s.symbols, false) + float(extra[s.parent_index]);
+  }
+  threadgroup_barrier(mem_flags::mem_device);
   device TiledProperty *properties = reinterpret_cast<device TiledProperty *>(base + p.properties);
-  for (uint prop = 0; prop < f.properties; ++prop) {
-    device TiledProperty &q = properties[prop]; q.bins = q.histogram = 0;
-    for (uint c = 0; c < 4; ++c) q.winners[c] = EmptyCandidate();
+  // Each SIMD group owns whole properties. Only integer occupancy/bin scans
+  // move across lanes; the parent entropy above retains its exact float order.
+  const uint local = lane & 31, inherited = n.constants;
+  uint constants = 0, needed = 0;
+  for (uint prop = lane / 32; prop < f.properties; prop += 4) {
+    device TiledProperty &q = properties[prop];
+    if (!local) q.bins = q.histogram = 0;
+    if (local < 4) q.winners[local] = EmptyCandidate();
     if (!(s.base_cost > d.split_threshold)) continue;
-    if ((n.constants & (1u << prop)) || f.bins[prop] == 1) { n.constants |= 1u << prop; continue; }
+    if ((inherited & (1u << prop)) || f.bins[prop] == 1) { constants |= 1u << prop; continue; }
     device uint *occupancy = reinterpret_cast<device uint *>(base + p.occupancy) + prop * 256;
     device uint *map = reinterpret_cast<device uint *>(base + p.bin_map) + prop * 256;
-    uint sum = 0;
-    for (uint b = 0; b < f.bins[prop]; ++b) {
-      const uint count = occupancy[b];
-      map[b] = q.bins; q.bins += count != 0;
-      sum += count; occupancy[b] = sum;
+    uint used = 0, sum = 0;
+    for (uint first = 0; first < f.bins[prop]; first += 32) {
+      const uint b = first + local, count = b < f.bins[prop] ? occupancy[b] : 0;
+      const uint2 prefix(simd_prefix_inclusive_sum(uint(count != 0)), simd_prefix_inclusive_sum(count));
+      if (b < f.bins[prop]) {
+        map[b] = used + prefix.x - uint(count != 0);
+        occupancy[b] = sum + prefix.y;
+      }
+      used += simd_broadcast(prefix.x, 31);
+      sum += simd_broadcast(prefix.y, 31);
     }
-    if (q.bins <= 1) { n.constants |= 1u << prop; q.bins = 0; }
-    if (q.bins && n.end - n.begin <= kTiledRows && q.bins * (s.symbols + 1) <= kTiledSmallCells)
-      q.histogram = kTiledLocalHistogram;
-    else
-      s.needed += q.bins * f.predictors * (s.symbols + 1) * 4;
+    if (!local) {
+      if (used <= 1) constants |= 1u << prop;
+      else {
+        q.bins = used;
+        if (n.end - n.begin <= kTiledRows && used * (s.symbols + 1) <= kTiledSmallCells)
+          q.histogram = kTiledLocalHistogram;
+        else
+          needed += used * f.predictors * (s.symbols + 1) * 4;
+      }
+    }
   }
-  s.stage = kTiledPending;
+  threadgroup uint2 summaries[4];
+  if (!local) summaries[lane / 32] = uint2(constants, needed);
+  threadgroup_barrier(mem_flags::mem_device | mem_flags::mem_threadgroup);
+  if (!lane) {
+    s.needed = 0;
+    for (uint i = 0; i < 4; ++i) { n.constants |= summaries[i].x; s.needed += summaries[i].y; }
+    s.stage = kTiledPending;
+  }
 }
 
 kernel void gjxl_histogram_tiled_schedule(

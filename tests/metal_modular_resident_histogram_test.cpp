@@ -10,7 +10,7 @@ namespace {
 using namespace histogram_fitting_test;
 size_t fits = 0, failures = 0;
 ResidentHistogramExecutor executor = ResidentHistogramExecutor::kDepthFirst;
-size_t active_nodes = 128, rounds = 16, same_fit_peak = 0, deferred_peak = 0;
+size_t active_nodes = 128, rounds = 16, active_peak = 0, same_fit_peak = 0, deferred_peak = 0;
 ResidentHistogramInput Input(std::span<const ResidentHistogramRequest> requests, bool capture = false) {
   ResidentHistogramInput input{requests, capture};
   input.executor = executor;
@@ -66,6 +66,10 @@ void Case(GpuBackend &gpu, const std::vector<HistogramTrainingSamples> &samples,
   if (executor != ResidentHistogramExecutor::kDepthFirst) {
     Check(result.maximum_active_nodes <= plan.frontier.active_nodes && result.frontier_rounds > 0,
           "Frontier exceeded its admitted active slots");
+    Check(result.maximum_same_fit_nodes <= result.maximum_active_nodes &&
+          result.maximum_active_nodes <= result.maximum_ready_nodes,
+          "Frontier population counters are inconsistent");
+    active_peak = std::max(active_peak, result.maximum_active_nodes);
     same_fit_peak = std::max(same_fit_peak, result.maximum_same_fit_nodes);
     deferred_peak = std::max(deferred_peak, result.maximum_deferred_nodes);
     if (executor == ResidentHistogramExecutor::kTiledFrontier) {
@@ -79,6 +83,9 @@ void Case(GpuBackend &gpu, const std::vector<HistogramTrainingSamples> &samples,
   } else Check(result.submissions == 1, "Depth-first fitting added submissions");
   Check(result.trees.size() == expected.size() && result.row_offsets.size() == expected.size() + 1,
         "Resident fitting omitted results");
+  size_t expected_nodes = 0;
+  for (const auto &tree : expected) expected_nodes += tree.size;
+  Check(result.visited_nodes == expected_nodes, "Resident fitting duplicated or omitted node visits");
   for (size_t i = 0; i < samples.size(); ++i) {
     if (result.trees[i] != expected[i]) {
       std::cerr << "fit " << i << " nodes GPU/CPU " << result.trees[i].size << '/' << expected[i].size << '\n';
@@ -291,6 +298,36 @@ int main(int argc, char **argv) try {
       active_nodes = width;
       Case(*gpu, {Fixture(0, 2051, 2)});
     }
+    // Partial sets of SIMD-owned properties and bin counts on both sides of
+    // scan boundaries, including constant properties and the final bin.
+    constexpr size_t bin_counts[] = {1, 31, 32, 33, 63, 64, 65, 127, 128, 129, 255, 256, 2, 16, 17, 256};
+    active_nodes = 128;
+    for (size_t properties : {size_t{3}, size_t{5}, size_t{7}, size_t{15}}) {
+      auto partial = Fixture(1, 257, 2);
+      partial.property_count = properties;
+      for (size_t p = 0; p < properties; ++p) {
+        const size_t bins = bin_counts[(p + properties) % std::size(bin_counts)];
+        partial.thresholds[p].resize(bins - 1);
+        std::iota(partial.thresholds[p].begin(), partial.thresholds[p].end(), 0);
+        for (size_t i = 0; i < partial.weights.size(); ++i) {
+          const uint32_t bin = i % 5 == 0 ? bins - 1 : (i * 7) % bins;
+          if (p < partial.static_property_count) partial.static_values[p][i] = bin;
+          else partial.values[p - partial.static_property_count][i] = bin;
+        }
+      }
+      Case(*gpu, {partial});
+      if (properties == 15) {
+        HistogramTreeLearningOptions stopped; stopped.split_threshold = 1e9f;
+        Case(*gpu, {partial}, stopped);
+      }
+    }
+    // A full cohort fills more than one lane's worth of active slots. Uneven
+    // trees leave holes that the next round must fill in original slot order.
+    std::vector<HistogramTrainingSamples> cohort;
+    for (size_t i = 0; i < 64; ++i) cohort.push_back(Fixture(i % 6, 257 + i * 3, 2));
+    active_nodes = 257; active_peak = 0;
+    Case(*gpu, cohort);
+    Check(active_peak > 128, "Parallel node setup did not fill a multi-slot-per-lane frontier");
     active_nodes = 128;
   }
   if (executor != ResidentHistogramExecutor::kDepthFirst) {
