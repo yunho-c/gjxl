@@ -1,0 +1,495 @@
+{
+  "schema": 1,
+  "date": "2026-10-17",
+  "branch": "feat/gpu-resident-fitting",
+  "base_revision": "4d79908938f1889c573ecc5b445cc47f33019e2c",
+  "hardware": "Apple M4 Pro, 20 GPU cores, 14 CPU participants, 48 GiB, battery, normal power mode",
+  "case": {
+    "image": "photo-large-1029.pam",
+    "width": 4000,
+    "height": 3000,
+    "format": "RGB8",
+    "fits": 42,
+    "rows": 5285712,
+    "population": 5285712,
+    "tree_nodes": 35878,
+    "selection": "First actual nonempty frontier cohort of full-resolution encode; not a whole-image fitting benchmark"
+  },
+  "fitting_boundary": "Complete fitting including validation, scratch, partition, node/queue management, canonicalization and publication. GPU upload included. Input sampling, CPU input restoration, backend/domain and worker-pool creation excluded. Concurrent thread launch/join included. CPU seconds are process CPU time.",
+  "cpu_frontier": {
+    "cpu14": {
+      "wall_seconds": {
+        "median": 0.40947395799999997,
+        "minimum": 0.39221225,
+        "maximum": 0.44862275
+      },
+      "process_cpu_seconds": {
+        "median": 4.668582499999999,
+        "minimum": 4.642212,
+        "maximum": 4.686433
+      },
+      "gpu_nanoseconds": {
+        "median": 0.0,
+        "minimum": 0,
+        "maximum": 0
+      },
+      "input_restore_seconds": {
+        "median": 0.00294675,
+        "minimum": 0.002502917,
+        "maximum": 0.009526875
+      },
+      "peak_backing_bytes": {
+        "median": 170341636.0,
+        "minimum": 170341636,
+        "maximum": 170341636
+      },
+      "incremental_peak_bytes": {
+        "median": 22149344.0,
+        "minimum": 22149344,
+        "maximum": 22149344
+      },
+      "tree_nodes": {
+        "median": 35878.0,
+        "minimum": 35878,
+        "maximum": 35878
+      }
+    },
+    "frontier": {
+      "wall_seconds": {
+        "median": 1.2067930415,
+        "minimum": 1.196630417,
+        "maximum": 1.213382042
+      },
+      "process_cpu_seconds": {
+        "median": 0.024115499999999998,
+        "minimum": 0.022599,
+        "maximum": 0.02776
+      },
+      "gpu_nanoseconds": {
+        "median": 1179411074.0,
+        "minimum": 1170700033,
+        "maximum": 1188761780
+      },
+      "input_restore_seconds": {
+        "median": 4.1e-08,
+        "minimum": 0,
+        "maximum": 1.66e-07
+      },
+      "peak_backing_bytes": {
+        "median": 272523976.0,
+        "minimum": 272523976,
+        "maximum": 272523976
+      },
+      "incremental_peak_bytes": {
+        "median": 272523976.0,
+        "minimum": 272523976,
+        "maximum": 272523976
+      },
+      "tree_nodes": {
+        "median": 35878.0,
+        "minimum": 35878,
+        "maximum": 35878
+      }
+    }
+  },
+  "timeline": {
+    "gpu_active_seconds": {
+      "Committed \"modular.stream_weighted_features\" with 1 encoders": 0.021619625,
+      "Committed \"modular.histogram_rows\" with 1 encoders": 0.016745327,
+      "Committed \"modular.histogram_frontier\" with 1 encoders": 7.437257884,
+      "Committed \"modular.stream_tokens\" with 1 encoders": 0.016475292
+    },
+    "frontier_active_seconds": 7.437257884,
+    "other_process_active_overlap_seconds": {
+      "Orca Helper (1560)": 0.108238309,
+      "WindowServer (602)": 1.213364188,
+      "Google Chrome Helper (Aperitif) (4823)": 0.001555793
+    },
+    "other_process_active_overlap_union_seconds": 1.312848414,
+    "compiler_spill_events": {
+      "272": 1936,
+      "1360": 1936
+    },
+    "boundary": "Union of Active GPU intervals joined to the target command buffer IDs; overlapping/nested events counted once. Other-process overlap is temporal coexistence, not attributable slowdown."
+  },
+  "profiles": {
+    "early": {
+      "node_cost_percent": 99.87684132414493,
+      "node_compiler": {
+        "ALU": "1314",
+        "Branch": "101",
+        "Cost": "99.88%",
+        "Device atomics": "6",
+        "Device loads": "115",
+        "Device stores": "39",
+        "FP16": "0",
+        "FP32": "283",
+        "Instructions": "2136",
+        "INT16": "135",
+        "INT32": "392",
+        "Invocations": "16",
+        "SIMD groups": "8032",
+        "Spilled bytes": "1360",
+        "Stage": "compute",
+        "Temp registers": "96",
+        "Texture reads": "0",
+        "Texture writes": "0",
+        "Threadgroup atomics": "6",
+        "Threadgroup loads": "37",
+        "Threadgroup memory (bytes)": "0",
+        "Threadgroup stores": "39",
+        "Uniform registers": "44",
+        "Wait": "0"
+      },
+      "counters": {
+        "vs_occupancy": "0.00%",
+        "fs_occupancy": "1.03%",
+        "kernel_occupancy": "7.50%",
+        "total_occupancy": "8.54%",
+        "gpu_bandwidth": "42.41",
+        "gpu_read_bandwidth": "38.11",
+        "gpu_write_bandwidth": "4.31",
+        "active_cores": "71",
+        "occupancy_manager_target": "96.29%",
+        "l1_eviction_rate": "1.23",
+        "vertex_shader_launch_limiter": "0.02%",
+        "fragment_shader_launch_limiter": "1.22%",
+        "compute_shader_launch_limiter": "0.04%",
+        "alu_utilization": "3.46%",
+        "l1_cache_limiter": "3.59%",
+        "l1_cache_utilization": "3.59%",
+        "l1_read_bandwidth": "66.96",
+        "threadgroup_memory_l1_read_bandwidth": "1.99",
+        "imageblock_l1_read_bandwidth": "6.52",
+        "unclassified_l1_read_bandwidth": "4.08",
+        "register_l1_read_bandwidth": "0.25",
+        "stack_l1_read_bandwidth": "13.75",
+        "buffer_l1_read_bandwidth": "40.38",
+        "l1_write_bandwidth": "252.15",
+        "threadgroup_memory_l1_write_bandwidth": "39.61",
+        "imageblock_l1_write_bandwidth": "6.81",
+        "unclassified_l1_write_bandwidth": "4.05",
+        "register_l1_write_bandwidth": "0.24",
+        "stack_l1_write_bandwidth": "197.25",
+        "buffer_l1_write_bandwidth": "4.19",
+        "total_simd_groups_inflight": "8",
+        "vertex_simd_groups_inflight": "0",
+        "fragment_simd_groups_inflight": "1",
+        "compute_simd_groups_inflight": "7",
+        "gpu_peak_bandwidth": "8.97%",
+        "gpu_peak_read_bandwidth": "8.06%",
+        "gpu_peak_write_bandwidth": "0.91%"
+      }
+    },
+    "middle-final": {
+      "node_cost_percent": 99.54405697344794,
+      "node_compiler": {
+        "ALU": "1314",
+        "Branch": "101",
+        "Cost": "99.54%",
+        "Device atomics": "6",
+        "Device loads": "115",
+        "Device stores": "39",
+        "FP16": "0",
+        "FP32": "283",
+        "Instructions": "2136",
+        "INT16": "135",
+        "INT32": "392",
+        "Invocations": "16",
+        "SIMD groups": "8512",
+        "Spilled bytes": "1360",
+        "Stage": "compute",
+        "Temp registers": "96",
+        "Texture reads": "0",
+        "Texture writes": "0",
+        "Threadgroup atomics": "6",
+        "Threadgroup loads": "37",
+        "Threadgroup memory (bytes)": "0",
+        "Threadgroup stores": "39",
+        "Uniform registers": "44",
+        "Wait": "0"
+      },
+      "counters": {
+        "vs_occupancy": "0.00%",
+        "fs_occupancy": "2.79%",
+        "kernel_occupancy": "10.17%",
+        "total_occupancy": "12.95%",
+        "alu_utilization": "6.43%",
+        "gpu_bandwidth": "47.54",
+        "gpu_read_bandwidth": "33.97",
+        "gpu_write_bandwidth": "13.57",
+        "l1_read_bandwidth": "94.72",
+        "threadgroup_memory_l1_read_bandwidth": "8.06",
+        "imageblock_l1_read_bandwidth": "13.26",
+        "unclassified_l1_read_bandwidth": "11.28",
+        "register_l1_read_bandwidth": "1.34",
+        "stack_l1_read_bandwidth": "8.98",
+        "buffer_l1_read_bandwidth": "51.80",
+        "l1_write_bandwidth": "145.49",
+        "threadgroup_memory_l1_write_bandwidth": "23.73",
+        "imageblock_l1_write_bandwidth": "13.40",
+        "unclassified_l1_write_bandwidth": "10.97",
+        "register_l1_write_bandwidth": "1.38",
+        "stack_l1_write_bandwidth": "79.39",
+        "buffer_l1_write_bandwidth": "16.62",
+        "vertex_shader_launch_limiter": "0.10%",
+        "fragment_shader_launch_limiter": "3.99%",
+        "compute_shader_launch_limiter": "0.64%",
+        "gpu_peak_bandwidth": "10.05%",
+        "gpu_peak_read_bandwidth": "7.18%",
+        "gpu_peak_write_bandwidth": "2.87%"
+      }
+    },
+    "late-final": {
+      "node_cost_percent": 99.36674023143007,
+      "node_compiler": {
+        "ALU": "1314",
+        "Branch": "101",
+        "Cost": "99.37%",
+        "Device atomics": "6",
+        "Device loads": "115",
+        "Device stores": "39",
+        "FP16": "0",
+        "FP32": "283",
+        "Instructions": "2136",
+        "INT16": "135",
+        "INT32": "392",
+        "Invocations": "16",
+        "SIMD groups": "5009",
+        "Spilled bytes": "1360",
+        "Stage": "compute",
+        "Temp registers": "96",
+        "Texture reads": "0",
+        "Texture writes": "0",
+        "Threadgroup atomics": "6",
+        "Threadgroup loads": "37",
+        "Threadgroup memory (bytes)": "0",
+        "Threadgroup stores": "39",
+        "Uniform registers": "44",
+        "Wait": "0"
+      },
+      "counters": {
+        "kernel_occupancy": "11.18%",
+        "total_occupancy": "11.18%",
+        "alu_utilization": "6.11%",
+        "gpu_bandwidth": "27.68",
+        "gpu_read_bandwidth": "12.70",
+        "gpu_write_bandwidth": "14.98",
+        "l1_read_bandwidth": "65.08",
+        "threadgroup_memory_l1_read_bandwidth": "11.14",
+        "unclassified_l1_read_bandwidth": "0.00",
+        "register_l1_read_bandwidth": "1.15",
+        "stack_l1_read_bandwidth": "7.55",
+        "buffer_l1_read_bandwidth": "45.24",
+        "l1_write_bandwidth": "67.89",
+        "threadgroup_memory_l1_write_bandwidth": "16.46",
+        "unclassified_l1_write_bandwidth": "0.00",
+        "register_l1_write_bandwidth": "1.26",
+        "stack_l1_write_bandwidth": "27.05",
+        "buffer_l1_write_bandwidth": "23.11",
+        "compute_shader_launch_limiter": "0.00%",
+        "gpu_peak_bandwidth": "5.85%",
+        "gpu_peak_read_bandwidth": "2.69%",
+        "gpu_peak_write_bandwidth": "3.17%"
+      }
+    },
+    "view-final": {
+      "node_cost_percent": 99.79068761081942,
+      "node_compiler": {
+        "ALU": "1312",
+        "Branch": "101",
+        "Cost": "99.79%",
+        "Device atomics": "6",
+        "Device loads": "118",
+        "Device stores": "39",
+        "FP16": "0",
+        "FP32": "283",
+        "Instructions": "1903",
+        "INT16": "135",
+        "INT32": "390",
+        "Invocations": "16",
+        "SIMD groups": "7860",
+        "Spilled bytes": "144",
+        "Stage": "compute",
+        "Temp registers": "96",
+        "Texture reads": "0",
+        "Texture writes": "0",
+        "Threadgroup atomics": "6",
+        "Threadgroup loads": "37",
+        "Threadgroup memory (bytes)": "0",
+        "Threadgroup stores": "39",
+        "Uniform registers": "44",
+        "Wait": "0"
+      },
+      "counters": {
+        "vs_occupancy": "0.00%",
+        "fs_occupancy": "5.16%",
+        "kernel_occupancy": "7.68%",
+        "total_occupancy": "12.84%",
+        "alu_utilization": "4.55%",
+        "gpu_bandwidth": "45.48",
+        "gpu_read_bandwidth": "40.98",
+        "gpu_write_bandwidth": "4.51",
+        "l1_read_bandwidth": "84.52",
+        "threadgroup_memory_l1_read_bandwidth": "4.43",
+        "imageblock_l1_read_bandwidth": "18.46",
+        "unclassified_l1_read_bandwidth": "19.72",
+        "register_l1_read_bandwidth": "0.25",
+        "stack_l1_read_bandwidth": "0.04",
+        "buffer_l1_read_bandwidth": "41.61",
+        "l1_write_bandwidth": "82.37",
+        "threadgroup_memory_l1_write_bandwidth": "37.63",
+        "imageblock_l1_write_bandwidth": "20.62",
+        "unclassified_l1_write_bandwidth": "18.76",
+        "register_l1_write_bandwidth": "0.23",
+        "stack_l1_write_bandwidth": "0.43",
+        "buffer_l1_write_bandwidth": "4.69",
+        "vertex_shader_launch_limiter": "0.74%",
+        "fragment_shader_launch_limiter": "5.25%",
+        "compute_shader_launch_limiter": "2.08%",
+        "gpu_peak_bandwidth": "9.62%",
+        "gpu_peak_read_bandwidth": "8.66%",
+        "gpu_peak_write_bandwidth": "0.95%"
+      }
+    }
+  },
+  "metadata_reference_experiment": {
+    "control": {
+      "wall_seconds": {
+        "median": 1.2435162915000002,
+        "minimum": 1.195486209,
+        "maximum": 1.271993083
+      },
+      "process_cpu_seconds": {
+        "median": 0.024369500000000002,
+        "minimum": 0.023448,
+        "maximum": 0.028224
+      },
+      "gpu_nanoseconds": {
+        "median": 1217698783.0,
+        "minimum": 1169554321,
+        "maximum": 1247050406
+      },
+      "input_restore_seconds": {
+        "median": 2.05e-08,
+        "minimum": 0,
+        "maximum": 1.25e-07
+      },
+      "peak_backing_bytes": {
+        "median": 272523976.0,
+        "minimum": 272523976,
+        "maximum": 272523976
+      },
+      "incremental_peak_bytes": {
+        "median": 272523976.0,
+        "minimum": 272523976,
+        "maximum": 272523976
+      },
+      "tree_nodes": {
+        "median": 35878.0,
+        "minimum": 35878,
+        "maximum": 35878
+      }
+    },
+    "view": {
+      "wall_seconds": {
+        "median": 1.1994665625,
+        "minimum": 1.174040125,
+        "maximum": 1.28315225
+      },
+      "process_cpu_seconds": {
+        "median": 0.0238675,
+        "minimum": 0.022909,
+        "maximum": 0.026664
+      },
+      "gpu_nanoseconds": {
+        "median": 1172708324.5,
+        "minimum": 1149428243,
+        "maximum": 1257972074
+      },
+      "input_restore_seconds": {
+        "median": 2.1e-08,
+        "minimum": 0,
+        "maximum": 8.3e-08
+      },
+      "peak_backing_bytes": {
+        "median": 272523976.0,
+        "minimum": 272523976,
+        "maximum": 272523976
+      },
+      "incremental_peak_bytes": {
+        "median": 272523976.0,
+        "minimum": 272523976,
+        "maximum": 272523976
+      },
+      "tree_nodes": {
+        "median": 35878.0,
+        "minimum": 35878,
+        "maximum": 35878
+      }
+    },
+    "paired_fraction_reductions": [
+      -0.009625912283124372,
+      0.029288523942233913,
+      0.033829560669009995,
+      0.00478640736875291,
+      0.05942296890323473,
+      -0.0024900882263680924
+    ],
+    "median_paired_reduction": 0.01703746565549341,
+    "ratio_of_medians_reduction": 0.03542352384210812,
+    "scope": "Diagnostic alternate metallib only; no shipped shader change or full-encode qualification of the variant"
+  },
+  "validation": {
+    "exact_fitting_invocations": 70,
+    "trees_compared": 2940,
+    "full_encodes": {
+      "trace-encode": {
+        "exact_decode": true,
+        "bytes": 10507251,
+        "sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+      },
+      "diagnostic-encode": {
+        "exact_decode": true,
+        "bytes": 10507251,
+        "sha256": "2cfd2402384ff6670fd8357e1e5e626aded66c7a91f7293f8ba54ec945a367ad"
+      }
+    },
+    "ctest": "Test project /Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-diagnostics\n    Start 226: metal_modular_frontier_histogram\n1/1 Test #226: metal_modular_frontier_histogram ...   Passed    1.00 sec\n\n100% tests passed out of 1\n\nTotal Test time (real) =   1.01 sec\n"
+  },
+  "limitations": [
+    "Profiled captures are diagnostic, not benchmark observations. Timeline counters include desktop GPU activity; sample profile covers one core of twenty.",
+    "Full-image trace and first-cohort replay diagnose 1029, not a three-photo optimization qualification.",
+    "No trustworthy line/phase percentages for histogram, scoring and partition inside the monolithic node kernel.",
+    "Initial counter XML export timed out and remains partial; excluded. Some gpudebug extractions queried an empty cached navigation tree; excluded and retried by reopening embedded profiles.",
+    "Compiler spilled bytes are static per-shader metadata, not dynamically transferred bytes. Managed backing excludes the common immutable sample archive, driver/profiler and process-wide resources."
+  ],
+  "artifacts_root": "/Users/yunhocho/GitHub/gjxl-gpu-resident-fitting/build/frontier-attribution-20261017",
+  "artifact_sha256": {
+    "prepared-replay-manifest.json": "68371a3a1da577e41e95c777209bc75c76e512a8379ffcda8fc42de818495266",
+    "prepared-replay.json": "8d17c6bdd7e731425465892f8640803db4262d23c8e4439890781bb11abafbad",
+    "timeline-capture.json": "657e66a8b5266d2db846fa9192a4303170e561d4acf7bed43de6b4cacb1ed32b",
+    "timeline-analysis.json": "aec07ee10187ed98c913c6ae627652639ded1e9cf7ffcf78abc90a42ae195f9b",
+    "capture-early.json": "04c2adf0486b39c7c2fb29e891eeae266c2b99f6ed0987cfc0748bf6467fcb3b",
+    "metadata-view/manifest.json": "7eec634f3e61e944a9ec43155e32e84886b40cc9f048fb8e692fa5ce03f3c513",
+    "metadata-capture/manifest.json": "e53d957e78a33aac705f1b95a08c9271fa7255611b1b5f4240ca0e7d001c2342",
+    "metadata-paired/manifest.json": "79ca529bbc34bb85e32fc9a79954a0f5486ba9ac401d7876406601c70c09c582",
+    "profile-early-shader.jsonl": "47edcc1cf5dbb4009c5b63ff3c925b6730f0c2d5152f04403433bd2ac88ce4a0",
+    "profile-middle-final.json": "13c61d93895d89bac562cc92c7479d2f32ef0b1d8ce3e7960953355314a83f9a",
+    "profile-late-final.json": "d82d05668bac70fc28c2c07c9ff21bfcf4a01ef69581eb739f086ddf9969f5fc",
+    "profile-view-final.json": "a3fd7bc820b0e1e95401356ad938eb08ea7843a7be7afe608d6a258384c29173",
+    "build-metadata-variant.py": "a9e61a831c2ac6805fbb9482ae209ec3c9d7054a22a8708ea77ce47310da4112",
+    "run-replay-study.py": "48ada9c1f1198d408beee97857647c0ecd600ce604e4b06a828685bcbbe0dc66",
+    "profile-capture.py": "d51e1f7efa091c70d7abfa46a81af3bc1f12f8fa0fad0358fa84df0c876e8dc7",
+    "analyze-timeline.py": "f91b68b8cab89d009c81ffd2245c4740c8342a585b678ede2ccb432b4f2a6051",
+    "summarize.py": "a3e99f9e9aec6207b57f67645b8a112bd4540a79013a626d66772707b2a3f3b6",
+    "final-checks.json": "dd0345cd791c145ed803ad256ef85d437b19c50a25b90274d4ef28646b9bfe2e"
+  },
+  "diagnostic_source_sha256": {
+    "CMakeLists.txt": "64de3c45a99bd154d5936e70af9a97feef51c12b1467773db8f6773f98db1be9",
+    "src/gpu/metal/metal_modular_histogram_fitting.cpp": "9a9529f9eece312e24b7cdd0273e68476844883529ea9e73b128f49a5136b796",
+    "tools/modular_reference_learning/resident_fitting_probe.cpp": "58b0ad3a73b5aa128bb964e93e2f105e446d92e598fb71005cd6c910aab42b89",
+    "tools/modular_reference_learning/frontier_sample_archive.h": "2da8f679788d769bb00c1d286291f56b4a67e12bfb2037cdf191d245a40457c5",
+    "tools/modular_reference_learning/frontier_metal_diagnostics.h": "8cfdd61a72306a1d1418acda6a731d66249a62a2c711160e1cd4b0474dc9bea1"
+  }
+}
