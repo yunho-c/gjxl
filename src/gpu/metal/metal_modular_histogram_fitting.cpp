@@ -218,9 +218,15 @@ HistogramFittingDeviceLimits
 MetalBackend::histogram_fitting_limits() const noexcept {
   const size_t buffer = std::min(
       size_t{UINT32_MAX}, static_cast<size_t>(device_->maxBufferLength()));
+  size_t scratch = 256 * 1024 * 1024;
+#if defined(GJXL_MODULAR_FRONTIER_DIAGNOSTICS)
+  // Private admission experiment only; ordinary builds retain the 256 MiB cap.
+  const char *large = std::getenv("GJXL_FRONTIER_DIAGNOSTIC_LARGE_SCRATCH");
+  if (large && std::string_view(large) == "1") scratch = 320 * 1024 * 1024;
+#endif
   return {kMaximumHistogramFittingFits, kMaximumHistogramFittingRows,
           kMaximumHistogramFittingFits, buffer,
-          std::min(buffer, size_t{256 * 1024 * 1024})};
+          std::min(buffer, scratch)};
 }
 
 std::array<size_t, 3> MetalBackend::HistogramFittingBufferCapacities(
@@ -700,7 +706,7 @@ Status MetalBackend::FitHistogramTrees(const ResidentHistogramInput &input,
     candidate.submissions = 1;
   } else {
 #if defined(GJXL_MODULAR_FRONTIER_DIAGNOSTICS)
-    frontier_diagnostic::Capture diagnostic(input, device_.get());
+    frontier_diagnostic::Capture diagnostic(input, device_.get(), pipeline, plan);
 #endif
     struct FrontierContext {
       MTL::Buffer *prepared, *work;

@@ -10,7 +10,9 @@
 namespace gjxl::frontier_diagnostic {
 class Capture {
 public:
-  Capture(const histogram_gpu_internal::ResidentHistogramInput &input, MTL::Device *device)
+  Capture(const histogram_gpu_internal::ResidentHistogramInput &input, MTL::Device *device,
+          MTL::ComputePipelineState *pipeline,
+          const histogram_gpu_internal::ResidentHistogramPlan &plan)
       : device_(device) {
     const char *directory = std::getenv("GJXL_FRONTIER_DIAGNOSTIC_DIR");
     if (!directory || !*directory) return;
@@ -32,6 +34,15 @@ public:
     const auto metadata = directory_ / "submissions.jsonl";
     if (std::filesystem::exists(metadata)) throw std::runtime_error("Diagnostic output already exists");
     log_.open(metadata); log_.exceptions(std::ios::badbit | std::ios::failbit);
+    const auto path = directory_ / "pipeline.json";
+    if (std::filesystem::exists(path)) throw std::runtime_error("Pipeline diagnostic already exists");
+    std::ofstream properties(path); properties.exceptions(std::ios::badbit | std::ios::failbit);
+    properties << "{\"schema\":1,\"static_threadgroup_memory_bytes\":" << pipeline->staticThreadgroupMemoryLength()
+               << ",\"max_threads_per_threadgroup\":" << pipeline->maxTotalThreadsPerThreadgroup()
+               << ",\"thread_execution_width\":" << pipeline->threadExecutionWidth()
+               << ",\"device_max_threadgroup_memory_bytes\":" << device_->maxThreadgroupMemoryLength()
+               << ",\"active_capacity\":" << plan.frontier.active_nodes
+               << ",\"scratch_bytes\":" << plan.scratch_bytes << "}\n";
   }
   ~Capture() { End(); }
   void Begin(size_t submission) {

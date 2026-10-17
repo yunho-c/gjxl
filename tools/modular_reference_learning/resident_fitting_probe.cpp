@@ -173,9 +173,10 @@ int main(int argc, char **argv) try {
   ResidentHistogramInput input = controls;
   input.requests = requests;
   input.executor = ResidentHistogramExecutor::kFrontier;
-  ResidentHistogramPlan plan; Ok(ComputeResidentHistogramPlan(input, &plan));
+  const auto limits = QueryGpuModularHistogramFitting(*gpu)->histogram_fitting_limits();
+  ResidentHistogramPlan plan; Ok(ComputeResidentHistogramPlan(input, &plan, &limits));
   std::ofstream out(argv[2]); out << std::setprecision(17) << std::boolalpha;
-  out << "{\"schema\":3,\"input\":" << std::quoted(argv[1]) << ",\"fits\":" << fits
+  out << "{\"schema\":4,\"input\":" << std::quoted(argv[1]) << ",\"fits\":" << fits
       << ",\"metallib\":" << std::quoted(metallib ? metallib : "embedded")
       << ",\"source_kind\":" << std::quoted(from_archive ? "prepared_archive" : "photo_tiles")
       << ",\"tile\":" << (from_archive ? 0 : tile) << ",\"rows\":" << rows << ",\"population\":" << population
@@ -183,6 +184,7 @@ int main(int argc, char **argv) try {
       << ",\"requested_active_nodes\":" << controls.maximum_active_nodes
       << ",\"rounds_per_submission\":" << controls.rounds_per_submission
       << ",\"maximum_scratch_bytes\":" << controls.maximum_scratch_bytes
+      << ",\"device_maximum_scratch_bytes\":" << limits.maximum_scratch_bytes
       << ",\"planned_active_nodes\":" << plan.frontier.active_nodes
       << ",\"planned_scratch_bytes\":" << plan.scratch_bytes
       << ",\"scratch_slot_bytes\":" << plan.frontier.slot.bytes
