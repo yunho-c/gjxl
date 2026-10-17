@@ -251,6 +251,23 @@ int main(int argc, char **argv) try {
     reordered.static_values[0][i] = (i * 13) % 256;
   Case(*gpu, {reordered});
   if (executor == ResidentHistogramExecutor::kTiledFrontier) {
+    // Exercise compact histograms on both sides of the 1024-cell shared
+    // collection boundary, with weighted counts, extra bits and a partial
+    // second row tile. The native oracle also checks ties and row partitioning.
+    for (size_t symbols : {size_t{16}, size_t{256}}) {
+      auto compact = Fixture(1, 513, 2);
+      for (size_t i = 0; i < compact.weights.size(); ++i) {
+        compact.static_values[0][i] = i % 3;
+        compact.static_values[1][i] = i % 4;
+        compact.values[0][i] = i % 60;
+        compact.values[1][i] = i % 61;
+        for (size_t pred = 0; pred < compact.predictor_count; ++pred)
+          compact.residuals[pred][i] = {
+              static_cast<uint8_t>((i + pred) % symbols),
+              static_cast<uint8_t>(i % 2 ? 0 : 63)};
+      }
+      Case(*gpu, {compact}, options);
+    }
     // Full bin and symbol spans force pool deferral. Each 512-row hash tile
     // also exercises collisions, repeated keys and a partial final tile.
     auto dense = Fixture(2, 1025, 14);

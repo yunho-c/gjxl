@@ -24,6 +24,29 @@ uint FindTask(device const TiledTask *tasks, uint count, uint group) {
   }
   return lo;
 }
+// Reuse lower-histogram loads between children. Each side retains Entropy's
+// native four-lane arithmetic and final pairwise sum, without reassociation.
+float2 EntropyPair(device const uint *lower, device const uint *parent, uint symbols) {
+  uint low_total = 0, high_total = 0;
+  for (uint sym = 0; sym < symbols; ++sym) {
+    const uint low = lower[sym];
+    low_total += low;
+    high_total += parent[sym] - low;
+  }
+  const float low_inverse = 1.0f / float(low_total), high_inverse = 1.0f / float(high_total);
+  float4 low_bits = 0.0f, high_bits = 0.0f;
+  for (uint sym = 0; sym < symbols; sym += 4) {
+    const uint4 low(lower[sym], lower[sym + 1], lower[sym + 2], lower[sym + 3]);
+    const uint4 high = uint4(parent[sym], parent[sym + 1], parent[sym + 2], parent[sym + 3]) - low;
+    const float4 low_f = float4(low), high_f = float4(high);
+    const float4 low_probability = max(low_f * low_inverse, float4(1.0f / 4096));
+    const float4 high_probability = max(high_f * high_inverse, float4(1.0f / 4096));
+    low_bits = low_bits - low_f * select(NativeLog2(low_probability), float4(0), low == low_total);
+    high_bits = high_bits - high_f * select(NativeLog2(high_probability), float4(0), high == high_total);
+  }
+  return float2((low_bits.x + low_bits.y) + (low_bits.z + low_bits.w),
+                (high_bits.x + high_bits.y) + (high_bits.z + high_bits.w));
+}
 Candidate EmptyCandidate() { return {0, 0, 0, 0, kMaximumCost, kMaximumCost, 0, 0}; }
 }
 
@@ -339,6 +362,25 @@ kernel void gjxl_histogram_tiled_collect(
   // At most 512 distinct row keys enter 1024 slots. CAS insertion never waits
   // for another group, and cannot exhaust this table. Counts are integer sums.
   threadgroup atomic_uint keys[kTiledHashEntries], counts[kTiledHashEntries], extra[256];
+  const uint cells = q.bins * stride;
+  if (cells <= kTiledHashEntries) {
+    // Compact histograms fit directly in the existing count storage. Include
+    // the extra-bit column, avoiding hash setup and probing for these groups.
+    for (uint i = lane; i < cells; i += 128)
+      atomic_store_explicit(&counts[i], 0, memory_order_relaxed);
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint i = first + lane; i < end; i += 128) {
+      const uint row = order[i], weight = weights[row];
+      const uint bin = map[Property(prepared, f, task.property, row)];
+      const uchar2 token = tokens[row];
+      atomic_fetch_add_explicit(&counts[bin * stride + token.x], weight, memory_order_relaxed);
+      if (token.y) atomic_fetch_add_explicit(&counts[bin * stride + s.symbols], weight * uint(token.y), memory_order_relaxed);
+    }
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+    for (uint i = lane; i < cells; i += 128)
+      Add(hist + i, atomic_load_explicit(&counts[i], memory_order_relaxed));
+    return;
+  }
   for (uint i = lane; i < kTiledHashEntries; i += 128) {
     atomic_store_explicit(&keys[i], 0xffffffffu, memory_order_relaxed);
     atomic_store_explicit(&counts[i], 0, memory_order_relaxed);
@@ -405,8 +447,9 @@ kernel void gjxl_histogram_tiled_score(
     for (uint b = lane; b < bins; b += 128) {
       if (!Threshold(occupancy, b, n.end - n.begin)) continue;
       device const uint *low_hist = hist + map[b] * stride;
-      const float low = Entropy(low_hist, reinterpret_cast<device const int *>(parent + pred * 256), symbols, false) + float(low_hist[symbols]);
-      const float high = Entropy(low_hist, reinterpret_cast<device const int *>(parent + pred * 256), symbols, true) + float(parent_extra[pred]) - float(low_hist[symbols]);
+      const float2 costs = EntropyPair(low_hist, parent + pred * 256, symbols);
+      const float low = costs.x + float(low_hist[symbols]);
+      const float high = costs.y + float(parent_extra[pred]) - float(low_hist[symbols]);
       if (low + penalty < sides[2 * b].cost + sides[2 * b].penalty) sides[2 * b] = {low, penalty, f.predictor_ids[pred]};
       if (high + penalty < sides[2 * b + 1].cost + sides[2 * b + 1].penalty) sides[2 * b + 1] = {high, penalty, f.predictor_ids[pred]};
     }
