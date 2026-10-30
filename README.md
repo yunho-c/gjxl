@@ -2,7 +2,9 @@
 
 `gjxl` is a **GPU-accelerated JPEG XL encoder** with 2-30x speedup vs. multithreaded CPU at equal-or-better compression rates. 
 
-[Paper](assets/gjxl-paper-v1.pdf) | Blog post (coming soon)
+[Paper](assets/gjxl-paper-v1.pdf) | [Prior-art correction](docs/prior-art-correction.md) | Blog post (coming soon)
+
+> **Prior-art correction (October 30, 2026):** The hosted v1 PDF retains an outdated claim that gjxl is the first GPU-accelerated JPEG XL encoder. We withdraw that claim and acknowledge [jxl-gpu](https://github.com/imazen/jxl-gpu) and [cujpegxl](https://github.com/m-pilia/cujpegxl), discussed in [Martino Pilia's October 24 comparison](https://martinopilia.com/posts/2026/10/24/cujpegxl-entropy-improvement.html). See the [correction note](docs/prior-art-correction.md) for the scope of gjxl's contribution and the status of v1.
 
 > **Abstract**: JPEG XL offers state-of-the-art compression rate and versatility. However, this comes at the cost of high computational complexity, especially for encoding. High-resolution images, such as those shot on modern smartphones, can take over 10 seconds to encode at high effort, which may complicate widespread adoption of JPEG XL. Based on the observation that much of libjxl’s expensive computations are parallelizable, we empirically demonstrate the usefulness of GPUs for JPEG XL by developing gjxl, a GPU-accelerated encoder that offloads perceptual analysis workloads to the GPU while keeping entropy/bitstream workloads on the CPU. **gjxl achieves 2.8× speedup vs. libjxl at default effort** while simultaneously producing smaller files via a more aggressive use of compute-intensive features. gjxl is permissively licensed and available at [https://github.com/yunho-c/gjxl](https://github.com/yunho-c/gjxl).
 
@@ -63,7 +65,7 @@ JPEG XL is a modern image codec that typically achieves 30-60% smaller files com
 <details>
 <summary>What's the point of this? When will I ever need this?</summary>
 
-From a research standpoint, this demonstrates for the first time that GPU-based JPEG XL codec implementation is a viable idea. We believe that more dramatic speedup would be possible in the future, as demonstrated in prior GPU acceleration literature on JPEG and JPEG2000.
+From a research standpoint, gjxl investigates how GPU-resident perceptual analysis, parallel reformulations, and CPU/GPU overlap affect JPEG XL encoding time and rate-distortion performance. It provides CUDA and Metal implementations and measurements against libjxl under the configurations described in the paper. Earlier GPU-accelerated JPEG XL projects include [jxl-gpu](https://github.com/imazen/jxl-gpu) and [cujpegxl](https://github.com/m-pilia/cujpegxl); see the [prior-art correction](docs/prior-art-correction.md).
 
 From a practical standpoint, gjxl is useful when converting a bunch of files into JPEG XL for archival purposes, since it's faster, especially when processing images in batch.
 
@@ -248,4 +250,5 @@ The conformance target builds the decoder from the recursive submodule checkout.
 - [Justfile](Justfile): build, encode, conformance, and benchmark recipes.
 
 Other files in docs are development artifacts and will be cleaned... sometime.
+
 
